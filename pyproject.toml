@@ -1,0 +1,49 @@
+[build-system]
+requires = ["scikit-build-core>=0.8", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "shannon-entropy"
+version = "0.1.0"
+description = "White-box physicochemical referee for LLM safeguarding via Shannon entropy collapse detection"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Louis-Philippe Morency"},
+]
+keywords = ["entropy", "llm", "safety", "ai-safety", "shannon", "thermodynamics"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Security",
+]
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+numba = ["numba>=0.57"]
+openai = ["openai>=1.0"]
+anthropic = ["anthropic>=0.20"]
+vllm = ["vllm>=0.4"]
+all = ["numba>=0.57", "openai>=1.0", "anthropic>=0.20"]
+dev = ["pytest>=7.0", "numba>=0.57"]
+
+[project.scripts]
+shannon-monitor = "shannon.cli:main"
+
+[tool.scikit-build]
+wheel.packages = ["python/shannon"]
+cmake.build-type = "Release"
+cmake.args = ["-DSHANNON_BUILD_TESTS=OFF"]
+
+[tool.scikit-build.cmake.define]
+SHANNON_BUILD_PYTHON = "ON"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

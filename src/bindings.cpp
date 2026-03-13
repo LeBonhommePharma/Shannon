@@ -4,6 +4,10 @@
 // Zero-copy numpy array acceptance. GIL released during computation.
 // Follows FlexAIDdS _core module pattern.
 //
+// Exposes: entropy functions, EntropyResult, CollapseEvent,
+//          SlidingWindowEntropy, ShannonEnergyMatrix, SoftContactMatrix,
+//          FastOPTICS, TypeInfo, SuperCluster, HardwareInfo.
+//
 // Copyright 2024-2026 Louis-Philippe Morency
 // Licensed under the Apache License, Version 2.0
 // =============================================================================
@@ -15,6 +19,7 @@
 
 #include "shannon.h"
 #include "energy_matrix.h"
+#include "fast_optics.h"
 
 namespace py = pybind11;
 
@@ -134,6 +139,48 @@ PYBIND11_MODULE(_core, m) {
             },
             py::arg("callback"));
 
+    // ── TypeInfo (8-bit type encoding) ─────────────────────────────────────
+
+    py::class_<shannon::TypeInfo>(m, "TypeInfo")
+        .def_readonly("type_index", &shannon::TypeInfo::type_index)
+        .def_readonly("base_type", &shannon::TypeInfo::base_type)
+        .def_readonly("charge_bin", &shannon::TypeInfo::charge_bin)
+        .def_readonly("hbond", &shannon::TypeInfo::hbond)
+        .def("__repr__", [](const shannon::TypeInfo& t) {
+            return "<TypeInfo idx=" + std::to_string(t.type_index) +
+                   " base=" + std::to_string(t.base_type) +
+                   " charge=" + std::to_string(t.charge_bin) +
+                   " hbond=" + std::to_string(t.hbond) + ">";
+        });
+
+    m.def("decode_type", &shannon::decode_type, py::arg("type_index"),
+          "Decode 8-bit type index into (base_type, charge_bin, hbond)");
+    m.def("encode_type", &shannon::encode_type,
+          py::arg("base"), py::arg("charge"), py::arg("hbond"),
+          "Encode (base_type, charge_bin, hbond) into 8-bit type index");
+
+    // ── SoftContactMatrix ──────────────────────────────────────────────────
+
+    py::class_<shannon::SoftContactMatrix>(m, "SoftContactMatrix")
+        .def(py::init<>())
+        .def("load", &shannon::SoftContactMatrix::load, py::arg("path"),
+             "Load from binary blob (SC01 format)")
+        .def("lookup", &shannon::SoftContactMatrix::lookup,
+             py::arg("type_i"), py::arg("type_j"),
+             "O(1) energy lookup")
+        .def("is_loaded", &shannon::SoftContactMatrix::is_loaded)
+        .def_readonly_static("DIM", &shannon::SoftContactMatrix::DIM)
+        .def_readonly_static("BYTE_SIZE", &shannon::SoftContactMatrix::BYTE_SIZE);
+
+    // ── SuperCluster ───────────────────────────────────────────────────────
+
+    py::class_<shannon::SuperCluster>(m, "SuperCluster")
+        .def(py::init<>())
+        .def_readwrite("member_types", &shannon::SuperCluster::member_types)
+        .def_readwrite("centroid", &shannon::SuperCluster::centroid)
+        .def_readwrite("radius", &shannon::SuperCluster::radius)
+        .def_readwrite("cluster_id", &shannon::SuperCluster::cluster_id);
+
     // ── ShannonEnergyMatrix (256x256 white-box referee) ────────────────────
 
     py::class_<shannon::ShannonEnergyMatrix>(m, "ShannonEnergyMatrix")
@@ -145,9 +192,52 @@ PYBIND11_MODULE(_core, m) {
              "O(1) energy lookup — symmetric: E[i][j] == E[j][i]")
         .def("interaction_score", &shannon::ShannonEnergyMatrix::interaction_score,
              py::arg("token_a"), py::arg("token_b"))
+        .def("get_row_vector", &shannon::ShannonEnergyMatrix::get_row_vector,
+             py::arg("type_i"),
+             "Get 256-d row vector for clustering")
         .def("nonzero_count", &shannon::ShannonEnergyMatrix::nonzero_count)
+        .def("source", &shannon::ShannonEnergyMatrix::source,
+             "Source of matrix data: 'soft_contact' or 'closed_form'")
         .def_readonly_static("DIM", &shannon::ShannonEnergyMatrix::DIM)
         .def_readonly_static("TOTAL_PARAMS", &shannon::ShannonEnergyMatrix::TOTAL_PARAMS);
+
+    // ── FastOPTICS ─────────────────────────────────────────────────────────
+
+    py::class_<shannon::FastOPTICS::Params>(m, "FastOPTICSParams")
+        .def(py::init<>())
+        .def_readwrite("min_pts", &shannon::FastOPTICS::Params::min_pts)
+        .def_readwrite("n_projections", &shannon::FastOPTICS::Params::n_projections)
+        .def_readwrite("xi", &shannon::FastOPTICS::Params::xi)
+        .def_readwrite("seed", &shannon::FastOPTICS::Params::seed);
+
+    py::class_<shannon::OPTICSPoint>(m, "OPTICSPoint")
+        .def_readonly("index", &shannon::OPTICSPoint::index)
+        .def_readonly("reachability_dist", &shannon::OPTICSPoint::reachability_dist)
+        .def_readonly("core_dist", &shannon::OPTICSPoint::core_dist)
+        .def_readonly("cluster_id", &shannon::OPTICSPoint::cluster_id);
+
+    py::class_<shannon::ClusterResult>(m, "ClusterResult")
+        .def_readonly("ordering", &shannon::ClusterResult::ordering)
+        .def_readonly("clusters", &shannon::ClusterResult::clusters)
+        .def_readonly("centroids", &shannon::ClusterResult::centroids)
+        .def_readonly("n_clusters", &shannon::ClusterResult::n_clusters)
+        .def_readonly("n_noise", &shannon::ClusterResult::n_noise);
+
+    py::class_<shannon::FastOPTICS>(m, "FastOPTICS")
+        .def(py::init<shannon::FastOPTICS::Params>(),
+             py::arg("params") = shannon::FastOPTICS::Params{})
+        .def("cluster",
+            [](const shannon::FastOPTICS& self, py::array_t<float> data) {
+                auto buf = data.request();
+                if (buf.ndim != 2) throw std::runtime_error("Expected 2D array");
+                size_t n = buf.shape[0];
+                size_t d = buf.shape[1];
+                py::gil_scoped_release release;
+                return self.cluster(static_cast<float*>(buf.ptr), n, d);
+            },
+            py::arg("data"),
+            "Run FastOPTICS clustering on (n, d) float32 array")
+        .def("params", &shannon::FastOPTICS::params);
 
     // ── Hardware info ──────────────────────────────────────────────────────
 
@@ -166,5 +256,5 @@ PYBIND11_MODULE(_core, m) {
           "Query available hardware acceleration backends");
 
     // ── Module-level constants ─────────────────────────────────────────────
-    m.attr("__version__") = "0.1.0";
+    m.attr("__version__") = "0.2.0";
 }

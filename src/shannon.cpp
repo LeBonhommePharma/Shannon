@@ -174,17 +174,28 @@ namespace {
 
 using entropy_fn_t = double(*)(const double*, size_t);
 
-entropy_fn_t resolve_entropy_impl() {
-#ifdef SHANNON_HAS_AVX512
-#if defined(__GNUC__) || defined(__clang__)
-    if (__builtin_cpu_supports("avx512f")) return shannon_entropy_avx512;
-#endif
+// __builtin_cpu_supports is available on GCC and non-Apple Clang on x86.
+// Apple Clang does not support it. On ARM, none of the SHANNON_HAS_AVX*
+// macros are defined, so these blocks are compiled out entirely.
+#if defined(__GNUC__) && !defined(__apple_build_version__) && (defined(__x86_64__) || defined(__i386__))
+#define SHANNON_CAN_CPUID 1
 #endif
 
-#ifdef SHANNON_HAS_AVX2
-#if defined(__GNUC__) || defined(__clang__)
+entropy_fn_t resolve_entropy_impl() {
+#if defined(SHANNON_HAS_AVX512) && defined(SHANNON_CAN_CPUID)
+    if (__builtin_cpu_supports("avx512f")) return shannon_entropy_avx512;
+#endif
+
+#if defined(SHANNON_HAS_AVX2) && defined(SHANNON_CAN_CPUID)
     if (__builtin_cpu_supports("avx2")) return shannon_entropy_avx2;
 #endif
+
+    // If compiled with AVX flags but no CPUID (e.g., Apple Clang x86),
+    // use the SIMD path directly since the compiler already verified support.
+#if defined(SHANNON_HAS_AVX512) && !defined(SHANNON_CAN_CPUID)
+    return shannon_entropy_avx512;
+#elif defined(SHANNON_HAS_AVX2) && !defined(SHANNON_CAN_CPUID)
+    return shannon_entropy_avx2;
 #endif
 
     return shannon_entropy_scalar;
@@ -193,15 +204,15 @@ entropy_fn_t resolve_entropy_impl() {
 entropy_fn_t g_entropy_impl = resolve_entropy_impl();
 
 const char* resolve_backend_name() {
-#ifdef SHANNON_HAS_AVX512
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(SHANNON_HAS_AVX512) && defined(SHANNON_CAN_CPUID)
     if (__builtin_cpu_supports("avx512f")) return "avx512";
+#elif defined(SHANNON_HAS_AVX512)
+    return "avx512";
 #endif
-#endif
-#ifdef SHANNON_HAS_AVX2
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(SHANNON_HAS_AVX2) && defined(SHANNON_CAN_CPUID)
     if (__builtin_cpu_supports("avx2")) return "avx2";
-#endif
+#elif defined(SHANNON_HAS_AVX2) && !defined(SHANNON_HAS_AVX512)
+    return "avx2";
 #endif
 #ifdef SHANNON_HAS_OPENMP
     return "openmp";
@@ -431,14 +442,18 @@ HardwareInfo get_hardware_info() {
     HardwareInfo info{};
 
 #ifdef SHANNON_HAS_AVX512
-#if defined(__GNUC__) || defined(__clang__)
+#ifdef SHANNON_CAN_CPUID
     info.has_avx512 = __builtin_cpu_supports("avx512f");
+#else
+    info.has_avx512 = true;  // compiled with AVX-512 flags
 #endif
 #endif
 
 #ifdef SHANNON_HAS_AVX2
-#if defined(__GNUC__) || defined(__clang__)
+#ifdef SHANNON_CAN_CPUID
     info.has_avx2 = __builtin_cpu_supports("avx2");
+#else
+    info.has_avx2 = true;  // compiled with AVX2 flags
 #endif
 #endif
 

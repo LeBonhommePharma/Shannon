@@ -60,6 +60,7 @@ endif()
 set(SHANNON_CORE_SOURCES
     src/shannon.cpp
     src/energy_matrix.cpp
+    src/fast_optics.cpp
 )
 
 if(SHANNON_CUDA)
@@ -89,8 +90,28 @@ endif()
 
 # Metal (macOS only)
 if(SHANNON_METAL AND APPLE)
+    enable_language(OBJCXX)
+    target_sources(shannon_static PRIVATE src/shannon_metal.mm)
     target_compile_definitions(shannon_static PUBLIC SHANNON_HAS_METAL)
-    target_link_libraries(shannon_static PUBLIC "-framework Metal" "-framework Foundation")
+    target_link_libraries(shannon_static PUBLIC "-framework Metal" "-framework Foundation" "-framework MetalPerformanceShaders")
+    # Compile Metal shaders to metallib
+    set(METAL_SHADER ${CMAKE_CURRENT_SOURCE_DIR}/src/shannon_metal.metal)
+    set(METAL_AIR ${CMAKE_CURRENT_BINARY_DIR}/shannon_metal.air)
+    set(METAL_LIB ${CMAKE_CURRENT_BINARY_DIR}/shannon_metal.metallib)
+    add_custom_command(
+        OUTPUT ${METAL_AIR}
+        COMMAND xcrun -sdk macosx metal -c ${METAL_SHADER} -o ${METAL_AIR}
+        DEPENDS ${METAL_SHADER}
+        COMMENT "Compiling Metal shader"
+    )
+    add_custom_command(
+        OUTPUT ${METAL_LIB}
+        COMMAND xcrun -sdk macosx metallib ${METAL_AIR} -o ${METAL_LIB}
+        DEPENDS ${METAL_AIR}
+        COMMENT "Linking Metal shader library"
+    )
+    add_custom_target(metal_shaders ALL DEPENDS ${METAL_LIB})
+    add_dependencies(shannon_static metal_shaders)
 endif()
 
 # =============================================================================
@@ -132,4 +153,8 @@ if(SHANNON_BUILD_TESTS)
     add_executable(test_energy_matrix tests/test_energy_matrix.cpp)
     target_link_libraries(test_energy_matrix PRIVATE shannon_static GTest::gtest_main)
     add_test(NAME EnergyMatrixTests COMMAND test_energy_matrix)
+
+    add_executable(test_fast_optics tests/test_fast_optics.cpp)
+    target_link_libraries(test_fast_optics PRIVATE shannon_static GTest::gtest_main)
+    add_test(NAME FastOPTICSTests COMMAND test_fast_optics)
 endif()

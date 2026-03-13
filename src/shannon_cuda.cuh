@@ -28,6 +28,21 @@ double shannon_cuda_entropy(const double* host_probs, size_t n);
 // Compute entropy from logits on GPU (fused log-sum-exp + entropy)
 double shannon_cuda_entropy_from_logits(const double* host_logits, size_t n);
 
+// Compute weighted entropy on GPU with energy matrix context
+// matrix_data: flat 256x256 float energy matrix on host
+// token_ids: context token IDs
+double shannon_cuda_weighted_entropy(
+    const double* host_probs, size_t n,
+    const float* matrix_data,
+    const unsigned char* token_ids, size_t context_len);
+
+// Compute pairwise Euclidean distance matrix on GPU (for FastOPTICS)
+// data: (n, d) row-major float array on host
+// dist_out: (n, n) output distance matrix on host
+void shannon_cuda_pairwise_distances(
+    const float* host_data, size_t n, size_t d,
+    float* dist_out);
+
 // Release device buffers
 void shannon_cuda_shutdown();
 

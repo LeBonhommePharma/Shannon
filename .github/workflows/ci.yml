@@ -10,26 +10,26 @@ jobs:
   # ── C++ build + tests ────────────────────────────────────────────────────
   cpp:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        include:
-          - os: ubuntu-latest
-            cmake_extra: ""
-          - os: macos-latest
-            cmake_extra: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies (Ubuntu)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y cmake g++-13
-        env:
-          CC: gcc-13
-          CXX: g++-13
 
-      - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF ${{ matrix.cmake_extra }}
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF -DCMAKE_CXX_COMPILER=g++-13
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF
 
       - name: Build
         run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
@@ -40,32 +40,45 @@ jobs:
   # ── Python build + tests ─────────────────────────────────────────────────
   python:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies (Ubuntu)
+      - name: Install system dependencies (Ubuntu)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y cmake g++-13
 
-      - name: Install Python package
+      - name: Install Python package (Linux)
+        if: runner.os == 'Linux'
         run: |
           pip install --upgrade pip
-          pip install numpy pybind11 scikit-build-core pytest numba
-          pip install -e ".[dev]"
+          pip install numpy pybind11 scikit-build-core pytest
+          CMAKE_ARGS="-DCMAKE_CXX_COMPILER=g++-13" pip install -e .
+        env:
+          CXX: g++-13
+
+      - name: Install Python package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pip install --upgrade pip
+          pip install numpy pybind11 scikit-build-core pytest
+          pip install -e .
 
       - name: Run Python tests
         run: pytest tests/test_detector.py -v
 
-  # ── Python-only tests (no C++ build) ─────────────────────────────────────
+  # ── Python-only tests (no C++ build, pure fallback) ─────────────────────
   python-fallback:
     runs-on: ubuntu-latest
     steps:
@@ -76,12 +89,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install without C++ (pure Python fallback)
-        run: |
-          pip install numpy pytest
-          pip install -e . --no-build-isolation 2>/dev/null || true
-          # Fallback: install as pure Python
-          cd python && pip install -e . 2>/dev/null || true
-          PYTHONPATH=python pytest tests/test_detector.py -v
+      - name: Install minimal dependencies
+        run: pip install numpy pytest
+
+      - name: Run tests with pure Python fallback
+        run: pytest tests/test_detector.py -v
         env:
           PYTHONPATH: python

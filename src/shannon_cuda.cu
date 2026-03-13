@@ -250,6 +250,143 @@ double shannon_cuda_entropy_from_logits(const double* host_logits, size_t n) {
     return std::max(H, 0.0);
 }
 
+// =============================================================================
+// Kernel: weighted entropy with 256x256 energy matrix
+// =============================================================================
+
+// Energy matrix in constant memory (256x256 float = 256 KB, fits in constant mem)
+__constant__ float d_energy_matrix[256 * 256];
+static bool d_matrix_loaded = false;
+
+__global__ void kernel_weighted_entropy(
+    const double* __restrict__ probs,
+    const unsigned char* __restrict__ token_ids,
+    size_t n, size_t context_len,
+    double inv_context,
+    double* __restrict__ partial_sums
+) {
+    extern __shared__ double sdata[];
+
+    size_t tid = threadIdx.x;
+    size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = blockDim.x * gridDim.x;
+
+    double local_h = 0.0;
+    for (size_t i = gid; i < n; i += stride) {
+        double p = probs[i];
+        if (p <= 0.0) continue;
+
+        unsigned char ti = static_cast<unsigned char>(i % 256);
+
+        // Average energy with context tokens (from constant memory)
+        double w = 0.0;
+        for (size_t c = 0; c < context_len; ++c) {
+            w += d_energy_matrix[ti * 256 + token_ids[c]];
+        }
+        w *= inv_context;
+
+        double weight = exp(-w);
+        local_h -= weight * p * log2(p);
+    }
+
+    sdata[tid] = local_h;
+    __syncthreads();
+
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) sdata[tid] += sdata[tid + s];
+        __syncthreads();
+    }
+
+    if (tid == 0) partial_sums[blockIdx.x] = sdata[0];
+}
+
+double shannon_cuda_weighted_entropy(
+    const double* host_probs, size_t n,
+    const float* matrix_data,
+    const unsigned char* token_ids, size_t context_len
+) {
+    std::lock_guard<std::mutex> lock(d_mutex);
+    if (!d_initialized || n > d_max_n) return -1.0;
+
+    // Load energy matrix to constant memory (one-time)
+    if (!d_matrix_loaded && matrix_data) {
+        cudaMemcpyToSymbol(d_energy_matrix, matrix_data, 256 * 256 * sizeof(float));
+        d_matrix_loaded = true;
+    }
+
+    constexpr int BLOCK_SIZE = 256;
+    int num_blocks = std::min(static_cast<int>((n + BLOCK_SIZE - 1) / BLOCK_SIZE), 256);
+
+    cudaMemcpy(d_data, host_probs, n * sizeof(double), cudaMemcpyHostToDevice);
+
+    // Copy token IDs to device
+    unsigned char* d_token_ids = nullptr;
+    cudaMalloc(&d_token_ids, context_len * sizeof(unsigned char));
+    cudaMemcpy(d_token_ids, token_ids, context_len * sizeof(unsigned char), cudaMemcpyHostToDevice);
+
+    double inv_context = 1.0 / static_cast<double>(context_len);
+
+    kernel_weighted_entropy<<<num_blocks, BLOCK_SIZE, BLOCK_SIZE * sizeof(double)>>>(
+        d_data, d_token_ids, n, context_len, inv_context, d_partial);
+
+    std::vector<double> h_partial(num_blocks);
+    cudaMemcpy(h_partial.data(), d_partial, num_blocks * sizeof(double), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_token_ids);
+
+    double H = 0.0;
+    for (int i = 0; i < num_blocks; ++i) H += h_partial[i];
+    return H;
+}
+
+// =============================================================================
+// Kernel: pairwise Euclidean distance matrix for FastOPTICS
+// =============================================================================
+
+__global__ void kernel_pairwise_distances(
+    const float* __restrict__ data,
+    float* __restrict__ dist_out,
+    size_t n, size_t d
+) {
+    size_t row = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row >= n || col >= n) return;
+    if (col < row) {
+        // Symmetric: copy from upper triangle
+        dist_out[row * n + col] = dist_out[col * n + row];
+        return;
+    }
+
+    double sum = 0.0;
+    for (size_t k = 0; k < d; ++k) {
+        double diff = static_cast<double>(data[row * d + k]) - static_cast<double>(data[col * d + k]);
+        sum += diff * diff;
+    }
+    dist_out[row * n + col] = static_cast<float>(sqrt(sum));
+}
+
+void shannon_cuda_pairwise_distances(
+    const float* host_data, size_t n, size_t d,
+    float* dist_out
+) {
+    float* d_points = nullptr;
+    float* d_dists  = nullptr;
+
+    cudaMalloc(&d_points, n * d * sizeof(float));
+    cudaMalloc(&d_dists, n * n * sizeof(float));
+    cudaMemcpy(d_points, host_data, n * d * sizeof(float), cudaMemcpyHostToDevice);
+
+    dim3 block(16, 16);
+    dim3 grid((n + 15) / 16, (n + 15) / 16);
+    kernel_pairwise_distances<<<grid, block>>>(d_points, d_dists, n, d);
+
+    cudaMemcpy(dist_out, d_dists, n * n * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_points);
+    cudaFree(d_dists);
+}
+
 void shannon_cuda_shutdown() {
     std::lock_guard<std::mutex> lock(d_mutex);
     if (d_data) { cudaFree(d_data); d_data = nullptr; }

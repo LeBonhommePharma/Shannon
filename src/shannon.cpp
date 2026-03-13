@@ -1,0 +1,187 @@
+// Copyright 2024-2026 Louis-Philippe Morency & Contributors
+// SPDX-License-Identifier: MIT
+//
+// Core Shannon entropy kernels — ported from FlexAID∆S
+// (LIB/statmech.cpp · LIB/ShannonThermoStack/)
+//
+// The log-sum-exp numerically stable implementation preserves
+// every pragma and optimisation from the molecular-docking kernel.
+
+#include "shannon.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <numeric>
+
+namespace shannon {
+
+// ─── Configurational Entropy (log-sum-exp, OpenMP + SIMD) ────────────────────
+//
+// Ported directly from FlexAID∆S shannon_configurational_entropy.
+// Given unnormalized log-weights w_i, the entropy in bits is:
+//
+//   S = log2(Z) - (1/Z) * sum_i [ w_i * exp(w_i - max_w) ] / ln(2)
+//
+// where Z = sum_i exp(w_i - max_w)  (log-sum-exp trick for stability).
+
+double shannon_configurational_entropy(const double* log_weights, std::size_t n) {
+    if (n == 0) return 0.0;
+    if (n == 1) return 0.0;
+
+    // Step 1: find max for log-sum-exp stability
+    double max_w = log_weights[0];
+    #pragma omp simd reduction(max:max_w)
+    for (std::size_t i = 1; i < n; ++i) {
+        if (log_weights[i] > max_w) max_w = log_weights[i];
+    }
+
+    // Step 2: compute partition function Z and weighted sum
+    double Z = 0.0;
+    double weighted_sum = 0.0;
+
+    #pragma omp parallel for simd reduction(+:Z,weighted_sum) schedule(static)
+    for (std::size_t i = 0; i < n; ++i) {
+        const double shifted = log_weights[i] - max_w;
+        const double exp_val = std::exp(shifted);
+        Z += exp_val;
+        weighted_sum += shifted * exp_val;  // (w_i - max_w) * exp(w_i - max_w)
+    }
+
+    if (Z <= 0.0) return 0.0;
+
+    // Step 3: entropy in bits
+    // H = log2(Z) - weighted_sum / (Z * ln2)
+    const double log2_Z = std::log2(Z);
+    const double entropy = log2_Z - (weighted_sum / (Z * kLn2));
+
+    return std::max(0.0, entropy);
+}
+
+// ─── Entropy from Probability Distribution ───────────────────────────────────
+
+double shannon_entropy_from_probs(const double* probs, std::size_t n) {
+    if (n == 0) return 0.0;
+
+    double h = 0.0;
+
+    #pragma omp parallel for simd reduction(+:h) schedule(static)
+    for (std::size_t i = 0; i < n; ++i) {
+        if (probs[i] > kEpsilon) {
+            h -= probs[i] * std::log2(probs[i]);
+        }
+    }
+
+    return std::max(0.0, h);
+}
+
+// ─── Entropy from Log-Probabilities ──────────────────────────────────────────
+
+double shannon_entropy_from_logprobs(const double* logprobs, std::size_t n) {
+    if (n == 0) return 0.0;
+
+    double h = 0.0;
+
+    #pragma omp parallel for simd reduction(+:h) schedule(static)
+    for (std::size_t i = 0; i < n; ++i) {
+        const double p = std::exp(logprobs[i]);
+        if (p > kEpsilon) {
+            h -= p * logprobs[i] * kLog2E;  // convert from nats to bits
+        }
+    }
+
+    return std::max(0.0, h);
+}
+
+// ─── Collapse Detector ───────────────────────────────────────────────────────
+
+CollapseDetector::CollapseDetector(std::size_t window_size, double threshold_bits)
+    : window_size_(window_size > 0 ? window_size : kDefaultWindowSize)
+    , threshold_(threshold_bits)
+    , window_(window_size_, 0.0) {}
+
+void CollapseDetector::reset() {
+    trace_.clear();
+    std::fill(window_.begin(), window_.end(), 0.0);
+    window_pos_ = 0;
+    window_full_ = false;
+    token_count_ = 0;
+}
+
+CollapseResult CollapseDetector::add_logits(const double* logits, std::size_t n) {
+    return push_entropy(shannon_configurational_entropy(logits, n));
+}
+
+CollapseResult CollapseDetector::add_logits(std::span<const double> logits) {
+    return add_logits(logits.data(), logits.size());
+}
+
+CollapseResult CollapseDetector::add_probs(const double* probs, std::size_t n) {
+    return push_entropy(shannon_entropy_from_probs(probs, n));
+}
+
+CollapseResult CollapseDetector::add_probs(std::span<const double> probs) {
+    return add_probs(probs.data(), probs.size());
+}
+
+CollapseResult CollapseDetector::add_logprobs(const double* logprobs, std::size_t n) {
+    return push_entropy(shannon_entropy_from_logprobs(logprobs, n));
+}
+
+CollapseResult CollapseDetector::add_logprobs(std::span<const double> logprobs) {
+    return add_logprobs(logprobs.data(), logprobs.size());
+}
+
+void CollapseDetector::set_callback(CollapseCallback cb) {
+    callback_ = std::move(cb);
+}
+
+CollapseResult CollapseDetector::push_entropy(double h) {
+    trace_.push_back(h);
+
+    // Update circular buffer
+    window_[window_pos_] = h;
+    window_pos_ = (window_pos_ + 1) % window_size_;
+    if (!window_full_ && window_pos_ == 0) {
+        window_full_ = true;
+    }
+
+    // Compute window statistics
+    const std::size_t count = window_full_ ? window_size_ : window_pos_;
+    double sum = 0.0;
+    double sum_sq = 0.0;
+
+    for (std::size_t i = 0; i < count; ++i) {
+        sum += window_[i];
+        sum_sq += window_[i] * window_[i];
+    }
+
+    const double mean = (count > 0) ? sum / static_cast<double>(count) : 0.0;
+    const double variance = (count > 1)
+        ? (sum_sq / static_cast<double>(count)) - (mean * mean)
+        : 0.0;
+    const double stddev = std::sqrt(std::max(0.0, variance));
+
+    const double delta = h - mean;
+    const double z = (stddev > 1e-12) ? delta / stddev : 0.0;
+    const bool collapsed = (count >= window_size_) && (delta < threshold_);
+
+    CollapseResult result{
+        .entropy     = h,
+        .window_mean = mean,
+        .window_std  = stddev,
+        .delta       = delta,
+        .z_score     = z,
+        .collapsed   = collapsed,
+        .token_index = token_count_,
+    };
+
+    ++token_count_;
+
+    if (collapsed && callback_) {
+        callback_(result);
+    }
+
+    return result;
+}
+
+}  // namespace shannon

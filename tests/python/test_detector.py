@@ -8,12 +8,13 @@ import numpy as np
 import pytest
 
 from shannon_entropy import (
+    CollapseResult,
     ShannonCollapseDetector,
+    get_backend,
     shannon_configurational_entropy,
     shannon_entropy_from_logprobs,
     shannon_entropy_from_probs,
 )
-from shannon_entropy.core import get_backend
 
 
 # ── Core entropy functions ───────────────────────────────────────────────────
@@ -193,6 +194,25 @@ class TestSyntheticPatterns:
 
         # FP rate should be very low
         assert collapses / 1000 < 0.01
+
+
+class TestPublicAPI:
+    """Verify that all key symbols are importable from the top-level package."""
+
+    def test_collapse_result_exported(self):
+        import shannon_entropy
+        assert hasattr(shannon_entropy, "CollapseResult")
+        assert shannon_entropy.CollapseResult is CollapseResult
+
+    def test_get_backend_exported(self):
+        import shannon_entropy
+        assert hasattr(shannon_entropy, "get_backend")
+        assert shannon_entropy.get_backend is get_backend
+
+    def test_collapse_result_is_return_type(self):
+        det = ShannonCollapseDetector()
+        result = det.add_logits(np.zeros(8))
+        assert isinstance(result, CollapseResult)
 
 
 class TestBackend:

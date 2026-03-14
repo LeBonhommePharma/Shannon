@@ -165,6 +165,9 @@ pytest tests/ -v
 
 # Regenerate soft-contact binary blob (optional)
 python scripts/build_soft_contact.py --show-projection
+
+# Train energy matrix from synthetic data (optional)
+python scripts/train_256x256.py --synthetic --n-complexes 500
 ```
 
 ### Docker
@@ -361,10 +364,22 @@ python benchmarks/bench_sensitivity.py
 |---|---|
 | `instance()` | Get singleton (thread-safe) |
 | `energy(i, j)` | O(1) symmetric energy lookup |
+| `interaction_score(a, b)` | Interaction score between token types |
 | `get_row_vector(i)` | 256-d row vector for clustering |
 | `weighted_entropy(probs, n, ids, ctx)` | Context-weighted entropy |
+| `score_poses_two_stage(ti, tj, dist, n, cpc, pct)` | Two-stage scoring: matrix pre-filter + analytic refinement |
 | `source()` | `'soft_contact'` or `'closed_form'` |
 | `nonzero_count()` | Number of non-zero parameters |
+
+### `SoftContactMatrix`
+
+| Method | Description |
+|---|---|
+| `load(path)` | Load from binary blob (SC01 format) |
+| `lookup(type_i, type_j)` | O(1) energy lookup |
+| `batch_lookup(types_i, types_j)` | Batch lookup (SIMD accelerated) |
+| `row_dot(type_i, weights)` | Dot product of matrix row with 256-d weight vector (FMA) |
+| `is_loaded()` | Whether a matrix has been loaded |
 
 ### `FastOPTICS`
 
@@ -372,6 +387,20 @@ python benchmarks/bench_sensitivity.py
 |---|---|
 | `cluster(data)` | Run clustering on (n, d) float32 array |
 | `compute_centroid(data, d, indices)` | Centroid of member subset |
+
+### Training Pipeline
+
+The `scripts/train_256x256.py` module provides an L-BFGS optimization pipeline that fits the 256x256 energy matrix to experimental binding affinity data (PDBbind or synthetic):
+
+```bash
+# Train on synthetic data (for development)
+python scripts/train_256x256.py --synthetic --n-complexes 500
+
+# Train on PDBbind data
+python scripts/train_256x256.py --pdbbind-dir /path/to/PDBbind --output data/soft_contact_256.bin
+```
+
+The training objective maximizes Pearson correlation between predicted and experimental ΔG values, with L2 regularization and symmetry constraints. See `tests/test_train.py` for convergence validation.
 
 ## Repository Structure
 
@@ -382,7 +411,8 @@ Shannon/
 ├── LICENSE                              # Apache 2.0
 ├── README.md
 ├── data/
-│   └── soft_contact_256.bin             # Precomputed 256x256 matrix (256 KB)
+│   ├── soft_contact_256.bin             # Precomputed 256x256 matrix (256 KB)
+│   └── token_projection.bin            # Token embedding → 256-bin projection map
 ├── src/
 │   ├── shannon.h / shannon.cpp          # Core entropy kernels + SIMD dispatch
 │   ├── energy_matrix.h / .cpp           # ShannonEnergyMatrix + SoftContactMatrix
@@ -404,18 +434,22 @@ Shannon/
 │       └── cli.py                       # shannon-monitor CLI
 ├── scripts/
 │   ├── build_soft_contact.py            # 256x256 matrix generation
-│   └── project_tokens.py               # Token embedding → 256-bin projection
+│   ├── project_tokens.py               # Token embedding → 256-bin projection
+│   └── train_256x256.py                # L-BFGS training pipeline for 256x256 matrix
 ├── tests/
 │   ├── test_shannon.cpp                 # GoogleTest: entropy kernels
 │   ├── test_energy_matrix.cpp           # GoogleTest: matrix + type encoding
 │   ├── test_fast_optics.cpp             # GoogleTest: clustering
-│   └── test_detector.py                 # pytest: detector + integrations
+│   ├── test_detector.py                 # pytest: detector + integrations
+│   ├── test_train.py                    # pytest: training pipeline + L-BFGS convergence
+│   └── test_integration.py             # pytest: end-to-end integration tests
 ├── examples/
 │   ├── openai_demo.py
 │   ├── anthropic_demo.py
 │   └── vllm_demo.py
 ├── benchmarks/
-│   └── bench_sensitivity.py
+│   ├── bench_sensitivity.py             # Collapse detection sensitivity analysis
+│   └── bench_matrix.py                  # Energy matrix lookup throughput benchmarks
 ├── docker/
 │   ├── Dockerfile.cpu
 │   └── Dockerfile.cuda

@@ -32,7 +32,8 @@ openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.20"]
 vllm = ["vllm>=0.4"]
 all = ["numba>=0.57", "openai>=1.0", "anthropic>=0.20"]
-dev = ["pytest>=7.0", "numba>=0.57"]
+dev = ["pytest>=7.0", "numba>=0.57", "scipy>=1.10"]
+train = ["scipy>=1.10"]
 
 [project.scripts]
 shannon-monitor = "shannon.cli:main"

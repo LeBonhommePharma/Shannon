@@ -7,12 +7,16 @@ Measures:
 3. Collapse detection sensitivity on synthetic patterns
 
 Usage:
-    python benchmarks/bench_sensitivity.py
+    python benchmarks/bench_sensitivity.py [--json]
 """
 
 from __future__ import annotations
 
+import argparse
+import json
+import sys
 import time
+from datetime import datetime, timezone
 from typing import Callable
 
 import numpy as np
@@ -46,13 +50,14 @@ def bench_entropy_throughput(
         tokens_per_sec = n_iters / elapsed
         us_per_call = elapsed / n_iters * 1e6
         results[vocab] = us_per_call
-        print(f"  {label:>10s}  vocab={vocab:>7d}  {us_per_call:8.1f} us/call  {tokens_per_sec:10.0f} tok/s")
+        print(f"  {label:>10s}  vocab={vocab:>7d}  {us_per_call:8.1f} us/call  {tokens_per_sec:10.0f} tok/s",
+              file=sys.stderr)
     return results
 
 
-def bench_collapse_sensitivity() -> None:
+def bench_collapse_sensitivity() -> dict:
     """Test collapse detection on synthetic patterns."""
-    print("\n=== Collapse Detection Sensitivity ===\n")
+    print("\n=== Collapse Detection Sensitivity ===\n", file=sys.stderr)
 
     np.random.seed(42)
     n_trials = 1000
@@ -98,57 +103,86 @@ def bench_collapse_sensitivity() -> None:
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
     fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
 
-    print(f"Trials: {n_trials} collapse + {n_trials} no-collapse")
-    print(f"TP={tp}  FP={fp}  TN={tn}  FN={fn_count}")
-    print(f"Sensitivity: {sensitivity:.1%}")
-    print(f"Specificity: {specificity:.1%}")
-    print(f"False positive rate: {fpr:.3%}")
+    print(f"Trials: {n_trials} collapse + {n_trials} no-collapse", file=sys.stderr)
+    print(f"TP={tp}  FP={fp}  TN={tn}  FN={fn_count}", file=sys.stderr)
+    print(f"Sensitivity: {sensitivity:.1%}", file=sys.stderr)
+    print(f"Specificity: {specificity:.1%}", file=sys.stderr)
+    print(f"False positive rate: {fpr:.3%}", file=sys.stderr)
+
+    return {
+        "n_trials": n_trials,
+        "tp": tp, "fp": fp, "tn": tn, "fn": fn_count,
+        "sensitivity": sensitivity,
+        "specificity": specificity,
+        "fpr": fpr,
+    }
 
 
 def main() -> None:
-    print("Shannon Entropy — Performance Benchmarks")
-    print(f"Version: {shannon.__version__}")
-    print(f"C++ core: {shannon._HAS_CORE}")
-    print(f"Fallback backend: {get_fallback_backend()}")
-    print()
+    parser = argparse.ArgumentParser(description="Shannon sensitivity & throughput benchmarks")
+    parser.add_argument("--json", action="store_true", help="Output structured JSON to stdout")
+    args = parser.parse_args()
+
+    print("Shannon Entropy — Performance Benchmarks", file=sys.stderr)
+    print(f"Version: {shannon.__version__}", file=sys.stderr)
+    print(f"C++ core: {shannon._HAS_CORE}", file=sys.stderr)
+    print(f"Fallback backend: {get_fallback_backend()}", file=sys.stderr)
+    print(file=sys.stderr)
 
     vocab_sizes = [100, 1000, 10000, 32000, 128000]
+    all_throughput = {}
 
     # NumPy baseline
-    print("=== NumPy Baseline ===")
-    bench_entropy_throughput(
+    print("=== NumPy Baseline ===", file=sys.stderr)
+    numpy_results = bench_entropy_throughput(
         _shannon_entropy_from_logits_numpy,
         vocab_sizes,
         n_iters=100,
         label="numpy",
     )
+    all_throughput["numpy"] = {str(k): v for k, v in numpy_results.items()}
 
     # Numba (if available)
     if get_fallback_backend() == "numba":
         from shannon._numba_fallback import _shannon_entropy_from_logits_numba
-        print("\n=== Numba ===")
-        bench_entropy_throughput(
+        print("\n=== Numba ===", file=sys.stderr)
+        numba_results = bench_entropy_throughput(
             _shannon_entropy_from_logits_numba,
             vocab_sizes,
             n_iters=100,
             label="numba",
         )
+        all_throughput["numba"] = {str(k): v for k, v in numba_results.items()}
 
     # C++ core (if available)
     if shannon._HAS_CORE:
-        print("\n=== C++ Core ===")
-        bench_entropy_throughput(
+        print("\n=== C++ Core ===", file=sys.stderr)
+        cpp_results = bench_entropy_throughput(
             shannon.shannon_entropy_from_logits,
             vocab_sizes,
             n_iters=1000,
             label="cpp",
         )
+        all_throughput["cpp"] = {str(k): v for k, v in cpp_results.items()}
 
         info = shannon.get_hardware_info()
-        print(f"\nActive backend: {info.active_backend}")
+        print(f"\nActive backend: {info.active_backend}", file=sys.stderr)
 
     # Collapse sensitivity
-    bench_collapse_sensitivity()
+    sensitivity_results = bench_collapse_sensitivity()
+
+    if args.json:
+        output = {
+            "benchmark": "bench_sensitivity",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "version": shannon.__version__,
+            "has_cpp_core": shannon._HAS_CORE,
+            "fallback_backend": get_fallback_backend(),
+            "throughput_us_per_call": all_throughput,
+            "collapse_sensitivity": sensitivity_results,
+        }
+        json.dump(output, sys.stdout, indent=2)
+        print()  # trailing newline
 
 
 if __name__ == "__main__":

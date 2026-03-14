@@ -63,7 +63,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           pip install --upgrade pip
-          pip install numpy pybind11 scikit-build-core pytest
+          pip install numpy pybind11 scikit-build-core pytest scipy
           CMAKE_ARGS="-DCMAKE_CXX_COMPILER=g++-13" pip install -e .
         env:
           CXX: g++-13
@@ -72,11 +72,14 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           pip install --upgrade pip
-          pip install numpy pybind11 scikit-build-core pytest
+          pip install numpy pybind11 scikit-build-core pytest scipy
           pip install -e .
 
       - name: Run Python tests
-        run: pytest tests/test_detector.py -v
+        run: pytest tests/ -v
+
+      - name: Run training pipeline (synthetic)
+        run: python scripts/train_256x256.py --synthetic --output /tmp/test_matrix.bin -v
 
   # ── Python-only tests (no C++ build, pure fallback) ─────────────────────
   python-fallback:
@@ -90,9 +93,48 @@ jobs:
           python-version: "3.12"
 
       - name: Install minimal dependencies
-        run: pip install numpy pytest
+        run: pip install numpy pytest scipy
 
       - name: Run tests with pure Python fallback
-        run: pytest tests/test_detector.py -v
+        run: pytest tests/test_detector.py tests/test_train.py -v
         env:
           PYTHONPATH: python
+
+  # ── Benchmarks ──────────────────────────────────────────────────────────
+  benchmarks:
+    runs-on: ubuntu-latest
+    needs: [cpp, python]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++-13
+
+      - name: Install Python package
+        run: |
+          pip install --upgrade pip
+          pip install numpy pybind11 scikit-build-core pytest scipy
+          CMAKE_ARGS="-DCMAKE_CXX_COMPILER=g++-13" pip install -e .
+        env:
+          CXX: g++-13
+
+      - name: Run matrix benchmark
+        run: python benchmarks/bench_matrix.py --json > bench_matrix.json 2>&1 || python benchmarks/bench_matrix.py 2>&1 | tee bench_matrix.txt
+
+      - name: Run sensitivity benchmark
+        run: python benchmarks/bench_sensitivity.py --json > bench_sensitivity.json 2>&1 || python benchmarks/bench_sensitivity.py 2>&1 | tee bench_sensitivity.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            bench_*.json
+            bench_*.txt

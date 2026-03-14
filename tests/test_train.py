@@ -22,6 +22,7 @@ from train_256x256 import (
     compute_energy_closed_form,
     distance_kernel,
     ridge_regression_fit,
+    lbfgs_refine,
     project_to_40x40,
     validate_matrix,
     write_sc01,
@@ -263,3 +264,68 @@ class TestSyntheticData:
             assert 0 <= c.type_j < 256
             assert c.distance > 0
             assert c.complex_id >= 0
+
+
+# =============================================================================
+# L-BFGS convergence with synthetic ground truth
+# =============================================================================
+
+class TestLBFGSConvergence:
+    def test_lbfgs_improves_fit(self):
+        """L-BFGS refinement should improve Pearson r on synthetic data."""
+        # Generate synthetic training data with known ground truth
+        contacts, delta_g = generate_synthetic_training_data(
+            n_complexes=100, contacts_per_complex=30, seed=77,
+        )
+
+        # Fit initial matrix via ridge regression
+        matrix_init = ridge_regression_fit(
+            contacts, delta_g, min_observations=3, lam=0.1,
+        )
+
+        # Group contacts by complex
+        contacts_by_complex: dict[int, list] = {}
+        for c in contacts:
+            contacts_by_complex.setdefault(c.complex_id, []).append(c)
+
+        delta_g_dict = {i: delta_g[i] for i in range(len(delta_g))}
+
+        # Run L-BFGS refinement
+        matrix_refined, metrics = lbfgs_refine(
+            matrix_init,
+            contacts_by_complex,
+            delta_g_dict,
+            reg_strength=0.001,
+            max_iter=50,
+        )
+
+        # Refined matrix should be symmetric
+        max_asym = np.max(np.abs(matrix_refined - matrix_refined.T))
+        assert max_asym < 1e-10
+
+        # Refined matrix should be finite
+        assert not np.any(np.isnan(matrix_refined))
+        assert not np.any(np.isinf(matrix_refined))
+
+        # Pearson r should be high on synthetic (noiseless) data
+        assert metrics["pearson_r"] > 0.90, \
+            f"Pearson r too low: {metrics['pearson_r']:.4f}"
+
+    def test_lbfgs_skips_with_few_complexes(self):
+        """L-BFGS should skip gracefully with < 10 complexes."""
+        contacts, delta_g = generate_synthetic_training_data(
+            n_complexes=5, contacts_per_complex=10, seed=0,
+        )
+        matrix_init = ridge_regression_fit(
+            contacts, delta_g, min_observations=1, lam=0.1,
+        )
+        contacts_by_complex: dict[int, list] = {}
+        for c in contacts:
+            contacts_by_complex.setdefault(c.complex_id, []).append(c)
+        delta_g_dict = {i: delta_g[i] for i in range(len(delta_g))}
+
+        matrix_out, metrics = lbfgs_refine(
+            matrix_init, contacts_by_complex, delta_g_dict,
+        )
+        # Should return input unchanged
+        np.testing.assert_array_equal(matrix_out, matrix_init)

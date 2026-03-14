@@ -21,13 +21,14 @@ ENV CC=gcc-13 CXX=g++-13
 WORKDIR /build
 COPY . .
 
-# Build with CUDA support
+# Build with CUDA support and run C++ tests
 RUN mkdir build && cd build \
     && cmake .. -DCMAKE_BUILD_TYPE=Release \
                 -DSHANNON_CUDA=ON \
                 -DSHANNON_BUILD_TESTS=ON \
                 -DSHANNON_BUILD_PYTHON=OFF \
-    && make -j$(nproc)
+    && make -j$(nproc) \
+    && ctest --output-on-failure
 
 # ─── Python package ─────────────────────────────────────────────────────────
 
@@ -48,10 +49,13 @@ COPY . .
 
 RUN python3 -m venv /opt/shannon \
     && /opt/shannon/bin/pip install --upgrade pip \
-    && /opt/shannon/bin/pip install numpy pybind11 scikit-build-core \
+    && /opt/shannon/bin/pip install numpy pybind11 scikit-build-core scipy \
     && /opt/shannon/bin/pip install -e ".[dev]"
 
 ENV PATH="/opt/shannon/bin:$PATH"
+
+# Run all Python tests
+RUN /opt/shannon/bin/pytest tests/ -v
 
 ENTRYPOINT ["shannon-monitor"]
 CMD ["info"]

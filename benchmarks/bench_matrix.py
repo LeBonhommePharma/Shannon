@@ -2,13 +2,16 @@
 """Benchmark: 256×256 matrix operations — single lookup, batch, row-dot, two-stage scoring.
 
 Usage:
-    python benchmarks/bench_matrix.py
+    python benchmarks/bench_matrix.py [--json]
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import time
 import sys
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -19,13 +22,17 @@ def format_ns(total_seconds: float, n_ops: int) -> str:
     return f"{ns:.2f} ns/op"
 
 
-def bench_single_lookup():
+def ns_per_op(total_seconds: float, n_ops: int) -> float:
+    return total_seconds * 1e9 / n_ops
+
+
+def bench_single_lookup() -> float | None:
     """Benchmark: 10M individual lookups via SoftContactMatrix.lookup()."""
     try:
         from shannon._core import ShannonEnergyMatrix
     except ImportError:
-        print("  [SKIP] C++ module not available")
-        return
+        print("  [SKIP] C++ module not available", file=sys.stderr)
+        return None
 
     m = ShannonEnergyMatrix.instance()
     sc = m.soft_contact()
@@ -44,16 +51,17 @@ def bench_single_lookup():
         sc.lookup(int(types_i[k]), int(types_j[k]))
     elapsed = time.perf_counter() - start
 
-    print(f"  Single lookup: {N:,} ops in {elapsed:.3f}s = {format_ns(elapsed, N)}")
+    print(f"  Single lookup: {N:,} ops in {elapsed:.3f}s = {format_ns(elapsed, N)}", file=sys.stderr)
+    return ns_per_op(elapsed, N)
 
 
-def bench_batch_lookup():
+def bench_batch_lookup() -> float | None:
     """Benchmark: 10M lookups via batch_lookup() (SIMD accelerated)."""
     try:
         from shannon._core import ShannonEnergyMatrix
     except ImportError:
-        print("  [SKIP] C++ module not available")
-        return
+        print("  [SKIP] C++ module not available", file=sys.stderr)
+        return None
 
     m = ShannonEnergyMatrix.instance()
     sc = m.soft_contact()
@@ -67,20 +75,20 @@ def bench_batch_lookup():
     sc.batch_lookup(types_i[:1000], types_j[:1000])
 
     start = time.perf_counter()
-    scores = sc.batch_lookup(types_i, types_j)
+    sc.batch_lookup(types_i, types_j)
     elapsed = time.perf_counter() - start
 
-    print(f"  Batch lookup:  {N:,} ops in {elapsed:.3f}s = {format_ns(elapsed, N)}")
-    return scores
+    print(f"  Batch lookup:  {N:,} ops in {elapsed:.3f}s = {format_ns(elapsed, N)}", file=sys.stderr)
+    return ns_per_op(elapsed, N)
 
 
-def bench_row_dot():
+def bench_row_dot() -> float | None:
     """Benchmark: 1M row-dot operations (FMA accelerated)."""
     try:
         from shannon._core import ShannonEnergyMatrix
     except ImportError:
-        print("  [SKIP] C++ module not available")
-        return
+        print("  [SKIP] C++ module not available", file=sys.stderr)
+        return None
 
     m = ShannonEnergyMatrix.instance()
     sc = m.soft_contact()
@@ -98,16 +106,17 @@ def bench_row_dot():
         sc.row_dot(k % 256, weights)
     elapsed = time.perf_counter() - start
 
-    print(f"  Row-dot:       {N:,} ops in {elapsed:.3f}s = {format_ns(elapsed, N)}")
+    print(f"  Row-dot:       {N:,} ops in {elapsed:.3f}s = {format_ns(elapsed, N)}", file=sys.stderr)
+    return ns_per_op(elapsed, N)
 
 
-def bench_two_stage():
+def bench_two_stage() -> dict | None:
     """Benchmark: two-stage pose scoring (10K poses × 50 contacts)."""
     try:
         from shannon._core import ShannonEnergyMatrix
     except ImportError:
-        print("  [SKIP] C++ module not available")
-        return
+        print("  [SKIP] C++ module not available", file=sys.stderr)
+        return None
 
     m = ShannonEnergyMatrix.instance()
 
@@ -129,40 +138,82 @@ def bench_two_stage():
         types_i, types_j, distances, N_POSES, CONTACTS, 0.10)
     elapsed = time.perf_counter() - start
 
-    print(f"  Two-stage:     {N_POSES:,} poses × {CONTACTS} contacts in {elapsed:.3f}s")
-    print(f"                 Survived pre-filter: {result.poses_evaluated}/{result.poses_total}")
-    print(f"                 Entropy: {result.entropy:.4f} bits")
-    print(f"                 ΔG proxy: {result.delta_g_proxy:.4f} kcal/mol")
+    print(f"  Two-stage:     {N_POSES:,} poses × {CONTACTS} contacts in {elapsed:.3f}s", file=sys.stderr)
+    print(f"                 Survived pre-filter: {result.poses_evaluated}/{result.poses_total}", file=sys.stderr)
+    print(f"                 Entropy: {result.entropy:.4f} bits", file=sys.stderr)
+    print(f"                 ΔG proxy: {result.delta_g_proxy:.4f} kcal/mol", file=sys.stderr)
+
+    return {
+        "two_stage_ms": elapsed * 1000,
+        "two_stage_poses": N_POSES,
+        "two_stage_contacts": CONTACTS,
+        "two_stage_survival_rate": result.poses_evaluated / result.poses_total if result.poses_total > 0 else 0,
+        "two_stage_entropy": result.entropy,
+        "two_stage_delta_g": result.delta_g_proxy,
+    }
 
 
 def main():
-    print("=" * 60)
-    print("Shannon 256×256 Matrix Benchmark")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description="Shannon 256×256 matrix benchmarks")
+    parser.add_argument("--json", action="store_true", help="Output structured JSON to stdout")
+    args = parser.parse_args()
 
+    print("=" * 60, file=sys.stderr)
+    print("Shannon 256×256 Matrix Benchmark", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
+    backend = "unknown"
+    hw_info = {}
     try:
         from shannon._core import get_hardware_info
         hw = get_hardware_info()
-        print(f"Backend: {hw.active_backend}")
-        print(f"  AVX-512: {hw.has_avx512}")
-        print(f"  AVX2:    {hw.has_avx2}")
-        print(f"  OpenMP:  {hw.has_openmp}")
-        print(f"  CUDA:    {hw.has_cuda}")
-        print(f"  Metal:   {hw.has_metal}")
+        backend = hw.active_backend
+        hw_info = {
+            "avx512": hw.has_avx512,
+            "avx2": hw.has_avx2,
+            "openmp": hw.has_openmp,
+            "cuda": hw.has_cuda,
+            "metal": hw.has_metal,
+        }
+        print(f"Backend: {hw.active_backend}", file=sys.stderr)
+        print(f"  AVX-512: {hw.has_avx512}", file=sys.stderr)
+        print(f"  AVX2:    {hw.has_avx2}", file=sys.stderr)
+        print(f"  OpenMP:  {hw.has_openmp}", file=sys.stderr)
+        print(f"  CUDA:    {hw.has_cuda}", file=sys.stderr)
+        print(f"  Metal:   {hw.has_metal}", file=sys.stderr)
     except ImportError:
-        print("C++ module not available — benchmarks will be skipped")
-        sys.exit(1)
+        print("C++ module not available — benchmarks will be skipped", file=sys.stderr)
+        if args.json:
+            json.dump({"error": "C++ module not available"}, sys.stdout, indent=2)
+        else:
+            sys.exit(1)
+        return
 
-    print()
-    print("--- Matrix Operations ---")
-    bench_single_lookup()
-    bench_batch_lookup()
-    bench_row_dot()
-    print()
-    print("--- Pose Scoring ---")
-    bench_two_stage()
-    print()
-    print("Done.")
+    print(file=sys.stderr)
+    print("--- Matrix Operations ---", file=sys.stderr)
+    single_ns = bench_single_lookup()
+    batch_ns = bench_batch_lookup()
+    row_dot_ns = bench_row_dot()
+    print(file=sys.stderr)
+    print("--- Pose Scoring ---", file=sys.stderr)
+    two_stage = bench_two_stage()
+    print(file=sys.stderr)
+    print("Done.", file=sys.stderr)
+
+    if args.json:
+        results = {
+            "benchmark": "bench_matrix",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "backend": backend,
+            "hardware": hw_info,
+            "single_lookup_ns": single_ns,
+            "batch_lookup_ns": batch_ns,
+            "row_dot_ns": row_dot_ns,
+        }
+        if two_stage:
+            results.update(two_stage)
+        json.dump(results, sys.stdout, indent=2)
+        print()  # trailing newline
 
 
 if __name__ == "__main__":

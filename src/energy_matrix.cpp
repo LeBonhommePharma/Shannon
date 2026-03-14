@@ -186,7 +186,7 @@ double ShannonEnergyMatrix::weighted_entropy(
 
 #ifdef SHANNON_HAS_OPENMP
     if (n > 10000) {
-        #pragma omp parallel for reduction(-:H)
+        #pragma omp parallel for reduction(+:H)
         for (size_t i = 0; i < n; ++i) {
             if (probs[i] <= 0.0) continue;
             double w = 0.0;
@@ -196,7 +196,7 @@ double ShannonEnergyMatrix::weighted_entropy(
             }
             w *= inv_context;
             double weight = std::exp(-w);
-            H -= weight * probs[i] * std::log2(probs[i]);
+            H += weight * (-probs[i] * std::log2(probs[i]));
         }
     } else
 #endif
@@ -210,7 +210,7 @@ double ShannonEnergyMatrix::weighted_entropy(
             }
             w *= inv_context;
             double weight = std::exp(-w);
-            H -= weight * probs[i] * std::log2(probs[i]);
+            H += weight * (-probs[i] * std::log2(probs[i]));
         }
     }
 
@@ -232,7 +232,7 @@ double ShannonEnergyMatrix::weighted_entropy_with_bias(
 
 #ifdef SHANNON_HAS_OPENMP
     if (n > 10000) {
-        #pragma omp parallel for reduction(-:H)
+        #pragma omp parallel for reduction(+:H)
         for (size_t i = 0; i < n; ++i) {
             if (probs[i] <= 0.0) continue;
             uint8_t ti = static_cast<uint8_t>(i % DIM);
@@ -250,7 +250,7 @@ double ShannonEnergyMatrix::weighted_entropy_with_bias(
             }
             double gaussian_bias = std::exp(-dist_sq * inv_2sigma2);
             double weight = std::exp(-w) * gaussian_bias;
-            H -= weight * probs[i] * std::log2(probs[i]);
+            H += weight * (-probs[i] * std::log2(probs[i]));
         }
     } else
 #endif
@@ -272,7 +272,7 @@ double ShannonEnergyMatrix::weighted_entropy_with_bias(
             }
             double gaussian_bias = std::exp(-dist_sq * inv_2sigma2);
             double weight = std::exp(-w) * gaussian_bias;
-            H -= weight * probs[i] * std::log2(probs[i]);
+            H += weight * (-probs[i] * std::log2(probs[i]));
         }
     }
 
@@ -305,6 +305,7 @@ void SoftContactMatrix::batch_lookup(
     const uint8_t* types_i, const uint8_t* types_j,
     float* scores, size_t n
 ) const noexcept {
+    if (n == 0 || !types_i || !types_j || !scores) return;
     size_t k = 0;
 
 #ifdef SHANNON_HAS_AVX512
@@ -346,6 +347,7 @@ void SoftContactMatrix::batch_lookup(
 // =============================================================================
 
 float SoftContactMatrix::row_dot(uint8_t type_i, const float* weights) const noexcept {
+    if (!weights) return 0.0f;
     const float* r = row(type_i);
     size_t j = 0;
 
@@ -488,7 +490,13 @@ ScoringResult ShannonEnergyMatrix::score_poses_two_stage(
     size_t contacts_per_pose,
     float cutoff_percentile
 ) const noexcept {
-    if (n_poses == 0 || contacts_per_pose == 0) {
+    if (n_poses == 0 || contacts_per_pose == 0 ||
+        !pose_types_i || !pose_types_j || !distances) {
+        return ScoringResult{0.0, 0, 0, 0.0};
+    }
+
+    // Guard against size_t overflow in total element count
+    if (n_poses > SIZE_MAX / contacts_per_pose) {
         return ScoringResult{0.0, 0, 0, 0.0};
     }
 

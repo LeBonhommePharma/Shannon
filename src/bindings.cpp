@@ -174,6 +174,8 @@ PYBIND11_MODULE(_core, m) {
                py::array_t<uint8_t> types_i, py::array_t<uint8_t> types_j) {
                 auto bi = types_i.request();
                 auto bj = types_j.request();
+                if (bi.ndim != 1) throw std::runtime_error("types_i must be 1D");
+                if (bj.ndim != 1) throw std::runtime_error("types_j must be 1D");
                 if (bi.size != bj.size) throw std::runtime_error("types_i and types_j must have same length");
                 size_t n = bi.size;
                 auto result = py::array_t<float>(n);
@@ -193,6 +195,7 @@ PYBIND11_MODULE(_core, m) {
             [](const shannon::SoftContactMatrix& self,
                uint8_t type_i, py::array_t<float> weights) {
                 auto bw = weights.request();
+                if (bw.ndim != 1) throw std::runtime_error("weights must be 1D");
                 if (bw.size != 256) throw std::runtime_error("weights must be length 256");
                 py::gil_scoped_release release;
                 return self.row_dot(type_i, static_cast<float*>(bw.ptr));
@@ -251,6 +254,19 @@ PYBIND11_MODULE(_core, m) {
                 auto bi = types_i.request();
                 auto bj = types_j.request();
                 auto bd = distances.request();
+                if (bi.ndim != 1) throw std::runtime_error("types_i must be 1D");
+                if (bj.ndim != 1) throw std::runtime_error("types_j must be 1D");
+                if (bd.ndim != 1) throw std::runtime_error("distances must be 1D");
+                size_t total = n_poses * contacts_per_pose;
+                if (static_cast<size_t>(bi.size) < total)
+                    throw std::runtime_error("types_i too short: need " + std::to_string(total) +
+                                             " elements, got " + std::to_string(bi.size));
+                if (static_cast<size_t>(bj.size) < total)
+                    throw std::runtime_error("types_j too short: need " + std::to_string(total) +
+                                             " elements, got " + std::to_string(bj.size));
+                if (static_cast<size_t>(bd.size) < total)
+                    throw std::runtime_error("distances too short: need " + std::to_string(total) +
+                                             " elements, got " + std::to_string(bd.size));
                 py::gil_scoped_release release;
                 return self.score_poses_two_stage(
                     static_cast<uint8_t*>(bi.ptr),

@@ -362,6 +362,7 @@ void shannon_metal_batch_lookup(
     const float* matrix_data
 ) {
     if (n == 0 || !g_initialized) return;
+    if (!types_i || !types_j || !scores || !matrix_data) return;
 
     @autoreleasepool {
         // Buffers

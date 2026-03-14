@@ -244,6 +244,8 @@ double shannon_cuda_entropy_from_logits(const double* host_logits, size_t n) {
         sum_x_exp += h_sum_x_exp[i];
     }
 
+    if (sum_exp <= 0.0) return 0.0;
+
     double log_Z = max_logit + std::log(sum_exp);
     double mean_logit = sum_x_exp / sum_exp;
     double H = std::log2(std::exp(1.0)) * (log_Z - mean_logit);
@@ -307,6 +309,7 @@ double shannon_cuda_weighted_entropy(
 ) {
     std::lock_guard<std::mutex> lock(d_mutex);
     if (!d_initialized || n > d_max_n) return -1.0;
+    if (context_len == 0 || !token_ids || !host_probs) return 0.0;
 
     // Load energy matrix to constant memory (one-time)
     if (!d_matrix_loaded && matrix_data) {
@@ -321,7 +324,9 @@ double shannon_cuda_weighted_entropy(
 
     // Copy token IDs to device
     unsigned char* d_token_ids = nullptr;
-    cudaMalloc(&d_token_ids, context_len * sizeof(unsigned char));
+    if (cudaMalloc(&d_token_ids, context_len * sizeof(unsigned char)) != cudaSuccess) {
+        return -1.0;
+    }
     cudaMemcpy(d_token_ids, token_ids, context_len * sizeof(unsigned char), cudaMemcpyHostToDevice);
 
     double inv_context = 1.0 / static_cast<double>(context_len);
@@ -425,16 +430,18 @@ void shannon_cuda_batch_lookup(
     const unsigned char* types_i, const unsigned char* types_j,
     float* scores, size_t n
 ) {
-    if (n == 0) return;
+    if (n == 0 || !types_i || !types_j || !scores) return;
     if (!d_matrix_loaded) return;
 
     unsigned char* d_ti = nullptr;
     unsigned char* d_tj = nullptr;
     float* d_scores = nullptr;
 
-    cudaMalloc(&d_ti, n);
-    cudaMalloc(&d_tj, n);
-    cudaMalloc(&d_scores, n * sizeof(float));
+    if (cudaMalloc(&d_ti, n) != cudaSuccess) return;
+    if (cudaMalloc(&d_tj, n) != cudaSuccess) { cudaFree(d_ti); return; }
+    if (cudaMalloc(&d_scores, n * sizeof(float)) != cudaSuccess) {
+        cudaFree(d_ti); cudaFree(d_tj); return;
+    }
 
     cudaMemcpy(d_ti, types_i, n, cudaMemcpyHostToDevice);
     cudaMemcpy(d_tj, types_j, n, cudaMemcpyHostToDevice);
@@ -496,18 +503,28 @@ void shannon_cuda_batch_pose_score(
     size_t n_poses, size_t contacts_per_pose
 ) {
     if (n_poses == 0 || contacts_per_pose == 0) return;
+    if (!types_i || !types_j || !distances || !scores) return;
     if (!d_matrix_loaded) return;
 
     size_t total = n_poses * contacts_per_pose;
+    // Guard against size_t overflow
+    if (n_poses > SIZE_MAX / contacts_per_pose) return;
+
     unsigned char* d_ti = nullptr;
     unsigned char* d_tj = nullptr;
     float* d_dist = nullptr;
     float* d_scores = nullptr;
 
-    cudaMalloc(&d_ti, total);
-    cudaMalloc(&d_tj, total);
-    cudaMalloc(&d_dist, total * sizeof(float));
-    cudaMalloc(&d_scores, n_poses * sizeof(float));
+    if (cudaMalloc(&d_ti, total) != cudaSuccess) return;
+    if (cudaMalloc(&d_tj, total) != cudaSuccess) {
+        cudaFree(d_ti); return;
+    }
+    if (cudaMalloc(&d_dist, total * sizeof(float)) != cudaSuccess) {
+        cudaFree(d_ti); cudaFree(d_tj); return;
+    }
+    if (cudaMalloc(&d_scores, n_poses * sizeof(float)) != cudaSuccess) {
+        cudaFree(d_ti); cudaFree(d_tj); cudaFree(d_dist); return;
+    }
 
     cudaMemcpy(d_ti, types_i, total, cudaMemcpyHostToDevice);
     cudaMemcpy(d_tj, types_j, total, cudaMemcpyHostToDevice);

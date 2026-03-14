@@ -46,6 +46,19 @@ void shannon_cuda_pairwise_distances(
 // Release device buffers
 void shannon_cuda_shutdown();
 
+// Batch matrix lookup on GPU: scores[k] = matrix[types_i[k] * 256 + types_j[k]]
+// Uses constant-memory cached energy matrix
+void shannon_cuda_batch_lookup(
+    const unsigned char* types_i, const unsigned char* types_j,
+    float* scores, size_t n);
+
+// Batch pose scoring on GPU: per-pose sum of matrix[ti][tj] * f(r)
+// types_i/types_j: [n_poses * contacts_per_pose], distances: [n_poses * contacts_per_pose]
+void shannon_cuda_batch_pose_score(
+    const unsigned char* types_i, const unsigned char* types_j,
+    const float* distances, float* scores,
+    size_t n_poses, size_t contacts_per_pose);
+
 // Query GPU availability
 bool shannon_cuda_available();
 

@@ -211,3 +211,20 @@ kernel void pairwise_distances(
     }
     dist_out[row * n + col] = sqrt(sum);
 }
+
+// =============================================================================
+// Kernel: Batch matrix lookup — scores[k] = matrix[types_i[k] * 256 + types_j[k]]
+// =============================================================================
+
+kernel void batch_matrix_lookup(
+    device const uchar* types_i [[buffer(0)]],
+    device const uchar* types_j [[buffer(1)]],
+    device float* scores [[buffer(2)]],
+    constant float* energy_matrix [[buffer(3)]],
+    constant uint& n [[buffer(4)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= n) return;
+    uint idx = uint(types_i[gid]) * 256 + uint(types_j[gid]);
+    scores[gid] = energy_matrix[idx];
+}

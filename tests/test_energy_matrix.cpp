@@ -200,3 +200,175 @@ TEST(EnergyMatrix, WeightedEntropyWithBiasEmpty) {
     double H = m.weighted_entropy_with_bias(nullptr, 0, nullptr, 0, cluster);
     EXPECT_NEAR(H, 0.0, 1e-15);
 }
+
+// =============================================================================
+// Batch lookup
+// =============================================================================
+
+TEST(SoftContactMatrix, BatchLookupConsistency) {
+    // Batch lookup must match individual lookups
+    const auto& m = shannon::ShannonEnergyMatrix::instance();
+    const auto& sc = m.soft_contact();
+
+    constexpr size_t N = 100;
+    uint8_t types_i[N], types_j[N];
+    float batch_scores[N];
+
+    for (size_t k = 0; k < N; ++k) {
+        types_i[k] = static_cast<uint8_t>((k * 7 + 3) % 256);
+        types_j[k] = static_cast<uint8_t>((k * 13 + 17) % 256);
+    }
+
+    sc.batch_lookup(types_i, types_j, batch_scores, N);
+
+    for (size_t k = 0; k < N; ++k) {
+        float expected = sc.lookup(types_i[k], types_j[k]);
+        EXPECT_FLOAT_EQ(batch_scores[k], expected)
+            << "Batch mismatch at k=" << k
+            << " types=(" << (int)types_i[k] << "," << (int)types_j[k] << ")";
+    }
+}
+
+TEST(SoftContactMatrix, BatchLookupEmpty) {
+    const auto& sc = shannon::ShannonEnergyMatrix::instance().soft_contact();
+    sc.batch_lookup(nullptr, nullptr, nullptr, 0);  // should not crash
+}
+
+// =============================================================================
+// Row-dot
+// =============================================================================
+
+TEST(SoftContactMatrix, RowDotCorrectness) {
+    const auto& sc = shannon::ShannonEnergyMatrix::instance().soft_contact();
+
+    // Use uniform weights = 1.0
+    float weights[256];
+    for (int j = 0; j < 256; ++j) weights[j] = 1.0f;
+
+    float dot = sc.row_dot(42, weights);
+
+    // Manual sum of row 42
+    float expected = 0.0f;
+    for (int j = 0; j < 256; ++j) {
+        expected += sc.lookup(42, j);
+    }
+
+    EXPECT_NEAR(dot, expected, std::abs(expected) * 1e-5f)
+        << "Row-dot mismatch for type 42";
+}
+
+TEST(SoftContactMatrix, RowDotZeroWeights) {
+    const auto& sc = shannon::ShannonEnergyMatrix::instance().soft_contact();
+    float weights[256] = {};
+    float dot = sc.row_dot(0, weights);
+    EXPECT_FLOAT_EQ(dot, 0.0f);
+}
+
+// =============================================================================
+// SYBYL bridge
+// =============================================================================
+
+TEST(SybylBridge, KnownTypes) {
+    EXPECT_EQ(shannon::sybyl_to_base("C.3"), 0);
+    EXPECT_EQ(shannon::sybyl_to_base("C.ar"), 3);
+    EXPECT_EQ(shannon::sybyl_to_base("N.ar"), 8);
+    EXPECT_EQ(shannon::sybyl_to_base("O.3"), 12);
+    EXPECT_EQ(shannon::sybyl_to_base("H"), 19);
+    EXPECT_EQ(shannon::sybyl_to_base("C.ar.het"), 20);
+    EXPECT_EQ(shannon::sybyl_to_base("C.2.bridge"), 21);
+    EXPECT_EQ(shannon::sybyl_to_base("F"), 22);
+}
+
+TEST(SybylBridge, UnknownType) {
+    EXPECT_EQ(shannon::sybyl_to_base("UNKNOWN"), -1);
+    EXPECT_EQ(shannon::sybyl_to_base(""), -1);
+    EXPECT_EQ(shannon::sybyl_to_base(nullptr), -1);
+}
+
+TEST(SybylBridge, RoundTrip) {
+    // sybyl_to_base → base_to_sybyl_parent should give valid SYBYL parent
+    int base = shannon::sybyl_to_base("C.3");
+    EXPECT_EQ(base, 0);
+    int sybyl = shannon::base_to_sybyl_parent(static_cast<uint8_t>(base));
+    EXPECT_GE(sybyl, 0);
+    EXPECT_LT(sybyl, 40);
+}
+
+TEST(SybylBridge, ContextAwareParent) {
+    // C.ar.het (base 20) → SYBYL parent should be C.ar (parent 3)
+    int parent = shannon::base_to_sybyl_parent(20);
+    EXPECT_EQ(parent, 3);
+
+    // C.2.bridge (base 21) → SYBYL parent should be C.2 (parent 1)
+    parent = shannon::base_to_sybyl_parent(21);
+    EXPECT_EQ(parent, 1);
+}
+
+// =============================================================================
+// 40×40 projection
+// =============================================================================
+
+TEST(Projection, ProjectTo40x40) {
+    const auto& sc = shannon::ShannonEnergyMatrix::instance().soft_contact();
+
+    float proj[32 * 32] = {};
+    shannon::project_to_40x40(sc, proj);
+
+    // Symmetry check (spot)
+    for (int i = 0; i < 32; i += 5) {
+        for (int j = i; j < 32; j += 7) {
+            EXPECT_NEAR(proj[i * 32 + j], proj[j * 32 + i], 1e-5f)
+                << "40x40 asymmetry at (" << i << "," << j << ")";
+        }
+    }
+
+    // Non-trivial: at least some entries should be non-zero
+    int nonzero = 0;
+    for (int k = 0; k < 32 * 32; ++k) {
+        if (proj[k] != 0.0f) nonzero++;
+    }
+    EXPECT_GT(nonzero, 100);
+}
+
+// =============================================================================
+// Two-stage pose scoring
+// =============================================================================
+
+TEST(EnergyMatrix, TwoStageScoringBasic) {
+    const auto& m = shannon::ShannonEnergyMatrix::instance();
+
+    // Create 100 synthetic poses, 10 contacts each
+    constexpr size_t N_POSES = 100;
+    constexpr size_t CONTACTS = 10;
+    uint8_t types_i[N_POSES * CONTACTS];
+    uint8_t types_j[N_POSES * CONTACTS];
+    float distances[N_POSES * CONTACTS];
+
+    // Fill with deterministic data
+    for (size_t p = 0; p < N_POSES; ++p) {
+        for (size_t c = 0; c < CONTACTS; ++c) {
+            size_t idx = p * CONTACTS + c;
+            types_i[idx] = static_cast<uint8_t>((p + c) % 256);
+            types_j[idx] = static_cast<uint8_t>((p * 3 + c * 7) % 256);
+            distances[idx] = 3.0f + static_cast<float>(c) * 0.5f;
+        }
+    }
+
+    auto result = m.score_poses_two_stage(
+        types_i, types_j, distances, N_POSES, CONTACTS, 0.10f);
+
+    EXPECT_EQ(result.poses_total, N_POSES);
+    EXPECT_EQ(result.poses_evaluated, 10u);  // 10% of 100
+    EXPECT_GE(result.entropy, 0.0);
+    EXPECT_FALSE(std::isnan(result.entropy));
+    EXPECT_FALSE(std::isinf(result.entropy));
+    EXPECT_FALSE(std::isnan(result.delta_g_proxy));
+}
+
+TEST(EnergyMatrix, TwoStageScoringEmpty) {
+    const auto& m = shannon::ShannonEnergyMatrix::instance();
+    auto result = m.score_poses_two_stage(nullptr, nullptr, nullptr, 0, 0, 0.10f);
+    EXPECT_EQ(result.poses_total, 0u);
+    EXPECT_EQ(result.poses_evaluated, 0u);
+    EXPECT_NEAR(result.entropy, 0.0, 1e-15);
+}

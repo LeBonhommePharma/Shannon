@@ -401,6 +401,131 @@ bool shannon_cuda_available() {
     return (err == cudaSuccess && device_count > 0);
 }
 
+// =============================================================================
+// Kernel: batch matrix lookup
+// =============================================================================
+
+__global__ void kernel_batch_matrix_lookup(
+    const unsigned char* __restrict__ types_i,
+    const unsigned char* __restrict__ types_j,
+    float* __restrict__ scores,
+    size_t n
+) {
+    size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t stride = blockDim.x * gridDim.x;
+
+    for (size_t i = gid; i < n; i += stride) {
+        unsigned int idx = static_cast<unsigned int>(types_i[i]) * 256
+                         + static_cast<unsigned int>(types_j[i]);
+        scores[i] = d_energy_matrix[idx];
+    }
+}
+
+void shannon_cuda_batch_lookup(
+    const unsigned char* types_i, const unsigned char* types_j,
+    float* scores, size_t n
+) {
+    if (n == 0) return;
+    if (!d_matrix_loaded) return;
+
+    unsigned char* d_ti = nullptr;
+    unsigned char* d_tj = nullptr;
+    float* d_scores = nullptr;
+
+    cudaMalloc(&d_ti, n);
+    cudaMalloc(&d_tj, n);
+    cudaMalloc(&d_scores, n * sizeof(float));
+
+    cudaMemcpy(d_ti, types_i, n, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_tj, types_j, n, cudaMemcpyHostToDevice);
+
+    constexpr size_t BLOCK = 256;
+    size_t grid = (n + BLOCK - 1) / BLOCK;
+    kernel_batch_matrix_lookup<<<grid, BLOCK>>>(d_ti, d_tj, d_scores, n);
+
+    cudaMemcpy(scores, d_scores, n * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_ti);
+    cudaFree(d_tj);
+    cudaFree(d_scores);
+}
+
+// =============================================================================
+// Kernel: batch pose scoring
+// =============================================================================
+
+__global__ void kernel_batch_pose_score(
+    const unsigned char* __restrict__ types_i,
+    const unsigned char* __restrict__ types_j,
+    const float* __restrict__ distances,
+    float* __restrict__ pose_scores,
+    size_t n_poses, size_t contacts_per_pose
+) {
+    extern __shared__ float sdata_f[];
+
+    size_t pose_id = blockIdx.x;
+    if (pose_id >= n_poses) return;
+
+    size_t tid = threadIdx.x;
+    size_t offset = pose_id * contacts_per_pose;
+
+    float local_sum = 0.0f;
+    for (size_t c = tid; c < contacts_per_pose; c += blockDim.x) {
+        unsigned int idx = static_cast<unsigned int>(types_i[offset + c]) * 256
+                         + static_cast<unsigned int>(types_j[offset + c]);
+        float r = distances[offset + c];
+        float kernel_val = expf(-r * r / 18.0f);  // σ=3.0 Å
+        local_sum += d_energy_matrix[idx] * kernel_val;
+    }
+
+    sdata_f[tid] = local_sum;
+    __syncthreads();
+
+    // Block reduction
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) sdata_f[tid] += sdata_f[tid + s];
+        __syncthreads();
+    }
+
+    if (tid == 0) pose_scores[pose_id] = sdata_f[0];
+}
+
+void shannon_cuda_batch_pose_score(
+    const unsigned char* types_i, const unsigned char* types_j,
+    const float* distances, float* scores,
+    size_t n_poses, size_t contacts_per_pose
+) {
+    if (n_poses == 0 || contacts_per_pose == 0) return;
+    if (!d_matrix_loaded) return;
+
+    size_t total = n_poses * contacts_per_pose;
+    unsigned char* d_ti = nullptr;
+    unsigned char* d_tj = nullptr;
+    float* d_dist = nullptr;
+    float* d_scores = nullptr;
+
+    cudaMalloc(&d_ti, total);
+    cudaMalloc(&d_tj, total);
+    cudaMalloc(&d_dist, total * sizeof(float));
+    cudaMalloc(&d_scores, n_poses * sizeof(float));
+
+    cudaMemcpy(d_ti, types_i, total, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_tj, types_j, total, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_dist, distances, total * sizeof(float), cudaMemcpyHostToDevice);
+
+    constexpr size_t BLOCK = 256;
+    size_t shared_mem = BLOCK * sizeof(float);
+    kernel_batch_pose_score<<<n_poses, BLOCK, shared_mem>>>(
+        d_ti, d_tj, d_dist, d_scores, n_poses, contacts_per_pose);
+
+    cudaMemcpy(scores, d_scores, n_poses * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_ti);
+    cudaFree(d_tj);
+    cudaFree(d_dist);
+    cudaFree(d_scores);
+}
+
 }  // namespace cuda
 }  // namespace shannon
 

@@ -45,6 +45,12 @@ void shannon_metal_pairwise_distances(
 // Release Metal resources
 void shannon_metal_shutdown();
 
+// Batch matrix lookup on GPU: scores[k] = matrix[types_i[k] * 256 + types_j[k]]
+void shannon_metal_batch_lookup(
+    const unsigned char* types_i, const unsigned char* types_j,
+    float* scores, size_t n,
+    const float* matrix_data);
+
 // Query Metal GPU availability
 bool shannon_metal_available();
 

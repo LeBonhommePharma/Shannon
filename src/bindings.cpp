@@ -169,6 +169,36 @@ PYBIND11_MODULE(_core, m) {
              py::arg("type_i"), py::arg("type_j"),
              "O(1) energy lookup")
         .def("is_loaded", &shannon::SoftContactMatrix::is_loaded)
+        .def("batch_lookup",
+            [](const shannon::SoftContactMatrix& self,
+               py::array_t<uint8_t> types_i, py::array_t<uint8_t> types_j) {
+                auto bi = types_i.request();
+                auto bj = types_j.request();
+                if (bi.size != bj.size) throw std::runtime_error("types_i and types_j must have same length");
+                size_t n = bi.size;
+                auto result = py::array_t<float>(n);
+                auto br = result.request();
+                {
+                    py::gil_scoped_release release;
+                    self.batch_lookup(
+                        static_cast<uint8_t*>(bi.ptr),
+                        static_cast<uint8_t*>(bj.ptr),
+                        static_cast<float*>(br.ptr), n);
+                }
+                return result;
+            },
+            py::arg("types_i"), py::arg("types_j"),
+            "Batch lookup: scores[k] = matrix[types_i[k], types_j[k]] (SIMD accelerated)")
+        .def("row_dot",
+            [](const shannon::SoftContactMatrix& self,
+               uint8_t type_i, py::array_t<float> weights) {
+                auto bw = weights.request();
+                if (bw.size != 256) throw std::runtime_error("weights must be length 256");
+                py::gil_scoped_release release;
+                return self.row_dot(type_i, static_cast<float*>(bw.ptr));
+            },
+            py::arg("type_i"), py::arg("weights"),
+            "Dot product of matrix row with 256-d weight vector (FMA accelerated)")
         .def_readonly_static("DIM", &shannon::SoftContactMatrix::DIM)
         .def_readonly_static("BYTE_SIZE", &shannon::SoftContactMatrix::BYTE_SIZE);
 
@@ -180,6 +210,20 @@ PYBIND11_MODULE(_core, m) {
         .def_readwrite("centroid", &shannon::SuperCluster::centroid)
         .def_readwrite("radius", &shannon::SuperCluster::radius)
         .def_readwrite("cluster_id", &shannon::SuperCluster::cluster_id);
+
+    // ── ScoringResult ──────────────────────────────────────────────────────
+
+    py::class_<shannon::ScoringResult>(m, "ScoringResult")
+        .def_readonly("entropy", &shannon::ScoringResult::entropy)
+        .def_readonly("poses_evaluated", &shannon::ScoringResult::poses_evaluated)
+        .def_readonly("poses_total", &shannon::ScoringResult::poses_total)
+        .def_readonly("delta_g_proxy", &shannon::ScoringResult::delta_g_proxy)
+        .def("__repr__", [](const shannon::ScoringResult& r) {
+            return "<ScoringResult H=" + std::to_string(r.entropy) +
+                   " evaluated=" + std::to_string(r.poses_evaluated) +
+                   "/" + std::to_string(r.poses_total) +
+                   " dG=" + std::to_string(r.delta_g_proxy) + ">";
+        });
 
     // ── ShannonEnergyMatrix (256x256 white-box referee) ────────────────────
 
@@ -198,6 +242,26 @@ PYBIND11_MODULE(_core, m) {
         .def("nonzero_count", &shannon::ShannonEnergyMatrix::nonzero_count)
         .def("source", &shannon::ShannonEnergyMatrix::source,
              "Source of matrix data: 'soft_contact' or 'closed_form'")
+        .def("score_poses_two_stage",
+            [](const shannon::ShannonEnergyMatrix& self,
+               py::array_t<uint8_t> types_i, py::array_t<uint8_t> types_j,
+               py::array_t<float> distances,
+               size_t n_poses, size_t contacts_per_pose,
+               float cutoff_percentile) {
+                auto bi = types_i.request();
+                auto bj = types_j.request();
+                auto bd = distances.request();
+                py::gil_scoped_release release;
+                return self.score_poses_two_stage(
+                    static_cast<uint8_t*>(bi.ptr),
+                    static_cast<uint8_t*>(bj.ptr),
+                    static_cast<float*>(bd.ptr),
+                    n_poses, contacts_per_pose, cutoff_percentile);
+            },
+            py::arg("types_i"), py::arg("types_j"), py::arg("distances"),
+            py::arg("n_poses"), py::arg("contacts_per_pose"),
+            py::arg("cutoff_percentile") = 0.10f,
+            "Two-stage scoring: matrix pre-filter + analytic refinement")
         .def_readonly_static("DIM", &shannon::ShannonEnergyMatrix::DIM)
         .def_readonly_static("TOTAL_PARAMS", &shannon::ShannonEnergyMatrix::TOTAL_PARAMS);
 
@@ -254,6 +318,30 @@ PYBIND11_MODULE(_core, m) {
 
     m.def("get_hardware_info", &shannon::get_hardware_info,
           "Query available hardware acceleration backends");
+
+    // ── SYBYL bridge ──────────────────────────────────────────────────────
+
+    m.def("sybyl_to_base",
+        [](const std::string& sybyl_type) {
+            return shannon::sybyl_to_base(sybyl_type.c_str());
+        },
+        py::arg("sybyl_type"),
+        "Map SYBYL atom type string to base type (0-31). Returns -1 for unknown.");
+
+    m.def("base_to_sybyl_parent", &shannon::base_to_sybyl_parent,
+          py::arg("base_type"),
+          "Map base type (0-31) back to SYBYL parent index (0-39)");
+
+    m.def("project_to_40x40",
+        [](const shannon::SoftContactMatrix& matrix) {
+            auto result = py::array_t<float>({32, 32});
+            auto buf = result.request();
+            py::gil_scoped_release release;
+            shannon::project_to_40x40(matrix, static_cast<float*>(buf.ptr));
+            return result;
+        },
+        py::arg("matrix"),
+        "Project 256x256 matrix to 32x32 SYBYL-equivalent (block-mean)");
 
     // ── Module-level constants ─────────────────────────────────────────────
     m.attr("__version__") = "0.2.0";

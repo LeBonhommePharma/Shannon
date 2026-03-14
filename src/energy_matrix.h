@@ -59,6 +59,14 @@ public:
 
     bool is_loaded() const noexcept { return loaded_; }
 
+    // Batch lookup: score N type-pairs in one call (AVX2/AVX-512 accelerated)
+    // types_i[k], types_j[k] → scores[k] = data_[types_i[k] * 256 + types_j[k]]
+    void batch_lookup(const uint8_t* types_i, const uint8_t* types_j,
+                      float* scores, size_t n) const noexcept;
+
+    // Row-dot: dot product of matrix row with a 256-d weight vector (FMA accelerated)
+    float row_dot(uint8_t type_i, const float* weights) const noexcept;
+
 private:
     alignas(64) float data_[TOTAL_ENTRIES];  // 256 KB, L1-resident
     bool loaded_ = false;
@@ -111,6 +119,31 @@ struct SuperCluster {
 };
 
 // =============================================================================
+// SYBYL Bridge — map between 32 base types and ~40 SYBYL atom types
+// =============================================================================
+
+// Map SYBYL atom type string to base type (0-31). Returns -1 for unknown.
+int sybyl_to_base(const char* sybyl_type) noexcept;
+
+// Map base type (0-31) back to SYBYL parent index (0-39).
+int base_to_sybyl_parent(uint8_t base_type) noexcept;
+
+// Project 256×256 matrix to 40×40 SYBYL-equivalent (block-mean).
+// out_40x40 must point to at least 32*32 = 1024 floats.
+void project_to_40x40(const SoftContactMatrix& matrix, float* out_40x40) noexcept;
+
+// =============================================================================
+// ScoringResult — Output of two-stage pose scoring
+// =============================================================================
+
+struct ScoringResult {
+    double entropy;           // Shannon entropy of surviving pose ensemble
+    size_t poses_evaluated;   // Number surviving pre-filter
+    size_t poses_total;       // Total input poses
+    double delta_g_proxy;     // Boltzmann-weighted ΔG estimate
+};
+
+// =============================================================================
 // ShannonEnergyMatrix — Main API (256x256 white-box referee)
 // =============================================================================
 
@@ -158,6 +191,19 @@ public:
 
     // Access underlying SoftContactMatrix
     const SoftContactMatrix& soft_contact() const noexcept { return soft_contact_; }
+
+    // Two-stage pose scoring:
+    // 1. Matrix pre-filter: fast O(1) lookup, eliminate ~90% of poses
+    // 2. Analytic refinement: full LJ+Coulomb on survivors
+    // Returns Boltzmann-weighted entropy over surviving poses
+    ScoringResult score_poses_two_stage(
+        const uint8_t* pose_types_i,   // [n_poses * contacts_per_pose]
+        const uint8_t* pose_types_j,   // [n_poses * contacts_per_pose]
+        const float* distances,        // [n_poses * contacts_per_pose]
+        size_t n_poses,
+        size_t contacts_per_pose,
+        float cutoff_percentile = 0.10f  // keep top 10%
+    ) const noexcept;
 
     // Source of matrix data
     const char* source() const noexcept { return source_; }

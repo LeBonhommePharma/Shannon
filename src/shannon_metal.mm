@@ -35,6 +35,7 @@ static id<MTLComputePipelineState> g_find_max_pipeline = nil;
 static id<MTLComputePipelineState> g_entropy_logits_pipeline = nil;
 static id<MTLComputePipelineState> g_weighted_entropy_pipeline = nil;
 static id<MTLComputePipelineState> g_pairwise_dist_pipeline = nil;
+static id<MTLComputePipelineState> g_batch_lookup_pipeline = nil;
 
 // Persistent buffers
 static id<MTLBuffer> g_data_buffer = nil;
@@ -125,6 +126,7 @@ bool shannon_metal_init(size_t max_vocab_size) {
         g_entropy_logits_pipeline = create_pipeline(@"entropy_from_logits");
         g_weighted_entropy_pipeline = create_pipeline(@"weighted_entropy");
         g_pairwise_dist_pipeline = create_pipeline(@"pairwise_distances");
+        g_batch_lookup_pipeline = create_pipeline(@"batch_matrix_lookup");
 
         if (!g_entropy_probs_pipeline) return false;
 
@@ -350,6 +352,53 @@ void shannon_metal_pairwise_distances(
     }
 }
 
+// =============================================================================
+// Batch matrix lookup on Metal GPU
+// =============================================================================
+
+void shannon_metal_batch_lookup(
+    const unsigned char* types_i, const unsigned char* types_j,
+    float* scores, size_t n,
+    const float* matrix_data
+) {
+    if (n == 0 || !g_initialized) return;
+
+    @autoreleasepool {
+        // Buffers
+        id<MTLBuffer> ti_buf = [g_device newBufferWithBytes:types_i
+            length:n options:MTLResourceStorageModeShared];
+        id<MTLBuffer> tj_buf = [g_device newBufferWithBytes:types_j
+            length:n options:MTLResourceStorageModeShared];
+        id<MTLBuffer> scores_buf = [g_device newBufferWithLength:n * sizeof(float)
+            options:MTLResourceStorageModeShared];
+        id<MTLBuffer> mat_buf = [g_device newBufferWithBytes:matrix_data
+            length:256 * 256 * sizeof(float) options:MTLResourceStorageModeShared];
+
+        uint32_t n32 = static_cast<uint32_t>(n);
+
+        id<MTLCommandBuffer> cmdBuffer = [g_queue commandBuffer];
+        id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];
+
+        [encoder setComputePipelineState:g_batch_lookup_pipeline];
+        [encoder setBuffer:ti_buf offset:0 atIndex:0];
+        [encoder setBuffer:tj_buf offset:0 atIndex:1];
+        [encoder setBuffer:scores_buf offset:0 atIndex:2];
+        [encoder setBuffer:mat_buf offset:0 atIndex:3];
+        [encoder setBytes:&n32 length:sizeof(n32) atIndex:4];
+
+        MTLSize gridSize = MTLSizeMake(n, 1, 1);
+        NSUInteger threadGroupWidth = std::min(
+            g_batch_lookup_pipeline.maxTotalThreadsPerThreadgroup, (NSUInteger)256);
+        MTLSize tgSize = MTLSizeMake(threadGroupWidth, 1, 1);
+        [encoder dispatchThreads:gridSize threadsPerThreadgroup:tgSize];
+        [encoder endEncoding];
+        [cmdBuffer commit];
+        [cmdBuffer waitUntilCompleted];
+
+        memcpy(scores, [scores_buf contents], n * sizeof(float));
+    }
+}
+
 void shannon_metal_shutdown() {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_entropy_probs_pipeline = nil;
@@ -357,6 +406,7 @@ void shannon_metal_shutdown() {
     g_entropy_logits_pipeline = nil;
     g_weighted_entropy_pipeline = nil;
     g_pairwise_dist_pipeline = nil;
+    g_batch_lookup_pipeline = nil;
     g_data_buffer = nil;
     g_partial_buffer = nil;
     g_matrix_buffer = nil;

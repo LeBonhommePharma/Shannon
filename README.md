@@ -349,10 +349,10 @@ ruff check python/ tests/
 ## Citation
 
 ```bibtex
-@software{morency2024shannon,
+@software{morency2026shannon,
   author  = {Morency, Louis-Philippe},
   title   = {Shannon: Entropy Collapse Detection for LLM Safety},
-  year    = {2024},
+  year    = {2026},
   url     = {https://github.com/lmorency/Shannon},
   note    = {Derived from FlexAID-deltaS configurational entropy framework}
 }

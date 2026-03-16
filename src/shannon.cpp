@@ -105,6 +105,8 @@ void CollapseDetector::reset() {
     window_pos_ = 0;
     window_full_ = false;
     token_count_ = 0;
+    running_sum_ = 0.0;
+    running_sum_sq_ = 0.0;
 }
 
 CollapseResult CollapseDetector::add_logits(const double* logits, std::size_t n) {
@@ -138,6 +140,13 @@ void CollapseDetector::set_callback(CollapseCallback cb) {
 CollapseResult CollapseDetector::push_entropy(double h) {
     trace_.push_back(h);
 
+    // Incremental update: subtract outgoing value before overwriting
+    if (window_full_) {
+        const double outgoing = window_[window_pos_];
+        running_sum_ -= outgoing;
+        running_sum_sq_ -= outgoing * outgoing;
+    }
+
     // Update circular buffer
     window_[window_pos_] = h;
     window_pos_ = (window_pos_ + 1) % window_size_;
@@ -145,19 +154,16 @@ CollapseResult CollapseDetector::push_entropy(double h) {
         window_full_ = true;
     }
 
-    // Compute window statistics
+    // Add incoming value
+    running_sum_ += h;
+    running_sum_sq_ += h * h;
+
+    // Compute window statistics from running accumulators
     const std::size_t count = window_full_ ? window_size_ : window_pos_;
-    double sum = 0.0;
-    double sum_sq = 0.0;
 
-    for (std::size_t i = 0; i < count; ++i) {
-        sum += window_[i];
-        sum_sq += window_[i] * window_[i];
-    }
-
-    const double mean = (count > 0) ? sum / static_cast<double>(count) : 0.0;
+    const double mean = (count > 0) ? running_sum_ / static_cast<double>(count) : 0.0;
     const double variance = (count > 1)
-        ? (sum_sq / static_cast<double>(count)) - (mean * mean)
+        ? (running_sum_sq_ / static_cast<double>(count)) - (mean * mean)
         : 0.0;
     const double stddev = std::sqrt(std::max(0.0, variance));
 

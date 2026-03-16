@@ -132,6 +132,15 @@ def _numpy_from_logprobs(logprobs: np.ndarray) -> float:
     return float(max(0.0, h))
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _ensure_float64_1d(x: ArrayLike) -> np.ndarray:
+    """Convert to float64 1-D C-contiguous array, avoiding copy if already suitable."""
+    if isinstance(x, np.ndarray) and x.dtype == np.float64 and x.ndim == 1 and x.flags['C_CONTIGUOUS']:
+        return x
+    return np.asarray(x, dtype=np.float64).ravel()
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 def shannon_configurational_entropy(log_weights: ArrayLike) -> float:
@@ -149,7 +158,7 @@ def shannon_configurational_entropy(log_weights: ArrayLike) -> float:
     float
         Entropy in bits (>= 0).
     """
-    arr = np.asarray(log_weights, dtype=np.float64).ravel()
+    arr = _ensure_float64_1d(log_weights)
     if _USE_CPP:
         return float(_cpp_conf_entropy(arr))
     if _USE_NUMBA:
@@ -170,7 +179,7 @@ def shannon_entropy_from_probs(probs: ArrayLike) -> float:
     float
         Entropy in bits.
     """
-    arr = np.asarray(probs, dtype=np.float64).ravel()
+    arr = _ensure_float64_1d(probs)
     if _USE_CPP:
         return float(_cpp_from_probs(arr))
     if _USE_NUMBA:
@@ -191,7 +200,7 @@ def shannon_entropy_from_logprobs(logprobs: ArrayLike) -> float:
     float
         Entropy in bits.
     """
-    arr = np.asarray(logprobs, dtype=np.float64).ravel()
+    arr = _ensure_float64_1d(logprobs)
     if _USE_CPP:
         return float(_cpp_from_logprobs(arr))
     if _USE_NUMBA:

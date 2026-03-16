@@ -11,8 +11,6 @@ import json
 import sys
 from typing import TextIO
 
-import numpy as np
-
 from shannon_entropy.detector import ShannonCollapseDetector, CollapseResult
 
 
@@ -68,14 +66,12 @@ def monitor_jsonl(
         if values is None:
             continue
 
-        arr = np.asarray(values, dtype=np.float64)
-
         if field == "probs":
-            result = detector.add_probs(arr)
+            result = detector.add_probs(values)
         elif field == "logprobs":
-            result = detector.add_logprobs(arr)
+            result = detector.add_logprobs(values)
         else:
-            result = detector.add_logits(arr)
+            result = detector.add_logits(values)
 
         if not quiet:
             flag = " ***" if result.collapsed else ""

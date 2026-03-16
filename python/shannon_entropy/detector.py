@@ -18,6 +18,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from shannon_entropy.core import (
+    _ensure_float64_1d,
     shannon_configurational_entropy,
     shannon_entropy_from_logprobs,
     shannon_entropy_from_probs,
@@ -104,6 +105,8 @@ class ShannonCollapseDetector:
         self._trace: list[float] = []
         self._window: deque[float] = deque(maxlen=window_size)
         self._token_count = 0
+        self._running_sum = 0.0
+        self._running_sum_sq = 0.0
 
     def reset(self) -> None:
         """Clear all internal state."""
@@ -112,6 +115,8 @@ class ShannonCollapseDetector:
         self._trace.clear()
         self._window.clear()
         self._token_count = 0
+        self._running_sum = 0.0
+        self._running_sum_sq = 0.0
 
     def add_logits(self, logits: ArrayLike) -> CollapseResult:
         """Feed raw logits for the current token.
@@ -125,7 +130,7 @@ class ShannonCollapseDetector:
         -------
         CollapseResult
         """
-        arr = np.asarray(logits, dtype=np.float64).ravel()
+        arr = _ensure_float64_1d(logits)
         if self._cpp_detector is not None:
             r = self._cpp_detector.add_logits(arr)
             return self._wrap_cpp_result(r)
@@ -144,7 +149,7 @@ class ShannonCollapseDetector:
         -------
         CollapseResult
         """
-        arr = np.asarray(probs, dtype=np.float64).ravel()
+        arr = _ensure_float64_1d(probs)
         if self._cpp_detector is not None:
             r = self._cpp_detector.add_probs(arr)
             return self._wrap_cpp_result(r)
@@ -163,7 +168,7 @@ class ShannonCollapseDetector:
         -------
         CollapseResult
         """
-        arr = np.asarray(logprobs, dtype=np.float64).ravel()
+        arr = _ensure_float64_1d(logprobs)
         if self._cpp_detector is not None:
             r = self._cpp_detector.add_logprobs(arr)
             return self._wrap_cpp_result(r)
@@ -188,13 +193,22 @@ class ShannonCollapseDetector:
     def _push(self, h: float) -> CollapseResult:
         """Push an entropy value through the Python fallback detector."""
         self._trace.append(h)
+
+        # Subtract outgoing value before deque auto-evicts it
+        if len(self._window) == self._window.maxlen:
+            outgoing = self._window[0]
+            self._running_sum -= outgoing
+            self._running_sum_sq -= outgoing * outgoing
+
         self._window.append(h)
+        self._running_sum += h
+        self._running_sum_sq += h * h
 
         count = len(self._window)
-        mean = sum(self._window) / count if count > 0 else 0.0
+        mean = self._running_sum / count if count > 0 else 0.0
 
         if count > 1:
-            variance = sum((x - mean) ** 2 for x in self._window) / count
+            variance = (self._running_sum_sq / count) - (mean * mean)
             std = math.sqrt(max(0.0, variance))
         else:
             std = 0.0

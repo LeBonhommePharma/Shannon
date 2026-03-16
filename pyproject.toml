@@ -31,6 +31,7 @@ numba = ["numba>=0.57"]
 openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.20"]
 vllm = ["vllm>=0.4"]
+contact = ["scikit-learn>=1.0"]
 all = ["numba>=0.57", "openai>=1.0", "anthropic>=0.20"]
 dev = ["pytest>=7.0", "numba>=0.57", "scipy>=1.10"]
 train = ["scipy>=1.10"]
@@ -39,7 +40,7 @@ train = ["scipy>=1.10"]
 shannon-monitor = "shannon.cli:main"
 
 [tool.scikit-build]
-wheel.packages = ["python/shannon"]
+wheel.packages = ["python/shannon", "python/shannon_contact", "python/shannon_entropy"]
 cmake.build-type = "Release"
 cmake.args = ["-DSHANNON_BUILD_TESTS=OFF"]
 

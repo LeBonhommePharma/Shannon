@@ -63,7 +63,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           pip install --upgrade pip
-          pip install numpy pybind11 scikit-build-core pytest scipy
+          pip install numpy pybind11 scikit-build-core pytest scipy scikit-learn
           CMAKE_ARGS="-DCMAKE_CXX_COMPILER=g++-13" pip install -e .
         env:
           CXX: g++-13
@@ -72,7 +72,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           pip install --upgrade pip
-          pip install numpy pybind11 scikit-build-core pytest scipy
+          pip install numpy pybind11 scikit-build-core pytest scipy scikit-learn
           pip install -e .
 
       - name: Run Python tests

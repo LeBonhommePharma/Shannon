@@ -61,6 +61,7 @@ set(SHANNON_CORE_SOURCES
     src/shannon.cpp
     src/energy_matrix.cpp
     src/fast_optics.cpp
+    src/contact/soft_contact_matrix.cpp
 )
 
 if(SHANNON_CUDA)
@@ -126,6 +127,10 @@ if(SHANNON_BUILD_PYTHON)
         pybind11_add_module(_core src/bindings.cpp)
         target_link_libraries(_core PRIVATE shannon_static)
         install(TARGETS _core DESTINATION shannon)
+
+        pybind11_add_module(_shannon_contact_cpp src/contact/bindings_contact.cpp)
+        target_link_libraries(_shannon_contact_cpp PRIVATE shannon_static)
+        install(TARGETS _shannon_contact_cpp DESTINATION shannon_contact)
     else()
         message(STATUS "pybind11 not found — skipping Python bindings")
     endif()
@@ -157,4 +162,8 @@ if(SHANNON_BUILD_TESTS)
     add_executable(test_fast_optics tests/test_fast_optics.cpp)
     target_link_libraries(test_fast_optics PRIVATE shannon_static GTest::gtest_main)
     add_test(NAME FastOPTICSTests COMMAND test_fast_optics)
+
+    add_executable(test_soft_contact tests/cpp/test_soft_contact_matrix.cpp)
+    target_link_libraries(test_soft_contact PRIVATE shannon_static GTest::gtest_main)
+    add_test(NAME SoftContactTests COMMAND test_soft_contact)
 endif()

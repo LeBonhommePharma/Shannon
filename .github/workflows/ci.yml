@@ -34,6 +34,8 @@ jobs:
 
       - name: Run pytest
         run: pytest tests/python/ -v --tb=short
+        env:
+          OMP_NUM_THREADS: 1
 
   cpp-tests:
     name: C++ Tests on ${{ matrix.os }}
@@ -53,6 +55,8 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure -C Release
+        env:
+          OMP_NUM_THREADS: 1
 
   lint:
     name: Lint & Format

@@ -120,7 +120,7 @@ class TestShannonCollapseDetector:
     def test_trace(self):
         det = ShannonCollapseDetector()
         for _ in range(10):
-            det.add_logits(np.random.randn(100))
+            det.add_logits(np.random.default_rng(42 + _).standard_normal(100))
         assert len(det.trace) == 10
 
     def test_reset(self):

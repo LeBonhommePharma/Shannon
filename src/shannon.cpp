@@ -6,6 +6,10 @@
 //
 // The log-sum-exp numerically stable implementation preserves
 // every pragma and optimisation from the molecular-docking kernel.
+//
+// NOTE (reproducibility): OpenMP reductions (+:) over floating-point
+// may produce different bit-level results with different thread counts.
+// Set OMP_NUM_THREADS=1 for bitwise-reproducible results across runs.
 
 #include "shannon.hpp"
 

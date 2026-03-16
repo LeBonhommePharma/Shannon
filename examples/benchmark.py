@@ -94,12 +94,12 @@ def benchmark():
     # ── Latency benchmark ────────────────────────────────────────
 
     det = ShannonCollapseDetector()
-    warmup_logits = np.random.randn(50000)
+    warmup_logits = np.random.default_rng(0).standard_normal(50000)
     for _ in range(10):
         det.add_logits(warmup_logits)
 
     det.reset()
-    logits = np.random.randn(50000)
+    logits = np.random.default_rng(1).standard_normal(50000)
     n_iter = 10000
 
     start = time.perf_counter()

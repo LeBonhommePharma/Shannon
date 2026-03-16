@@ -70,7 +70,8 @@ class TestMatrixCreation:
         assert np.all(arr == 0.0)
 
     def test_from_numpy(self):
-        data = np.random.randn(256, 256).astype(np.float32)
+        rng = np.random.default_rng(42)
+        data = rng.standard_normal((256, 256)).astype(np.float32)
         m = SoftContactMatrix(data=data)
         np.testing.assert_array_equal(m.to_numpy(), data)
 
@@ -93,11 +94,12 @@ class TestLookup:
         assert m.lookup(0, 0) == 0.0
 
     def test_lookup_matches_numpy(self):
-        data = np.random.randn(256, 256).astype(np.float32)
+        rng = np.random.default_rng(42)
+        data = rng.standard_normal((256, 256)).astype(np.float32)
         m = SoftContactMatrix(data=data)
         for _ in range(100):
-            i = np.random.randint(0, 256)
-            j = np.random.randint(0, 256)
+            i = rng.integers(0, 256)
+            j = rng.integers(0, 256)
             assert m.lookup(i, j) == pytest.approx(float(data[i, j]))
 
 
@@ -125,7 +127,8 @@ class TestSymmetry:
 
 class TestFileIO:
     def test_save_load_round_trip(self, tmp_path):
-        data = np.random.randn(256, 256).astype(np.float32)
+        rng = np.random.default_rng(42)
+        data = rng.standard_normal((256, 256)).astype(np.float32)
         m = SoftContactMatrix(data=data)
 
         path = tmp_path / "matrix.bin"

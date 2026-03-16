@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: MIT
 //
 // 256×256 Soft Contact Matrix — implementation.
+//
+// NOTE (reproducibility): OpenMP reductions (+:) over floating-point
+// may produce different bit-level results with different thread counts.
+// Set OMP_NUM_THREADS=1 for bitwise-reproducible results across runs.
 
 #include "soft_contact_matrix.hpp"
 

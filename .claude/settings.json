@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/lp.more/Documents/PhD/Programs/Shannon && if [ -d build ]; then cmake --build build -j 2>&1 | tail -5; else echo 'No build directory — skipping build check.'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

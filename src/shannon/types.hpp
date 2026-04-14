@@ -9,9 +9,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
+
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/types.h>
+#endif
 
 namespace shannon {
 
@@ -50,7 +55,7 @@ enum class DispatchError : uint8_t {
     LAUNCH_FAILED = 3,
     SYNC_FAILED   = 4,
     INVALID_ARGS  = 5,
-    OVERFLOW      = 6,
+    BUF_OVERFLOW  = 6,
     DEVICE_LOST   = 7,
 };
 
@@ -60,7 +65,7 @@ struct DispatchResult {
     double        elapsed_ms   = 0.0;
     std::string   detail;
 
-    explicit operator bool() const { return error == DispatchError::OK; }
+    [[nodiscard]] explicit operator bool() const { return error == DispatchError::OK; }
 };
 
 // ─── Collapse detection result ───────────────────────────────────────────────
@@ -94,7 +99,7 @@ struct HandrailConfig {
     HandrailAction on_first_collapse    = HandrailAction::ALERT;
     HandrailAction on_sustained_collapse = HandrailAction::KILL;
     int            sustained_threshold  = 3;        // N consecutive collapses before escalation
-    std::string    monitored_pid;                  // PID of the LLM process
+    std::optional<pid_t> monitored_pid;            // PID of the LLM process
     std::string    log_path           = "/dev/stderr";
     std::string    webhook_url;                    // optional
     std::string    shmem_path;                     // optional: shared memory channel
@@ -125,7 +130,26 @@ struct DispatchTelemetry {
     int64_t elements          = 0;
     double  throughput_meps   = 0.0;   // million elements per second
 
-    std::string summary() const;
+    std::string summary() const {
+        const char* name = "UNKNOWN";
+        switch (backend) {
+        case Backend::SCALAR: name = "SCALAR"; break;
+        case Backend::OPENMP: name = "OPENMP"; break;
+        case Backend::SSE42:  name = "SSE42";  break;
+        case Backend::AVX2:   name = "AVX2";   break;
+        case Backend::AVX512: name = "AVX512"; break;
+        case Backend::NEON:   name = "NEON";   break;
+        case Backend::METAL:  name = "METAL";  break;
+        case Backend::CUDA:   name = "CUDA";   break;
+        case Backend::ROCM:   name = "ROCM";   break;
+        case Backend::AUTO:   name = "AUTO";   break;
+        }
+        return std::string("DispatchTelemetry{backend=") + name
+            + ", wall_time_ms=" + std::to_string(wall_time_ms)
+            + ", elements=" + std::to_string(elements)
+            + ", throughput_meps=" + std::to_string(throughput_meps)
+            + "}";
+    }
 };
 
 struct DispatchReport {

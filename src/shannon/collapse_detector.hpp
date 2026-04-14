@@ -41,6 +41,7 @@ public:
     void set_callback(CollapseCallback cb);
     void set_window_size(std::size_t size);
     void set_threshold(double threshold_bits);
+    void set_max_trace_size(std::size_t max_size);
     void reset();
 
     // Accessors
@@ -54,6 +55,7 @@ private:
     std::size_t window_pos_ = 0;
     bool window_full_ = false;
     std::size_t token_count_ = 0;
+    std::size_t max_trace_size_ = 0;
     std::vector<double> trace_;
     CollapseCallback callback_;
 };

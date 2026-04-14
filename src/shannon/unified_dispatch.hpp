@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <span>
 #include <string>
 #include <vector>
@@ -69,8 +70,9 @@ private:
     UnifiedDispatch() = default;
 
     hw::HardwareCapabilities hw_;
-    bool detected_ = false;
-    Backend override_ = Backend::AUTO;
+    std::once_flag detect_flag_;
+    std::atomic<bool> detected_{false};
+    std::atomic<Backend> override_{Backend::AUTO};
 
     Backend select_backend_for_entropy() const;
 };

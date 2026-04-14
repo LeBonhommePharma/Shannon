@@ -68,6 +68,9 @@ CollapseResult CollapseDetector::add_logprobs(std::span<const double> logprobs) 
 
 CollapseResult CollapseDetector::push_entropy(double h) {
     trace_.push_back(h);
+    if (max_trace_size_ > 0 && trace_.size() > max_trace_size_) {
+        trace_.erase(trace_.begin(), trace_.begin() + (trace_.size() - max_trace_size_));
+    }
 
     // Update circular buffer
     window_[window_pos_] = h;
@@ -76,19 +79,23 @@ CollapseResult CollapseDetector::push_entropy(double h) {
         window_full_ = true;
     }
 
-    // Compute window statistics
+    // Compute window statistics using numerically stable two-pass variance
     const std::size_t count = window_full_ ? window_size_ : window_pos_;
     double sum = 0.0;
-    double sum_sq = 0.0;
 
     for (std::size_t i = 0; i < count; ++i) {
         sum += window_[i];
-        sum_sq += window_[i] * window_[i];
     }
 
     const double mean = (count > 0) ? sum / static_cast<double>(count) : 0.0;
+
+    double sum_sq_diff = 0.0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const double diff = window_[i] - mean;
+        sum_sq_diff += diff * diff;
+    }
     const double variance = (count > 1)
-        ? (sum_sq / static_cast<double>(count)) - (mean * mean)
+        ? sum_sq_diff / static_cast<double>(count)
         : 0.0;
     const double stddev = std::sqrt(std::max(0.0, variance));
 
@@ -129,6 +136,13 @@ void CollapseDetector::set_window_size(std::size_t size) {
 
 void CollapseDetector::set_threshold(double threshold_bits) {
     threshold_ = threshold_bits;
+}
+
+void CollapseDetector::set_max_trace_size(std::size_t max_size) {
+    max_trace_size_ = max_size;
+    if (max_trace_size_ > 0 && trace_.size() > max_trace_size_) {
+        trace_.erase(trace_.begin(), trace_.begin() + (trace_.size() - max_trace_size_));
+    }
 }
 
 std::size_t CollapseDetector::token_count() const noexcept {

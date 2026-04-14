@@ -7,6 +7,7 @@
 #include "shannon/hardware_detect.hpp"
 
 #include <sstream>
+#include <cstring>
 
 // ── x86 CPUID ────────────────────────────────────────────────────────────────
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
@@ -18,18 +19,20 @@
 #  else
 #    include <cpuid.h>
      static void shannon_cpuid(int regs[4], int leaf) {
-         __cpuid_count(leaf, 0,
-                       reinterpret_cast<unsigned&>(regs[0]),
-                       reinterpret_cast<unsigned&>(regs[1]),
-                       reinterpret_cast<unsigned&>(regs[2]),
-                       reinterpret_cast<unsigned&>(regs[3]));
+         unsigned a, b, c, d;
+         __cpuid_count(leaf, 0, a, b, c, d);
+         std::memcpy(&regs[0], &a, sizeof(int));
+         std::memcpy(&regs[1], &b, sizeof(int));
+         std::memcpy(&regs[2], &c, sizeof(int));
+         std::memcpy(&regs[3], &d, sizeof(int));
      }
      static void shannon_cpuidex(int regs[4], int leaf, int sub) {
-         __cpuid_count(leaf, sub,
-                       reinterpret_cast<unsigned&>(regs[0]),
-                       reinterpret_cast<unsigned&>(regs[1]),
-                       reinterpret_cast<unsigned&>(regs[2]),
-                       reinterpret_cast<unsigned&>(regs[3]));
+         unsigned a, b, c, d;
+         __cpuid_count(leaf, sub, a, b, c, d);
+         std::memcpy(&regs[0], &a, sizeof(int));
+         std::memcpy(&regs[1], &b, sizeof(int));
+         std::memcpy(&regs[2], &c, sizeof(int));
+         std::memcpy(&regs[3], &d, sizeof(int));
      }
 #  endif
 #else
@@ -67,12 +70,32 @@ static void detect_x86_simd(HardwareCapabilities& hw) {
     hw.has_sse42 = (regs[2] & (1 << 20)) != 0;   // ECX bit 20
     hw.has_fma   = (regs[2] & (1 << 12)) != 0;   // ECX bit 12
 
+    bool xsave_enabled = (regs[2] & (1 << 27)) != 0;   // ECX bit 27: OSXSAVE
+
     shannon_cpuidex(regs, 7, 0);
-    hw.has_avx2       = (regs[1] & (1 <<  5)) != 0;  // EBX bit 5
-    hw.has_avx512f    = (regs[1] & (1 << 16)) != 0;  // EBX bit 16
-    hw.has_avx512dq   = (regs[1] & (1 << 17)) != 0;  // EBX bit 17
-    hw.has_avx512bw   = (regs[1] & (1 << 30)) != 0;  // EBX bit 30
-    hw.has_avx512vnni = (regs[2] & (1 << 11)) != 0;  // ECX bit 11
+    bool avx2_cpuid    = (regs[1] & (1 <<  5)) != 0;   // EBX bit 5
+    bool avx512f_cpuid = (regs[1] & (1 << 16)) != 0;   // EBX bit 16
+    hw.has_avx512dq   = (regs[1] & (1 << 17)) != 0;    // EBX bit 17
+    hw.has_avx512bw   = (regs[1] & (1 << 30)) != 0;    // EBX bit 30
+    hw.has_avx512vnni = (regs[2] & (1 << 11)) != 0;    // ECX bit 11
+
+    if (xsave_enabled) {
+#  ifdef _MSC_VER
+        unsigned long long xcr0 = _xgetbv(0);
+#  else
+        unsigned lo = 0, hi = 0;
+        __asm__ __volatile__("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+        unsigned long long xcr0 = (static_cast<unsigned long long>(hi) << 32) | lo;
+#  endif
+        bool ymm_enabled = (xcr0 & 0x6) == 0x6;         // XMM + YMM state
+        bool zmm_enabled = (xcr0 & 0xE6) == 0xE6;       // ZMM state (bits 1,2,5,6,7)
+
+        hw.has_avx2 = avx2_cpuid && ymm_enabled;
+        hw.has_avx512f = avx512f_cpuid && zmm_enabled;
+    } else {
+        hw.has_avx2 = false;
+        hw.has_avx512f = false;
+    }
 
     hw.has_avx512 = hw.has_avx512f && hw.has_avx512dq && hw.has_avx512bw;
 #else
@@ -130,8 +153,18 @@ static void detect_cuda(HardwareCapabilities& hw) {
 
 static void detect_metal(HardwareCapabilities& hw) {
 #ifdef SHANNON_USE_METAL
+    // TODO: Runtime Metal probe via MTLCreateSystemDefaultDevice() requires
+    // an Objective-C++ bridge (e.g. hardware_detect_metal.mm). Without it,
+    // we cannot confirm GPU availability at runtime — only at compile time.
+    // For now, claim Metal only if we're on Apple hardware with the build flag.
+    // This may falsely report Metal on headless/CI macOS without a GPU.
+#  if defined(__APPLE__) && defined(__aarch64__)
     hw.has_metal = true;
     hw.metal_gpu_name = "Apple GPU (Metal-capable)";
+#  elif defined(__APPLE__)
+    hw.has_metal = true;
+    hw.metal_gpu_name = "macOS GPU (Metal build-enabled, unprobed)";
+#  endif
 #else
     (void)hw;
 #endif

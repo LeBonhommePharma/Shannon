@@ -21,18 +21,25 @@ UnifiedDispatch& UnifiedDispatch::instance() {
 }
 
 void UnifiedDispatch::detect() {
-    if (detected_) return;
-    hw_ = hw::detect_hardware();
-    detected_ = true;
+    std::call_once(detect_flag_, [this] {
+        hw_ = hw::detect_hardware();
+        detected_ = true;
+    });
 }
 
 const hw::HardwareCapabilities& UnifiedDispatch::capabilities() const noexcept {
     return hw_;
 }
 
-void UnifiedDispatch::set_override(Backend b) noexcept { override_ = b; }
-void UnifiedDispatch::clear_override() noexcept { override_ = Backend::AUTO; }
-Backend UnifiedDispatch::current_override() const noexcept { return override_; }
+void UnifiedDispatch::set_override(Backend b) noexcept {
+    override_.store(b, std::memory_order_relaxed);
+}
+void UnifiedDispatch::clear_override() noexcept {
+    override_.store(Backend::AUTO, std::memory_order_relaxed);
+}
+Backend UnifiedDispatch::current_override() const noexcept {
+    return override_.load(std::memory_order_relaxed);
+}
 
 bool UnifiedDispatch::is_available(Backend b) const noexcept {
     switch (b) {
@@ -67,9 +74,12 @@ const char* UnifiedDispatch::backend_name(Backend b) noexcept {
 }
 
 std::vector<Backend> UnifiedDispatch::available_backends() const {
+    static constexpr Backend kAllBackends[] = {
+        Backend::SCALAR, Backend::OPENMP, Backend::SSE42, Backend::AVX2,
+        Backend::AVX512, Backend::NEON, Backend::METAL, Backend::CUDA, Backend::ROCM
+    };
     std::vector<Backend> result;
-    for (uint8_t i = 0; i <= static_cast<uint8_t>(Backend::ROCM); ++i) {
-        Backend b = static_cast<Backend>(i);
+    for (Backend b : kAllBackends) {
         if (is_available(b)) result.push_back(b);
     }
     return result;
@@ -95,11 +105,27 @@ Backend UnifiedDispatch::select_backend_for_entropy() const {
     return Backend::SCALAR;
 }
 
-Backend UnifiedDispatch::best_backend(KernelType /*kernel*/) const {
-    if (override_ != Backend::AUTO && is_available(override_)) {
-        return override_;
+Backend UnifiedDispatch::best_backend(KernelType kernel) const {
+    Backend ov = override_.load(std::memory_order_relaxed);
+    if (ov != Backend::AUTO && is_available(ov)) {
+        return ov;
     }
-    return select_backend_for_entropy();
+
+    if (hw_.has_cuda)  return Backend::CUDA;
+    if (hw_.has_rocm)  return Backend::ROCM;
+    if (hw_.has_metal) return Backend::METAL;
+
+    if (hw_.has_avx512) return Backend::AVX512;
+    if (hw_.has_avx2)   return Backend::AVX2;
+
+    if (kernel == KernelType::CONFIGURATIONAL_ENTROPY) {
+        if (hw_.has_sse42)  return Backend::SSE42;
+        if (hw_.has_neon)   return Backend::NEON;
+    }
+
+    if (hw_.has_openmp) return Backend::OPENMP;
+
+    return Backend::SCALAR;
 }
 
 // ─── Dispatched entropy functions ────────────────────────────────────────────
@@ -124,25 +150,25 @@ DispatchResult UnifiedDispatch::compute_configurational_entropy(
         out_entropy = kernels::configurational_entropy_avx512(log_weights, n);
         break;
 #endif
-        // Fall through to next best
+        [[fallthrough]];
     case Backend::AVX2:
 #if defined(SHANNON_USE_AVX2) && defined(__x86_64__)
         out_entropy = kernels::configurational_entropy_avx2(log_weights, n);
         break;
 #endif
-        // Fall through
+        [[fallthrough]];
     case Backend::SSE42:
 #if defined(SHANNON_USE_SSE42) && defined(__x86_64__)
         out_entropy = kernels::configurational_entropy_sse42(log_weights, n);
         break;
 #endif
-        // Fall through
+        [[fallthrough]];
     case Backend::NEON:
 #if defined(SHANNON_USE_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
         out_entropy = kernels::configurational_entropy_neon(log_weights, n);
         break;
 #endif
-        // Fall through
+        [[fallthrough]];
     case Backend::OPENMP:
 #if defined(SHANNON_USE_OPENMP)
         out_entropy = kernels::configurational_entropy_omp(log_weights, n);
@@ -181,16 +207,19 @@ DispatchResult UnifiedDispatch::compute_entropy_from_probs(
         out_entropy = kernels::entropy_from_probs_avx512(probs, n);
         break;
 #endif
+        [[fallthrough]];
     case Backend::AVX2:
 #if defined(SHANNON_USE_AVX2) && defined(__x86_64__)
         out_entropy = kernels::entropy_from_probs_avx2(probs, n);
         break;
 #endif
+        [[fallthrough]];
     case Backend::OPENMP:
 #if defined(SHANNON_USE_OPENMP)
         out_entropy = kernels::entropy_from_probs_omp(probs, n);
         break;
 #endif
+        [[fallthrough]];
     default:
         out_entropy = kernels::entropy_from_probs_scalar(probs, n);
         result.used_backend = Backend::SCALAR;
@@ -223,16 +252,19 @@ DispatchResult UnifiedDispatch::compute_entropy_from_logprobs(
         out_entropy = kernels::entropy_from_logprobs_avx512(logprobs, n);
         break;
 #endif
+        [[fallthrough]];
     case Backend::AVX2:
 #if defined(SHANNON_USE_AVX2) && defined(__x86_64__)
         out_entropy = kernels::entropy_from_logprobs_avx2(logprobs, n);
         break;
 #endif
+        [[fallthrough]];
     case Backend::OPENMP:
 #if defined(SHANNON_USE_OPENMP)
         out_entropy = kernels::entropy_from_logprobs_omp(logprobs, n);
         break;
 #endif
+        [[fallthrough]];
     default:
         out_entropy = kernels::entropy_from_logprobs_scalar(logprobs, n);
         result.used_backend = Backend::SCALAR;

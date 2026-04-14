@@ -10,9 +10,9 @@
 
 #include "shannon/types.hpp"
 
+#include <atomic>
 #include <chrono>
-#include <cstdio>
-#include <cstring>
+#include <mutex>
 #include <string>
 
 namespace shannon {
@@ -29,15 +29,17 @@ public:
 
 private:
     HandrailConfig cfg_;
-    int consecutive_collapses_ = 0;
-    int total_collapses_       = 0;
-    int escalated_             = 0;
+    std::atomic<int> consecutive_collapses_{0};
+    std::atomic<int> total_collapses_{0};
+    std::atomic<int> escalated_{0};
+    mutable std::mutex action_mutex_;
     std::chrono::steady_clock::time_point last_action_time_;
 
     void execute_action(HandrailAction action, const CollapseResult& result);
     bool cooldown_ok() const;
     void log_collapse(const CollapseResult& result);
-    void send_signal(int sig, const std::string& pid);
+    void send_signal(int sig, std::optional<pid_t> pid);
+    void fire_webhook(const std::string& url, const CollapseResult& result);
 };
 
 }  // namespace shannon

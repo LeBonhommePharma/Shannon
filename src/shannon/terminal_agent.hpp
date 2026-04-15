@@ -24,8 +24,9 @@ namespace shannon {
 
 struct AgentConfig {
     // Entropy detection
-    std::size_t window_size    = kDefaultWindowSize;
-    double threshold_bits      = kDefaultCollapseThreshold;
+    std::size_t window_size        = kDefaultWindowSize;
+    double threshold_bits          = kDefaultCollapseThreshold;
+    std::size_t oscillation_window = kDefaultOscillationWindow;
 
     // Input stream
     StreamMode stream_mode     = StreamMode::STDIN_PIPE;

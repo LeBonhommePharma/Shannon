@@ -1,7 +1,12 @@
-// collapse_detector.hpp — Expanded sliding-window collapse detector for Shannon 2.0
+// collapse_detector.hpp — Sliding-window entropy event detector for Shannon 2.0
+//
+// Detects three classes of entropy anomaly:
+//   COLLAPSE    — entropy drops below threshold (ordering / lock-in)
+//   EXPANSION   — entropy rises above threshold (disordering / release)
+//   OSCILLATION — rapid alternation between collapse and expansion
 //
 // Uses the unified dispatch for backend selection. Tracks entropy over a
-// sliding window, computes z-score delta, and fires callbacks on collapse.
+// sliding window, computes z-score delta, and fires callbacks on events.
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #pragma once
@@ -20,7 +25,9 @@ class CollapseDetector {
 public:
     explicit CollapseDetector(
         std::size_t window_size = kDefaultWindowSize,
-        double threshold_bits  = kDefaultCollapseThreshold);
+        double collapse_threshold = kDefaultCollapseThreshold,
+        double expansion_threshold = kDefaultExpansionThreshold,
+        std::size_t oscillation_window = kDefaultOscillationWindow);
 
     // Feed logits (unnormalized log-weights) — main entry point
     CollapseResult add_logits(const double* logits, std::size_t n);
@@ -40,9 +47,14 @@ public:
     // Configuration
     void set_callback(CollapseCallback cb);
     void set_window_size(std::size_t size);
-    void set_threshold(double threshold_bits);
+    void set_collapse_threshold(double threshold_bits);
+    void set_expansion_threshold(double threshold_bits);
+    void set_oscillation_window(std::size_t size);
     void set_max_trace_size(std::size_t max_size);
     void reset();
+
+    // Legacy compat
+    void set_threshold(double threshold_bits);
 
     // Accessors
     std::size_t token_count() const noexcept;
@@ -50,14 +62,20 @@ public:
 
 private:
     std::size_t window_size_;
-    double threshold_;
+    double collapse_threshold_;
+    double expansion_threshold_;
+    std::size_t oscillation_window_;
     std::vector<double> window_;
     std::size_t window_pos_ = 0;
     bool window_full_ = false;
     std::size_t token_count_ = 0;
     std::size_t max_trace_size_ = 0;
     std::vector<double> trace_;
+    std::vector<EntropyEvent> event_history_;
     CollapseCallback callback_;
+
+    EntropyEvent classify_event(double delta, bool window_ready) const;
+    bool detect_oscillation() const;
 };
 
 }  // namespace shannon

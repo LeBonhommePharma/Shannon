@@ -44,6 +44,12 @@ enum class KernelType : uint8_t {
     TURBO_QUANTIZE          = 3,   // quantize logits
     TURBO_ENTROPY           = 4,   // entropy on quantized data
     COLLAPSE_DETECT         = 5,   // sliding window z-score
+    KL_DIVERGENCE           = 6,   // KL(p||q) between distributions
+    CROSS_ENTROPY           = 7,   // H(p, q)
+    MUTUAL_INFORMATION      = 8,   // I(X_t; X_{t+1})
+    JS_DIVERGENCE           = 9,   // Jensen-Shannon divergence
+    EXPANSION_DETECT        = 10,  // expansion detection (symmetric to collapse)
+    OSCILLATION_DETECT      = 11,  // rapid collapse/expand alternation
 };
 
 // ─── Error handling ──────────────────────────────────────────────────────────
@@ -68,6 +74,15 @@ struct DispatchResult {
     [[nodiscard]] explicit operator bool() const { return error == DispatchError::OK; }
 };
 
+// ─── Entropy event classification ────────────────────────────────────────────
+
+enum class EntropyEvent : uint8_t {
+    NONE        = 0,   // within normal bounds
+    COLLAPSE    = 1,   // delta < -threshold (ordering / lock-in)
+    EXPANSION   = 2,   // delta > +threshold (disordering / release)
+    OSCILLATION = 3,   // rapid alternation between collapse and expansion
+};
+
 // ─── Collapse detection result ───────────────────────────────────────────────
 
 struct CollapseResult {
@@ -76,7 +91,10 @@ struct CollapseResult {
     double      window_std  = 0.0;     // std-dev of entropy over window
     double      delta       = 0.0;     // entropy - window_mean (negative = collapse)
     double      z_score     = 0.0;     // standardised score (delta / std)
-    bool        collapsed   = false;   // true if delta < threshold
+    bool        collapsed   = false;   // true if delta < collapse_threshold
+    bool        expanded    = false;   // true if delta > expansion_threshold
+    bool        oscillating = false;   // true if rapid collapse/expand alternation
+    EntropyEvent event      = EntropyEvent::NONE;  // classified event
     std::size_t token_index = 0;       // 0-based token counter
     Backend     used_backend = Backend::SCALAR;  // which backend computed entropy
 };
@@ -96,14 +114,16 @@ enum class HandrailAction : uint8_t {
 };
 
 struct HandrailConfig {
-    HandrailAction on_first_collapse    = HandrailAction::ALERT;
+    HandrailAction on_first_collapse     = HandrailAction::ALERT;
     HandrailAction on_sustained_collapse = HandrailAction::KILL;
-    int            sustained_threshold  = 3;        // N consecutive collapses before escalation
+    HandrailAction on_expansion          = HandrailAction::ALERT;
+    HandrailAction on_oscillation        = HandrailAction::ALERT;
+    int            sustained_threshold   = 3;        // N consecutive collapses before escalation
     std::optional<pid_t> monitored_pid;            // PID of the LLM process
-    std::string    log_path           = "/dev/stderr";
+    std::string    log_path              = "/dev/stderr";
     std::string    webhook_url;                    // optional
     std::string    shmem_path;                     // optional: shared memory channel
-    double         cooldown_seconds   = 5.0;       // min time between escalated actions
+    double         cooldown_seconds      = 5.0;       // min time between escalated actions
 };
 
 using HandrailCallback = std::function<void(HandrailAction, const CollapseResult&)>;

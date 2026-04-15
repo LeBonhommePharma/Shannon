@@ -45,8 +45,9 @@ int TerminalAgent::run() {
     }
 
     if (!config_.quiet) {
-        std::fprintf(stderr, "[shannon] Done. %zu tokens processed, %d collapses detected\n",
-            tokens_processed_, handrail_.total_collapses());
+        std::fprintf(stderr, "[shannon] Done. %zu tokens, %d collapses, %d expansions, %d oscillations\n",
+            tokens_processed_, handrail_.total_collapses(),
+            handrail_.total_expansions(), handrail_.total_oscillations());
     }
 
     return exit_code;
@@ -109,20 +110,24 @@ int TerminalAgent::run_stdin() {
             ++tokens_processed_;
 
             if (!config_.quiet && config_.verbose) {
+                const char* tag = "";
+                if (result.oscillating)    tag = " ** OSCILLATION **";
+                else if (result.expanded)  tag = " ** EXPANSION **";
+                else if (result.collapsed) tag = " ** COLLAPSE **";
                 std::fprintf(stderr,
                     "[shannon] token %zu: H=%.4f bits, delta=%.4f, z=%.4f%s\n",
                     result.token_index,
                     result.entropy,
                     result.delta,
                     result.z_score,
-                    result.collapsed ? " ** COLLAPSE **" : "");
+                    tag);
             }
         });
 
         if (!ok) break;
     }
 
-    return handrail_.total_collapses() > 0 ? 1 : 0;
+    return (handrail_.total_collapses() > 0 || handrail_.total_oscillations() > 0) ? 1 : 0;
 }
 
 int TerminalAgent::run_socket() {
@@ -133,15 +138,17 @@ int TerminalAgent::run_socket() {
         ++tokens_processed_;
 
         if (!config_.quiet && config_.verbose) {
-            std::fprintf(stderr,
-                "[shannon] token %zu: H=%.4f bits%s\n",
-                result.token_index, result.entropy,
-                result.collapsed ? " ** COLLAPSE **" : "");
-        }
+                const char* tag = "";
+                if (result.collapsed) tag = " ** COLLAPSE **";
+                else if (result.expanded) tag = " ** EXPANSION **";
+                std::fprintf(stderr,
+                    "[shannon] token %zu: H=%.4f bits%s\n",
+                    result.token_index, result.entropy, tag);
+            }
     });
 
     socket_ingester_.reset();
-    return handrail_.total_collapses() > 0 ? 1 : 0;
+    return (handrail_.total_collapses() > 0 || handrail_.total_oscillations() > 0) ? 1 : 0;
 }
 
 int TerminalAgent::run_shmem() {
@@ -159,16 +166,18 @@ int TerminalAgent::run_shmem() {
         ++tokens_processed_;
 
         if (!config_.quiet && config_.verbose) {
-            std::fprintf(stderr,
-                "[shannon] token %zu: H=%.4f bits%s\n",
-                result.token_index, result.entropy,
-                result.collapsed ? " ** COLLAPSE **" : "");
-        }
+                const char* tag = "";
+                if (result.collapsed) tag = " ** COLLAPSE **";
+                else if (result.expanded) tag = " ** EXPANSION **";
+                std::fprintf(stderr,
+                    "[shannon] token %zu: H=%.4f bits%s\n",
+                    result.token_index, result.entropy, tag);
+            }
     });
 
     shmem_ingester_->close();
     shmem_ingester_.reset();
-    return handrail_.total_collapses() > 0 ? 1 : 0;
+    return (handrail_.total_collapses() > 0 || handrail_.total_oscillations() > 0) ? 1 : 0;
 }
 
 void TerminalAgent::on_collapse(const CollapseResult& result) {

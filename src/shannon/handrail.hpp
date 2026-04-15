@@ -1,9 +1,14 @@
 // handrail.hpp — Failsafe handrail engine for Shannon 2.0
 //
-// Evaluates collapse events and executes configured failsafe actions:
-// alert, throttle, kill, coredump, webhook, or user callback.
-// Supports escalation: first collapse → on_first_collapse action,
-// N consecutive collapses → on_sustained_collapse action (with cooldown).
+// Evaluates entropy events (collapse, expansion, oscillation) and executes
+// configured failsafe actions: alert, throttle, kill, coredump, webhook,
+// or user callback.
+//
+// Supports escalation:
+//   first collapse → on_first_collapse action
+//   N consecutive collapses → on_sustained_collapse action (with cooldown)
+//   expansion → on_expansion action (with cooldown)
+//   oscillation → on_oscillation action (with cooldown)
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #pragma once
@@ -25,19 +30,23 @@ public:
     void reset();
 
     int total_collapses()    const;
+    int total_expansions()   const;
+    int total_oscillations() const;
     int escalated_actions()  const;
 
 private:
     HandrailConfig cfg_;
     std::atomic<int> consecutive_collapses_{0};
     std::atomic<int> total_collapses_{0};
+    std::atomic<int> total_expansions_{0};
+    std::atomic<int> total_oscillations_{0};
     std::atomic<int> escalated_{0};
     mutable std::mutex action_mutex_;
     std::chrono::steady_clock::time_point last_action_time_;
 
     void execute_action(HandrailAction action, const CollapseResult& result);
     bool cooldown_ok() const;
-    void log_collapse(const CollapseResult& result);
+    void log_event(const char* event_type, const CollapseResult& result);
     void send_signal(int sig, std::optional<pid_t> pid);
     void fire_webhook(const std::string& url, const CollapseResult& result);
 };

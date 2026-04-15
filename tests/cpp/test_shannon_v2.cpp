@@ -103,6 +103,244 @@ TEST(EntropyCrossCheck, DeterministicPeak) {
     EXPECT_NEAR(h, 0.0, 1e-14);
 }
 
+// ─── Expansion detection tests ─────────────────────────────────────────────
+
+TEST(ExpansionDetection, DetectsSuddenExpansion) {
+    CollapseDetector det(8, -3.2, +3.2);
+
+    std::vector<double> low_entropy(1024, -1000.0);
+    low_entropy[0] = 0.0;
+
+    for (int i = 0; i < 8; ++i) {
+        det.add_logits(low_entropy);
+    }
+
+    std::vector<double> high_entropy(1024);
+    for (std::size_t i = 0; i < 1024; ++i) {
+        high_entropy[i] = static_cast<double>(i) * 0.01;
+    }
+
+    auto r = det.add_logits(high_entropy);
+    EXPECT_TRUE(r.expanded);
+    EXPECT_GT(r.entropy, 1.0);
+    EXPECT_EQ(r.event, EntropyEvent::EXPANSION);
+}
+
+TEST(ExpansionDetection, ExpansionCallbackFires) {
+    bool expansion_fired = false;
+    CollapseDetector det(4, -2.0, +2.0);
+    det.set_callback([&](const CollapseResult& r) {
+        if (r.expanded) expansion_fired = true;
+    });
+
+    std::vector<double> peak(16, -100.0);
+    peak[0] = 0.0;
+    for (int i = 0; i < 4; ++i) det.add_logits(peak);
+
+    std::vector<double> broad(16, 0.0);
+    det.add_logits(broad);
+
+    EXPECT_TRUE(expansion_fired);
+}
+
+TEST(ExpansionDetection, NoExpansionOnStableInput) {
+    CollapseDetector det(8, -3.2, +3.2);
+
+    std::vector<double> logits(16, 0.0);
+    for (int i = 0; i < 20; ++i) {
+        auto r = det.add_logits(logits);
+        if (i >= 8) {
+            EXPECT_FALSE(r.expanded);
+        }
+    }
+}
+
+TEST(ExpansionDetection, SymmetricThresholds) {
+    CollapseDetector det(4, -2.0, +2.0);
+
+    for (int i = 0; i < 4; ++i) det.push_entropy(10.0);
+
+    auto r_collapse = det.push_entropy(2.0);
+    EXPECT_TRUE(r_collapse.collapsed);
+    EXPECT_FALSE(r_collapse.expanded);
+
+    det.reset();
+    for (int i = 0; i < 4; ++i) det.push_entropy(10.0);
+
+    auto r_expand = det.push_entropy(18.0);
+    EXPECT_TRUE(r_expand.expanded);
+    EXPECT_FALSE(r_expand.collapsed);
+}
+
+// ─── Oscillation detection tests ────────────────────────────────────────────
+
+TEST(OscillationDetection, DetectsRapidAlternation) {
+    CollapseDetector det(4, -2.0, +2.0, 6);
+
+    for (int i = 0; i < 4; ++i) det.push_entropy(10.0);
+
+    det.push_entropy(2.0);
+    det.push_entropy(18.0);
+    det.push_entropy(2.0);
+    det.push_entropy(18.0);
+
+    auto r = det.push_entropy(2.0);
+    EXPECT_TRUE(r.oscillating);
+    EXPECT_EQ(r.event, EntropyEvent::OSCILLATION);
+}
+
+TEST(OscillationDetection, NoOscillationOnStableInput) {
+    CollapseDetector det(8, -3.2, +3.2, 5);
+
+    for (int i = 0; i < 20; ++i) {
+        auto r = det.push_entropy(10.0);
+        EXPECT_FALSE(r.oscillating);
+    }
+}
+
+TEST(OscillationDetection, NoOscillationOnSingleCollapse) {
+    CollapseDetector det(4, -2.0, +2.0, 5);
+
+    for (int i = 0; i < 4; ++i) det.push_entropy(10.0);
+    auto r = det.push_entropy(2.0);
+
+    EXPECT_TRUE(r.collapsed);
+    EXPECT_FALSE(r.oscillating);
+}
+
+// ─── EntropyEvent enum tests ────────────────────────────────────────────────
+
+TEST(EntropyEvent, EnumValues) {
+    EXPECT_EQ(static_cast<int>(EntropyEvent::NONE), 0);
+    EXPECT_EQ(static_cast<int>(EntropyEvent::COLLAPSE), 1);
+    EXPECT_EQ(static_cast<int>(EntropyEvent::EXPANSION), 2);
+    EXPECT_EQ(static_cast<int>(EntropyEvent::OSCILLATION), 3);
+}
+
+TEST(EntropyEvent, ClassifyCorrectly) {
+    CollapseDetector det(4, -2.0, +2.0);
+
+    for (int i = 0; i < 4; ++i) det.push_entropy(10.0);
+
+    auto r_normal = det.push_entropy(10.5);
+    EXPECT_EQ(r_normal.event, EntropyEvent::NONE);
+
+    auto r_collapse = det.push_entropy(2.0);
+    EXPECT_EQ(r_collapse.event, EntropyEvent::COLLAPSE);
+}
+
+// ─── Handrail expansion/oscillation tests ────────────────────────────────────
+
+TEST(Handrail, CountsExpansions) {
+    HandrailConfig cfg;
+    cfg.on_expansion = HandrailAction::LOG_ONLY;
+    cfg.on_first_collapse = HandrailAction::LOG_ONLY;
+    cfg.on_sustained_collapse = HandrailAction::LOG_ONLY;
+    cfg.log_path = "/dev/null";
+
+    HandrailEngine engine(std::move(cfg));
+
+    CollapseResult r{
+        .entropy = 15.0, .window_mean = 8.0, .window_std = 1.0,
+        .delta = 7.0, .z_score = 7.0, .collapsed = false,
+        .expanded = true, .oscillating = false,
+        .event = EntropyEvent::EXPANSION,
+        .token_index = 0, .used_backend = Backend::SCALAR,
+    };
+
+    engine.evaluate(r);
+    EXPECT_EQ(engine.total_expansions(), 1);
+    EXPECT_EQ(engine.total_collapses(), 0);
+}
+
+TEST(Handrail, CountsOscillations) {
+    HandrailConfig cfg;
+    cfg.on_oscillation = HandrailAction::LOG_ONLY;
+    cfg.on_first_collapse = HandrailAction::LOG_ONLY;
+    cfg.on_sustained_collapse = HandrailAction::LOG_ONLY;
+    cfg.log_path = "/dev/null";
+
+    HandrailEngine engine(std::move(cfg));
+
+    CollapseResult r{
+        .entropy = 5.0, .window_mean = 8.0, .window_std = 1.0,
+        .delta = -3.0, .z_score = -3.0, .collapsed = false,
+        .expanded = false, .oscillating = true,
+        .event = EntropyEvent::OSCILLATION,
+        .token_index = 0, .used_backend = Backend::SCALAR,
+    };
+
+    engine.evaluate(r);
+    EXPECT_EQ(engine.total_oscillations(), 1);
+    EXPECT_EQ(engine.total_collapses(), 0);
+}
+
+TEST(Handrail, ExpansionActionFires) {
+    HandrailConfig cfg;
+    cfg.on_expansion = HandrailAction::KILL;
+    cfg.on_first_collapse = HandrailAction::LOG_ONLY;
+    cfg.on_sustained_collapse = HandrailAction::LOG_ONLY;
+    cfg.log_path = "/dev/null";
+    cfg.monitored_pid = static_cast<pid_t>(999999999);
+    cfg.cooldown_seconds = 0.0;
+
+    HandrailEngine engine(std::move(cfg));
+
+    CollapseResult r{
+        .entropy = 15.0, .window_mean = 8.0, .window_std = 1.0,
+        .delta = 7.0, .z_score = 7.0, .collapsed = false,
+        .expanded = true, .oscillating = false,
+        .event = EntropyEvent::EXPANSION,
+        .token_index = 0, .used_backend = Backend::SCALAR,
+    };
+
+    engine.evaluate(r);
+    EXPECT_EQ(engine.total_expansions(), 1);
+    EXPECT_EQ(engine.escalated_actions(), 1);
+}
+
+TEST(Handrail, ExpansionResetsConsecutiveCollapses) {
+    HandrailConfig cfg;
+    cfg.on_first_collapse = HandrailAction::LOG_ONLY;
+    cfg.on_sustained_collapse = HandrailAction::KILL;
+    cfg.on_expansion = HandrailAction::LOG_ONLY;
+    cfg.sustained_threshold = 2;
+    cfg.log_path = "/dev/null";
+    cfg.monitored_pid = static_cast<pid_t>(999999999);
+    cfg.cooldown_seconds = 0.0;
+
+    HandrailEngine engine(std::move(cfg));
+
+    CollapseResult collapsed{
+        .entropy = 1.0, .window_mean = 8.0, .window_std = 1.0,
+        .delta = -7.0, .z_score = -7.0, .collapsed = true,
+        .expanded = false, .oscillating = false,
+        .event = EntropyEvent::COLLAPSE,
+        .token_index = 0, .used_backend = Backend::SCALAR,
+    };
+    CollapseResult expanded{
+        .entropy = 15.0, .window_mean = 8.0, .window_std = 1.0,
+        .delta = 7.0, .z_score = 7.0, .collapsed = false,
+        .expanded = true, .oscillating = false,
+        .event = EntropyEvent::EXPANSION,
+        .token_index = 1, .used_backend = Backend::SCALAR,
+    };
+
+    engine.evaluate(collapsed);
+    engine.evaluate(expanded);
+    engine.evaluate(collapsed);
+
+    EXPECT_EQ(engine.total_collapses(), 2);
+    EXPECT_EQ(engine.escalated_actions(), 0);
+}
+
+// ─── Config expansion tests ─────────────────────────────────────────────────
+
+TEST(Config, ExpansionConstants) {
+    EXPECT_DOUBLE_EQ(kDefaultExpansionThreshold, +3.2);
+    EXPECT_EQ(kDefaultOscillationWindow, 5u);
+}
+
 TEST(EntropyCrossCheck, LargeVocabulary) {
     std::vector<double> logits(1000, 0.0);
     double h = kernels::configurational_entropy_scalar(logits.data(), 1000);
@@ -449,7 +687,7 @@ TEST(Handrail, KillActionNoCrash) {
     cfg.on_sustained_collapse = HandrailAction::LOG_ONLY;
     cfg.sustained_threshold = 3;
     cfg.log_path = "/dev/null";
-    cfg.monitored_pid = 999999999;
+    cfg.monitored_pid = static_cast<pid_t>(999999999);
     cfg.cooldown_seconds = 100.0;
 
     HandrailEngine engine(std::move(cfg));
@@ -471,7 +709,7 @@ TEST(Handrail, SustainedThresholdOne) {
     cfg.on_sustained_collapse = HandrailAction::KILL;
     cfg.sustained_threshold = 1;
     cfg.log_path = "/dev/null";
-    cfg.monitored_pid = 999999999;
+    cfg.monitored_pid = static_cast<pid_t>(999999999);
     cfg.cooldown_seconds = 100.0;
 
     HandrailEngine engine(std::move(cfg));
@@ -493,7 +731,7 @@ TEST(Handrail, SustainedThresholdTwo) {
     cfg.on_sustained_collapse = HandrailAction::KILL;
     cfg.sustained_threshold = 2;
     cfg.log_path = "/dev/null";
-    cfg.monitored_pid = 999999999;
+    cfg.monitored_pid = static_cast<pid_t>(999999999);
     cfg.cooldown_seconds = 0.0;
 
     HandrailEngine engine(std::move(cfg));
@@ -590,7 +828,7 @@ TEST(Handrail, CoreDumpAction) {
     cfg.on_sustained_collapse = HandrailAction::LOG_ONLY;
     cfg.sustained_threshold = 3;
     cfg.log_path = "/dev/null";
-    cfg.monitored_pid = 999999999;
+    cfg.monitored_pid = static_cast<pid_t>(999999999);
     cfg.cooldown_seconds = 0.0;
 
     HandrailEngine engine(std::move(cfg));

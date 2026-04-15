@@ -1,4 +1,6 @@
-// collapse_detector.cpp — Expanded sliding-window collapse detector
+// collapse_detector.cpp — Sliding-window entropy event detector
+//
+// Detects collapse, expansion, and oscillation in LLM token entropy.
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/collapse_detector.hpp"
@@ -8,14 +10,22 @@
 
 namespace shannon {
 
-CollapseDetector::CollapseDetector(std::size_t window_size, double threshold_bits)
+CollapseDetector::CollapseDetector(
+    std::size_t window_size,
+    double collapse_threshold,
+    double expansion_threshold,
+    std::size_t oscillation_window)
     : window_size_(window_size > 0 ? window_size : kDefaultWindowSize)
-    , threshold_(threshold_bits)
-    , window_(window_size_, 0.0) {}
+    , collapse_threshold_(collapse_threshold)
+    , expansion_threshold_(expansion_threshold > 0 ? expansion_threshold : -collapse_threshold)
+    , oscillation_window_(oscillation_window > 0 ? oscillation_window : kDefaultOscillationWindow)
+    , window_(window_size_, 0.0)
+    , event_history_(oscillation_window_, EntropyEvent::NONE) {}
 
 void CollapseDetector::reset() {
     trace_.clear();
     std::fill(window_.begin(), window_.end(), 0.0);
+    std::fill(event_history_.begin(), event_history_.end(), EntropyEvent::NONE);
     window_pos_ = 0;
     window_full_ = false;
     token_count_ = 0;
@@ -66,27 +76,43 @@ CollapseResult CollapseDetector::add_logprobs(std::span<const double> logprobs) 
     return add_logprobs(logprobs.data(), logprobs.size());
 }
 
+EntropyEvent CollapseDetector::classify_event(double delta, bool window_ready) const {
+    if (!window_ready) return EntropyEvent::NONE;
+    if (delta < collapse_threshold_) return EntropyEvent::COLLAPSE;
+    if (delta > expansion_threshold_) return EntropyEvent::EXPANSION;
+    return EntropyEvent::NONE;
+}
+
+bool CollapseDetector::detect_oscillation() const {
+    int alternations = 0;
+    for (std::size_t i = 1; i < event_history_.size(); ++i) {
+        EntropyEvent prev = event_history_[i - 1];
+        EntropyEvent curr = event_history_[i];
+        if ((prev == EntropyEvent::COLLAPSE && curr == EntropyEvent::EXPANSION) ||
+            (prev == EntropyEvent::EXPANSION && curr == EntropyEvent::COLLAPSE)) {
+            ++alternations;
+        }
+    }
+    return alternations >= 2;
+}
+
 CollapseResult CollapseDetector::push_entropy(double h) {
     trace_.push_back(h);
     if (max_trace_size_ > 0 && trace_.size() > max_trace_size_) {
         trace_.erase(trace_.begin(), trace_.begin() + (trace_.size() - max_trace_size_));
     }
 
-    // Update circular buffer
     window_[window_pos_] = h;
     window_pos_ = (window_pos_ + 1) % window_size_;
     if (!window_full_ && window_pos_ == 0) {
         window_full_ = true;
     }
 
-    // Compute window statistics using numerically stable two-pass variance
     const std::size_t count = window_full_ ? window_size_ : window_pos_;
     double sum = 0.0;
-
     for (std::size_t i = 0; i < count; ++i) {
         sum += window_[i];
     }
-
     const double mean = (count > 0) ? sum / static_cast<double>(count) : 0.0;
 
     double sum_sq_diff = 0.0;
@@ -101,7 +127,18 @@ CollapseResult CollapseDetector::push_entropy(double h) {
 
     const double delta = h - mean;
     const double z = (stddev > 1e-12) ? delta / stddev : 0.0;
-    const bool collapsed = (count >= window_size_) && (delta < threshold_);
+    const bool window_ready = (count >= window_size_);
+
+    EntropyEvent event = classify_event(delta, window_ready);
+
+    event_history_[token_count_ % oscillation_window_] = event;
+    bool oscillating = false;
+    if (window_ready && event != EntropyEvent::NONE) {
+        oscillating = detect_oscillation();
+    }
+    if (oscillating) {
+        event = EntropyEvent::OSCILLATION;
+    }
 
     CollapseResult result{
         .entropy     = h,
@@ -109,14 +146,17 @@ CollapseResult CollapseDetector::push_entropy(double h) {
         .window_std  = stddev,
         .delta       = delta,
         .z_score     = z,
-        .collapsed   = collapsed,
+        .collapsed   = (event == EntropyEvent::COLLAPSE),
+        .expanded    = (event == EntropyEvent::EXPANSION),
+        .oscillating = oscillating,
+        .event       = event,
         .token_index = token_count_,
-        .used_backend = Backend::SCALAR,  // Overwritten by caller if dispatched
+        .used_backend = Backend::SCALAR,
     };
 
     ++token_count_;
 
-    if (collapsed && callback_) {
+    if ((result.collapsed || result.expanded || result.oscillating) && callback_) {
         callback_(result);
     }
 
@@ -134,8 +174,21 @@ void CollapseDetector::set_window_size(std::size_t size) {
     window_full_ = false;
 }
 
+void CollapseDetector::set_collapse_threshold(double threshold_bits) {
+    collapse_threshold_ = threshold_bits;
+}
+
+void CollapseDetector::set_expansion_threshold(double threshold_bits) {
+    expansion_threshold_ = threshold_bits;
+}
+
+void CollapseDetector::set_oscillation_window(std::size_t size) {
+    oscillation_window_ = (size > 0) ? size : kDefaultOscillationWindow;
+    event_history_.assign(oscillation_window_, EntropyEvent::NONE);
+}
+
 void CollapseDetector::set_threshold(double threshold_bits) {
-    threshold_ = threshold_bits;
+    collapse_threshold_ = threshold_bits;
 }
 
 void CollapseDetector::set_max_trace_size(std::size_t max_size) {

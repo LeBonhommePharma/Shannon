@@ -1,7 +1,7 @@
 // handrail.cpp — Failsafe handrail engine for Shannon 2.0
 //
-// Evaluates collapse events and executes configured failsafe actions
-// with escalation and cooldown logic.
+// Evaluates collapse, expansion, and oscillation events with
+// escalation and cooldown logic.
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/handrail.hpp"
@@ -28,6 +28,22 @@ HandrailEngine::HandrailEngine(HandrailConfig cfg)
                             std::chrono::duration<double>(cfg_.cooldown_seconds + 1.0))) {}
 
 void HandrailEngine::evaluate(const CollapseResult& result) {
+    if (result.oscillating) {
+        total_oscillations_.fetch_add(1, std::memory_order_relaxed);
+        log_event("OSCILLATION", result);
+        execute_action(cfg_.on_oscillation, result);
+        consecutive_collapses_.store(0, std::memory_order_relaxed);
+        return;
+    }
+
+    if (result.expanded) {
+        total_expansions_.fetch_add(1, std::memory_order_relaxed);
+        consecutive_collapses_.store(0, std::memory_order_relaxed);
+        log_event("EXPANSION", result);
+        execute_action(cfg_.on_expansion, result);
+        return;
+    }
+
     if (!result.collapsed) {
         consecutive_collapses_.store(0, std::memory_order_relaxed);
         return;
@@ -36,7 +52,7 @@ void HandrailEngine::evaluate(const CollapseResult& result) {
     total_collapses_.fetch_add(1, std::memory_order_relaxed);
     consecutive_collapses_.fetch_add(1, std::memory_order_relaxed);
 
-    log_collapse(result);
+    log_event("COLLAPSE", result);
 
     int cc = consecutive_collapses_.load(std::memory_order_relaxed);
 
@@ -50,11 +66,21 @@ void HandrailEngine::evaluate(const CollapseResult& result) {
 void HandrailEngine::reset() {
     consecutive_collapses_.store(0, std::memory_order_relaxed);
     total_collapses_.store(0, std::memory_order_relaxed);
+    total_expansions_.store(0, std::memory_order_relaxed);
+    total_oscillations_.store(0, std::memory_order_relaxed);
     escalated_.store(0, std::memory_order_relaxed);
 }
 
 int HandrailEngine::total_collapses() const {
     return total_collapses_.load(std::memory_order_relaxed);
+}
+
+int HandrailEngine::total_expansions() const {
+    return total_expansions_.load(std::memory_order_relaxed);
+}
+
+int HandrailEngine::total_oscillations() const {
+    return total_oscillations_.load(std::memory_order_relaxed);
 }
 
 int HandrailEngine::escalated_actions() const {
@@ -68,7 +94,7 @@ bool HandrailEngine::cooldown_ok() const {
     return elapsed >= cfg_.cooldown_seconds;
 }
 
-void HandrailEngine::log_collapse(const CollapseResult& result) {
+void HandrailEngine::log_event(const char* event_type, const CollapseResult& result) {
     std::FILE* fp = nullptr;
     const bool is_stderr = (cfg_.log_path.empty() || cfg_.log_path == "/dev/stderr");
 
@@ -81,9 +107,9 @@ void HandrailEngine::log_collapse(const CollapseResult& result) {
     if (!fp) return;
 
     std::fprintf(fp,
-        "[SHANNON HANDRAIL] collapse #%d at token %zu: "
+        "[SHANNON HANDRAIL] %s at token %zu: "
         "entropy=%.4f bits, delta=%.4f, z=%.4f, backend=%d\n",
-        total_collapses_.load(std::memory_order_relaxed),
+        event_type,
         result.token_index,
         result.entropy,
         result.delta,
@@ -146,11 +172,22 @@ void HandrailEngine::execute_action(HandrailAction action, const CollapseResult&
 }
 
 void HandrailEngine::fire_webhook(const std::string& url, const CollapseResult& result) {
-    std::string json = "{\"collapsed\":true,\"entropy\":"
-        + std::to_string(result.entropy)
-        + ",\"token_index\":" + std::to_string(result.token_index)
-        + ",\"delta\":" + std::to_string(result.delta)
-        + ",\"z_score\":" + std::to_string(result.z_score) + "}";
+    const char* event_str = "none";
+    if (result.collapsed) event_str = "collapse";
+    else if (result.expanded) event_str = "expansion";
+    else if (result.oscillating) event_str = "oscillation";
+
+    std::string json = "{\"event\":\"";
+    json += event_str;
+    json += "\",\"entropy\":";
+    json += std::to_string(result.entropy);
+    json += ",\"token_index\":";
+    json += std::to_string(result.token_index);
+    json += ",\"delta\":";
+    json += std::to_string(result.delta);
+    json += ",\"z_score\":";
+    json += std::to_string(result.z_score);
+    json += "}";
 
     static std::atomic<bool> sigchld_installed{false};
     if (!sigchld_installed.exchange(true)) {

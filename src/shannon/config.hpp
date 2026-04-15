@@ -19,11 +19,13 @@ inline constexpr double kEpsilon = 1e-300;                      // numerical flo
 
 // ─── Default detection parameters ────────────────────────────────────────────
 
-inline constexpr double      kDefaultCollapseThreshold = -3.2;  // bits
-inline constexpr std::size_t kDefaultWindowSize        = 8;     // sliding window
-inline constexpr int         kDefaultTurboQuantBits     = 4;    // 4-bit quantization
-inline constexpr int         kDefaultSustainedCount     = 3;    // consecutive collapses for escalation
-inline constexpr double      kDefaultCooldownSeconds    = 5.0;  // min time between escalated actions
+inline constexpr double      kDefaultCollapseThreshold  = -3.2;  // bits (ordering)
+inline constexpr double      kDefaultExpansionThreshold  = +3.2;  // bits (disordering)
+inline constexpr std::size_t kDefaultWindowSize         = 8;     // sliding window
+inline constexpr std::size_t kDefaultOscillationWindow  = 5;     // tokens for oscillation detection
+inline constexpr int         kDefaultTurboQuantBits      = 4;    // 4-bit quantization
+inline constexpr int         kDefaultSustainedCount      = 3;    // consecutive collapses for escalation
+inline constexpr double      kDefaultCooldownSeconds     = 5.0;  // min time between escalated actions
 
 // ─── Version ─────────────────────────────────────────────────────────────────
 

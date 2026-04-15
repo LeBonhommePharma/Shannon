@@ -34,6 +34,10 @@ static void print_usage(const char* prog) {
         "  --logprobs            Input is log-probabilities\n"
         "  --window <n>          Sliding window size (default: %zu)\n"
         "  --threshold <bits>    Collapse threshold in bits (default: %.1f)\n"
+        "  --expansion <bits>    Expansion threshold in bits (default: +%.1f)\n"
+        "  --osc-window <n>      Oscillation detection window (default: %zu)\n"
+        "  --on-expansion <act>  Expansion action (default: alert): log|alert|throttle|kill|coredump|webhook\n"
+        "  --on-oscillation <act> Oscillation action (default: alert): log|alert|throttle|kill|coredump|webhook\n"
         "  --socket <path>       Unix domain socket path\n"
         "  --shmem <name>        Shared memory name\n"
         "  --handrail <action>   First collapse action (default: alert): log|alert|throttle|kill|coredump|webhook\n"
@@ -57,6 +61,8 @@ static void print_usage(const char* prog) {
         prog,
         shannon::kDefaultWindowSize,
         shannon::kDefaultCollapseThreshold,
+        shannon::kDefaultExpansionThreshold,
+        shannon::kDefaultOscillationWindow,
         shannon::kDefaultSustainedCount,
         shannon::kDefaultCooldownSeconds);
 }
@@ -92,6 +98,14 @@ int main(int argc, char* argv[]) {
             config.window_size = static_cast<std::size_t>(std::stoul(argv[++i]));
         } else if (arg == "--threshold" && i + 1 < argc) {
             config.threshold_bits = std::stod(argv[++i]);
+        } else if (arg == "--expansion" && i + 1 < argc) {
+            config.handrail.on_expansion = parse_action(argv[++i]);
+        } else if (arg == "--osc-window" && i + 1 < argc) {
+            config.oscillation_window = static_cast<std::size_t>(std::stoul(argv[++i]));
+        } else if (arg == "--on-expansion" && i + 1 < argc) {
+            config.handrail.on_expansion = parse_action(argv[++i]);
+        } else if (arg == "--on-oscillation" && i + 1 < argc) {
+            config.handrail.on_oscillation = parse_action(argv[++i]);
         } else if (arg == "--socket" && i + 1 < argc) {
             config.stream_mode = shannon::StreamMode::UNIX_SOCKET;
             config.socket_path = argv[++i];

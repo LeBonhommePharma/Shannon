@@ -13,7 +13,7 @@ from typing import TextIO
 
 import numpy as np
 
-from shannon_entropy.detector import ShannonCollapseDetector, CollapseResult
+from shannon_entropy.detector import CollapseResult, ShannonCollapseDetector
 
 
 def _on_collapse(result: CollapseResult) -> None:
@@ -102,25 +102,29 @@ def main() -> None:
         help="Input JSONL file (default: stdin)",
     )
     parser.add_argument(
-        "-f", "--field",
+        "-f",
+        "--field",
         default="logits",
         choices=["logits", "probs", "logprobs"],
         help="JSON field containing the distribution (default: logits)",
     )
     parser.add_argument(
-        "-w", "--window-size",
+        "-w",
+        "--window-size",
         type=int,
         default=8,
         help="Sliding window size (default: 8)",
     )
     parser.add_argument(
-        "-t", "--threshold",
+        "-t",
+        "--threshold",
         type=float,
         default=-3.2,
         help="Collapse threshold in bits (default: -3.2)",
     )
     parser.add_argument(
-        "-q", "--quiet",
+        "-q",
+        "--quiet",
         action="store_true",
         help="Only output final collapse count",
     )

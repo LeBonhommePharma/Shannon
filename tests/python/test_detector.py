@@ -5,8 +5,6 @@
 import math
 
 import numpy as np
-import pytest
-
 from shannon_entropy import (
     ShannonCollapseDetector,
     shannon_configurational_entropy,
@@ -14,7 +12,6 @@ from shannon_entropy import (
     shannon_entropy_from_probs,
 )
 from shannon_entropy.core import get_backend
-
 
 # ── Core entropy functions ───────────────────────────────────────────────────
 

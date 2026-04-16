@@ -19,9 +19,14 @@ _USE_CPP = False
 try:
     from _shannon_cpp import (
         shannon_configurational_entropy as _cpp_conf_entropy,
-        shannon_entropy_from_probs as _cpp_from_probs,
+    )
+    from _shannon_cpp import (
         shannon_entropy_from_logprobs as _cpp_from_logprobs,
     )
+    from _shannon_cpp import (
+        shannon_entropy_from_probs as _cpp_from_probs,
+    )
+
     _USE_CPP = True
 except ImportError:
     pass
@@ -33,6 +38,7 @@ _USE_NUMBA = False
 if not _USE_CPP:
     try:
         from numba import njit, prange  # type: ignore[import-untyped]
+
         _USE_NUMBA = True
     except ImportError:
         pass
@@ -95,6 +101,7 @@ if _USE_NUMBA:
 
 # ── Pure-NumPy fallback (no Numba, no C++) ───────────────────────────────────
 
+
 def _numpy_conf_entropy(log_weights: np.ndarray) -> float:
     """Log-sum-exp Shannon configurational entropy (pure NumPy)."""
     if log_weights.size <= 1:
@@ -133,6 +140,7 @@ def _numpy_from_logprobs(logprobs: np.ndarray) -> float:
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
+
 
 def shannon_configurational_entropy(log_weights: ArrayLike) -> float:
     """Compute Shannon configurational entropy from unnormalized log-weights.

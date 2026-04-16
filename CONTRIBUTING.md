@@ -12,7 +12,7 @@ Thank you for your interest in contributing. This guide covers build, test, and 
 ## Quick Start
 
 ```bash
-git clone https://github.com/lmorency/Shannon.git
+git clone https://github.com/LeBonhommePharma/Shannon.git
 cd Shannon
 
 # Build C++ library + tests + agent
@@ -94,7 +94,7 @@ Example: `Fix: Define missing _rel_lib variable in setup.py`
 
 ## Reporting Issues
 
-Open an issue at https://github.com/lmorency/Shannon/issues with:
+Open an issue at https://github.com/LeBonhommePharma/Shannon/issues with:
 - Shannon version (`grep VERSION CMakeLists.txt`)
 - Compiler and platform
 - Minimal reproduction steps

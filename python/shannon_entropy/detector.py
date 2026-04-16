@@ -12,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 import math
 from collections import deque
-from typing import Callable, Optional, Sequence
+from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -97,7 +97,7 @@ class ShannonCollapseDetector:
         threshold: float = DEFAULT_COLLAPSE_THRESHOLD,
         expansion_threshold: float = DEFAULT_EXPANSION_THRESHOLD,
         oscillation_window: int = DEFAULT_OSCILLATION_WINDOW,
-        callback: Optional[CollapseCallback] = None,
+        callback: CollapseCallback | None = None,
     ) -> None:
         self._cpp_detector = None
         try:

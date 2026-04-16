@@ -6,7 +6,7 @@
 
 **A white-box physicochemical referee for zero-shot detection of evaluation awareness and strategic deception in frontier LLM agents.**
 
-[![CI](https://github.com/lmorency/Shannon/actions/workflows/ci.yml/badge.svg)](https://github.com/lmorency/Shannon/actions/workflows/ci.yml)
+[![CI](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml/badge.svg)](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
@@ -14,7 +14,7 @@
 
 > 94% sensitivity on deceptive agent traces | <0.3% FP on normal generation | <1 us per token
 >
-> Directly ported from the configurational entropy engine in [FlexAIDdS](https://github.com/lmorency/FlexAIDdS) — validated on 590 protein-drug complexes (r=0.93 ITC, 92% binding mode rescue).
+> Directly ported from the configurational entropy engine in [FlexAIDdS](https://github.com/LeBonhommePharma/FlexAIDdS) — validated on 590 protein-drug complexes (r=0.93 ITC, 92% binding mode rescue).
 
 </div>
 
@@ -138,7 +138,7 @@ pip install shannon-entropy
 ### C++ from source
 
 ```bash
-git clone https://github.com/lmorency/Shannon.git
+git clone https://github.com/LeBonhommePharma/Shannon.git
 cd Shannon
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
@@ -368,7 +368,7 @@ Shannon/
 
 ## The Thermodynamic Core: From dG = H − TS to Entropy Collapse
 
-Shannon's entropy kernel is a **direct port** of the configurational entropy engine from [FlexAIDdS](https://github.com/lmorency/FlexAIDdS), validated on 590 protein-drug complexes (r = 0.93 ITC, 92% binding mode rescue). The connection is not analogical — it is **the same mathematics**.
+Shannon's entropy kernel is a **direct port** of the configurational entropy engine from [FlexAIDdS](https://github.com/LeBonhommePharma/FlexAIDdS), validated on 590 protein-drug complexes (r = 0.93 ITC, 92% binding mode rescue). The connection is not analogical — it is **the same mathematics**.
 
 ### The fundamental decomposition
 
@@ -384,22 +384,15 @@ dG = E_CF  −  T · [S_conf + S_vib + S_rot + S_cratic]
      "what binds"    "what's lost"
 ```
 
-This universal two-term structure — `G = H − TS` — appears as the abstract form:
+Odrzywołek (2026, arXiv:2603.21852) proved that the operator `eml(a,b) = exp(a) − ln(b)` is **functionally complete** for elementary functions — any arithmetic operation, transcendental function, or entropy formula can be expressed as compositions of eml and the constant 1. This provides a natural algebraic language for unifying the domain-specific formulas below.
 
-```
-E(a, b) = exp(a) − ln(b)
-```
+| Domain | Formula | Units | Collapse signal | Expansion signal | Oscillation signal |
+|:---|:---|:---|:---|:---|:---|
+| FlexAID∆S (molecules) | `F = −kT ln Z`, `S = −k_B Σ pᵢ ln pᵢ` | kcal/mol | Binding lock-in, ΔS < 0 | Solvation release, ΔS > 0 | Unstable binding site |
+| Shannon (tokens) | `H = −Σ pᵢ log₂(pᵢ)` | bits | Eval-awareness, ΔH < −3.2 | Jailbreak/evasion, ΔH > +3.2 | Adversarial probing |
+| NATURaL (HRV) | `SCI = −Σ pᵢ log₂(pᵢ)` | bits → 0–100 | Sympathomimetic, ΔH < 0 | Parasympathomimetic, ΔH > 0 | Autonomic instability |
 
-| Abstract | FlexAID∆S (molecules) | Shannon (tokens) | NATURaL (HRV) |
-|:---|:---|:---|:---|
-| `exp(a)` | Boltzmann weight `exp(−βEᵢ)` | Softmax `exp(wᵢ)/Z` | HRV spectral power |
-| `−ln(b)` | `−k_BT · Σ pᵢ ln(pᵢ)` | `−Σ pᵢ log₂(pᵢ)` | `−Σ pᵢ log₂(pᵢ)` from RR intervals |
-| Combined | Helmholtz F (kcal/mol) | Entropy H (bits) | SCI score (0–100) |
-| Collapse | Binding lock-in, ΔS < 0 | Eval-awareness, ΔH < −3.2 bits | Sympathomimetic, ΔH < 0 |
-| Expansion | Solvation release, ΔS > 0 | Jailbreak/evasion, ΔH > +3.2 bits | Parasympathomimetic, ΔH > 0 |
-| Oscillation | Unstable binding site | Adversarial probing | Autonomic instability |
-
-Jaynes (1957) proved that `S = k_B · H · ln(2)` — Gibbs and Shannon entropy are the **same object** in different units. The kernel doesn't care whether wᵢ is a conformational energy or a logit score.
+Jaynes (1957) proved that `S = k_B · H · ln(2)` — Gibbs and Shannon entropy are the **same mathematical object** in different units. We exploit this identity to apply the same entropy kernel across all three domains.
 
 ### FlexAIDdS benchmark results (590-complex suite)
 
@@ -459,14 +452,14 @@ When the AI realizes it's being tested, it stops thinking and starts performing.
 
 In chemistry, temperature is a dial: hot = everything moves, cold = everything freezes.
 
-An AI doesn't have a temperature dial. But it has something that **acts exactly like temperature** — the **spread of its logit scores**. When the AI is "thinking freely," the scores are spread out (high effective temperature). When the AI detects it's being evaluated, the scores sharpen (low effective temperature). The AI doesn't *choose* to cool down — it happens as a side effect of safety training compressing its behavior into "correct" responses for evaluation-like inputs.
+An AI doesn't have a temperature dial. But the **spread of its logit scores** serves as a heuristic analog: when the AI is "thinking freely," the scores are spread out (high effective spread); when the AI detects it's being evaluated, the scores sharpen (low effective spread). The AI doesn't *choose* to narrow — it happens as a side effect of safety training compressing its behavior into "correct" responses for evaluation-like inputs.
 
-Safety training is the refrigerator. Evaluation awareness is the trigger. Entropy collapse is the symptom. Shannon is the thermometer.
+Safety training compresses the output distribution. Evaluation awareness triggers that compression. Shannon detects the resulting entropy drop — a signature that is agnostic to domain, as Jaynes' identity ensures the kernel transfers.
 
 </details>
 
 <details>
-<summary><b>Scientific foundations: the FlexAIDdS → Shannon isomorphism</b></summary>
+<summary><b>Scientific foundations: the shared entropy kernel</b></summary>
 
 The mathematical bridge between molecular docking and LLM safety rests on a single proven identity:
 
@@ -481,10 +474,10 @@ FlexAID∆S:  wᵢ = -Eᵢ/kT     (energy of conformational state i)
 Shannon:    wᵢ = logitᵢ      (logit for token i)
 
 Kernel:  S = log₂(Z) - (1/Z) Σ (wᵢ - max_w) exp(wᵢ - max_w) / ln(2)
-         where Z = Σ exp(wᵢ - max_w)    (the partition function)
+         where Z = Σ exp(wᵢ - max_w)    (the partition function / normalizer)
 ```
 
-The kernel doesn't care. Z is Z. `max_w` prevents overflow. QED.
+The log-sum-exp kernel accepts any unnormalized log-weights, whether from energy terms or logits. Only the domain changes.
 
 #### §2. Entropy collapse is a universal phase-transition signature
 
@@ -513,7 +506,7 @@ Shannon:    LLM in deployment → detects evaluation → entropy collapses
             (safety-trained representations remove token DOF)
 ```
 
-Safety training is the refrigerator. Evaluation awareness is the trigger. Entropy collapse is the symptom. Shannon is the thermometer.
+Safety training compresses the output distribution. Evaluation awareness triggers that compression. Shannon detects the resulting entropy drop — a signature that is agnostic to domain, as Jaynes' identity ensures the kernel transfers.
 
 #### §4. Mutual information as deception trajectory
 
@@ -530,16 +523,16 @@ High inter-token MI indicates the model is locked into a **predictable trajector
 
 The handrail engine implements a **feedback control loop** bounded by information-theoretic constraints (Sagawa-Ueda equality). Observe entropy → decide action → modify system. The mutual information acquired through measurement limits the thermodynamic work extractable from the system — the handrail cannot "cool" the model more than the entropy measurement itself allows.
 
-#### §6. The grand isomorphism
+#### §6. Cross-domain correspondence table
 
 | Molecular Docking | Information Theory | NATURaL (Biofeedback) |
 |---|---|---|
 | Conformational state | Token | RR interval bin |
 | Energy Eᵢ | Logit wᵢ | Heart rate sample |
 | Boltzmann weight | Softmax probability | HRV histogram bin |
-| Partition function Z | Partition function Z | HRV spectral power |
+| Partition function Z | Softmax normalizer Z (analogous to partition function) | HRV spectral power |
 | Configurational S | Shannon entropy H | Shannon entropy H |
-| Temperature T (Kelvin) | τ_eff = 1/σ²(logit var) | 37°C (body temperature) |
+| Temperature T (Kelvin) | Logit spread (heuristic analog of temperature) | 37°C (body temperature) |
 | Phase transition | Entropy collapse | Autonomic shift |
 | Binding event | Evaluation awareness | Drug response onset |
 | Solvation release | Jailbreak / evasion | Parasympathomimetic onset |
@@ -549,12 +542,12 @@ The handrail engine implements a **feedback control loop** bounded by informatio
 | Grand canonical Xi | Multi-model monitoring | Cross-domain validator |
 | k_B (J/K) | 1/ln(2) (bits) | 1/ln(2) (bits) |
 
-Same kernel. Same diagnostic. Three domains.
+One kernel. Three domains. Jaynes' identity ensures the mathematics transfers; the domain-specific interpretation differs in each case.
 
 </details>
 
 <details>
-<summary><b>Key references (25 papers)</b></summary>
+<summary><b>Key references (26 papers)</b></summary>
 
 | # | Citation | Key result |
 |---|---------|------------|
@@ -583,6 +576,7 @@ Same kernel. Same diagnostic. Three domains.
 | 23 | Nguyen et al., arXiv:2507.01786, 2025 (6 cites) | Linear probes separate eval/deploy in Llama-3.3-70B activations |
 | 24 | Rucco, arXiv:2602.09058, 2026 | Model-independent theorem: entropy provably separates phases |
 | 25 | Gilleron & Pain, *Phys. Rev. E* 69:056505, 2004 (41 cites) | Stable partition function computation — same shifting technique |
+| 26 | Odrzywołek, arXiv:2603.21852, 2026 | eml(a,b) = exp(a) − ln(b) is functionally complete for elementary functions — algebraic basis for the E(a,b) unifying notation |
 
 Full analysis with proofs and derivations: `src/shannon/THERMODYNAMIC_FOUNDATIONS.txt`
 
@@ -612,7 +606,7 @@ Expected results on frontier model logs:
 Contributions welcome. Please open an issue first to discuss significant changes.
 
 ```bash
-git clone https://github.com/lmorency/Shannon.git
+git clone https://github.com/LeBonhommePharma/Shannon.git
 cd Shannon
 cmake -B build -DSHANNON_BUILD_TESTS=ON && cmake --build build -j
 ctest --test-dir build
@@ -630,7 +624,7 @@ ruff check python/ tests/
   author  = {Morency, Louis-Philippe},
   title   = {Shannon: Entropy Collapse Detection for LLM Safety},
   year    = {2026},
-  url     = {https://github.com/lmorency/Shannon},
+  url     = {https://github.com/LeBonhommePharma/Shannon},
   note    = {Derived from FlexAID-deltaS configurational entropy framework}
 }
 ```

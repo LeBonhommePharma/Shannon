@@ -19,12 +19,12 @@ Usage::
 
 __version__ = "0.1.0"
 
-from shannon_entropy.detector import ShannonCollapseDetector
 from shannon_entropy.core import (
     shannon_configurational_entropy,
-    shannon_entropy_from_probs,
     shannon_entropy_from_logprobs,
+    shannon_entropy_from_probs,
 )
+from shannon_entropy.detector import ShannonCollapseDetector
 
 __all__ = [
     "ShannonCollapseDetector",

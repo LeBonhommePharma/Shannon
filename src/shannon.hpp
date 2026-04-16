@@ -124,6 +124,8 @@ private:
     std::size_t           window_pos_ = 0;
     bool                  window_full_ = false;
     std::size_t           token_count_ = 0;
+    double                running_sum_ = 0.0;
+    double                running_sum_sq_ = 0.0;
     CollapseCallback      callback_;
 };
 

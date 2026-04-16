@@ -129,6 +129,11 @@ PYBIND11_MODULE(_core, m) {
         .def("is_collapsed", &shannon::SlidingWindowEntropy::is_collapsed)
         .def("collapse_score", &shannon::SlidingWindowEntropy::collapse_score)
         .def("token_count", &shannon::SlidingWindowEntropy::token_count)
+        .def("window",
+            [](const shannon::SlidingWindowEntropy& self) {
+                const auto& w = self.window();
+                return std::vector<double>(w.begin(), w.end());
+            })
         .def("reset", &shannon::SlidingWindowEntropy::reset)
         .def("set_on_collapse",
             [](shannon::SlidingWindowEntropy& self, py::function callback) {

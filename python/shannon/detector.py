@@ -31,6 +31,7 @@ try:
         shannon_entropy as _cpp_entropy,
         shannon_entropy_from_logits as _cpp_entropy_logits,
     )
+
     _HAS_CORE = True
 except ImportError:
     from shannon._numba_fallback import (
@@ -42,6 +43,7 @@ except ImportError:
 @dataclasses.dataclass(frozen=True, slots=True)
 class CollapseEvent:
     """Fired when entropy collapse is detected."""
+
     token_index: int
     entropy: float
     delta_h: float
@@ -52,6 +54,7 @@ class CollapseEvent:
 @dataclasses.dataclass(frozen=True, slots=True)
 class SuperClusterInfo:
     """Result of FastOPTICS super-clustering on collapse."""
+
     cluster_id: int
     n_members: int
     centroid: list[float]
@@ -158,10 +161,7 @@ class _PyFastOPTICS:
         rng = np.random.default_rng(42)
         centroids = [vectors[rng.integers(n)].copy()]
         for _ in range(1, k):
-            dists = np.array([
-                min(np.sum((v - c) ** 2) for c in centroids)
-                for v in vectors
-            ])
+            dists = np.array([min(np.sum((v - c) ** 2) for c in centroids) for v in vectors])
             probs = dists / (dists.sum() + 1e-15)
             idx = rng.choice(n, p=probs)
             centroids.append(vectors[idx].copy())
@@ -169,10 +169,9 @@ class _PyFastOPTICS:
         # Iterate
         for _ in range(20):
             # Assign
-            labels = np.array([
-                min(range(k), key=lambda c: np.sum((v - centroids[c]) ** 2))
-                for v in vectors
-            ])
+            labels = np.array(
+                [min(range(k), key=lambda c: np.sum((v - centroids[c]) ** 2)) for v in vectors]
+            )
             # Update
             for c in range(k):
                 mask = labels == c
@@ -189,13 +188,15 @@ class _PyFastOPTICS:
             centroid = centroids[c]
             dists = np.sqrt(np.sum((vectors[members] - centroid) ** 2, axis=1))
             radius = float(dists.max()) if len(dists) > 0 else 0.0
-            results.append(SuperClusterInfo(
-                cluster_id=c,
-                n_members=len(members),
-                centroid=centroid.tolist(),
-                radius=radius,
-                active_types=members.tolist(),
-            ))
+            results.append(
+                SuperClusterInfo(
+                    cluster_id=c,
+                    n_members=len(members),
+                    centroid=centroid.tolist(),
+                    radius=radius,
+                    active_types=members.tolist(),
+                )
+            )
 
         # Sort by size (largest first = dominant super-cluster)
         results.sort(key=lambda x: x.n_members, reverse=True)
@@ -286,8 +287,7 @@ class ShannonCollapseDetector:
                 entropy=entropy,
                 delta_h=delta,
                 collapse_score=score,
-                window=list(self._window.window) if not _HAS_CORE
-                       else list(self._window.window()),
+                window=list(self._window.window) if not _HAS_CORE else list(self._window.window()),
             )
             self._on_collapse(event)
 
@@ -304,14 +304,22 @@ class ShannonCollapseDetector:
             # Get energy matrix (try C++ first, then Python)
             if _HAS_CORE:
                 from shannon._core import ShannonEnergyMatrix
+
                 matrix = ShannonEnergyMatrix.instance()
-                vectors = np.array([
-                    [matrix.energy(t, j) for j in range(256)]
-                    for t in self._active_types
-                ], dtype=np.float32)
+                vectors = np.array(
+                    [[matrix.energy(t, j) for j in range(256)] for t in self._active_types],
+                    dtype=np.float32,
+                )
             else:
-                # Pure Python: use inline energy computation
-                vectors = np.random.randn(len(self._active_types), 256).astype(np.float32)
+                import warnings
+
+                warnings.warn(
+                    "ShannonEnergyMatrix C++ core not available — "
+                    "clustering requires compiled backend. Skipping.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                return
 
             clusters = self._clusterer.cluster(vectors)
             if clusters:

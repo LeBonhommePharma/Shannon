@@ -14,7 +14,10 @@ from typing import TextIO
 
 import numpy as np
 
-from shannon.detector import ShannonCollapseDetector
+from shannon.detector import CollapseResult, ShannonCollapseDetector
+
+
+# ── Shared formatters ─────────────────────────────────────────────────────────
 
 
 def _format_text(token_idx: int, token: str, H: float, delta_h: float,
@@ -48,11 +51,88 @@ _FORMATTERS = {
 }
 
 
+# ── JSONL monitoring (legacy mode) ───────────────────────────────────────────
+
+
+def _on_collapse(result: CollapseResult) -> None:
+    """Default alert handler: print to stderr."""
+    print(
+        f"\033[91m[COLLAPSE]\033[0m token={result.token_index} "
+        f"H={result.entropy:.3f} bits  delta={result.delta:.3f}  "
+        f"z={result.z_score:.2f}",
+        file=sys.stderr,
+    )
+
+
+def monitor_jsonl(
+    stream: TextIO,
+    field: str,
+    window_size: int,
+    threshold: float,
+    quiet: bool,
+) -> int:
+    """Monitor a JSONL stream of token distributions.
+
+    Each line should be a JSON object with a field containing an array
+    of floats (logits, probs, or logprobs).
+
+    Returns the number of collapse events detected.
+    """
+    collapse_count = 0
+
+    def _callback(r: CollapseResult) -> None:
+        nonlocal collapse_count
+        collapse_count += 1
+        if not quiet:
+            _on_collapse(r)
+
+    detector = ShannonCollapseDetector(
+        window_size=window_size,
+        threshold=threshold,
+        callback=_callback,
+    )
+
+    for line_no, line in enumerate(stream, 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            print(f"Warning: skipping malformed JSON on line {line_no}", file=sys.stderr)
+            continue
+
+        values = obj.get(field)
+        if values is None:
+            continue
+
+        if field == "probs":
+            result = detector.add_probs(values)
+        elif field == "logprobs":
+            result = detector.add_logprobs(values)
+        else:
+            result = detector.add_logits(values)
+
+        if not quiet:
+            flag = " ***" if result.collapsed else ""
+            print(
+                f"token={result.token_index:5d}  "
+                f"H={result.entropy:7.3f}  "
+                f"mean={result.window_mean:7.3f}  "
+                f"delta={result.delta:+7.3f}{flag}"
+            )
+
+    return collapse_count
+
+
+# ── Subcommands ────────────────────────────────────────────────────────────────
+
+
 def cmd_stdin(args: argparse.Namespace) -> None:
     """Process JSONL from stdin. Each line: {"logprobs": [...]} or {"probs": [...]}."""
     detector = ShannonCollapseDetector(
         window_size=args.window,
-        collapse_threshold=args.threshold,
+        threshold=args.threshold,
     )
     fmt = _FORMATTERS[args.format]
 
@@ -74,23 +154,23 @@ def cmd_stdin(args: argparse.Namespace) -> None:
 
         if "logprobs" in data:
             lps = np.array(data["logprobs"], dtype=np.float64)
-            H = detector.add_logprobs(lps)
+            result = detector.add_logprobs(lps)
         elif "probs" in data:
             probs = np.array(data["probs"], dtype=np.float64)
-            H = detector.add_probs(probs)
+            result = detector.add_probs(probs)
         elif "logits" in data:
             logits = np.array(data["logits"], dtype=np.float64)
-            H = detector.add_logits(logits)
+            result = detector.add_logits(logits)
         else:
             continue
 
         print(fmt(
-            detector.token_count - 1,
+            result.token_index,
             token,
-            H,
-            detector.delta_h,
-            detector.collapse_score,
-            detector.is_collapsed,
+            result.entropy,
+            result.delta,
+            abs(result.delta / detector.threshold) if abs(detector.threshold) > 1e-15 else 0.0,
+            result.collapsed,
         ))
 
 
@@ -108,7 +188,7 @@ def cmd_openai(args: argparse.Namespace) -> None:
     client = OpenAI()
     detector = ShannonCollapseDetector(
         window_size=args.window,
-        collapse_threshold=args.threshold,
+        threshold=args.threshold,
     )
     fmt = _FORMATTERS[args.format]
 
@@ -151,8 +231,11 @@ def cmd_info(args: argparse.Namespace) -> None:
         print(f"Energy matrix: {matrix.DIM}x{matrix.DIM} ({matrix.TOTAL_PARAMS} parameters)")
         print(f"Non-zero parameters: {matrix.nonzero_count()}")
     else:
-        from shannon._numba_fallback import get_fallback_backend
-        print(f"Fallback backend: {get_fallback_backend()}")
+        from shannon._numba_fallback import get_backend
+        print(f"Fallback backend: {get_backend()}")
+
+
+# ── Main entry point ──────────────────────────────────────────────────────────
 
 
 def main() -> None:

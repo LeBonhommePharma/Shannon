@@ -42,7 +42,7 @@ dev = [
 ]
 
 [project.scripts]
-shannon-monitor = "shannon_entropy.cli:main"
+shannon-monitor = "shannon.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/LeBonhommePharma/Shannon"

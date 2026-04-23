@@ -47,21 +47,38 @@ except ImportError:
     from shannon._numba_fallback import (
         shannon_entropy,
         shannon_entropy_from_logits,
+        shannon_configurational_entropy,
+        shannon_entropy_from_logprobs,
+        get_backend,
     )
 
-from shannon.detector import ShannonCollapseDetector, CollapseEvent
+from shannon._numba_fallback import (
+    _ensure_float64_1d,
+    shannon_configurational_entropy,
+    shannon_entropy_from_logprobs,
+    get_backend,
+)
+from shannon.detector import ShannonCollapseDetector, CollapseEvent, CollapseResult
 
 __all__ = [
     # Core functions
     "shannon_entropy",
     "shannon_entropy_from_logits",
+    "shannon_configurational_entropy",
+    "shannon_entropy_from_logprobs",
+    "shannon_entropy_from_probs",  # alias for shannon_entropy
     # Detector
     "ShannonCollapseDetector",
     "CollapseEvent",
+    "CollapseResult",
     # Backend info
     "_HAS_CORE",
+    "get_backend",
     "__version__",
 ]
+
+# Alias: shannon_entropy_from_probs is the same as shannon_entropy
+shannon_entropy_from_probs = shannon_entropy
 
 # Extend exports when C++ core is available
 if _HAS_CORE:

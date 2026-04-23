@@ -12,7 +12,7 @@ import numpy as np
 
 from shannon_contact.matrix import SoftContactMatrix, NUM_ATOM_TYPES
 from shannon_contact.pose_encoder import PoseEncoder
-from shannon_entropy import shannon_configurational_entropy
+from shannon import shannon_configurational_entropy
 
 
 class ContactEntropyAnalyzer:

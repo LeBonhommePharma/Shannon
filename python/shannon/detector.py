@@ -6,9 +6,11 @@
 # into a single dominant state (analogous to configurational entropy
 # collapse in molecular docking).
 #
-# Now includes FastOPTICS super-clustering: on collapse detection, the
-# active region of the 256x256 matrix is clustered to identify the dominant
-# interaction pattern (super-cluster), enabling Gaussian-biased entropy.
+# Features:
+#   - Z-score based collapse/expansion/oscillation detection
+#   - O(1) running-sum window statistics
+#   - FastOPTICS super-clustering on collapse (optional)
+#   - C++ acceleration with Python fallback
 #
 # Copyright 2024-2026 Louis-Philippe Morency
 # Licensed under the Apache License, Version 2.0
@@ -17,32 +19,68 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 from collections import deque
 from typing import Callable
 
 import numpy as np
+from numpy.typing import ArrayLike
 
-# Backend selection: C++ accelerated or Numba/NumPy fallback
-# Follows FlexAIDdS _HAS_CORE pattern
-_HAS_CORE = False
-try:
-    from shannon._core import (
-        SlidingWindowEntropy as _CppSlidingWindow,
-        shannon_entropy as _cpp_entropy,
-        shannon_entropy_from_logits as _cpp_entropy_logits,
-    )
+from shannon._numba_fallback import (
+    _ensure_float64_1d,
+    shannon_configurational_entropy,
+    shannon_entropy_from_logits as _entropy_from_logits,
+    shannon_entropy as _entropy_from_probs,
+    shannon_entropy_from_logprobs as _entropy_from_logprobs,
+)
 
-    _HAS_CORE = True
-except ImportError:
-    from shannon._numba_fallback import (
-        shannon_entropy as _fb_entropy,
-        shannon_entropy_from_logits as _fb_entropy_logits,
-    )
+DEFAULT_WINDOW_SIZE = 8
+DEFAULT_COLLAPSE_THRESHOLD = -3.2  # bits (delta below window mean)
+DEFAULT_EXPANSION_THRESHOLD = +3.2  # bits (delta above window mean)
+DEFAULT_OSCILLATION_WINDOW = 5
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CollapseResult:
+    """Result from a single step of entropy event detection."""
+
+    entropy: float
+    """Current token entropy (bits)."""
+
+    window_mean: float
+    """Mean entropy over the sliding window."""
+
+    window_std: float
+    """Standard deviation of entropy over the window."""
+
+    delta: float
+    """entropy - window_mean (negative = collapse, positive = expansion)."""
+
+    z_score: float
+    """Standardised score: delta / window_std."""
+
+    collapsed: bool
+    """True if the entropy dropped below collapse threshold."""
+
+    expanded: bool
+    """True if the entropy rose above expansion threshold."""
+
+    oscillating: bool
+    """True if rapid collapse/expand alternation detected."""
+
+    event: str
+    """Classified event: 'none', 'collapse', 'expansion', or 'oscillation'."""
+
+    token_index: int
+    """0-based token counter."""
+
+
+CollapseCallback = Callable[[CollapseResult], None]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class CollapseEvent:
-    """Fired when entropy collapse is detected."""
+    """Fired when entropy collapse is detected (for streaming integrations)."""
 
     token_index: int
     entropy: float
@@ -62,79 +100,6 @@ class SuperClusterInfo:
     active_types: list[int]
 
 
-class _PySlidingWindow:
-    """Pure-Python sliding window entropy tracker (fallback)."""
-
-    def __init__(self, window_size: int = 8, collapse_threshold: float = -3.2):
-        self._window_size = window_size
-        self._threshold = collapse_threshold
-        self._buffer: deque[float] = deque(maxlen=window_size)
-        self._trace: list[float] = []
-
-    def push(self, entropy_value: float) -> None:
-        self._trace.append(entropy_value)
-        self._buffer.append(entropy_value)
-
-    @property
-    def current_entropy(self) -> float:
-        return self._buffer[-1] if self._buffer else 0.0
-
-    @property
-    def mean_entropy(self) -> float:
-        if not self._buffer:
-            return 0.0
-        return sum(self._buffer) / len(self._buffer)
-
-    @property
-    def delta_h(self) -> float:
-        """Linear regression slope over the window (bits/token)."""
-        n = len(self._buffer)
-        if n < 2:
-            return 0.0
-        # Closed-form slope: (n*sum(i*h_i) - sum(i)*sum(h_i)) / (n*sum(i^2) - (sum(i))^2)
-        sum_i = 0.0
-        sum_h = 0.0
-        sum_ih = 0.0
-        sum_i2 = 0.0
-        for i, h in enumerate(self._buffer):
-            fi = float(i)
-            sum_i += fi
-            sum_h += h
-            sum_ih += fi * h
-            sum_i2 += fi * fi
-        fn = float(n)
-        denom = fn * sum_i2 - sum_i * sum_i
-        if abs(denom) < 1e-15:
-            return 0.0
-        return (fn * sum_ih - sum_i * sum_h) / denom
-
-    @property
-    def is_collapsed(self) -> bool:
-        return self.delta_h < self._threshold
-
-    @property
-    def collapse_score(self) -> float:
-        if abs(self._threshold) < 1e-15:
-            return 0.0
-        return abs(self.delta_h / self._threshold)
-
-    @property
-    def entropy_trace(self) -> list[float]:
-        return list(self._trace)
-
-    @property
-    def window(self) -> list[float]:
-        return list(self._buffer)
-
-    @property
-    def token_count(self) -> int:
-        return len(self._trace)
-
-    def reset(self) -> None:
-        self._buffer.clear()
-        self._trace.clear()
-
-
 class _PyFastOPTICS:
     """Pure-Python FastOPTICS for super-cluster extraction (fallback).
 
@@ -152,7 +117,6 @@ class _PyFastOPTICS:
         if n < self._min_pts:
             return []
 
-        # Simple k-means as fallback (FastOPTICS is in C++)
         k = min(self._n_clusters_hint, n // self._min_pts)
         if k < 1:
             k = 1
@@ -206,94 +170,338 @@ class _PyFastOPTICS:
 class ShannonCollapseDetector:
     """Real-time Shannon entropy collapse detector for LLM token streams.
 
-    A white-box, 256x256-parameter physicochemical referee for LLM safeguarding.
     Monitors the entropy of token probability distributions and detects sudden
     collapse — the information-theoretic analogue of configurational entropy
     collapse in molecular docking.
 
-    On collapse detection, triggers FastOPTICS super-clustering on the active
-    region of the 256x256 energy matrix to identify the dominant interaction
-    pattern.
+    Supports three event types:
+      - **collapse**: entropy drops far below window mean (delta < threshold)
+      - **expansion**: entropy rises far above window mean (delta > expansion_threshold)
+      - **oscillation**: rapid alternation between collapse and expansion
+
+    Optionally triggers FastOPTICS super-clustering on collapse detection.
 
     Parameters
     ----------
     window_size : int
         Number of recent entropy values to track (default: 8).
-    collapse_threshold : float
-        Delta-H threshold in bits/token for collapse detection (default: -3.2).
-        Negative because collapse means entropy is decreasing.
-    on_collapse : callable, optional
-        Callback fired on collapse detection, receives a CollapseEvent.
+    threshold : float
+        Collapse threshold in bits. A token is flagged when its entropy
+        drops more than this amount below the window mean (default: -3.2).
+    expansion_threshold : float
+        Expansion threshold in bits (default: +3.2).
+    oscillation_window : int
+        Window for detecting collapse/expansion alternation (default: 5).
+    callback : callable, optional
+        Function called on every collapse/expansion/oscillation event.
     enable_clustering : bool
         Enable FastOPTICS super-clustering on collapse (default: False).
+    collapse_threshold : float, optional
+        Alias for ``threshold`` (backwards compat). Ignored when ``threshold``
+        is also provided.
 
     Examples
     --------
     >>> detector = ShannonCollapseDetector()
-    >>> for logits in model_output_stream:
-    ...     detector.add_logits(logits)
-    ...     if detector.is_collapsed:
-    ...         print(f"Collapse at token {detector.token_count}!")
+    >>> result = detector.add_logits(np.random.randn(50000))
+    >>> print(f"Entropy: {result.entropy:.2f} bits, event: {result.event}")
     """
 
     def __init__(
         self,
-        window_size: int = 8,
-        collapse_threshold: float = -3.2,
-        on_collapse: Callable[[CollapseEvent], None] | None = None,
+        window_size: int = DEFAULT_WINDOW_SIZE,
+        threshold: float = DEFAULT_COLLAPSE_THRESHOLD,
+        expansion_threshold: float = DEFAULT_EXPANSION_THRESHOLD,
+        oscillation_window: int = DEFAULT_OSCILLATION_WINDOW,
+        callback: CollapseCallback | None = None,
         enable_clustering: bool = False,
+        # Backwards compat aliases
+        collapse_threshold: float | None = None,
+        on_collapse: Callable[[CollapseEvent], None] | None = None,
     ):
+        # Handle backwards-compat parameter names
+        if collapse_threshold is not None:
+            threshold = collapse_threshold
+        self._callback = callback or on_collapse
+        self._on_collapse_event = on_collapse  # Separate CollapseEvent callback
+
         self._window_size = window_size
-        self._collapse_threshold = collapse_threshold
-        self._on_collapse = on_collapse
+        self._threshold = threshold
+        self._expansion_threshold = expansion_threshold
+        self._oscillation_window = oscillation_window
         self._enable_clustering = enable_clustering
+
         self._trace: list[float] = []
+        self._window: deque[float] = deque(maxlen=window_size)
+        self._event_history: deque[str] = deque(maxlen=oscillation_window)
+        self._running_sum = 0.0
+        self._running_sum_sq = 0.0
+        self._token_count = 0
+
+        # C++ detector (optional fast path)
+        self._cpp_detector = None
+        try:
+            from _shannon_cpp import CollapseDetector as CppDetector
+
+            self._cpp_detector = CppDetector(
+                window_size, threshold, expansion_threshold, oscillation_window
+            )
+            if self._callback:
+                self._cpp_detector.set_callback(self._callback)
+        except ImportError:
+            pass
+
+        # Super-clustering (optional)
         self._last_super_cluster: SuperClusterInfo | None = None
         self._active_types: list[int] = []
-
-        # Select backend
-        if _HAS_CORE:
-            self._window = _CppSlidingWindow(window_size, collapse_threshold)
-            self._entropy_fn = _cpp_entropy
-            self._entropy_logits_fn = _cpp_entropy_logits
-            self._backend = "cpp"
-        else:
-            self._window = _PySlidingWindow(window_size, collapse_threshold)
-            self._entropy_fn = _fb_entropy
-            self._entropy_logits_fn = _fb_entropy_logits
-            self._backend = "python"
-
         if enable_clustering:
             self._clusterer = _PyFastOPTICS()
 
-    def _push_and_check(self, entropy: float) -> None:
-        """Push entropy value and fire callback if collapsed."""
-        self._trace.append(entropy)
+        # Backend label
+        try:
+            from shannon._core import SlidingWindowEntropy  # noqa: F401
+            self._backend = "cpp"
+        except ImportError:
+            self._backend = "python"
 
-        if _HAS_CORE:
-            self._window.push(entropy)
-            collapsed = self._window.is_collapsed()
-            delta = self._window.delta_h()
-            score = self._window.collapse_score()
+    def reset(self) -> None:
+        """Clear all internal state."""
+        if self._cpp_detector is not None:
+            self._cpp_detector.reset()
+        self._trace.clear()
+        self._window.clear()
+        self._event_history.clear()
+        self._token_count = 0
+        self._running_sum = 0.0
+        self._running_sum_sq = 0.0
+        self._last_super_cluster = None
+        self._active_types.clear()
+
+    def add_logits(self, logits: ArrayLike) -> CollapseResult:
+        """Feed raw logits for the current token.
+
+        Returns CollapseResult with full event classification.
+        """
+        arr = _ensure_float64_1d(logits)
+        if self._cpp_detector is not None:
+            r = self._cpp_detector.add_logits(arr)
+            return self._wrap_cpp_result(r)
+        h = shannon_configurational_entropy(arr)
+        result = self._push(h)
+
+        # Track active types for clustering
+        if self._enable_clustering:
+            top_k = min(20, len(arr))
+            top_indices = np.argpartition(arr, -top_k)[-top_k:]
+            self._active_types.extend(int(i % 256) for i in top_indices)
+            if len(self._active_types) > 1000:
+                self._active_types = self._active_types[-500:]
+
+        return result
+
+    def add_probs(self, probs: ArrayLike) -> CollapseResult:
+        """Feed a normalized probability distribution."""
+        arr = _ensure_float64_1d(probs)
+        if self._cpp_detector is not None:
+            r = self._cpp_detector.add_probs(arr)
+            return self._wrap_cpp_result(r)
+        h = _entropy_from_probs(arr)
+        return self._push(h)
+
+    def add_logprobs(self, logprobs: ArrayLike) -> CollapseResult:
+        """Feed log-probabilities (base e)."""
+        arr = _ensure_float64_1d(logprobs)
+        if self._cpp_detector is not None:
+            r = self._cpp_detector.add_logprobs(arr)
+            return self._wrap_cpp_result(r)
+        h = _entropy_from_logprobs(arr)
+        return self._push(h)
+
+    @property
+    def trace(self) -> list[float]:
+        """Full entropy trace (all tokens seen so far)."""
+        if self._cpp_detector is not None:
+            return list(self._cpp_detector.trace)
+        return list(self._trace)
+
+    @property
+    def entropy_trace(self) -> list[float]:
+        """Alias for trace."""
+        return self.trace
+
+    @property
+    def window_size(self) -> int:
+        return self._window_size
+
+    @property
+    def threshold(self) -> float:
+        return self._threshold
+
+    @property
+    def is_collapsed(self) -> bool:
+        """Whether the most recent token triggered a collapse event."""
+        if self._trace:
+            last_event = self._event_history[-1] if self._event_history else "none"
+            return last_event in ("collapse", "oscillation")
+        return False
+
+    @property
+    def collapse_score(self) -> float:
+        """|delta / threshold|, >1.0 means collapsed."""
+        if abs(self._threshold) < 1e-15 or not self._trace:
+            return 0.0
+        return abs(self._trace[-1] - self._current_mean / max(1, len(self._window)) / abs(self._threshold))
+
+    @property
+    def current_entropy(self) -> float:
+        """Most recent entropy value."""
+        return self._trace[-1] if self._trace else 0.0
+
+    @property
+    def delta_h(self) -> float:
+        """Rate of entropy change via linear regression over the window."""
+        n = len(self._window)
+        if n < 2:
+            return 0.0
+        sum_i = 0.0
+        sum_h = 0.0
+        sum_ih = 0.0
+        sum_i2 = 0.0
+        for i, h in enumerate(self._window):
+            fi = float(i)
+            sum_i += fi
+            sum_h += h
+            sum_ih += fi * h
+            sum_i2 += fi * fi
+        fn = float(n)
+        denom = fn * sum_i2 - sum_i * sum_i
+        if abs(denom) < 1e-15:
+            return 0.0
+        return (fn * sum_ih - sum_i * sum_h) / denom
+
+    @property
+    def token_count(self) -> int:
+        """Total number of tokens processed."""
+        return self._token_count
+
+    @property
+    def backend(self) -> str:
+        """Active computation backend: 'cpp' or 'python'."""
+        return self._backend
+
+    @property
+    def super_cluster(self) -> SuperClusterInfo | None:
+        """Most recent super-cluster from FastOPTICS (None if not triggered)."""
+        return self._last_super_cluster
+
+    def _push(self, h: float) -> CollapseResult:
+        """Push an entropy value through the Python fallback detector."""
+        self._trace.append(h)
+
+        # O(1) running-sum window statistics
+        if len(self._window) == self._window.maxlen:
+            outgoing = self._window[0]
+            self._running_sum -= outgoing
+            self._running_sum_sq -= outgoing * outgoing
+
+        self._window.append(h)
+        self._running_sum += h
+        self._running_sum_sq += h * h
+
+        count = len(self._window)
+        mean = self._running_sum / count if count > 0 else 0.0
+
+        if count > 1:
+            variance = (self._running_sum_sq / count) - (mean * mean)
+            std = math.sqrt(max(0.0, variance))
         else:
-            self._window.push(entropy)
-            collapsed = self._window.is_collapsed
-            delta = self._window.delta_h
-            score = self._window.collapse_score
+            std = 0.0
 
-        if collapsed and self._on_collapse is not None:
-            event = CollapseEvent(
-                token_index=len(self._trace) - 1,
-                entropy=entropy,
+        delta = h - mean
+        z = delta / std if std > 1e-12 else 0.0
+        window_ready = count >= self._window_size
+
+        collapsed = window_ready and (delta < self._threshold)
+        expanded = window_ready and (delta > self._expansion_threshold)
+
+        event = "none"
+        if collapsed:
+            event = "collapse"
+        elif expanded:
+            event = "expansion"
+
+        self._event_history.append(event)
+
+        oscillating = False
+        if window_ready and event != "none":
+            alternations = 0
+            prev = list(self._event_history)
+            for i in range(1, len(prev)):
+                if (prev[i - 1] == "collapse" and prev[i] == "expansion") or (
+                    prev[i - 1] == "expansion" and prev[i] == "collapse"
+                ):
+                    alternations += 1
+            if alternations >= 2:
+                oscillating = True
+                event = "oscillation"
+
+        result = CollapseResult(
+            entropy=h,
+            window_mean=mean,
+            window_std=std,
+            delta=delta,
+            z_score=z,
+            collapsed=collapsed,
+            expanded=expanded,
+            oscillating=oscillating,
+            event=event,
+            token_index=self._token_count,
+        )
+        self._token_count += 1
+
+        if (collapsed or expanded or oscillating) and self._callback:
+            self._callback(result)
+
+        # Fire CollapseEvent for legacy on_collapse callback
+        if collapsed and self._on_collapse_event is not None:
+            evt = CollapseEvent(
+                token_index=result.token_index,
+                entropy=h,
                 delta_h=delta,
-                collapse_score=score,
-                window=list(self._window.window) if not _HAS_CORE else list(self._window.window()),
+                collapse_score=abs(delta / self._threshold) if abs(self._threshold) > 1e-15 else 0.0,
+                window=list(self._window),
             )
-            self._on_collapse(event)
+            self._on_collapse_event(evt)
 
         # Trigger super-clustering on collapse
         if collapsed and self._enable_clustering:
             self._run_clustering()
+
+        return result
+
+    @staticmethod
+    def _wrap_cpp_result(r: object) -> CollapseResult:
+        """Wrap a C++ CollapseResult into our Python dataclass."""
+        event = "none"
+        if getattr(r, "oscillating", False):
+            event = "oscillation"
+        elif getattr(r, "expanded", False):
+            event = "expansion"
+        elif getattr(r, "collapsed", False):
+            event = "collapse"
+
+        return CollapseResult(
+            entropy=getattr(r, "entropy", 0.0),
+            window_mean=getattr(r, "window_mean", 0.0),
+            window_std=getattr(r, "window_std", 0.0),
+            delta=getattr(r, "delta", 0.0),
+            z_score=getattr(r, "z_score", 0.0),
+            collapsed=getattr(r, "collapsed", False),
+            expanded=getattr(r, "expanded", False),
+            oscillating=getattr(r, "oscillating", False),
+            event=event,
+            token_index=getattr(r, "token_index", 0),
+        )
 
     def _run_clustering(self) -> None:
         """Run FastOPTICS on active matrix rows to extract super-cluster."""
@@ -301,8 +509,7 @@ class ShannonCollapseDetector:
             return
 
         try:
-            # Get energy matrix (try C++ first, then Python)
-            if _HAS_CORE:
+            if self._backend == "cpp":
                 from shannon._core import ShannonEnergyMatrix
 
                 matrix = ShannonEnergyMatrix.instance()
@@ -323,102 +530,10 @@ class ShannonCollapseDetector:
 
             clusters = self._clusterer.cluster(vectors)
             if clusters:
-                self._last_super_cluster = clusters[0]  # Dominant cluster
+                self._last_super_cluster = clusters[0]
         except Exception:
             pass  # Clustering is best-effort
 
-    def add_logits(self, logits: np.ndarray) -> float:
-        """Compute entropy from raw logits and push to detector.
-
-        Uses fused log-sum-exp for numerical stability.
-        Returns the computed entropy in bits.
-        """
-        logits = np.asarray(logits, dtype=np.float64).ravel()
-        H = float(self._entropy_logits_fn(logits))
-        self._push_and_check(H)
-
-        # Track active types for clustering
-        if self._enable_clustering:
-            top_k = min(20, len(logits))
-            top_indices = np.argpartition(logits, -top_k)[-top_k:]
-            self._active_types.extend(int(i % 256) for i in top_indices)
-            # Keep bounded
-            if len(self._active_types) > 1000:
-                self._active_types = self._active_types[-500:]
-
-        return H
-
-    def add_probs(self, probs: np.ndarray) -> float:
-        """Compute entropy from probability distribution and push.
-
-        Returns the computed entropy in bits.
-        """
-        probs = np.asarray(probs, dtype=np.float64).ravel()
-        H = float(self._entropy_fn(probs))
-        self._push_and_check(H)
-        return H
-
-    def add_logprobs(self, logprobs: np.ndarray) -> float:
-        """Compute entropy from log-probabilities (e.g., OpenAI API output).
-
-        Converts log-probs to probs via exp(), then computes entropy.
-        Returns the computed entropy in bits.
-        """
-        logprobs = np.asarray(logprobs, dtype=np.float64).ravel()
-        probs = np.exp(logprobs)
-        return self.add_probs(probs)
-
     @property
-    def entropy_trace(self) -> list[float]:
-        """Full history of entropy values (all tokens, not just window)."""
-        return list(self._trace)
-
-    @property
-    def is_collapsed(self) -> bool:
-        """Whether the current window indicates entropy collapse."""
-        if _HAS_CORE:
-            return bool(self._window.is_collapsed())
-        return bool(self._window.is_collapsed)
-
-    @property
-    def collapse_score(self) -> float:
-        """|delta_h / threshold|, >1.0 means collapsed."""
-        if _HAS_CORE:
-            return float(self._window.collapse_score())
-        return float(self._window.collapse_score)
-
-    @property
-    def current_entropy(self) -> float:
-        """Most recent entropy value."""
-        if _HAS_CORE:
-            return float(self._window.current_entropy())
-        return float(self._window.current_entropy)
-
-    @property
-    def delta_h(self) -> float:
-        """Rate of entropy change (bits/token), via linear regression."""
-        if _HAS_CORE:
-            return float(self._window.delta_h())
-        return float(self._window.delta_h)
-
-    @property
-    def token_count(self) -> int:
-        """Total number of tokens processed."""
-        return len(self._trace)
-
-    @property
-    def backend(self) -> str:
-        """Active computation backend: 'cpp' or 'python'."""
-        return self._backend
-
-    @property
-    def super_cluster(self) -> SuperClusterInfo | None:
-        """Most recent super-cluster from FastOPTICS (None if not triggered)."""
-        return self._last_super_cluster
-
-    def reset(self) -> None:
-        """Clear all state and start fresh."""
-        self._trace.clear()
-        self._window.reset()
-        self._last_super_cluster = None
-        self._active_types.clear()
+    def _current_mean(self) -> float:
+        return self._running_sum / max(1, len(self._window))

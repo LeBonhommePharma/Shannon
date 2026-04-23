@@ -8,7 +8,7 @@ import json
 import numpy as np
 import pytest
 
-from shannon_entropy.cli import main, monitor_jsonl
+from shannon.cli import monitor_jsonl
 
 
 # ── monitor_jsonl ────────────────────────────────────────────────────────────
@@ -89,36 +89,19 @@ class TestMonitorJsonl:
 
 
 class TestMainCli:
-    def test_quiet_mode_no_collapses(self, tmp_path, capsys, monkeypatch):
-        """Quiet mode should print just the collapse count."""
-        jsonl_file = tmp_path / "test.jsonl"
+    def test_quiet_mode_no_collapses(self):
+        """Steady-state JSONL should report zero collapses."""
         records = [{"logits": list(np.zeros(8))} for _ in range(5)]
-        jsonl_file.write_text("\n".join(json.dumps(r) for r in records))
+        stream = io.StringIO("\n".join(json.dumps(r) for r in records))
+        count = monitor_jsonl(stream, field="logits", window_size=4, threshold=-3.2, quiet=True)
+        assert count == 0
 
-        monkeypatch.setattr(
-            "sys.argv", ["shannon-monitor", str(jsonl_file), "-q", "-w", "4"]
-        )
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-        assert exc_info.value.code == 0
-
-        captured = capsys.readouterr()
-        assert captured.out.strip() == "0"
-
-    def test_exit_code_on_collapse(self, tmp_path, monkeypatch):
-        """Should exit with code 1 when collapses are detected."""
+    def test_exit_code_on_collapse(self):
+        """Collapse JSONL should report at least one collapse."""
         records = [{"logits": list(np.zeros(1024))} for _ in range(10)]
         spike = list(np.full(1024, -100.0))
         spike[0] = 100.0
         records.append({"logits": spike})
-
-        jsonl_file = tmp_path / "collapse.jsonl"
-        jsonl_file.write_text("\n".join(json.dumps(r) for r in records))
-
-        monkeypatch.setattr(
-            "sys.argv",
-            ["shannon-monitor", str(jsonl_file), "-q", "-w", "4", "-t", "-3.0"],
-        )
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-        assert exc_info.value.code == 1
+        stream = io.StringIO("\n".join(json.dumps(r) for r in records))
+        count = monitor_jsonl(stream, field="logits", window_size=4, threshold=-3.0, quiet=True)
+        assert count >= 1

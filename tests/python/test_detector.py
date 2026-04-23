@@ -5,13 +5,13 @@
 import math
 
 import numpy as np
-from shannon_entropy import (
+from shannon import (
     ShannonCollapseDetector,
     shannon_configurational_entropy,
     shannon_entropy_from_logprobs,
     shannon_entropy_from_probs,
 )
-from shannon_entropy.core import get_backend
+from shannon._numba_fallback import get_backend
 
 # ── Core entropy functions ───────────────────────────────────────────────────
 

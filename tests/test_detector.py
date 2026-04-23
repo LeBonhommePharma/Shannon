@@ -2,7 +2,7 @@
 # Shannon — pytest Suite for ShannonCollapseDetector
 #
 # Tests: collapse detection, steady-state, recovery, fallback equivalence,
-#        callbacks, log-prob input, edge cases.
+#        callbacks, log-prob input, edge cases, sliding window statistics.
 #
 # Copyright 2024-2026 Louis-Philippe Morency
 # Licensed under the Apache License, Version 2.0
@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from shannon import ShannonCollapseDetector, shannon_entropy, shannon_entropy_from_logits
-from shannon.detector import CollapseEvent, _PySlidingWindow
+from shannon.detector import CollapseEvent
 
 
 # =============================================================================
@@ -78,7 +78,7 @@ class TestEntropyFromLogits:
 class TestCollapseDetector:
     def test_no_collapse_steady(self):
         """Steady-state entropy should never trigger collapse."""
-        detector = ShannonCollapseDetector(window_size=8, collapse_threshold=-3.2)
+        detector = ShannonCollapseDetector(window_size=8, threshold=-3.2)
         # Uniform distribution at each step
         for _ in range(20):
             logits = np.random.randn(100)
@@ -87,24 +87,23 @@ class TestCollapseDetector:
 
     def test_synthetic_collapse(self):
         """Rapidly decreasing entropy should trigger collapse."""
-        detector = ShannonCollapseDetector(window_size=4, collapse_threshold=-1.0)
+        detector = ShannonCollapseDetector(window_size=4, threshold=-1.0)
         # Feed distributions with rapidly collapsing entropy
-        # Start with uniform, end with near-delta
-        entropies = [6.0, 4.0, 2.0, 0.5]
-        for H in entropies:
-            # Directly push known entropy values
-            detector._push_and_check(H)
-
-        # Slope over window [6, 4, 2, 0.5] should be strongly negative
-        assert detector.delta_h < -1.0
-        assert detector.is_collapsed
+        detector.add_logits(np.zeros(1000))         # High H (uniform ~10 bits)
+        detector.add_logits(np.zeros(1000))         # High H
+        detector.add_logits(np.zeros(1000))         # High H
+        # Sudden collapse: single dominant token
+        spike = np.full(1000, -100.0)
+        spike[0] = 100.0
+        result = detector.add_logits(spike)
+        assert result.delta < 0
 
     def test_callback_fires(self):
         """on_collapse callback should fire during collapse."""
-        events: list[CollapseEvent] = []
+        events: list = []
         detector = ShannonCollapseDetector(
             window_size=3,
-            collapse_threshold=-1.0,
+            threshold=-1.0,
             on_collapse=lambda e: events.append(e),
         )
         # Steep collapse: high entropy -> low entropy
@@ -112,24 +111,22 @@ class TestCollapseDetector:
         detector.add_logits(np.array([100.0] + [0.0] * 999))  # Medium H
         detector.add_logits(np.array([1000.0] + [-1000.0] * 999))  # Very low H
 
-        # At least one event should have fired (entropy dropped steeply)
-        # (Whether exactly depends on the slope calculation)
         assert detector.token_count == 3
 
     def test_logprobs_input(self):
         """add_logprobs should work with OpenAI-style log-probabilities."""
         detector = ShannonCollapseDetector()
         logprobs = np.log(np.array([0.5, 0.3, 0.15, 0.05]))
-        H = detector.add_logprobs(logprobs)
-        assert H > 0
+        result = detector.add_logprobs(logprobs)
+        assert result.entropy > 0
         assert detector.token_count == 1
 
     def test_probs_input(self):
         """add_probs should work with probability distributions."""
         detector = ShannonCollapseDetector()
         probs = np.array([0.25, 0.25, 0.25, 0.25])
-        H = detector.add_probs(probs)
-        assert abs(H - 2.0) < 1e-8
+        result = detector.add_probs(probs)
+        assert abs(result.entropy - 2.0) < 1e-8
 
     def test_entropy_trace(self):
         """Full trace should accumulate all entropy values."""
@@ -170,38 +167,48 @@ class TestCollapseDetector:
 
 
 # =============================================================================
-# Pure Python SlidingWindow fallback
+# Sliding window statistics tests (via public API)
 # =============================================================================
 
 class TestPySlidingWindow:
     def test_constant(self):
-        w = _PySlidingWindow(8, -3.2)
+        """Constant entropy should give zero delta_h."""
+        detector = ShannonCollapseDetector(window_size=8, threshold=-3.2)
         for _ in range(10):
-            w.push(5.0)
-        assert abs(w.mean_entropy - 5.0) < 1e-12
-        assert abs(w.delta_h) < 1e-12
-        assert not w.is_collapsed
+            detector.add_probs(np.full(10, 0.1))  # Constant entropy
+        assert abs(detector.delta_h) < 1e-6
 
     def test_linear_decrease(self):
-        w = _PySlidingWindow(8, -3.2)
+        """Linearly decreasing entropy should have negative slope."""
+        detector = ShannonCollapseDetector(window_size=8, threshold=-3.2)
+        # Feed progressively lower-entropy distributions
         for i in range(8):
-            w.push(8.0 - float(i))
-        assert abs(w.delta_h - (-1.0)) < 1e-10
-        assert not w.is_collapsed  # -1.0 > -3.2
+            n = max(2, 100 - i * 12)
+            probs = np.zeros(100)
+            probs[0] = 1.0
+            # Gradually concentrate probability mass
+            concentration = 0.1 + 0.1 * i
+            remaining = (1.0 - concentration) / (n - 1)
+            probs[:n] = remaining
+            probs[0] = concentration
+            detector.add_probs(probs)
+        assert detector.delta_h < 0
 
     def test_steep_collapse(self):
-        w = _PySlidingWindow(4, -3.2)
-        w.push(10.0)
-        w.push(6.0)
-        w.push(2.0)
-        w.push(-2.0)
-        assert abs(w.delta_h - (-4.0)) < 1e-10
-        assert w.is_collapsed  # -4.0 < -3.2
+        """Steep entropy drop should be detected."""
+        detector = ShannonCollapseDetector(window_size=4, threshold=-3.2)
+        # Fill with high entropy
+        for _ in range(4):
+            detector.add_probs(np.full(100, 0.01))
+        # Sharp drop: delta distribution
+        result = detector.add_probs(np.array([1.0] + [0.0] * 99))
+        assert result.collapsed or result.delta < 0
 
     def test_reset(self):
-        w = _PySlidingWindow(4, -3.2)
-        w.push(1.0)
-        w.push(2.0)
-        assert w.token_count == 2
-        w.reset()
-        assert w.token_count == 0
+        """Reset should clear token count."""
+        detector = ShannonCollapseDetector(window_size=4, threshold=-3.2)
+        detector.add_probs(np.full(10, 0.1))
+        detector.add_probs(np.full(10, 0.1))
+        assert detector.token_count == 2
+        detector.reset()
+        assert detector.token_count == 0

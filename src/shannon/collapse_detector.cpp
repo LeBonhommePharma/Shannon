@@ -109,20 +109,16 @@ CollapseResult CollapseDetector::push_entropy(double h) {
     }
 
     const std::size_t count = window_full_ ? window_size_ : window_pos_;
-    double sum = 0.0;
-    for (std::size_t i = 0; i < count; ++i) {
-        sum += window_[i];
-    }
-    const double mean = (count > 0) ? sum / static_cast<double>(count) : 0.0;
 
-    double sum_sq_diff = 0.0;
+    // Welford: O(n), stable. Replaces E[X²]-E[X]² which cancels catastrophically near H≈2 bits.
+    double mean = 0.0, M2 = 0.0;
     for (std::size_t i = 0; i < count; ++i) {
-        const double diff = window_[i] - mean;
-        sum_sq_diff += diff * diff;
+        const double delta = window_[i] - mean;
+        mean += delta / static_cast<double>(i + 1);
+        const double delta2 = window_[i] - mean;
+        M2 += delta * delta2;
     }
-    const double variance = (count > 1)
-        ? sum_sq_diff / static_cast<double>(count)
-        : 0.0;
+    const double variance = (count > 1) ? M2 / static_cast<double>(count - 1) : 0.0;
     const double stddev = std::sqrt(std::max(0.0, variance));
 
     const double delta = h - mean;

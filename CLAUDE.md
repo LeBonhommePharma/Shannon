@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Shannon is a physics-grounded LLM safety library for zero-shot detection of evaluation awareness and strategic deception in frontier LLM agents. It ports configurational entropy computation from molecular docking (FlexAID∆S) to detect entropy collapse in LLM token distributions. When an LLM becomes evaluation-aware, its token distributions narrow (H drops from ~8-12 bits to ~2-4 bits), detectable via a sliding-window z-score threshold (default δ < -3.2 bits).
 
-Shannon 2.0 expands this into a pure C++20 terminal agent with unified hardware dispatch (CUDA/ROCm/Metal/AVX-512/AVX2/SSE4.2/NEON), TurboQuant zero-overhead monitoring, and failsafe handrails that sit on top of any LLM.
-
 ## Coding Directives
 
 - Start coding immediately when asked to implement — do not spend more than 1-2 rounds reading/planning before writing code.
@@ -22,7 +20,6 @@ Shannon 2.0 expands this into a pure C++20 terminal agent with unified hardware 
 ## File Naming Convention
 
 - Use underscores (not hyphens) in Python package and module names to avoid import errors.
-- C++ headers use `.hpp`, implementations use `.cpp`. New modules go in `src/shannon/`.
 - Check existing naming patterns in the repo before creating new files or directories.
 
 ## Build & Install
@@ -34,11 +31,6 @@ pip install -e ".[dev]"
 # C++ library only (no Python)
 cmake -B build -DSHANNON_BUILD_PYTHON=OFF
 cmake --build build --config Release -j
-
-# C++ tests only
-cmake -B build -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF
-cmake --build build -j
-ctest --test-dir build --output-on-failure
 ```
 
 ## Testing
@@ -47,10 +39,10 @@ ctest --test-dir build --output-on-failure
 # Python tests (pytest, 23 tests)
 pytest tests/python/ -v
 
-# Single test
+# Single test file
 pytest tests/python/test_detector.py -v -k "test_name"
 
-# C++ tests (GoogleTest, ~17 tests)
+# C++ tests (GoogleTest)
 cmake -B build -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF
 cmake --build build -j
 ctest --test-dir build --output-on-failure
@@ -66,9 +58,16 @@ mypy python/
 
 Target: Python 3.10+, line length 100, ruff rules E/F/W/I/UP.
 
+## Project Structure
+
+- Primary languages: Python, C++20, with YAML for configuration
+- CMake build system — always run `cmake -B build` then `cmake --build build` to compile
+- Python tests via `pytest tests/python/ -v`, C++ tests via `ctest --test-dir build --output-on-failure`
+- ~23 Python tests and a GoogleTest C++ suite — all should pass before committing
+
 ## Architecture
 
-### Three-tier backend pipeline (Python, core.py)
+### Three-tier backend pipeline (core.py)
 
 ```
 core.py → _shannon_cpp (C++/pybind11, OpenMP+SIMD)
@@ -78,22 +77,13 @@ core.py → _shannon_cpp (C++/pybind11, OpenMP+SIMD)
 
 Each tier implements the same log-sum-exp configurational entropy kernel. `core.py` auto-selects the fastest available backend at import time.
 
-### Key components (v1 — Python layer)
+### Key components
 
 - **src/shannon.cpp** — C++20 core: log-sum-exp entropy kernel with OpenMP+SIMD pragmas (namespace `shannon`)
 - **src/bindings.cpp** — pybind11 bridge exposing C++ kernels to Python
 - **python/shannon_entropy/core.py** — backend selection and pure-NumPy/Numba fallback implementations
-- **python/shannon_entropy/detector.py** — `ShannonCollapseDetector`: sliding-window state machine
+- **python/shannon_entropy/detector.py** — `ShannonCollapseDetector`: sliding-window state machine that tracks entropy over token stream, computes z-score delta, fires callback on collapse
 - **python/shannon_entropy/cli.py** — `shannon-monitor` CLI for piping JSONL token streams
-
-### Key components (v2 — C++20 expansion in progress)
-
-- **src/shannon/config.hpp** — Compile-time constants (ln2, log₂e, default thresholds, version)
-- **src/shannon/types.hpp** — Core types: `Backend` enum (SCALAR→ROCM+AUTO), `KernelType`, `HandrailAction`, `CollapseResult`, `HandrailConfig`, `DispatchTelemetry`
-- **src/shannon/hardware_detect.hpp/.cpp** — Runtime hardware detection (CPUID x86, ARM NEON, CUDA, ROCm, Metal, OpenMP). Cached singleton via `shannon::hw::detect_hardware()`
-- **src/shannon/entropy.hpp** — Entropy kernel declarations for all backends
-- **src/shannon/entropy_scalar.cpp** — Baseline scalar entropy kernels (configurational, probs, logprobs)
-- **src/shannon/handrail.hpp/.cpp** — Failsafe handrail engine: escalation logic (first → alert, sustained → kill), actions (LOG_ONLY, ALERT, THROTTLE, KILL, COREDUMP, WEBHOOK, CALLBACK)
 
 ### Entropy computation
 
@@ -111,10 +101,6 @@ S = log2(Z) - (1/Z) Σ (w_i - max_w) exp(w_i - max_w) / ln(2)
 | `SHANNON_BUILD_TESTS` | ON | Build GoogleTest suite |
 | `SHANNON_BUILD_PYTHON` | ON | Build pybind11 module |
 | `SHANNON_USE_OPENMP` | ON | Enable OpenMP acceleration |
-| `SHANNON_USE_CUDA` | OFF | Enable CUDA GPU kernels |
-| `SHANNON_USE_ROCM` | OFF | Enable ROCm/HIP GPU kernels |
-| `SHANNON_USE_METAL` | OFF | Enable Metal GPU kernels |
-| `SHANNON_USE_EIGEN` | OFF | Enable Eigen vectorization |
 
 ## CI
 

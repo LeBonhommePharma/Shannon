@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
 
 namespace shannon {
 
@@ -98,8 +99,8 @@ bool CollapseDetector::detect_oscillation() const {
 
 CollapseResult CollapseDetector::push_entropy(double h) {
     trace_.push_back(h);
-    if (max_trace_size_ > 0 && trace_.size() > max_trace_size_) {
-        trace_.erase(trace_.begin(), trace_.begin() + (trace_.size() - max_trace_size_));
+    if (trace_.size() > max_trace_size_) {
+        trace_.pop_front();   // O(1) with deque; max_trace_size_ defaults to MAX_TRACE (10000)
     }
 
     window_[window_pos_] = h;
@@ -188,9 +189,9 @@ void CollapseDetector::set_threshold(double threshold_bits) {
 }
 
 void CollapseDetector::set_max_trace_size(std::size_t max_size) {
-    max_trace_size_ = max_size;
-    if (max_trace_size_ > 0 && trace_.size() > max_trace_size_) {
-        trace_.erase(trace_.begin(), trace_.begin() + (trace_.size() - max_trace_size_));
+    max_trace_size_ = (max_size > 0) ? max_size : MAX_TRACE;
+    while (trace_.size() > max_trace_size_) {
+        trace_.pop_front();
     }
 }
 
@@ -198,7 +199,7 @@ std::size_t CollapseDetector::token_count() const noexcept {
     return token_count_;
 }
 
-const std::vector<double>& CollapseDetector::entropy_trace() const noexcept {
+const std::deque<double>& CollapseDetector::entropy_trace() const noexcept {
     return trace_;
 }
 

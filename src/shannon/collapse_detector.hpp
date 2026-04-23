@@ -16,6 +16,7 @@
 #include "shannon/unified_dispatch.hpp"
 
 #include <cstddef>
+#include <deque>
 #include <functional>
 #include <vector>
 
@@ -58,9 +59,11 @@ public:
 
     // Accessors
     std::size_t token_count() const noexcept;
-    const std::vector<double>& entropy_trace() const noexcept;
+    const std::deque<double>& entropy_trace() const noexcept;
 
 private:
+    static constexpr std::size_t MAX_TRACE = 10000;  // hard cap: prevents unbounded growth
+
     std::size_t window_size_;
     double collapse_threshold_;
     double expansion_threshold_;
@@ -69,8 +72,8 @@ private:
     std::size_t window_pos_ = 0;
     bool window_full_ = false;
     std::size_t token_count_ = 0;
-    std::size_t max_trace_size_ = 0;
-    std::vector<double> trace_;
+    std::size_t max_trace_size_ = MAX_TRACE;
+    std::deque<double> trace_;
     std::vector<EntropyEvent> event_history_;
     CollapseCallback callback_;
 

@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
 
 namespace shannon {
 
@@ -98,8 +99,8 @@ bool CollapseDetector::detect_oscillation() const {
 
 CollapseResult CollapseDetector::push_entropy(double h) {
     trace_.push_back(h);
-    if (max_trace_size_ > 0 && trace_.size() > max_trace_size_) {
-        trace_.erase(trace_.begin(), trace_.begin() + (trace_.size() - max_trace_size_));
+    if (trace_.size() > max_trace_size_) {
+        trace_.pop_front();   // O(1) with deque; max_trace_size_ defaults to MAX_TRACE (10000)
     }
 
     window_[window_pos_] = h;
@@ -109,20 +110,16 @@ CollapseResult CollapseDetector::push_entropy(double h) {
     }
 
     const std::size_t count = window_full_ ? window_size_ : window_pos_;
-    double sum = 0.0;
-    for (std::size_t i = 0; i < count; ++i) {
-        sum += window_[i];
-    }
-    const double mean = (count > 0) ? sum / static_cast<double>(count) : 0.0;
 
-    double sum_sq_diff = 0.0;
+    // Welford: O(n), stable. Replaces E[X²]-E[X]² which cancels catastrophically near H≈2 bits.
+    double mean = 0.0, M2 = 0.0;
     for (std::size_t i = 0; i < count; ++i) {
-        const double diff = window_[i] - mean;
-        sum_sq_diff += diff * diff;
+        const double delta = window_[i] - mean;
+        mean += delta / static_cast<double>(i + 1);
+        const double delta2 = window_[i] - mean;
+        M2 += delta * delta2;
     }
-    const double variance = (count > 1)
-        ? sum_sq_diff / static_cast<double>(count)
-        : 0.0;
+    const double variance = (count > 1) ? M2 / static_cast<double>(count - 1) : 0.0;
     const double stddev = std::sqrt(std::max(0.0, variance));
 
     const double delta = h - mean;
@@ -192,9 +189,9 @@ void CollapseDetector::set_threshold(double threshold_bits) {
 }
 
 void CollapseDetector::set_max_trace_size(std::size_t max_size) {
-    max_trace_size_ = max_size;
-    if (max_trace_size_ > 0 && trace_.size() > max_trace_size_) {
-        trace_.erase(trace_.begin(), trace_.begin() + (trace_.size() - max_trace_size_));
+    max_trace_size_ = (max_size > 0) ? max_size : MAX_TRACE;
+    while (trace_.size() > max_trace_size_) {
+        trace_.pop_front();
     }
 }
 
@@ -202,7 +199,7 @@ std::size_t CollapseDetector::token_count() const noexcept {
     return token_count_;
 }
 
-const std::vector<double>& CollapseDetector::entropy_trace() const noexcept {
+const std::deque<double>& CollapseDetector::entropy_trace() const noexcept {
     return trace_;
 }
 

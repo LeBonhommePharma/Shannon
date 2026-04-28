@@ -28,38 +28,32 @@ HandrailEngine::HandrailEngine(HandrailConfig cfg)
                             std::chrono::duration<double>(cfg_.cooldown_seconds + 1.0))) {}
 
 void HandrailEngine::evaluate(const CollapseResult& result) {
+    // if/else if: states are mutually exclusive; independent ifs risk double-evaluation
     if (result.oscillating) {
         total_oscillations_.fetch_add(1, std::memory_order_relaxed);
         log_event("OSCILLATION", result);
         execute_action(cfg_.on_oscillation, result);
         consecutive_collapses_.store(0, std::memory_order_relaxed);
-        return;
-    }
-
-    if (result.expanded) {
+    } else if (result.expanded) {
         total_expansions_.fetch_add(1, std::memory_order_relaxed);
         consecutive_collapses_.store(0, std::memory_order_relaxed);
         log_event("EXPANSION", result);
         execute_action(cfg_.on_expansion, result);
-        return;
-    }
-
-    if (!result.collapsed) {
+    } else if (!result.collapsed) {
         consecutive_collapses_.store(0, std::memory_order_relaxed);
-        return;
-    }
+    } else {
+        total_collapses_.fetch_add(1, std::memory_order_relaxed);
+        consecutive_collapses_.fetch_add(1, std::memory_order_relaxed);
 
-    total_collapses_.fetch_add(1, std::memory_order_relaxed);
-    consecutive_collapses_.fetch_add(1, std::memory_order_relaxed);
+        log_event("COLLAPSE", result);
 
-    log_event("COLLAPSE", result);
+        int cc = consecutive_collapses_.load(std::memory_order_relaxed);
 
-    int cc = consecutive_collapses_.load(std::memory_order_relaxed);
-
-    if (cc == 1) {
-        execute_action(cfg_.on_first_collapse, result);
-    } else if (cc >= cfg_.sustained_threshold) {
-        execute_action(cfg_.on_sustained_collapse, result);
+        if (cc == 1) {
+            execute_action(cfg_.on_first_collapse, result);
+        } else if (cc >= cfg_.sustained_threshold) {
+            execute_action(cfg_.on_sustained_collapse, result);
+        }
     }
 }
 

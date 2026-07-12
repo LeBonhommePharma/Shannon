@@ -11,6 +11,7 @@
 #include "shannon/hardware_detect.hpp"
 #include "shannon/types.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -30,13 +31,18 @@ public:
     void detect();
     const hw::HardwareCapabilities& capabilities() const noexcept;
 
-    // Backend selection
-    Backend best_backend(KernelType kernel = KernelType::CONFIGURATIONAL_ENTROPY) const;
+    // Backend selection.
+    // Optional n enables size-aware tradeoffs (e.g. NEON vs multi-core OpenMP
+    // for large vocabularies on aarch64).
+    Backend best_backend(KernelType kernel = KernelType::CONFIGURATIONAL_ENTROPY,
+                         std::size_t n = 0) const;
     void set_override(Backend b) noexcept;
     void clear_override() noexcept;
     Backend current_override() const noexcept;
 
     bool is_available(Backend b) const noexcept;
+    /// True when a backend has a compiled kernel for this entry point.
+    bool has_kernel(Backend b, KernelType kernel) const noexcept;
     static const char* backend_name(Backend b) noexcept;
     std::vector<Backend> available_backends() const;
     std::string hardware_report() const;
@@ -69,12 +75,16 @@ public:
 private:
     UnifiedDispatch() = default;
 
-    hw::HardwareCapabilities hw_;
-    std::once_flag detect_flag_;
-    std::atomic<bool> detected_{false};
+    // OpenMP fork/join beats single-thread NEON (2-wide doubles) only for large n.
+    static constexpr std::size_t kOpenMpPreferThreshold = 16384;
+
+    // Mutable so ensure_detected() can run from const accessors.
+    mutable hw::HardwareCapabilities hw_;
+    mutable std::once_flag detect_flag_;
+    mutable std::atomic<bool> detected_{false};
     std::atomic<Backend> override_{Backend::AUTO};
 
-    Backend select_backend_for_entropy() const;
+    void ensure_detected() const;
 };
 
 }  // namespace shannon::dispatch

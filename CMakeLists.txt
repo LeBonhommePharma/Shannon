@@ -75,28 +75,38 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
 
     # SSE4.2 — compiled with -msse4.2
     if(SHANNON_COMPILER_SSE42)
-        list(APPEND SHANNON_DEFS SHANNON_USE_SSE42)
+        list(APPEND SHANNON_DEFS SHANNON_USE_SSE42 SHANNON_HAS_SSE42)
         list(APPEND SHANNON_SIMD_SOURCES src/shannon/entropy_sse42.cpp)
     endif()
 
     # AVX2 — compiled with -mavx2 -mfma
     if(SHANNON_COMPILER_AVX2)
-        list(APPEND SHANNON_DEFS SHANNON_USE_AVX2)
+        list(APPEND SHANNON_DEFS SHANNON_USE_AVX2 SHANNON_HAS_AVX2)
         list(APPEND SHANNON_SIMD_SOURCES src/shannon/entropy_avx2.cpp)
     endif()
 
     # AVX-512 — compiled with -mavx512f -mavx512dq -mavx512bw
     if(SHANNON_COMPILER_AVX512)
-        list(APPEND SHANNON_DEFS SHANNON_USE_AVX512)
+        list(APPEND SHANNON_DEFS SHANNON_USE_AVX512 SHANNON_HAS_AVX512)
         list(APPEND SHANNON_SIMD_SOURCES src/shannon/entropy_avx512.cpp)
     endif()
 
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
-    list(APPEND SHANNON_DEFS SHANNON_USE_NEON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64|armv8")
+    # NEON/ASIMD is mandatory on AArch64 — always build the NEON kernels.
+    list(APPEND SHANNON_DEFS SHANNON_USE_NEON SHANNON_HAS_NEON)
     list(APPEND SHANNON_SIMD_SOURCES src/shannon/entropy_omp.cpp)
     list(APPEND SHANNON_SIMD_SOURCES src/shannon/entropy_neon.cpp)
+    message(STATUS "Shannon: ARM NEON/ASIMD entropy kernels enabled")
 else()
     list(APPEND SHANNON_SIMD_SOURCES src/shannon/entropy_omp.cpp)
+endif()
+
+# OpenMP HAS_ alias only when the toolchain actually provides OpenMP
+if(SHANNON_USE_OPENMP)
+    find_package(OpenMP)
+    if(OpenMP_CXX_FOUND)
+        list(APPEND SHANNON_DEFS SHANNON_HAS_OPENMP)
+    endif()
 endif()
 
 # ── Build the v2 library ───────────────────────────────────────────────────────
@@ -124,11 +134,8 @@ endif()
 
 target_link_libraries(shannon_v2 PUBLIC)
 
-if(SHANNON_USE_OPENMP)
-    find_package(OpenMP)
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(shannon_v2 PUBLIC OpenMP::OpenMP_CXX)
-    endif()
+if(SHANNON_USE_OPENMP AND OpenMP_CXX_FOUND)
+    target_link_libraries(shannon_v2 PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
 # ── v1 Core library (original, still compiles) ─────────────────────────────────

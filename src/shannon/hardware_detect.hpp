@@ -45,7 +45,9 @@ struct HardwareCapabilities {
     bool has_avx512     = false;   // composite: f && dq && bw
 
     // ── SIMD: ARM ──
-    bool has_neon       = false;
+    bool has_neon       = false;   // ASIMD / NEON (always true on aarch64)
+    bool has_neon_fma   = false;   // fused multiply-add (ARMv8+)
+    bool has_sve        = false;   // Scalable Vector Extension (AArch64)
 
     // ── OpenMP ──
     bool has_openmp           = false;

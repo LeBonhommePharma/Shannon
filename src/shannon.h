@@ -104,12 +104,14 @@ private:
 // ─── Hardware info ───────────────────────────────────────────────────────────
 
 struct HardwareInfo {
-    bool has_avx512;
-    bool has_avx2;
-    bool has_openmp;
-    bool has_cuda;
-    bool has_metal;
-    std::string active_backend;  // "avx512", "avx2", "openmp", "scalar", "cuda", "metal"
+    bool has_avx512 = false;
+    bool has_avx2   = false;
+    bool has_neon   = false;   // ARM NEON / ASIMD (Apple Silicon, aarch64)
+    bool has_openmp = false;
+    bool has_cuda   = false;
+    bool has_metal  = false;
+    // Preferred backend: "avx512" | "avx2" | "neon" | "openmp" | "scalar" | "cuda" | "metal"
+    std::string active_backend;
 };
 
 HardwareInfo get_hardware_info();

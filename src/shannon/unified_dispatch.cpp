@@ -23,11 +23,22 @@ UnifiedDispatch& UnifiedDispatch::instance() {
 void UnifiedDispatch::detect() {
     std::call_once(detect_flag_, [this] {
         hw_ = hw::detect_hardware();
-        detected_ = true;
+        detected_.store(true, std::memory_order_release);
     });
 }
 
+void UnifiedDispatch::ensure_detected() const {
+    // detect() is idempotent via call_once; mutable members allow const path.
+    if (!detected_.load(std::memory_order_acquire)) {
+        std::call_once(detect_flag_, [this] {
+            hw_ = hw::detect_hardware();
+            detected_.store(true, std::memory_order_release);
+        });
+    }
+}
+
 const hw::HardwareCapabilities& UnifiedDispatch::capabilities() const noexcept {
+    ensure_detected();
     return hw_;
 }
 
@@ -53,6 +64,74 @@ bool UnifiedDispatch::is_available(Backend b) const noexcept {
     case Backend::CUDA:   return hw_.has_cuda;
     case Backend::ROCM:   return hw_.has_rocm;
     case Backend::AUTO:   return true;
+    }
+    return false;
+}
+
+bool UnifiedDispatch::has_kernel(Backend b, KernelType kernel) const noexcept {
+    // GPU backends: only claim a kernel when the corresponding build flag is set.
+    // Without this, best_backend() would select CUDA/Metal/ROCm and fall through
+    // to scalar — wasting the CPU SIMD path (esp. NEON on Apple Silicon).
+    switch (b) {
+    case Backend::SCALAR:
+        return true;
+    case Backend::OPENMP:
+#if defined(SHANNON_USE_OPENMP)
+        return hw_.has_openmp;
+#else
+        return false;
+#endif
+    case Backend::SSE42:
+#if defined(SHANNON_USE_SSE42) && defined(__x86_64__)
+        // SSE4.2 only implements configurational_entropy
+        return hw_.has_sse42 && kernel == KernelType::CONFIGURATIONAL_ENTROPY;
+#else
+        (void)kernel;
+        return false;
+#endif
+    case Backend::AVX2:
+#if defined(SHANNON_USE_AVX2) && defined(__x86_64__)
+        return hw_.has_avx2;
+#else
+        return false;
+#endif
+    case Backend::AVX512:
+#if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
+        return hw_.has_avx512;
+#else
+        return false;
+#endif
+    case Backend::NEON:
+#if defined(SHANNON_USE_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
+        // Full NEON suite: configurational + probs + logprobs
+        return hw_.has_neon && (
+            kernel == KernelType::CONFIGURATIONAL_ENTROPY ||
+            kernel == KernelType::SHANNON_ENTROPY ||
+            kernel == KernelType::LOGPROB_ENTROPY);
+#else
+        (void)kernel;
+        return false;
+#endif
+    case Backend::CUDA:
+#if defined(SHANNON_USE_CUDA)
+        return hw_.has_cuda;
+#else
+        return false;
+#endif
+    case Backend::METAL:
+#if defined(SHANNON_USE_METAL)
+        return hw_.has_metal;
+#else
+        return false;
+#endif
+    case Backend::ROCM:
+#if defined(SHANNON_USE_ROCM)
+        return hw_.has_rocm;
+#else
+        return false;
+#endif
+    case Backend::AUTO:
+        return true;
     }
     return false;
 }
@@ -89,41 +168,33 @@ std::string UnifiedDispatch::hardware_report() const {
     return hw_.summary();
 }
 
-Backend UnifiedDispatch::select_backend_for_entropy() const {
-    // GPU backends first (if available and kernel supports it)
-    if (hw_.has_cuda)  return Backend::CUDA;
-    if (hw_.has_rocm)  return Backend::ROCM;
-    if (hw_.has_metal) return Backend::METAL;
-
-    // CPU SIMD hierarchy
-    if (hw_.has_avx512) return Backend::AVX512;
-    if (hw_.has_avx2)   return Backend::AVX2;
-    if (hw_.has_sse42)  return Backend::SSE42;
-    if (hw_.has_neon)   return Backend::NEON;
-    if (hw_.has_openmp) return Backend::OPENMP;
-
-    return Backend::SCALAR;
-}
-
-Backend UnifiedDispatch::best_backend(KernelType kernel) const {
+Backend UnifiedDispatch::best_backend(KernelType kernel, std::size_t n) const {
     Backend ov = override_.load(std::memory_order_relaxed);
-    if (ov != Backend::AUTO && is_available(ov)) {
+    if (ov != Backend::AUTO && is_available(ov) && has_kernel(ov, kernel)) {
         return ov;
     }
 
-    if (hw_.has_cuda)  return Backend::CUDA;
-    if (hw_.has_rocm)  return Backend::ROCM;
-    if (hw_.has_metal) return Backend::METAL;
+    // GPU first — only when a real kernel exists (compile-time gated above)
+    if (has_kernel(Backend::CUDA, kernel))  return Backend::CUDA;
+    if (has_kernel(Backend::ROCM, kernel))  return Backend::ROCM;
+    if (has_kernel(Backend::METAL, kernel)) return Backend::METAL;
 
-    if (hw_.has_avx512) return Backend::AVX512;
-    if (hw_.has_avx2)   return Backend::AVX2;
+    // x86 wide SIMD
+    if (has_kernel(Backend::AVX512, kernel)) return Backend::AVX512;
+    if (has_kernel(Backend::AVX2, kernel))   return Backend::AVX2;
 
-    if (kernel == KernelType::CONFIGURATIONAL_ENTROPY) {
-        if (hw_.has_sse42)  return Backend::SSE42;
-        if (hw_.has_neon)   return Backend::NEON;
+    // NEON vs OpenMP tradeoff on aarch64:
+    //   - medium n: single-thread NEON wins (no fork/join tax)
+    //   - large n:  multi-core OpenMP typically wins despite scalar exp
+    if (n >= kOpenMpPreferThreshold && has_kernel(Backend::OPENMP, kernel)) {
+        return Backend::OPENMP;
     }
 
-    if (hw_.has_openmp) return Backend::OPENMP;
+    // SSE4.2 (configurational only) and full NEON suite
+    if (has_kernel(Backend::SSE42, kernel)) return Backend::SSE42;
+    if (has_kernel(Backend::NEON, kernel))  return Backend::NEON;
+
+    if (has_kernel(Backend::OPENMP, kernel)) return Backend::OPENMP;
 
     return Backend::SCALAR;
 }
@@ -134,51 +205,68 @@ DispatchResult UnifiedDispatch::compute_configurational_entropy(
     const double* log_weights, std::size_t n, double& out_entropy,
     Backend backend)
 {
-    if (!detected_) detect();
+    ensure_detected();
 
     DispatchResult result;
-    result.used_backend = best_backend(KernelType::CONFIGURATIONAL_ENTROPY);
-    if (backend != Backend::AUTO && is_available(backend)) {
+    result.used_backend = best_backend(KernelType::CONFIGURATIONAL_ENTROPY, n);
+    if (backend != Backend::AUTO && is_available(backend) &&
+        has_kernel(backend, KernelType::CONFIGURATIONAL_ENTROPY)) {
         result.used_backend = backend;
     }
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
+    // Track whether a real kernel ran; fallthrough must not leave a stale backend.
+    bool ran = false;
     switch (result.used_backend) {
     case Backend::AVX512:
 #if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
         out_entropy = kernels::configurational_entropy_avx512(log_weights, n);
+        ran = true;
         break;
 #endif
         [[fallthrough]];
     case Backend::AVX2:
 #if defined(SHANNON_USE_AVX2) && defined(__x86_64__)
         out_entropy = kernels::configurational_entropy_avx2(log_weights, n);
+        result.used_backend = Backend::AVX2;
+        ran = true;
         break;
 #endif
         [[fallthrough]];
     case Backend::SSE42:
 #if defined(SHANNON_USE_SSE42) && defined(__x86_64__)
         out_entropy = kernels::configurational_entropy_sse42(log_weights, n);
+        result.used_backend = Backend::SSE42;
+        ran = true;
         break;
 #endif
         [[fallthrough]];
     case Backend::NEON:
 #if defined(SHANNON_USE_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
         out_entropy = kernels::configurational_entropy_neon(log_weights, n);
+        result.used_backend = Backend::NEON;
+        ran = true;
         break;
 #endif
         [[fallthrough]];
     case Backend::OPENMP:
 #if defined(SHANNON_USE_OPENMP)
-        out_entropy = kernels::configurational_entropy_omp(log_weights, n);
-        break;
+        if (hw_.has_openmp) {
+            out_entropy = kernels::configurational_entropy_omp(log_weights, n);
+            result.used_backend = Backend::OPENMP;
+            ran = true;
+            break;
+        }
 #endif
-        // Fall through to scalar
+        [[fallthrough]];
     default:
+        break;
+    }
+
+    if (!ran) {
         out_entropy = kernels::configurational_entropy_scalar(log_weights, n);
         result.used_backend = Backend::SCALAR;
-        break;
     }
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -191,39 +279,59 @@ DispatchResult UnifiedDispatch::compute_entropy_from_probs(
     const double* probs, std::size_t n, double& out_entropy,
     Backend backend)
 {
-    if (!detected_) detect();
+    ensure_detected();
 
     DispatchResult result;
-    result.used_backend = best_backend(KernelType::SHANNON_ENTROPY);
-    if (backend != Backend::AUTO && is_available(backend)) {
+    result.used_backend = best_backend(KernelType::SHANNON_ENTROPY, n);
+    if (backend != Backend::AUTO && is_available(backend) &&
+        has_kernel(backend, KernelType::SHANNON_ENTROPY)) {
         result.used_backend = backend;
     }
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
+    bool ran = false;
     switch (result.used_backend) {
     case Backend::AVX512:
 #if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
         out_entropy = kernels::entropy_from_probs_avx512(probs, n);
+        ran = true;
         break;
 #endif
         [[fallthrough]];
     case Backend::AVX2:
 #if defined(SHANNON_USE_AVX2) && defined(__x86_64__)
         out_entropy = kernels::entropy_from_probs_avx2(probs, n);
+        result.used_backend = Backend::AVX2;
+        ran = true;
+        break;
+#endif
+        [[fallthrough]];
+    case Backend::NEON:
+#if defined(SHANNON_USE_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
+        out_entropy = kernels::entropy_from_probs_neon(probs, n);
+        result.used_backend = Backend::NEON;
+        ran = true;
         break;
 #endif
         [[fallthrough]];
     case Backend::OPENMP:
 #if defined(SHANNON_USE_OPENMP)
-        out_entropy = kernels::entropy_from_probs_omp(probs, n);
-        break;
+        if (hw_.has_openmp) {
+            out_entropy = kernels::entropy_from_probs_omp(probs, n);
+            result.used_backend = Backend::OPENMP;
+            ran = true;
+            break;
+        }
 #endif
         [[fallthrough]];
     default:
+        break;
+    }
+
+    if (!ran) {
         out_entropy = kernels::entropy_from_probs_scalar(probs, n);
         result.used_backend = Backend::SCALAR;
-        break;
     }
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -236,39 +344,59 @@ DispatchResult UnifiedDispatch::compute_entropy_from_logprobs(
     const double* logprobs, std::size_t n, double& out_entropy,
     Backend backend)
 {
-    if (!detected_) detect();
+    ensure_detected();
 
     DispatchResult result;
-    result.used_backend = best_backend(KernelType::LOGPROB_ENTROPY);
-    if (backend != Backend::AUTO && is_available(backend)) {
+    result.used_backend = best_backend(KernelType::LOGPROB_ENTROPY, n);
+    if (backend != Backend::AUTO && is_available(backend) &&
+        has_kernel(backend, KernelType::LOGPROB_ENTROPY)) {
         result.used_backend = backend;
     }
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
+    bool ran = false;
     switch (result.used_backend) {
     case Backend::AVX512:
 #if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
         out_entropy = kernels::entropy_from_logprobs_avx512(logprobs, n);
+        ran = true;
         break;
 #endif
         [[fallthrough]];
     case Backend::AVX2:
 #if defined(SHANNON_USE_AVX2) && defined(__x86_64__)
         out_entropy = kernels::entropy_from_logprobs_avx2(logprobs, n);
+        result.used_backend = Backend::AVX2;
+        ran = true;
+        break;
+#endif
+        [[fallthrough]];
+    case Backend::NEON:
+#if defined(SHANNON_USE_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
+        out_entropy = kernels::entropy_from_logprobs_neon(logprobs, n);
+        result.used_backend = Backend::NEON;
+        ran = true;
         break;
 #endif
         [[fallthrough]];
     case Backend::OPENMP:
 #if defined(SHANNON_USE_OPENMP)
-        out_entropy = kernels::entropy_from_logprobs_omp(logprobs, n);
-        break;
+        if (hw_.has_openmp) {
+            out_entropy = kernels::entropy_from_logprobs_omp(logprobs, n);
+            result.used_backend = Backend::OPENMP;
+            ran = true;
+            break;
+        }
 #endif
         [[fallthrough]];
     default:
+        break;
+    }
+
+    if (!ran) {
         out_entropy = kernels::entropy_from_logprobs_scalar(logprobs, n);
         result.used_backend = Backend::SCALAR;
-        break;
     }
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -286,6 +414,7 @@ DispatchResult UnifiedDispatch::compute_configurational_entropy(
 }
 
 DispatchReport UnifiedDispatch::get_dispatch_report() const {
+    ensure_detected();
     Backend sel = best_backend(KernelType::CONFIGURATIONAL_ENTROPY);
     return DispatchReport{
         .selected  = sel,

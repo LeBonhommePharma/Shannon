@@ -8,6 +8,7 @@
 // every pragma and optimisation from the molecular-docking kernel.
 
 #include "shannon.hpp"
+#include "shannon.h"  // v1 HardwareInfo / shannon_entropy bridges
 
 #include <algorithm>
 #include <cmath>
@@ -188,6 +189,79 @@ CollapseResult CollapseDetector::push_entropy(double h) {
     }
 
     return result;
+}
+
+// ─── Hardware info (v1 API used by Python bindings / CLI) ────────────────────
+
+HardwareInfo get_hardware_info() {
+    HardwareInfo info{};
+
+#if defined(__AVX512F__)
+    info.has_avx512 = true;
+#endif
+#if defined(__AVX2__)
+    info.has_avx2 = true;
+#endif
+#if defined(__ARM_NEON) || defined(__aarch64__)
+    info.has_neon = true;
+#endif
+#ifdef _OPENMP
+    info.has_openmp = true;
+#endif
+#ifdef SHANNON_USE_CUDA
+    info.has_cuda = true;
+#endif
+#ifdef SHANNON_USE_METAL
+    info.has_metal = true;
+#endif
+
+    // Prefer widest available backend (mirrors UnifiedDispatch priority)
+    if (info.has_cuda)        info.active_backend = "cuda";
+    else if (info.has_metal)  info.active_backend = "metal";
+    else if (info.has_avx512) info.active_backend = "avx512";
+    else if (info.has_avx2)   info.active_backend = "avx2";
+    else if (info.has_neon)   info.active_backend = "neon";
+    else if (info.has_openmp) info.active_backend = "openmp";
+    else                      info.active_backend = "scalar";
+
+    return info;
+}
+
+// ─── v1 shannon.h API bridges (bindings expect these names) ──────────────────
+
+double shannon_entropy(const double* probs, size_t n) {
+    return shannon_entropy_from_probs(probs, n);
+}
+
+double shannon_entropy(std::span<const double> probs) {
+    return shannon_entropy_from_probs(probs.data(), probs.size());
+}
+
+double shannon_entropy_from_logits(const double* logits, size_t n) {
+    return shannon_configurational_entropy(logits, n);
+}
+
+double shannon_entropy_from_logits(std::span<const double> logits) {
+    return shannon_configurational_entropy(logits.data(), logits.size());
+}
+
+EntropyResult compute_entropy(const double* probs, size_t n, double collapse_threshold) {
+    EntropyResult r{};
+    r.H = shannon_entropy_from_probs(probs, n);
+    const double max_h = (n > 1) ? std::log2(static_cast<double>(n)) : 1.0;
+    r.H_normalized = (max_h > 0.0) ? r.H / max_h : 0.0;
+    r.collapsed = r.H_normalized < collapse_threshold;
+    return r;
+}
+
+EntropyResult compute_entropy_from_logits(const double* logits, size_t n,
+                                          double collapse_threshold) {
+    EntropyResult r{};
+    r.H = shannon_configurational_entropy(logits, n);
+    const double max_h = (n > 1) ? std::log2(static_cast<double>(n)) : 1.0;
+    r.H_normalized = (max_h > 0.0) ? r.H / max_h : 0.0;
+    r.collapsed = r.H_normalized < collapse_threshold;
+    return r;
 }
 
 }  // namespace shannon

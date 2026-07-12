@@ -402,8 +402,98 @@ TEST(UnifiedDispatch, BackendNames) {
     EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::SCALAR), "SCALAR");
     EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AVX2), "AVX2");
     EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AVX512), "AVX512");
+    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::NEON), "NEON");
     EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::CUDA), "CUDA");
     EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AUTO), "AUTO");
+}
+
+#if defined(SHANNON_USE_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
+TEST(NeonKernels, MatchesScalarConfigurational) {
+    std::vector<double> logits(64);
+    for (std::size_t i = 0; i < logits.size(); ++i) {
+        logits[i] = std::sin(static_cast<double>(i) * 0.17) * 3.0;
+    }
+    double h_scalar = kernels::configurational_entropy_scalar(logits.data(), logits.size());
+    double h_neon   = kernels::configurational_entropy_neon(logits.data(), logits.size());
+    EXPECT_NEAR(h_scalar, h_neon, 1e-10);
+}
+
+TEST(NeonKernels, MatchesScalarProbs) {
+    std::vector<double> probs = {0.05, 0.10, 0.15, 0.20, 0.25, 0.25};
+    double h_scalar = kernels::entropy_from_probs_scalar(probs.data(), probs.size());
+    double h_neon   = kernels::entropy_from_probs_neon(probs.data(), probs.size());
+    EXPECT_NEAR(h_scalar, h_neon, 1e-12);
+}
+
+TEST(NeonKernels, MatchesScalarLogprobs) {
+    std::vector<double> logprobs;
+    for (double p : {0.1, 0.2, 0.3, 0.4}) {
+        logprobs.push_back(std::log(p));
+    }
+    double h_scalar = kernels::entropy_from_logprobs_scalar(logprobs.data(), logprobs.size());
+    double h_neon   = kernels::entropy_from_logprobs_neon(logprobs.data(), logprobs.size());
+    EXPECT_NEAR(h_scalar, h_neon, 1e-12);
+}
+
+TEST(NeonKernels, OddLengthTail) {
+    // Force scalar tail path (n not multiple of 2/4)
+    std::vector<double> logits(17, 0.0);
+    logits[3] = 1.5;
+    double h_scalar = kernels::configurational_entropy_scalar(logits.data(), logits.size());
+    double h_neon   = kernels::configurational_entropy_neon(logits.data(), logits.size());
+    EXPECT_NEAR(h_scalar, h_neon, 1e-10);
+}
+
+TEST(UnifiedDispatch, SelectsNeonOnArm) {
+    auto& d = dispatch::UnifiedDispatch::instance();
+    d.detect();
+    d.clear_override();
+
+    EXPECT_TRUE(d.capabilities().has_neon);
+    EXPECT_TRUE(d.is_available(Backend::NEON));
+    EXPECT_TRUE(d.has_kernel(Backend::NEON, KernelType::CONFIGURATIONAL_ENTROPY));
+    EXPECT_TRUE(d.has_kernel(Backend::NEON, KernelType::SHANNON_ENTROPY));
+    EXPECT_TRUE(d.has_kernel(Backend::NEON, KernelType::LOGPROB_ENTROPY));
+
+    Backend best = d.best_backend(KernelType::CONFIGURATIONAL_ENTROPY, /*n=*/256);
+    // Prefer NEON over OpenMP for moderate n; GPU only if compiled+available
+    EXPECT_TRUE(best == Backend::NEON || best == Backend::CUDA ||
+                best == Backend::METAL || best == Backend::ROCM);
+
+    std::vector<double> logits(32, 0.0);
+    double h = 0.0;
+    auto result = d.compute_configurational_entropy(logits, h, Backend::NEON);
+    EXPECT_TRUE(result);
+    EXPECT_EQ(result.used_backend, Backend::NEON);
+    EXPECT_NEAR(h, 5.0, 1e-8);  // log2(32)
+}
+
+TEST(UnifiedDispatch, NeonOverrideProbsAndLogprobs) {
+    auto& d = dispatch::UnifiedDispatch::instance();
+    d.detect();
+
+    std::vector<double> probs(8, 1.0 / 8.0);
+    double h = 0.0;
+    auto r = d.compute_entropy_from_probs(probs.data(), probs.size(), h, Backend::NEON);
+    EXPECT_TRUE(r);
+    EXPECT_EQ(r.used_backend, Backend::NEON);
+    EXPECT_NEAR(h, 3.0, 1e-10);
+
+    std::vector<double> lp(4, std::log(0.25));
+    r = d.compute_entropy_from_logprobs(lp.data(), lp.size(), h, Backend::NEON);
+    EXPECT_TRUE(r);
+    EXPECT_EQ(r.used_backend, Backend::NEON);
+    EXPECT_NEAR(h, 2.0, 1e-10);
+}
+#endif  // SHANNON_USE_NEON
+
+TEST(HardwareDetect, NeonReportedOnArm) {
+    auto& hw = hw::detect_hardware();
+    auto summary = hw.summary();
+#if defined(__aarch64__) || defined(__ARM_NEON)
+    EXPECT_TRUE(hw.has_neon);
+    EXPECT_NE(summary.find("NEON"), std::string::npos);
+#endif
 }
 
 TEST(UnifiedDispatch, Override) {

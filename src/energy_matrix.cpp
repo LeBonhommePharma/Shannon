@@ -23,6 +23,20 @@
 #include <numbers>
 #include <numeric>
 
+// Prefer SHANNON_USE_* (set by CMake); accept SHANNON_HAS_* as aliases.
+#if defined(SHANNON_USE_AVX512) && !defined(SHANNON_HAS_AVX512)
+#  define SHANNON_HAS_AVX512 1
+#endif
+#if defined(SHANNON_USE_AVX2) && !defined(SHANNON_HAS_AVX2)
+#  define SHANNON_HAS_AVX2 1
+#endif
+#if defined(SHANNON_USE_OPENMP) && !defined(SHANNON_HAS_OPENMP)
+#  define SHANNON_HAS_OPENMP 1
+#endif
+#if defined(SHANNON_USE_NEON) && !defined(SHANNON_HAS_NEON)
+#  define SHANNON_HAS_NEON 1
+#endif
+
 #ifdef SHANNON_HAS_AVX512
 #include <immintrin.h>
 #endif
@@ -31,6 +45,10 @@
 #ifndef SHANNON_HAS_AVX512
 #include <immintrin.h>
 #endif
+#endif
+
+#if defined(SHANNON_HAS_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
+#include <arm_neon.h>
 #endif
 
 #ifdef SHANNON_HAS_OPENMP
@@ -336,6 +354,19 @@ void SoftContactMatrix::batch_lookup(
     }
 #endif
 
+#if defined(SHANNON_HAS_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
+    // NEON has no gather; compute 4 indices then scalar-load into a vector store.
+    // Still faster than pure scalar due to better ILP and store coalescing.
+    for (; k + 4 <= n; k += 4) {
+        alignas(16) float vals[4];
+        for (int m = 0; m < 4; ++m) {
+            vals[m] = data_[static_cast<unsigned>(types_i[k + m]) * DIM
+                            + types_j[k + m]];
+        }
+        vst1q_f32(scores + k, vld1q_f32(vals));
+    }
+#endif
+
     // Scalar tail
     for (; k < n; ++k) {
         scores[k] = data_[static_cast<unsigned>(types_i[k]) * DIM + types_j[k]];
@@ -378,6 +409,16 @@ float SoftContactMatrix::row_dot(uint8_t type_i, const float* weights) const noe
     sum128 = _mm_hadd_ps(sum128, sum128);
     sum128 = _mm_hadd_ps(sum128, sum128);
     float sum = _mm_cvtss_f32(sum128);
+#elif defined(SHANNON_HAS_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
+    float32x4_t acc0 = vdupq_n_f32(0.0f);
+    float32x4_t acc1 = vdupq_n_f32(0.0f);
+    for (; j + 8 <= DIM; j += 8) {
+        acc0 = vfmaq_f32(acc0, vld1q_f32(r + j),     vld1q_f32(weights + j));
+        acc1 = vfmaq_f32(acc1, vld1q_f32(r + j + 4), vld1q_f32(weights + j + 4));
+    }
+    acc0 = vaddq_f32(acc0, acc1);
+    float32x2_t s2 = vadd_f32(vget_low_f32(acc0), vget_high_f32(acc0));
+    float sum = vget_lane_f32(vpadd_f32(s2, s2), 0);
 #else
     float sum = 0.0f;
 #endif

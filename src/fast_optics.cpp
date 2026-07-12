@@ -22,6 +22,20 @@
 #include <random>
 #include <queue>
 
+// Prefer SHANNON_USE_* (set by CMake); accept SHANNON_HAS_* as aliases.
+#if defined(SHANNON_USE_AVX512) && !defined(SHANNON_HAS_AVX512)
+#  define SHANNON_HAS_AVX512 1
+#endif
+#if defined(SHANNON_USE_AVX2) && !defined(SHANNON_HAS_AVX2)
+#  define SHANNON_HAS_AVX2 1
+#endif
+#if defined(SHANNON_USE_OPENMP) && !defined(SHANNON_HAS_OPENMP)
+#  define SHANNON_HAS_OPENMP 1
+#endif
+#if defined(SHANNON_USE_NEON) && !defined(SHANNON_HAS_NEON)
+#  define SHANNON_HAS_NEON 1
+#endif
+
 #ifdef SHANNON_HAS_AVX512
 #include <immintrin.h>
 #endif
@@ -30,6 +44,10 @@
 #ifndef SHANNON_HAS_AVX512
 #include <immintrin.h>
 #endif
+#endif
+
+#if defined(SHANNON_HAS_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
+#include <arm_neon.h>
 #endif
 
 #ifdef SHANNON_HAS_OPENMP
@@ -78,6 +96,24 @@ double FastOPTICS::euclidean_distance(const float* a, const float* b, size_t d) 
     _mm256_store_ps(result, acc);
     double sum = 0.0;
     for (int k = 0; k < 8; ++k) sum += static_cast<double>(result[k]);
+    for (; i < d; ++i) {
+        double diff = static_cast<double>(a[i]) - static_cast<double>(b[i]);
+        sum += diff * diff;
+    }
+    return std::sqrt(sum);
+#elif defined(SHANNON_HAS_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
+    // 4-wide float NEON with FMA
+    float32x4_t acc = vdupq_n_f32(0.0f);
+    size_t i = 0;
+    const size_t vec_end = d - (d % 4);
+    for (; i < vec_end; i += 4) {
+        float32x4_t va = vld1q_f32(a + i);
+        float32x4_t vb = vld1q_f32(b + i);
+        float32x4_t diff = vsubq_f32(va, vb);
+        acc = vfmaq_f32(acc, diff, diff);
+    }
+    float32x2_t s2 = vadd_f32(vget_low_f32(acc), vget_high_f32(acc));
+    double sum = static_cast<double>(vget_lane_f32(vpadd_f32(s2, s2), 0));
     for (; i < d; ++i) {
         double diff = static_cast<double>(a[i]) - static_cast<double>(b[i]);
         sum += diff * diff;

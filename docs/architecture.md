@@ -80,8 +80,9 @@ No circular dependencies. Each module can be used independently.
 1. **Ingestion** — Raw logits/probs/logprobs arrive via JSONL, socket, or shared memory
 2. **Kernel dispatch** — `UnifiedDispatch::best_backend()` selects the optimal backend based on:
    - User override (if set)
-   - Hardware capabilities (CUDA > Metal > AVX-512 > AVX2 > SSE4.2/NEON > OpenMP > Scalar)
-   - Kernel type (SSE4.2/NEON only support `configurational_entropy`)
+   - Hardware capabilities (CUDA > Metal > AVX-512 > AVX2 > NEON > SSE4.2 > OpenMP > Scalar)
+   - Kernel type + compiled kernel presence (SSE4.2: configurational only; NEON: full suite)
+   - Problem size (OpenMP preferred over single-thread NEON when n ≥ 16384)
 3. **Entropy computation** — Returns H in bits via log-sum-exp, probs, or logprobs formula
 4. **Window update** — Circular buffer updated with new H value
 5. **Statistics** — Two-pass mean and population variance over the window
@@ -133,7 +134,7 @@ entropy_omp.cpp       → baseline ISA + OpenMP linkage
 entropy_sse42.cpp     → -msse4.2
 entropy_avx2.cpp      → -mavx2 -mfma
 entropy_avx512.cpp    → -mavx512f -mavx512dq -mavx512bw -mfma
-entropy_neon.cpp      → baseline ISA on aarch64 (NEON is always available)
+entropy_neon.cpp      → baseline ISA on aarch64 (NEON/ASIMD always available; full 3-kernel suite)
 entropy_gpu.cu        → NVCC (CUDA architectures 70-90)
 entropy_metal.metal   → xcrun metal → .metallib
 ```

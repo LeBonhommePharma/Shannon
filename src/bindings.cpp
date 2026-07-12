@@ -329,6 +329,7 @@ PYBIND11_MODULE(_core, m) {
     py::class_<shannon::HardwareInfo>(m, "HardwareInfo")
         .def_readonly("has_avx512", &shannon::HardwareInfo::has_avx512)
         .def_readonly("has_avx2", &shannon::HardwareInfo::has_avx2)
+        .def_readonly("has_neon", &shannon::HardwareInfo::has_neon)
         .def_readonly("has_openmp", &shannon::HardwareInfo::has_openmp)
         .def_readonly("has_cuda", &shannon::HardwareInfo::has_cuda)
         .def_readonly("has_metal", &shannon::HardwareInfo::has_metal)

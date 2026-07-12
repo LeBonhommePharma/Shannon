@@ -105,7 +105,17 @@ static void detect_x86_simd(HardwareCapabilities& hw) {
 
 static void detect_arm_neon(HardwareCapabilities& hw) {
 #if SHANNON_ARM
+    // NEON/ASIMD is mandatory on AArch64. On 32-bit ARM, __ARM_NEON is set
+    // when the compiler targets NEON (our build only enables this path then).
     hw.has_neon = true;
+    // ARMv8 AArch64 always has FMA for floating-point NEON.
+#  if defined(__aarch64__) || defined(__ARM_FEATURE_FMA)
+    hw.has_neon_fma = true;
+#  endif
+    // SVE is optional; probe compile-time feature (runtime SVE length varies).
+#  if defined(__ARM_FEATURE_SVE)
+    hw.has_sve = true;
+#  endif
 #else
     (void)hw;
 #endif
@@ -223,16 +233,29 @@ std::string HardwareCapabilities::summary() const {
     else
         os << "[shannon::hw]   ROCm: not available\n";
 
-    if (has_avx512)
+    // Report all detected SIMD features (not else-if): multi-ISA builds matter.
+    bool any_simd = false;
+    if (has_avx512) {
         os << "[shannon::hw]   AVX-512: F+DQ+BW"
            << (has_avx512vnni ? "+VNNI" : "") << "\n";
-    else if (has_avx2)
-        os << "[shannon::hw]   AVX2+FMA: yes\n";
-    else if (has_sse42)
+        any_simd = true;
+    }
+    if (has_avx2) {
+        os << "[shannon::hw]   AVX2+FMA: " << (has_fma ? "yes" : "avx2-only") << "\n";
+        any_simd = true;
+    }
+    if (has_sse42) {
         os << "[shannon::hw]   SSE4.2: yes\n";
-    else if (has_neon)
-        os << "[shannon::hw]   NEON: yes (ARM)\n";
-    else
+        any_simd = true;
+    }
+    if (has_neon) {
+        os << "[shannon::hw]   NEON/ASIMD: yes"
+           << (has_neon_fma ? " +FMA" : "")
+           << (has_sve ? " +SVE" : "")
+           << "\n";
+        any_simd = true;
+    }
+    if (!any_simd)
         os << "[shannon::hw]   SIMD: baseline only\n";
 
     os << "[shannon::hw]   OpenMP: "

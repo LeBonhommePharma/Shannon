@@ -227,20 +227,22 @@ thermodynamic behaviour, enabling:
 Shannon v2 uses a kernel-aware dispatch hierarchy:
 
 ```
-1. User override (set_override)        → use specified backend if available
-2. CUDA / ROCm / Metal (GPU)           → highest throughput for large vocab
+1. User override (set_override)        → use specified backend if available + has kernel
+2. CUDA / ROCm / Metal (GPU)           → only if compiled with SHANNON_USE_* + available
 3. AVX-512                              → 8 doubles per vector op
 4. AVX2 + FMA                           → 4 doubles per vector op
-5. SSE4.2 / NEON (configurational only) → 2 doubles, no probs/logprobs kernels
-6. OpenMP                               → parallel scalar fallback
-7. Scalar                               → always available, reference implementation
+5. NEON/ASIMD (aarch64, full suite)     → 2 doubles + FMA; all three kernels
+6. SSE4.2 (configurational only)        → 2 doubles
+7. OpenMP                               → parallel; preferred over NEON for n ≥ 16k
+8. Scalar                               → always available, reference implementation
 ```
 
-SSE4.2 and NEON only implement `configurational_entropy` (the log-sum-exp
-path). For `entropy_from_probs` and `entropy_from_logprobs`, the dispatch
-skips directly to AVX2 / OpenMP / Scalar. This is because these paths require
-a scalar `exp()` call per element inside the vectorized loop, and SSE4.2/NEON
-do not provide sufficient speedup over scalar for this pattern.
+SSE4.2 only implements `configurational_entropy`. NEON on aarch64 implements
+the full suite (configurational + probs + logprobs) with vectorized max,
+4-wide unrolled loads, and FMA accumulators; transcendental `exp`/`log2`
+remain scalar (no NEON double-precision transcendental intrinsics). GPU
+backends are never selected unless a kernel was actually compiled — avoiding
+false Metal/CUDA preference that would fall through to scalar and skip NEON.
 
 ### Per-ISA compilation
 

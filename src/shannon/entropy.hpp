@@ -31,6 +31,8 @@ namespace shannon::kernels {
 
 #if defined(SHANNON_USE_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
 [[nodiscard]] double configurational_entropy_neon(const double* w, std::size_t n) noexcept;
+[[nodiscard]] double entropy_from_probs_neon(const double* p, std::size_t n) noexcept;
+[[nodiscard]] double entropy_from_logprobs_neon(const double* lp, std::size_t n) noexcept;
 #endif
 
 // ─── Shannon entropy from probabilities ───────────────────────────────────────

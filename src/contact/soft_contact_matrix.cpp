@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace shannon::contact {
 
@@ -34,6 +35,22 @@ void SoftContactMatrix::load(const char* path) {
     const long file_size = std::ftell(fp);
     std::fseek(fp, 0, SEEK_SET);
 
+    char first4[4] = {0, 0, 0, 0};
+    if (std::fread(first4, 1, 4, fp) != 4) {
+        std::fclose(fp);
+        throw std::runtime_error(
+            "SoftContactMatrix::load: failed to read magic bytes");
+    }
+    std::fseek(fp, 0, SEEK_SET);
+
+    if (std::memcmp(first4, "SHNN", 4) == 0 &&
+        file_size == static_cast<long>(12 + kMatrixBytes)) {
+        std::fclose(fp);
+        throw std::runtime_error(
+            "SoftContactMatrix::load: refusing FlexAIDdS SHNN matrix; "
+            "atom type schema mismatch with Shannon SCM1/SC01");
+    }
+
     if (file_size == static_cast<long>(kHeaderBytes + kMatrixBytes)) {
         // File with SCM1 header
         char magic[4];
@@ -52,6 +69,23 @@ void SoftContactMatrix::load(const char* path) {
             std::fclose(fp);
             throw std::runtime_error(
                 "SoftContactMatrix::load: invalid magic bytes");
+        }
+    } else if (file_size == static_cast<long>(8 + kMatrixBytes)) {
+        char magic[4];
+        uint16_t rows;
+        uint16_t cols;
+        if (std::fread(magic, 1, 4, fp) != 4 ||
+            std::fread(&rows, sizeof(rows), 1, fp) != 1 ||
+            std::fread(&cols, sizeof(cols), 1, fp) != 1) {
+            std::fclose(fp);
+            throw std::runtime_error(
+                "SoftContactMatrix::load: failed to read SC01 header");
+        }
+        if (std::memcmp(magic, "SC01", 4) != 0 ||
+            rows != kNumAtomTypes || cols != kNumAtomTypes) {
+            std::fclose(fp);
+            throw std::runtime_error(
+                "SoftContactMatrix::load: invalid SC01 header");
         }
     } else if (file_size != static_cast<long>(kMatrixBytes)) {
         std::fclose(fp);

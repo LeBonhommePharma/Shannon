@@ -7,3 +7,5 @@ dist/
 *.so
 *.o
 *.a
+
+.DS_Store

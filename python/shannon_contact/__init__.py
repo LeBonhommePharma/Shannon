@@ -11,7 +11,7 @@
 
 __version__ = "0.1.0"
 
-from shannon_contact.matrix import SoftContactMatrix
+from shannon_contact.matrix import SoftContactMatrix, ATOM_TYPE_SCHEMA_ID
 from shannon_contact.atom_typer import encode_atom_type, decode_atom_type, bin_partial_charge
 
 # AtomTyper requires rdkit — lazy import to allow matrix-only usage
@@ -23,6 +23,7 @@ def __getattr__(name):
 
 __all__ = [
     "SoftContactMatrix",
+    "ATOM_TYPE_SCHEMA_ID",
     "AtomTyper",
     "encode_atom_type",
     "decode_atom_type",

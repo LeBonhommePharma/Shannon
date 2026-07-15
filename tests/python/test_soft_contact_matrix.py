@@ -17,12 +17,16 @@ from shannon_contact.matrix import (
     MATRIX_BYTES,
     SCM_MAGIC,
     SCM_HEADER_SIZE,
+    SC01_MAGIC,
+    SC01_HEADER_SIZE,
+    ATOM_TYPE_SCHEMA_ID,
     get_backend,
 )
 from shannon_contact.atom_typer import (
     encode_atom_type,
     decode_atom_type,
     bin_partial_charge,
+    ATOM_TYPE_SCHEMA_ID as TYPER_SCHEMA_ID,
 )
 
 
@@ -145,12 +149,49 @@ class TestFileIO:
         m = SoftContactMatrix(path=str(path))
         assert np.allclose(m.to_numpy(), 2.0)
 
+    def test_load_sc01_legacy_header(self, tmp_path):
+        data = np.ones((256, 256), dtype=np.float32) * 4.0
+        path = tmp_path / "matrix.sc01"
+        path.write_bytes(
+            SC01_MAGIC + struct.pack("<HH", 256, 256) + data.tobytes()
+        )
+
+        m = SoftContactMatrix(path=str(path))
+        assert np.allclose(m.to_numpy(), 4.0)
+
+    def test_reject_flexaidds_shnn_schema(self, tmp_path):
+        path = tmp_path / "flexaidds.shnn"
+        path.write_bytes(
+            b"SHNN" + struct.pack("<II", 1, 256)
+            + np.zeros((256, 256), dtype=np.float32).tobytes()
+        )
+        with pytest.raises(
+            (ValueError, RuntimeError), match="schema mismatch|FlexAIDdS"
+        ):
+            SoftContactMatrix(path=str(path))
+
+    def test_schema_constants_match(self):
+        assert ATOM_TYPE_SCHEMA_ID == TYPER_SCHEMA_ID
+        assert "base32.charge4.hbond1" in ATOM_TYPE_SCHEMA_ID
+
     def test_load_invalid_size_raises(self, tmp_path):
         path = tmp_path / "bad.bin"
         path.write_bytes(b"short")
         with pytest.raises((ValueError, RuntimeError)):
             SoftContactMatrix(path=str(path))
 
+    def test_project_to_superclusters(self):
+        data = np.zeros((256, 256), dtype=np.float32)
+        data[0, 2] = 1.0
+        data[0, 3] = 3.0
+        data[1, 2] = 5.0
+        data[1, 3] = 7.0
+        labels = [-1] * 256
+        labels[0] = labels[1] = 0
+        labels[2] = labels[3] = 1
+
+        reduced = SoftContactMatrix(data=data).project_to_superclusters(labels)
+        assert reduced[0, 1] == pytest.approx(4.0)
 
 # ─── Contact Scoring ────────────────────────────────────────────────────────
 

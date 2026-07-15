@@ -10,6 +10,10 @@ from typing import List, Optional
 
 import numpy as np
 
+ATOM_TYPE_SCHEMA_ID = "shannon.contact.atom256.v1.base32.charge4.hbond1"
+FLEXAIDDS_ATOM_TYPE_SCHEMA_ID = "flexaidds.atom256.v1.base64.charge2.hbond1"
+ATOM_TYPE_SCHEMA_VERSION = 1
+
 # Charge bin thresholds
 _CHARGE_THRESHOLDS = (-0.25, 0.0, 0.25)
 

@@ -53,6 +53,12 @@ enum class BaseAtomType : std::uint8_t {
 inline constexpr std::uint8_t kNumBaseTypes   = 32;
 inline constexpr std::uint8_t kNumChargeBins  = 4;
 inline constexpr std::uint8_t kNumHBondStates = 2;
+inline constexpr const char* kAtomTypeSchemaId =
+    "shannon.contact.atom256.v1.base32.charge4.hbond1";
+inline constexpr const char* kFlexAIDdSAtomTypeSchemaId =
+    "flexaidds.atom256.v1.base64.charge2.hbond1";
+inline constexpr std::uint32_t kAtomTypeSchemaVersion = 1;
+
 
 // ─── Charge Bins ────────────────────────────────────────────────────────────
 // Partial charge discretized into 4 bins.

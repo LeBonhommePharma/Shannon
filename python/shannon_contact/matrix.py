@@ -27,6 +27,11 @@ MATRIX_BYTES = MATRIX_SIZE * 4  # 262144 bytes (float32)
 
 SCM_MAGIC = b"SCM1"
 SCM_HEADER_SIZE = 16  # 4 magic + 4 version + 8 reserved
+SC01_MAGIC = b"SC01"
+SC01_HEADER_SIZE = 8  # 4 magic + uint16 rows + uint16 cols
+FLEXAIDDS_SHNN_MAGIC = b"SHNN"
+ATOM_TYPE_SCHEMA_ID = "shannon.contact.atom256.v1.base32.charge4.hbond1"
+FLEXAIDDS_ATOM_TYPE_SCHEMA_ID = "flexaidds.atom256.v1.base64.charge2.hbond1"
 
 
 def get_backend() -> str:
@@ -155,6 +160,50 @@ class SoftContactMatrix:
         energies = arr[types_i.astype(int), types_j.astype(int)]
         return float(np.sum(energies * weights))
 
+    def project_to_superclusters(
+        self,
+        labels: Sequence[int],
+        isolate_noise: bool = True,
+    ) -> np.ndarray:
+        """Project the 256x256 matrix to atom-contact cluster-pair means."""
+        if len(labels) != NUM_ATOM_TYPES:
+            raise ValueError("labels must contain exactly 256 entries")
+        arr = self.to_numpy()
+        type_to_cluster = np.full(NUM_ATOM_TYPES, -1, dtype=np.int32)
+        label_to_cluster: dict[int, int] = {}
+        n_clusters = 0
+
+        for atom_type, raw_label in enumerate(labels):
+            label = int(raw_label)
+            if label < 0:
+                if isolate_noise:
+                    type_to_cluster[atom_type] = n_clusters
+                    n_clusters += 1
+                else:
+                    type_to_cluster[atom_type] = 0
+                    n_clusters = max(n_clusters, 1)
+                continue
+            if label not in label_to_cluster:
+                label_to_cluster[label] = n_clusters
+                n_clusters += 1
+            type_to_cluster[atom_type] = label_to_cluster[label]
+
+        if n_clusters == 0:
+            n_clusters = 1
+            type_to_cluster.fill(0)
+
+        reduced = np.zeros((n_clusters, n_clusters), dtype=np.float32)
+        counts = np.zeros((n_clusters, n_clusters), dtype=np.float32)
+        for type_i in range(NUM_ATOM_TYPES):
+            ci = type_to_cluster[type_i]
+            for type_j in range(NUM_ATOM_TYPES):
+                cj = type_to_cluster[type_j]
+                reduced[ci, cj] += arr[type_i, type_j]
+                counts[ci, cj] += 1.0
+        mask = counts > 0
+        reduced[mask] /= counts[mask]
+        return reduced
+
     def pose_activation(
         self,
         types_i: np.ndarray,
@@ -219,15 +268,32 @@ class SoftContactMatrix:
         """Load matrix data into a numpy array."""
         raw = Path(path).read_bytes()
 
+        if raw[:4] == FLEXAIDDS_SHNN_MAGIC and len(raw) == 12 + MATRIX_BYTES:
+            raise ValueError(
+                "Cannot load FlexAIDdS SHNN matrix into Shannon: atom type "
+                f"schema mismatch ({FLEXAIDDS_ATOM_TYPE_SCHEMA_ID} != "
+                f"{ATOM_TYPE_SCHEMA_ID})"
+            )
+
         if len(raw) == SCM_HEADER_SIZE + MATRIX_BYTES:
             # Has SCM1 header
             if raw[:4] != SCM_MAGIC:
                 raise ValueError(f"Invalid magic bytes in {path}")
             raw = raw[SCM_HEADER_SIZE:]
+        elif len(raw) == SC01_HEADER_SIZE + MATRIX_BYTES:
+            if raw[:4] != SC01_MAGIC:
+                raise ValueError(f"Invalid magic bytes in {path}")
+            rows, cols = struct.unpack("<HH", raw[4:8])
+            if rows != NUM_ATOM_TYPES or cols != NUM_ATOM_TYPES:
+                raise ValueError(
+                    f"Invalid SC01 dimensions {rows}x{cols}; expected 256x256"
+                )
+            raw = raw[SC01_HEADER_SIZE:]
         elif len(raw) != MATRIX_BYTES:
             raise ValueError(
                 f"Unexpected file size {len(raw)} for {path} "
-                f"(expected {MATRIX_BYTES} or {SCM_HEADER_SIZE + MATRIX_BYTES})"
+                f"(expected {MATRIX_BYTES}, {SCM_HEADER_SIZE + MATRIX_BYTES}, "
+                f"or {SC01_HEADER_SIZE + MATRIX_BYTES})"
             )
 
         return np.frombuffer(raw, dtype=np.float32).reshape(

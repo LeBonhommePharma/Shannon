@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <random>
+#include <stdexcept>
 #include <vector>
 
 using namespace shannon::contact;
@@ -71,6 +72,15 @@ TEST(AtomTypes, SybylParent) {
     // sybyl_parent strips charge and hbond, returns base type
     const uint8_t t = encode_atom_type(7, 3, 1);  // N_ar, StrongPos, hbond
     EXPECT_EQ(sybyl_parent(t), 7);
+}
+
+
+TEST(AtomTypes, SchemaIdentityIsExplicit) {
+    EXPECT_STREQ(kAtomTypeSchemaId,
+                 "shannon.contact.atom256.v1.base32.charge4.hbond1");
+    EXPECT_STREQ(kFlexAIDdSAtomTypeSchemaId,
+                 "flexaidds.atom256.v1.base64.charge2.hbond1");
+    EXPECT_NE(std::strcmp(kAtomTypeSchemaId, kFlexAIDdSAtomTypeSchemaId), 0);
 }
 
 // ─── SoftContactMatrix Construction ─────────────────────────────────────────
@@ -163,6 +173,52 @@ TEST(SoftContactMatrix, LoadRawBlob) {
 
     EXPECT_FLOAT_EQ(m.lookup(0, 0), 1.0f);
     EXPECT_FLOAT_EQ(m.lookup(255, 255), -1.0f);
+
+    std::remove(tmp_path);
+}
+
+
+TEST(SoftContactMatrix, LoadSC01LegacyBlob) {
+    std::vector<float> raw(kMatrixSize, 4.0f);
+
+    const char* tmp_path = "/tmp/test_scm_sc01.bin";
+    FILE* fp = std::fopen(tmp_path, "wb");
+    ASSERT_NE(fp, nullptr);
+    const char magic[4] = {'S', 'C', '0', '1'};
+    const uint16_t rows = 256;
+    const uint16_t cols = 256;
+    std::fwrite(magic, 1, 4, fp);
+    std::fwrite(&rows, sizeof(rows), 1, fp);
+    std::fwrite(&cols, sizeof(cols), 1, fp);
+    std::fwrite(raw.data(), sizeof(float), kMatrixSize, fp);
+    std::fclose(fp);
+
+    SoftContactMatrix m;
+    m.load(tmp_path);
+
+    EXPECT_FLOAT_EQ(m.lookup(0, 0), 4.0f);
+    EXPECT_FLOAT_EQ(m.lookup(255, 255), 4.0f);
+
+    std::remove(tmp_path);
+}
+
+TEST(SoftContactMatrix, RejectsFlexAIDdSSHNNBlob) {
+    std::vector<float> raw(kMatrixSize, 0.0f);
+
+    const char* tmp_path = "/tmp/test_scm_shnn.bin";
+    FILE* fp = std::fopen(tmp_path, "wb");
+    ASSERT_NE(fp, nullptr);
+    const char magic[4] = {'S', 'H', 'N', 'N'};
+    const uint32_t version = 1;
+    const uint32_t dim = 256;
+    std::fwrite(magic, 1, 4, fp);
+    std::fwrite(&version, sizeof(version), 1, fp);
+    std::fwrite(&dim, sizeof(dim), 1, fp);
+    std::fwrite(raw.data(), sizeof(float), kMatrixSize, fp);
+    std::fclose(fp);
+
+    SoftContactMatrix m;
+    EXPECT_THROW(m.load(tmp_path), std::runtime_error);
 
     std::remove(tmp_path);
 }

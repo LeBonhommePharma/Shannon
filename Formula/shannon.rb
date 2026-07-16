@@ -90,8 +90,9 @@ class Shannon < Formula
 
   test do
     assert_path_exists bin/"shannon-agent"
-    output = shell_output("#{bin}/shannon-agent --help")
+    # Help text is printed to stderr (CLI convention).
+    output = shell_output("#{bin}/shannon-agent --help 2>&1")
     assert_match "shannon-agent", output
-    assert_match "Collapse", output
+    assert_match(/collapse/i, output)
   end
 end

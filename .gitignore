@@ -1,4 +1,5 @@
 build/
+.pybuild/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -7,5 +8,19 @@ dist/
 *.so
 *.o
 *.a
+*.dylib
+*.pyd
+.eggs/
+*.whl
+.venv/
+venv/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+cmake-build-*/
+# Staged extension build trees
+python/shannon/_core*.so
+python/shannon/_core*.pyd
 
 .DS_Store

@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build release artifacts (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-gcc
+            os: ubuntu-latest
+            artifact_name: shannon-linux
+          - name: macos-clang
+            os: macos-latest
+            artifact_name: shannon-macos
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ ninja-build libomp-dev
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja libomp
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSHANNON_BUILD_TESTS=OFF \
+            -DSHANNON_BUILD_PYTHON=OFF \
+            -DSHANNON_BUILD_AGENT=ON \
+            -DSHANNON_USE_OPENMP=ON \
+            -DSHANNON_USE_CUDA=OFF \
+            -DSHANNON_USE_METAL=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          cp -f build/shannon-agent dist/ || true
+          cp -f LICENSE dist/ || true
+          cp -f README.md dist/ || true
+          tar -czf ${{ matrix.artifact_name }}.tar.gz dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}.tar.gz

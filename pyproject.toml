@@ -4,10 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shannon-entropy"
-version = "0.1.0"
+# Static version (keep in sync with python/shannon/__init__.py and CMake project VERSION).
+# Do NOT use dynamic version via package import — that pulls numpy and produces
+# UNKNOWN-0.0.0 wheels on clean / older pip builds.
+version = "2.0.0"
 description = "Shannon Entropy Collapse Detection — physics-grounded LLM safety primitive"
 readme = "README.md"
-license = "MIT"
+license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [
     {name = "Louis-Philippe Morency", email = "lp@thebonhomme.com"},
@@ -19,7 +22,9 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: C++",
+    "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Security",
 ]
@@ -39,6 +44,8 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
+    "build>=1.0",
+    "twine>=5.0",
 ]
 
 [project.scripts]
@@ -48,12 +55,35 @@ shannon-monitor = "shannon.cli:main"
 Homepage = "https://github.com/LeBonhommePharma/Shannon"
 Repository = "https://github.com/LeBonhommePharma/Shannon"
 Issues = "https://github.com/LeBonhommePharma/Shannon/issues"
+Changelog = "https://github.com/LeBonhommePharma/Shannon/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+zip-safe = false
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["python"]
+include = ["shannon*", "shannon_contact*"]
+namespaces = false
+
+# cibuildwheel: produce installable wheels even when the optional C++ extension
+# cannot be compiled (pure-Python fallback). setup.py never fails the install.
+[tool.cibuildwheel]
+build-frontend = "build"
+skip = "pp* *-win32 *-manylinux_i686 *-musllinux_i686"
+test-command = "python -c \"import shannon; print(shannon.__version__)\""
+test-skip = ""
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+
+[tool.cibuildwheel.macos]
+environment = { MACOSX_DEPLOYMENT_TARGET = "12.0" }
 
 [tool.pytest.ini_options]
-testpaths = ["tests/python"]
+testpaths = ["tests/python", "tests"]
+python_files = ["test_*.py"]
 
 [tool.ruff]
 target-version = "py310"

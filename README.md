@@ -7,7 +7,8 @@
 **A white-box physicochemical referee for zero-shot detection of evaluation awareness and strategic deception in frontier LLM agents.**
 
 [![CI](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml/badge.svg)](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![PyPI](https://img.shields.io/badge/PyPI-shannon--entropy-blue.svg)](https://pypi.org/project/shannon-entropy/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-70%20pass-brightgreen.svg)]()
@@ -127,12 +128,48 @@ LLM Stream (logits / probs / logprobs / JSONL / socket / shared memory)
 
 ---
 
-## Build
+## Installation
 
-### Python (quick start)
+### Python (pip / PyPI)
 
 ```bash
+# After the first PyPI release:
 pip install shannon-entropy
+
+# Or install from GitHub (works today):
+pip install "git+https://github.com/LeBonhommePharma/Shannon.git"
+
+# Development (editable) from a clone:
+pip install -e ".[dev]"
+```
+
+This installs the **Python package** (`import shannon`) and the `shannon-monitor` CLI.
+The optional C++ extension (`shannon._core`) is built when a C++20 compiler and
+pybind11 are available; otherwise pure-Python / Numba fallbacks are used.
+Force pure-Python with `SHANNON_SKIP_CORE=1`.
+
+```bash
+shannon-monitor --help
+shannon-monitor info
+```
+
+### macOS Homebrew (native `shannon-agent`)
+
+```bash
+# Homebrew 6+ tap trust (formula-scoped; required when HOMEBREW_REQUIRE_TAP_TRUST is set):
+brew tap lebonhommepharma/shannon https://github.com/LeBonhommePharma/Shannon
+brew trust --formula lebonhommepharma/shannon/shannon
+brew install --HEAD lebonhommepharma/shannon/shannon
+
+# Optional Metal GPU path (needs Xcode Metal toolchain):
+#   brew install --build-from-source --HEAD --with-metal lebonhommepharma/shannon/shannon
+```
+
+This installs the **native** `shannon-agent` binary only (not the Python package).
+
+```bash
+shannon-agent --help
+cat token_stream.jsonl | shannon-agent --window 8 --threshold -3.2
 ```
 
 ### C++ from source
@@ -143,6 +180,8 @@ cd Shannon
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
+# Optional: install shannon-agent into a prefix
+cmake --install build --prefix /usr/local
 ```
 
 ### CMake options
@@ -165,7 +204,7 @@ ctest --test-dir build --output-on-failure
 | `shannon_v2` | Static C++20 library (v2 core + SIMD kernels) |
 | `shannon_core` | Static C++ library (v1 legacy) |
 | `shannon-agent` | CLI agent binary (v2) |
-| `_shannon_cpp` | pybind11 Python extension (v1) |
+| `_core` | pybind11 Python extension (`shannon._core`) |
 | `shannon_tests` | GoogleTest runner (v1, 16 tests) |
 | `shannon_v2_tests` | GoogleTest runner (v2, 70 tests) |
 

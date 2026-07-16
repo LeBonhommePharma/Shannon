@@ -2,7 +2,7 @@
 
 All notable changes to Shannon are documented in this file.
 
-## [2.0.0] — 2026-04-14
+## [2.0.0] — 2026-07-16
 
 ### Added
 
@@ -18,8 +18,17 @@ All notable changes to Shannon are documented in this file.
 - **`shannon-agent` CLI** — 18 command-line flags, 3 stream modes
 - **70 GoogleTest tests** across 12 test suites
 - **Documentation** — `docs/theory.md`, `docs/architecture.md`, `docs/api.md`
+- **PyPI packaging** — `setup.py` with optional `shannon._core` C++ extension and pure-Python fallback (`SHANNON_SKIP_CORE=1`); sdist + universal `py3-none-any` wheel via `.github/workflows/pypi-release.yml`
+- **Homebrew formula** — `Formula/shannon.rb` installs native `shannon-agent` (OpenMP; optional `--with-metal`); monorepo tap `lebonhommepharma/shannon`
+- **Release workflow** — `.github/workflows/release.yml` builds Linux/macOS `shannon-agent` artifacts on `v*` tags
+- **MANIFEST.in** — ships C++ sources in sdist so out-of-tree builds can compile `_core`
 
 ### Fixed
+
+- pybind11 module name aligned to `shannon._core` (was CMake `_shannon_cpp` vs `PYBIND11_MODULE(_core)`)
+- `shannon_core` now links `energy_matrix.cpp` + `fast_optics.cpp` so the extension has no missing symbols
+- Package version aligned to **2.0.0** (CMake / `python/shannon/__init__.py` / `pyproject.toml`)
+- License metadata set to **Apache-2.0** (matches `LICENSE`)
 
 - Replaced naive `E[X²] - (E[X])²` variance with stable two-pass `Σ(x - mean)²`
 - Added OSXSAVE + XCR0 validation before AVX2/AVX-512 selection (prevents SIGILL)

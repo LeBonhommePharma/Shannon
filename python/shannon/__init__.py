@@ -24,7 +24,7 @@ Usage:
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "2.0.0"
 
 # Backend selection: C++ accelerated or Python fallback
 # Follows FlexAIDdS _HAS_CORE graceful degradation pattern

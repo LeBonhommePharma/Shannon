@@ -139,8 +139,14 @@ if(SHANNON_USE_OPENMP AND OpenMP_CXX_FOUND)
 endif()
 
 # ── v1 Core library (original, still compiles) ─────────────────────────────────
+# Includes energy_matrix + fast_optics so the pybind11 module links cleanly
+# (bindings.cpp references SoftContactMatrix / ShannonEnergyMatrix / FastOPTICS).
 
-add_library(shannon_core STATIC src/shannon.cpp)
+add_library(shannon_core STATIC
+    src/shannon.cpp
+    src/energy_matrix.cpp
+    src/fast_optics.cpp
+)
 target_include_directories(shannon_core PUBLIC src/)
 
 if(SHANNON_USE_OPENMP)
@@ -187,9 +193,24 @@ if(SHANNON_BUILD_PYTHON)
         FetchContent_MakeAvailable(pybind11)
     endif()
 
-    pybind11_add_module(_shannon_cpp src/bindings.cpp)
-    target_link_libraries(_shannon_cpp PRIVATE shannon_core)
-    install(TARGETS _shannon_cpp DESTINATION .)
+    # Module name must match PYBIND11_MODULE(_core, ...) in bindings.cpp and
+    # the Python import path shannon._core.
+    pybind11_add_module(_core src/bindings.cpp)
+    target_link_libraries(_core PRIVATE shannon_core)
+    set_target_properties(_core PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/shannon"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/shannon"
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/shannon"
+    )
+    # Multi-config generators (Xcode/MSVC) need per-config output dirs.
+    foreach(cfg Debug Release RelWithDebInfo MinSizeRel)
+        string(TOUPPER "${cfg}" cfg_u)
+        set_target_properties(_core PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY_${cfg_u} "${CMAKE_BINARY_DIR}/python/shannon"
+            RUNTIME_OUTPUT_DIRECTORY_${cfg_u} "${CMAKE_BINARY_DIR}/python/shannon"
+        )
+    endforeach()
+    install(TARGETS _core DESTINATION shannon)
 endif()
 
 # ── shannon-agent CLI ───────────────────────────────────────────────────────────

@@ -264,4 +264,104 @@ EntropyResult compute_entropy_from_logits(const double* logits, size_t n,
     return r;
 }
 
+// ─── SlidingWindowEntropy (v1 API used by Python bindings) ───────────────────
+
+SlidingWindowEntropy::SlidingWindowEntropy(size_t window_size, double collapse_threshold)
+    : window_size_(window_size > 0 ? window_size : 8)
+    , collapse_threshold_(collapse_threshold)
+    , regression_denom_(0.0) {
+    precompute_regression_denom();
+}
+
+void SlidingWindowEntropy::precompute_regression_denom() {
+    // Denominator for slope of ordinary least squares over indices 0..n-1:
+    //   sum((i - mean_i)^2) = n*(n^2-1)/12
+    const double n = static_cast<double>(window_size_);
+    if (n < 2.0) {
+        regression_denom_ = 1.0;
+        return;
+    }
+    regression_denom_ = n * (n * n - 1.0) / 12.0;
+    if (regression_denom_ < 1e-18) {
+        regression_denom_ = 1.0;
+    }
+}
+
+void SlidingWindowEntropy::push(double entropy_value) {
+    buffer_.push_back(entropy_value);
+    if (buffer_.size() > window_size_) {
+        buffer_.pop_front();
+    }
+    trace_.push_back(entropy_value);
+
+    if (is_collapsed() && on_collapse_) {
+        CollapseEvent event{};
+        event.token_index = trace_.size() - 1;
+        event.entropy = entropy_value;
+        event.delta_h = delta_h();
+        event.collapse_score = collapse_score();
+        on_collapse_(event);
+    }
+}
+
+void SlidingWindowEntropy::push_logits(const double* logits, size_t n) {
+    push(shannon_entropy_from_logits(logits, n));
+}
+
+double SlidingWindowEntropy::current_entropy() const {
+    return buffer_.empty() ? 0.0 : buffer_.back();
+}
+
+double SlidingWindowEntropy::mean_entropy() const {
+    if (buffer_.empty()) return 0.0;
+    double sum = 0.0;
+    for (double v : buffer_) sum += v;
+    return sum / static_cast<double>(buffer_.size());
+}
+
+double SlidingWindowEntropy::delta_h() const {
+    // OLS slope of entropy vs. token index over the current window.
+    const size_t n = buffer_.size();
+    if (n < 2) return 0.0;
+
+    double mean_y = 0.0;
+    for (double v : buffer_) mean_y += v;
+    mean_y /= static_cast<double>(n);
+
+    const double mean_x = 0.5 * static_cast<double>(n - 1);
+    double numer = 0.0;
+    double denom = 0.0;
+    size_t i = 0;
+    for (double y : buffer_) {
+        const double dx = static_cast<double>(i) - mean_x;
+        numer += dx * (y - mean_y);
+        denom += dx * dx;
+        ++i;
+    }
+    if (denom < 1e-18) return 0.0;
+    return numer / denom;
+}
+
+bool SlidingWindowEntropy::is_collapsed() const {
+    if (buffer_.size() < window_size_) return false;
+    // collapse_threshold is typically negative (e.g. -3.2 bits/token).
+    return delta_h() < collapse_threshold_;
+}
+
+double SlidingWindowEntropy::collapse_score() const {
+    if (collapse_threshold_ >= 0.0 || std::abs(collapse_threshold_) < 1e-18) {
+        return 0.0;
+    }
+    return std::abs(delta_h() / collapse_threshold_);
+}
+
+void SlidingWindowEntropy::reset() {
+    buffer_.clear();
+    trace_.clear();
+}
+
+void SlidingWindowEntropy::set_on_collapse(std::function<void(const CollapseEvent&)> callback) {
+    on_collapse_ = std::move(callback);
+}
+
 }  // namespace shannon

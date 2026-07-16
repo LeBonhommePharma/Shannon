@@ -1,0 +1,29 @@
+# MANIFEST.in for shannon-entropy sdist
+# Include C++ sources so out-of-tree builds can compile shannon._core.
+
+include README.md
+include LICENSE
+include CHANGELOG.md
+include pyproject.toml
+include setup.py
+include CMakeLists.txt
+include MANIFEST.in
+
+# Python package
+recursive-include python/shannon *.py
+recursive-include python/shannon/integrations *.py
+recursive-include python/shannon_contact *.py
+
+# Optional accelerated extension sources + headers
+recursive-include src *.cpp *.c *.h *.hpp *.cu *.cuh *.metal *.mm
+
+# Runtime data used by examples / contact matrix tooling (optional)
+recursive-include data *.bin
+
+global-exclude __pycache__ *.py[cod] *~ .git* .DS_Store *.so *.dylib *.pyd
+prune */__pycache__
+prune */*.egg-info
+prune build
+prune dist
+prune */.git
+prune */.github

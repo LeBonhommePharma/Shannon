@@ -1,5 +1,6 @@
 import SwiftUI
 import PillCore
+import ShannonTheme
 
 /// Sizes for the two pill states. The collapsed height matches the notch so
 /// the pill reads as part of the hardware.
@@ -15,28 +16,52 @@ struct PillView: View {
     @ObservedObject var nowPlaying: NowPlayingModel
     @ObservedObject var battery: BatteryMonitor
     @ObservedObject var bridge: ShannonBridge
+    @ObservedObject var confirmation: ConfirmationController
     @Binding var isExpanded: Bool
+
+    /// A pending question forces the pill open — an approval prompt the user
+    /// has to hover to discover would be worse than useless.
+    private var showExpanded: Bool { isExpanded || confirmation.isAwaitingConfirmation }
+
+    /// The pill lights its accent border whenever the agent bridge is live —
+    /// that glow is the only at-rest signal that Shannon is watching.
+    private var isAgentActive: Bool { bridge.connected }
+
+    private var corner: CGFloat {
+        showExpanded ? ShannonRadius.xl : ShannonRadius.lg
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: PillMetrics.corner, style: .continuous)
-                .fill(.black)
-                .shadow(radius: isExpanded ? 12 : 0)
-
-            if isExpanded {
-                expanded
+            if showExpanded {
+                if confirmation.isAwaitingConfirmation {
+                    ConfirmationPromptView(confirmation: confirmation)
+                } else {
+                    expanded
+                }
             } else {
                 collapsed
             }
         }
         .frame(
-            width: isExpanded ? PillMetrics.expandedWidth : PillMetrics.collapsedWidth,
-            height: isExpanded ? PillMetrics.expandedHeight : PillMetrics.collapsedHeight
+            width: showExpanded ? PillMetrics.expandedWidth : PillMetrics.collapsedWidth,
+            height: showExpanded ? PillMetrics.expandedHeight : PillMetrics.collapsedHeight
         )
-        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: isExpanded)
+        .shannonPill(isActive: isAgentActive, cornerRadius: corner)
+        .overlay(flashOverlay)
+        .animation(.shannonFloat, value: showExpanded)
         .onHover { hovering in
             isExpanded = hovering
         }
+    }
+
+    /// Green wash on confirm, red on deny — the visual half of the gesture ack.
+    private var flashOverlay: some View {
+        RoundedRectangle(cornerRadius: corner, style: .continuous)
+            .fill(confirmation.flash == .confirm ? Color.shannonSuccess : Color.shannonError)
+            .opacity(confirmation.flash == nil ? 0 : 0.35)
+            .allowsHitTesting(false)
+            .animation(.easeOut(duration: 0.25), value: confirmation.flash)
     }
 
     // MARK: Collapsed
@@ -53,7 +78,7 @@ struct PillView: View {
 
             Text(collapsedText)
                 .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.shannonPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
@@ -84,16 +109,16 @@ struct PillView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(nowPlaying.state.info?.title ?? "Nothing playing")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.shannonPrimary)
                         .lineLimit(1)
                     Text(nowPlaying.state.info?.artist ?? "")
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(Color.shannonSecondary)
                         .lineLimit(1)
                     if !nowPlaying.providerAvailable {
                         Text("Now Playing unavailable — see BLOCKED.md")
                             .font(.system(size: 9))
-                            .foregroundStyle(.orange.opacity(0.9))
+                            .foregroundStyle(Color.shannonWarning)
                             .lineLimit(2)
                     }
                 }
@@ -103,7 +128,7 @@ struct PillView: View {
                         BatteryRing(snapshot: snap, diameter: 30)
                         Text(snap.timeLabel)
                             .font(.system(size: 9))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(Color.shannonSecondary)
                     }
                 }
             }
@@ -122,10 +147,10 @@ struct PillView: View {
                 Image(nsImage: art).resizable().aspectRatio(contentMode: .fill)
             } else {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(.white.opacity(0.08))
+                    .fill(Color.shannonSurfaceElevated)
                     .overlay(
                         Image(systemName: "music.note")
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(Color.shannonTertiary)
                     )
             }
         }
@@ -143,9 +168,9 @@ struct PillView: View {
         return VStack(spacing: 2) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.15))
+                    Capsule().fill(Color.shannonTertiary.opacity(0.5))
                     Capsule()
-                        .fill(.white.opacity(0.85))
+                        .fill(Color.shannonAccent)
                         .frame(width: geo.size.width * (info?.progress ?? 0))
                 }
                 .contentShape(Rectangle())
@@ -164,7 +189,7 @@ struct PillView: View {
                 Text(NowPlayingInfo.formatTime(info?.duration ?? 0))
             }
             .font(.system(size: 9, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.5))
+            .foregroundStyle(Color.shannonTertiary)
         }
     }
 
@@ -183,7 +208,7 @@ struct PillView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(Color.shannonPrimary)
         }
         .buttonStyle(.plain)
     }
@@ -191,19 +216,91 @@ struct PillView: View {
     private var footer: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(bridge.connected ? Color.green : Color.white.opacity(0.25))
+                .fill(bridge.connected ? Color.shannonSuccess : Color.shannonTertiary)
                 .frame(width: 6, height: 6)
             if let status = bridge.status {
                 Text("\(status.pillLabel) · \(status.backend)")
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(status.collapsed ? .orange : .white.opacity(0.55))
+                    .foregroundStyle(status.collapsed ? Color.shannonWarning : Color.shannonSecondary)
             } else {
                 Text("agent offline")
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(Color.shannonTertiary)
             }
             Spacer()
         }
+    }
+}
+
+/// The question the pill asks, answerable by head gesture or by clicking.
+struct ConfirmationPromptView: View {
+    @ObservedObject var confirmation: ConfirmationController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle.fill")
+                    .foregroundStyle(Color.shannonWarning)
+                Text(confirmation.prompt?.question ?? "")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.shannonPrimary)
+                    .lineLimit(2)
+            }
+
+            if let detail = confirmation.prompt?.detail {
+                Text(detail)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.shannonSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 10) {
+                answerButton("Yes", systemImage: "checkmark", tint: .shannonSuccess) {
+                    confirmation.answer(.confirmed)
+                }
+                answerButton("No", systemImage: "xmark", tint: .shannonError) {
+                    confirmation.answer(.denied)
+                }
+            }
+
+            // Always say which input is live: a user who nods at a pill that
+            // is not listening deserves to know why nothing happened.
+            HStack(spacing: 5) {
+                Image(systemName: confirmation.gesturesAvailable
+                      ? "airpods.gen3" : "airpods.gen3.slash")
+                    .font(.system(size: 9))
+                Text(confirmation.gesturesAvailable
+                     ? "Nod to confirm · shake to deny"
+                     : "Head gestures unavailable — \(confirmation.gestureStatus)")
+                    .font(.system(size: 9))
+                    .lineLimit(2)
+            }
+            .foregroundStyle(confirmation.gesturesAvailable ? Color.shannonSecondary : Color.shannonTertiary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func answerButton(
+        _ title: String,
+        systemImage: String,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage).font(.system(size: 10, weight: .bold))
+                Text(title).font(.system(size: 11, weight: .medium))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(tint.opacity(0.22)))
+            .overlay(Capsule().stroke(tint.opacity(0.55), lineWidth: 1))
+            .foregroundStyle(tint)
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -216,16 +313,16 @@ struct BatteryRing: View {
 
     private var tint: Color {
         switch snapshot.alertLevel {
-        case .normal:   return snapshot.isCharging ? .green : .white
-        case .low:      return .orange
-        case .critical: return .red
+        case .normal:   return snapshot.isCharging ? .shannonSuccess : .shannonPrimary
+        case .low:      return .shannonWarning
+        case .critical: return .shannonError
         }
     }
 
     var body: some View {
         ZStack {
             Circle()
-                .stroke(.white.opacity(0.18), lineWidth: 2)
+                .stroke(Color.shannonTertiary, lineWidth: 2)
             Circle()
                 .trim(from: 0, to: snapshot.fillFraction)
                 .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -237,7 +334,7 @@ struct BatteryRing: View {
             } else if diameter >= 28 {
                 Text("\(snapshot.percentage)")
                     .font(.system(size: diameter * 0.32, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(Color.shannonPrimary)
             }
         }
         .frame(width: diameter, height: diameter)

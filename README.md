@@ -331,6 +331,63 @@ pip install -e ".[dev]"
 pytest tests/python/ -v
 ```
 
+### Swift (42 tests, macOS only)
+
+```bash
+cd Pill
+swift test
+```
+
+Covers battery capacity parsing and alert edge-triggering, the Now Playing
+state machine and label truncation, and the bridge wire format including a
+live Unix-socket round trip.
+
+---
+
+## macOS Pill App (live activities)
+
+`Pill/` is a native Swift/SwiftUI agent app that puts Shannon in the notch. It
+runs as an `LSUIElement` — no dock icon, no menu bar item — and expands on
+hover. Collapsed, it shows media when something is playing and otherwise the
+live entropy readout: `H 8.4 ▽3.5`, amber when the detector reports a collapse.
+
+```bash
+cd Pill
+swift build && ./Scripts/make_app.sh
+open build/ShannonPill.app
+```
+
+| Live activity | Status |
+|---|---|
+| Battery + charging ring (IOKit, pulses at ≤20% / ≤10%) | ✅ implemented |
+| Shannon entropy readout via local socket | ✅ implemented |
+| Now Playing (art, scrubber, transport) | ⚠️ implemented, data source entitlement-gated |
+| Notification mirror, Focus/DND, AirDrop, file shelf | ❌ not implemented |
+
+Now Playing is built but macOS has no public API to read another app's playback
+state, and the private framework every notch utility uses was entitlement-gated
+in macOS 15.4. The pill degrades to the entropy readout when it gets no data.
+See [`Pill/BLOCKED.md`](Pill/BLOCKED.md) for that and the other platform limits.
+
+### Wiring the agent to the pill
+
+The Swift app is a pure consumer of the Python coordination layer over a local
+Unix domain socket (newline-delimited JSON, `0600`, nothing leaves the machine):
+
+```python
+from shannon import ShannonCollapseDetector
+from shannon.pill_bridge import PillBridgeServer
+
+detector = ShannonCollapseDetector()
+with PillBridgeServer(detector, agent="flexaid-runner") as server:
+    server.serve_in_thread()
+    ...  # run the agent; the pill picks it up within a second
+```
+
+Drive the UI without an agent using `python -m shannon.pill_bridge --demo`, and
+check what works on a given machine with `ShannonPill --probe`.
+Full detail in [`Pill/README.md`](Pill/README.md).
+
 ---
 
 ## Repository Structure
@@ -380,6 +437,17 @@ Shannon/
 |   +-- shannon-agent/
 |       +-- main.cpp              # CLI agent (18 flags, 3 stream modes)
 |
+|-- Pill/                         # macOS notch pill app (Swift/SwiftUI, LSUIElement)
+|   |-- Package.swift             # SwiftPM: PillCore + ShannonPill
+|   |-- project.yml               # XcodeGen spec -> ShannonPill.xcodeproj
+|   |-- README.md                 # Build, architecture, permissions
+|   |-- BLOCKED.md                # Platform limits (MediaRemote, DND, AirDrop)
+|   |-- Sources/
+|   |   |-- PillCore/             # Battery, NowPlaying, MediaRemote, ShannonBridge
+|   |   +-- ShannonPill/          # AppKit panel + SwiftUI views
+|   |-- Tests/PillCoreTests/      # 42 Swift unit tests
+|   +-- Scripts/make_app.sh       # SwiftPM binary -> ShannonPill.app
+|
 |-- tests/
 |   |-- cpp/
 |   |   |-- test_shannon.cpp      # v1 tests (16)
@@ -389,10 +457,11 @@ Shannon/
 |       +-- test_detector.py
 |
 |-- python/
-|   +-- shannon_entropy/
+|   +-- shannon/
 |       |-- __init__.py
 |       |-- core.py               # Backend selection (C++ / Numba / NumPy)
 |       |-- detector.py           # ShannonCollapseDetector class
+|       |-- pill_bridge.py        # Unix-socket status server for the Pill app
 |       +-- cli.py                # shannon-monitor CLI
 |
 |-- docs/

@@ -1,0 +1,4 @@
+aiohttp
+psutil
+pytest
+requests

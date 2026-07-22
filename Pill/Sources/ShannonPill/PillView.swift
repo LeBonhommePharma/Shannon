@@ -1,6 +1,5 @@
 import SwiftUI
 import PillCore
-import ShannonTheme
 
 /// Sizes for the two pill states. The collapsed height matches the notch so
 /// the pill reads as part of the hardware.
@@ -28,7 +27,7 @@ struct PillView: View {
     private var isAgentActive: Bool { bridge.connected }
 
     private var corner: CGFloat {
-        showExpanded ? ShannonRadius.xl : ShannonRadius.lg
+        PillMetrics.corner
     }
 
     var body: some View {

@@ -40,5 +40,11 @@
 	<string>Shannon Pill uses Apple Events to read media playback state from apps that do not publish to the system Now Playing centre.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Shannon Pill reads battery levels from connected Bluetooth devices such as AirPods.</string>
+
+	<!-- Required for CMHeadphoneMotionManager (head-nod confirmation).
+	     This key is the whole consent mechanism: head motion needs no special
+	     entitlement, only TCC approval prompted by its presence. -->
+	<key>NSMotionUsageDescription</key>
+	<string>Shannon Pill uses AirPods head motion so you can nod to confirm or shake to deny a prompt. Motion is read only while a question is on screen, and never leaves your Mac.</string>
 </dict>
 </plist>

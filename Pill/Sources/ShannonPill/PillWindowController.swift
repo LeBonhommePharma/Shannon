@@ -45,11 +45,18 @@ final class PillWindowController {
     private let nowPlaying: NowPlayingModel
     private let battery: BatteryMonitor
     private let bridge: ShannonBridge
+    private let confirmation: ConfirmationController
 
-    init(nowPlaying: NowPlayingModel, battery: BatteryMonitor, bridge: ShannonBridge) {
+    init(
+        nowPlaying: NowPlayingModel,
+        battery: BatteryMonitor,
+        bridge: ShannonBridge,
+        confirmation: ConfirmationController
+    ) {
         self.nowPlaying = nowPlaying
         self.battery = battery
         self.bridge = bridge
+        self.confirmation = confirmation
     }
 
     func show() {
@@ -67,7 +74,8 @@ final class PillWindowController {
             presentation: presentation,
             nowPlaying: nowPlaying,
             battery: battery,
-            bridge: bridge
+            bridge: bridge,
+            confirmation: confirmation
         )
         panel.contentView = NSHostingView(rootView: root)
         panel.orderFrontRegardless()
@@ -101,6 +109,7 @@ private struct PillHost: View {
     @ObservedObject var nowPlaying: NowPlayingModel
     @ObservedObject var battery: BatteryMonitor
     @ObservedObject var bridge: ShannonBridge
+    @ObservedObject var confirmation: ConfirmationController
 
     var body: some View {
         VStack {
@@ -108,6 +117,7 @@ private struct PillHost: View {
                 nowPlaying: nowPlaying,
                 battery: battery,
                 bridge: bridge,
+                confirmation: confirmation,
                 isExpanded: Binding(
                     get: { presentation.isExpanded },
                     set: { presentation.isExpanded = $0 }

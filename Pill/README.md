@@ -22,7 +22,7 @@ The canonical build is SwiftPM:
 ```bash
 cd Pill
 swift build              # compile
-swift test               # 42 unit tests
+swift test               # 73 unit tests
 ./Scripts/make_app.sh    # assemble build/ShannonPill.app (adds LSUIElement)
 open build/ShannonPill.app
 ```
@@ -64,6 +64,9 @@ Pill/
   Sources/
     PillCore/                 platform logic, no UI — this is what the tests cover
       Battery.swift           IOKit polling, alert edge-triggering
+      HeadGesture.swift       nod/shake detector, arming, debounce
+      HeadphoneMotionProvider.swift  CMHeadphoneMotionManager (macOS 14+)
+      ConfirmationController.swift   prompt state, gesture gating, feedback
       NowPlaying.swift        media state machine, provider protocol, stub provider
       MediaRemoteProvider.swift   private-framework bridge (see BLOCKED.md)
       ShannonBridge.swift     Unix-socket client for the Python agent
@@ -72,7 +75,7 @@ Pill/
       NotchGeometry.swift     where the pill sits on a given screen
       PillWindowController.swift  the non-activating panel
       PillView.swift          collapsed + expanded SwiftUI
-  Tests/PillCoreTests/        42 tests
+  Tests/PillCoreTests/        73 tests
   Resources/Info.plist        literal plist for the SwiftPM bundle
   project.yml                 XcodeGen spec
   Scripts/make_app.sh         SwiftPM binary → .app
@@ -122,6 +125,42 @@ Now Playing state, so this goes through the private MediaRemote framework,
 which Apple entitlement-gated in macOS 15.4. On a gated system the pill shows
 "Now Playing unavailable" and falls back to the entropy readout. Full detail
 and fallback options in [BLOCKED.md](BLOCKED.md).
+
+### Head-gesture confirmation ✅ (macOS 14+)
+
+When the agent needs an answer, the pill opens the question itself — an
+approval prompt you have to hover to discover would be worse than useless — and
+accepts a head gesture from AirPods:
+
+- **Nod** (pitch out and back) → confirm. Pill flashes green.
+- **Shake** (yaw out and back) → deny. Pill flashes red.
+
+Both are accompanied by a haptic and a soft system sound. Yes/No buttons are
+always present, so nothing depends on owning AirPods.
+
+Thresholds live in `HeadGestureConfig`: 15° excursion, return to within 40% of
+that inside 0.8 s, then a 2 s lockout. Three properties make this safe enough to
+put in front of "commit and push":
+
+- **Armed only while a prompt is live.** `ConfirmationController` arms the
+  detector in `ask` and disarms it the instant an answer is produced, and the
+  motion provider is not even started otherwise. Head movement outside a prompt
+  cannot answer anything.
+- **Neutral is captured at arming, not assumed level.** AirPods report attitude
+  in their own reference frame and people do not sit level; every excursion is
+  measured against the pose held when the question appeared.
+- **At most one answer per prompt.** If a gesture and a click race, the loser is
+  dropped. Yaw is compared with angle wrapping, so crossing the ±π seam is not
+  mistaken for a 356° head turn.
+
+`HeadGestureDetector` is a pure struct over timestamped samples with no clock
+access, which is why all 27 gesture tests run without hardware.
+
+**Caveats.** `CMHeadphoneMotionManager` is macOS 14+ (not macOS 11 — see
+BLOCKED.md §6); on Ventura the buttons remain and the pill explains why
+gestures are off. No entitlement is needed, only `NSMotionUsageDescription`
+consent. **The hardware path is untested** — no AirPods were connected during
+development, so expect to tune the thresholds.
 
 ### Shannon agent bridge ✅
 
@@ -173,6 +212,7 @@ when the detector reports a collapse.
 | Entropy bridge | none | — |
 | Now Playing metadata | private entitlement (unavailable) | see BLOCKED.md |
 | Now Playing transport | Accessibility | optional |
+| Head-gesture confirm | Motion & Fitness (TCC, no entitlement) | optional |
 
 The app is **not sandboxed** — IOKit power sources and MediaRemote are both
 unreachable from a sandboxed process. It therefore cannot ship on the Mac App

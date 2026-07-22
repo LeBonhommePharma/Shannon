@@ -124,7 +124,46 @@ Developer ID + notarization, or direct/unsigned for internal use.
 
 ---
 
-## 6. Permissions summary
+## 6. Head-gesture confirmation — NOT blocked, but two corrections
+
+Implemented and shipping. Recorded here because the spec it was built from was
+wrong on two points, both checked against the macOS 27 SDK headers rather than
+assumed:
+
+- **It is macOS 14, not macOS 11.** `CMHeadphoneMotionManager` is declared
+  `API_AVAILABLE(macos(14.0), ios(14.0), watchos(7.0))`. CoreMotion as a
+  framework is older, but this class is Sonoma-era. Since the pill targets
+  macOS 13, `HeadphoneMotionProvider` is `@available(macOS 14.0, *)` and
+  `makeHeadphoneMotionProvider()` returns an "unavailable" stand-in on Ventura
+  that explains itself in the UI. Raising the deployment target to 14 would
+  have been the alternative; keeping 13 preserves the documented support range.
+
+- **There is no `com.apple.headphone-motion` entitlement.** No such key exists.
+  Headphone motion is ordinary TCC consent, reported via
+  `CMHeadphoneMotionManager.authorizationStatus()` and prompted by the
+  `NSMotionUsageDescription` Info.plist string, which is present in both the
+  SwiftPM plist and the XcodeGen spec. Within CoreMotion, only
+  `CMFallDetectionManager` requires an Apple-granted entitlement. If motion is
+  later denied, the user must re-enable it in System Settings > Privacy &
+  Security > Motion & Fitness — an app cannot re-prompt.
+
+**Not yet verified on hardware.** The detector has 27 unit tests driving
+synthetic attitude streams, and `--probe` reports
+`gestures: available — motion access not yet requested` on this machine, which
+confirms the class resolves and TCC has not been asked yet. But no AirPods were
+connected during development, so the end-to-end path — real consent prompt,
+real `CMDeviceMotion` attitude stream, and the 15° / 0.8 s thresholds against
+an actual human nod — is **unproven**. Expect the thresholds to need tuning;
+they are all in `HeadGestureConfig` for exactly that reason. Verify with:
+
+```bash
+Pill/.build/debug/ShannonPill --probe          # should say "authorized"
+Pill/build/ShannonPill.app/Contents/MacOS/ShannonPill --demo   # poses a prompt
+```
+
+---
+
+## 7. Permissions summary
 
 | Capability | Permission | Status |
 |---|---|---|
@@ -133,6 +172,7 @@ Developer ID + notarization, or direct/unsigned for internal use.
 | Now Playing metadata | private entitlement | ⚠️ symbols resolve, no data |
 | Now Playing transport control | Accessibility | untested (needs §1 resolved) |
 | AirPods battery | Bluetooth | not implemented |
+| Head-gesture confirm | Motion & Fitness (TCC only) | ✅ built, macOS 14+, untested on hardware |
 | Notification mirror | Accessibility + Automation | ❌ blocked (§3) |
 | Focus / DND | none available | ❌ blocked (§2) |
 | AirDrop | none available | ❌ blocked (§4) |

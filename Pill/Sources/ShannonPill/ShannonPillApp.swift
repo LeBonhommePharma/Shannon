@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var battery: BatteryMonitor?
     private var bridge: ShannonBridge?
     private var demoProvider: StubNowPlayingProvider?
+    private var demoMotion: StubHeadphoneMotionProvider?
+    private var confirmation: ConfirmationController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // LSUIElement is set in Info.plist; assert it at runtime too so a bare
@@ -31,16 +33,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bat = BatteryMonitor(provider: IOKitBatteryProvider())
         let br = ShannonBridge()
 
-        let controller = PillWindowController(nowPlaying: np, battery: bat, bridge: br)
+        let motionProvider: HeadphoneMotionProviding
+        if Self.useDemo {
+            let stub = StubHeadphoneMotionProvider()
+            demoMotion = stub
+            motionProvider = stub
+        } else {
+            motionProvider = makeHeadphoneMotionProvider()
+        }
+        let confirm = ConfirmationController(
+            provider: motionProvider,
+            feedback: SystemConfirmationFeedback()
+        )
+
+        let controller = PillWindowController(
+            nowPlaying: np, battery: bat, bridge: br, confirmation: confirm
+        )
         controller.show()
 
         np.start()
         bat.start()
         br.start()
 
+        // pill must work regardless.
+
         nowPlaying = np
         battery = bat
         bridge = br
+        confirmation = confirm
         self.controller = controller
 
         demoProvider?.emit(.updated(NowPlayingInfo(
@@ -51,6 +71,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             elapsed: 37,
             isPlaying: true
         )))
+
+        if Self.useDemo {
+            confirm.ask(
+                ConfirmationPrompt(question: "Dock this ligand?", detail: "1a4g · Astex Diverse")
+            ) { answer, source in
+                print("demo prompt answered: \(answer.rawValue) via \(source.rawValue)")
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -98,6 +126,9 @@ struct ShannonPillMain {
             media.stop()
             print("  now playing: \(media.hasDelivered ? "delivering data" : "no data (entitlement-gated, or nothing playing)")")
         }
+
+        let motion = makeHeadphoneMotionProvider()
+        print("  gestures:    \(motion.isAvailable ? "available" : "unavailable") — \(motion.authorizationDescription)")
 
         let bridgePath = ShannonBridge.defaultSocketPath
         let client = UnixSocketClient()

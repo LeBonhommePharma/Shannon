@@ -38,3 +38,6 @@ iOS/Resources/Generated*.plist
 iOS/Resources/*.entitlements
 watchOS/Resources/Generated*.plist
 watchOS/Resources/*.entitlements
+iPad/ShannonPad.xcodeproj/
+iPad/Resources/Generated*.plist
+iPad/Resources/*.entitlements

@@ -1,0 +1,102 @@
+# XcodeGen spec for the Shannon iPad agent hub.
+#
+#     cd iPad && xcodegen generate && open ShannonPad.xcodeproj
+#
+# Regenerate after adding source files; the .xcodeproj is not checked in.
+#
+# The iPad app is a separate target from ShannonPhone rather than a shared
+# universal binary: it is a different application — a coordination dashboard,
+# not a status list — and shares only the ShannonCore/ShannonTheme packages.
+#
+# CloudKit needs a real Apple Developer account — see docs/MULTI_DEVICE.md.
+
+name: ShannonPad
+options:
+  bundleIdPrefix: com.lebonhommepharma.shannon
+  # The source is written against the iPadOS 16 API surface, but Xcode 27
+  # rebuilds Swift package dependencies at its recommended floor of iOS 17 —
+  # a 16.0 app target then cannot link ShannonCore. The floor is the
+  # toolchain's, not the code's.
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  ShannonCore:
+    path: ../Packages/ShannonCore
+  ShannonTheme:
+    path: ../Packages/ShannonTheme
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    GENERATE_INFOPLIST_FILE: YES
+
+targets:
+  ShannonPad:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/ShannonPad
+      - path: Sources/Shared
+    dependencies:
+      - package: ShannonCore
+      - package: ShannonTheme
+    info:
+      path: Resources/GeneratedInfo.plist
+      properties:
+        CFBundleDisplayName: Shannon
+        UILaunchScreen: {}
+        UIBackgroundModes:
+          - remote-notification
+        # Stage Manager and Slide Over: the hub is tested down to 320pt, so it
+        # opts in to every multitasking mode rather than forcing full screen.
+        UIRequiresFullScreen: false
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSMicrophoneUsageDescription:
+          Shannon uses the microphone for voice commands, transcribed on device.
+        NSSpeechRecognitionUsageDescription:
+          Speech is recognised entirely on this iPad; nothing is sent to a server.
+        # Private drag type, so an agent card dragged into another app in Split
+        # View is rejected instead of pasting a raw identifier.
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.lebonhommepharma.shannon.agent
+            UTTypeDescription: Shannon Agent
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification: {}
+    entitlements:
+      path: Resources/ShannonPad.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.lebonhommepharma.shannon
+        com.apple.developer.icloud-services:
+          - CloudKit
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
+        com.apple.security.application-groups:
+          - group.com.lebonhommepharma.shannon
+        aps-environment: development
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lebonhommepharma.shannon.pad
+        # iPad only. The phone app already covers device family 1.
+        TARGETED_DEVICE_FAMILY: "2"
+        SUPPORTS_MACCATALYST: NO
+
+schemes:
+  ShannonPad:
+    build:
+      targets:
+        ShannonPad: all
+    run:
+      config: Debug

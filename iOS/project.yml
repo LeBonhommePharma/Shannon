@@ -1,0 +1,163 @@
+# XcodeGen spec for the Shannon iPhone app, its widget, and the paired
+# Apple Watch app.
+#
+#     cd iOS && xcodegen generate && open Shannon.xcodeproj
+#
+# Regenerate after adding source files; the .xcodeproj is not checked in.
+#
+# CloudKit and App Groups need a real Apple Developer account — see
+# docs/MULTI_DEVICE.md for the exact Signing & Capabilities steps.
+
+name: Shannon
+options:
+  bundleIdPrefix: com.lebonhommepharma.shannon
+  deploymentTarget:
+    iOS: "16.0"
+    watchOS: "9.0"
+  createIntermediateGroups: true
+
+packages:
+  ShannonCore:
+    path: ../Packages/ShannonCore
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    # Blank until LP signs in with his Apple Developer account in Xcode;
+    # everything below builds unsigned for the Simulator without it.
+    DEVELOPMENT_TEAM: ""
+    GENERATE_INFOPLIST_FILE: YES
+
+targets:
+  # MARK: iPhone
+
+  ShannonPhone:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/ShannonPhone
+      - path: Sources/Shared
+    dependencies:
+      - package: ShannonCore
+      - target: ShannonWidget
+        embed: true
+      - target: ShannonWatch
+        embed: true
+    info:
+      path: Resources/GeneratedInfo.plist
+      properties:
+        CFBundleDisplayName: Shannon
+        UILaunchScreen: {}
+        UIBackgroundModes:
+          # Silent CloudKit pushes wake the app to refresh state.
+          - remote-notification
+    entitlements:
+      path: Resources/ShannonPhone.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.com.lebonhommepharma.shannon
+        com.apple.developer.icloud-services:
+          - CloudKit
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
+        com.apple.security.application-groups:
+          - group.com.lebonhommepharma.shannon
+        aps-environment: development
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lebonhommepharma.shannon.phone
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+  ShannonWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/ShannonWidget
+      - path: Sources/Shared
+    dependencies:
+      - package: ShannonCore
+    info:
+      path: Resources/GeneratedWidgetInfo.plist
+      properties:
+        CFBundleDisplayName: Shannon
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: Resources/ShannonWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.lebonhommepharma.shannon
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lebonhommepharma.shannon.phone.widget
+
+  # MARK: Apple Watch
+  #
+  # Sources live in ../watchOS so the watch app is browsable on its own, but
+  # the targets belong to this project — a watchOS app must be embedded in its
+  # companion iOS app to install.
+
+  ShannonWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: ../watchOS/Sources/ShannonWatch
+      - path: ../watchOS/Sources/Shared
+    dependencies:
+      - package: ShannonCore
+      - target: ShannonComplication
+        embed: true
+    info:
+      path: ../watchOS/Resources/GeneratedInfo.plist
+      properties:
+        CFBundleDisplayName: Shannon
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.lebonhommepharma.shannon.phone
+    entitlements:
+      path: ../watchOS/Resources/ShannonWatch.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.lebonhommepharma.shannon
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lebonhommepharma.shannon.phone.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+
+  ShannonComplication:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: ../watchOS/Sources/ShannonWatchComplication
+      - path: ../watchOS/Sources/Shared
+    dependencies:
+      - package: ShannonCore
+    info:
+      path: ../watchOS/Resources/GeneratedComplicationInfo.plist
+      properties:
+        CFBundleDisplayName: Shannon
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: ../watchOS/Resources/ShannonComplication.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.lebonhommepharma.shannon
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lebonhommepharma.shannon.phone.watchkitapp.complication
+
+schemes:
+  ShannonPhone:
+    build:
+      targets:
+        ShannonPhone: all
+    run:
+      config: Debug
+  ShannonWatch:
+    build:
+      targets:
+        ShannonWatch: all
+    run:
+      config: Debug

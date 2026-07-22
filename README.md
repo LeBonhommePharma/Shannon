@@ -362,12 +362,44 @@ open build/ShannonPill.app
 | Battery + charging ring (IOKit, pulses at ≤20% / ≤10%) | ✅ implemented |
 | Shannon entropy readout via local socket | ✅ implemented |
 | Now Playing (art, scrubber, transport) | ⚠️ implemented, data source entitlement-gated |
+| Head-gesture confirmation (nod / shake) | ✅ implemented, macOS 14+ · untested on hardware |
 | Notification mirror, Focus/DND, AirDrop, file shelf | ❌ not implemented |
 
 Now Playing is built but macOS has no public API to read another app's playback
 state, and the private framework every notch utility uses was entitlement-gated
 in macOS 15.4. The pill degrades to the entropy readout when it gets no data.
 See [`Pill/BLOCKED.md`](Pill/BLOCKED.md) for that and the other platform limits.
+
+### Gesture Controls
+
+When Shannon needs an answer — "Dock this ligand?", "Commit and push?" — the
+pill opens the question itself and accepts a **head gesture** from AirPods:
+
+| Gesture | Meaning |
+|---|---|
+| **Nod once** (pitch forward, back to neutral) | Confirm / Yes |
+| **Shake once** (yaw left or right, back to neutral) | Deny / No |
+
+A gesture must exceed **15°** and return to neutral within **0.8 s**, followed
+by a **2 s lockout** so one nod cannot answer two prompts. Confirm flashes the
+pill green, deny flashes it red, each with a haptic and a soft system sound.
+Yes/No buttons are always present, so the pill is fully usable without AirPods.
+
+Three properties matter for trusting this with an approval prompt:
+
+- **Motion is only read while a question is on screen.** The detector is armed
+  when the prompt appears and disarmed the moment it is answered, so ordinary
+  head movement can never confirm anything.
+- **Neutral is captured when the prompt appears**, not assumed level — sitting
+  with your head tilted does not read as a permanent nod.
+- **A prompt is answered at most once.** If a gesture and a click race, the
+  loser is dropped rather than answering twice.
+
+Requires **macOS 14 Sonoma or later** (`CMHeadphoneMotionManager` is
+`macos(14.0)`, despite CoreMotion itself being older) and AirPods Pro / 3rd gen
+/ Max or H1/H2 Beats. On macOS 13 the buttons remain and the pill says why
+gestures are unavailable. No entitlement is required — head motion is ordinary
+TCC consent, prompted by `NSMotionUsageDescription`, and nothing leaves the Mac.
 
 ### Wiring the agent to the pill
 
@@ -387,6 +419,146 @@ with PillBridgeServer(detector, agent="flexaid-runner") as server:
 Drive the UI without an agent using `python -m shannon.pill_bridge --demo`, and
 check what works on a given machine with `ShannonPill --probe`.
 Full detail in [`Pill/README.md`](Pill/README.md).
+
+---
+
+## iPhone & Apple Watch companions
+
+The Mac hub mirrors its state to iCloud so an iPhone and Apple Watch on the
+same account can follow what the agents are doing.
+
+```
+  Mac (ShannonPill)                iPhone (ShannonPhone)          Apple Watch
+  NowPlaying / battery ──CloudKit──▶ cards + widget + push ──WC──▶ 3 cards +
+  Shannon entropy bridge  (private)  notification feed             complication
+          ▲                                  │                          │
+          └────────── playback commands ◀────┴──────── crown taps ◀─────┘
+```
+
+- **iPhone** (iOS 16+): one card per running agent with turn count, last action
+  and live entropy; a FlexAID∆S progress ring with best RMSD and ETA; Now
+  Playing with controls that reach back to the Mac; a mirrored notification
+  feed; and a WidgetKit widget for the Lock and Home Screens.
+- **Apple Watch** (watchOS 9+): a glanceable complication —
+  `34/85 ✓ 1.42Å H=0.61` or `▶ Track — Artist` — plus at most three cards on
+  the Crown. No computation happens on the watch; it is a display relay.
+- **Shared model**: [`Packages/ShannonCore/`](Packages/ShannonCore) is a local
+  Swift package all three platforms import, holding the snapshot structs, the
+  CloudKit serialization, and the alert edge-triggering. Its 41 tests run
+  without an iCloud container.
+
+```bash
+cd Packages/ShannonCore && swift test          # shared model
+cd iOS && xcodegen generate                    # then open Shannon.xcodeproj
+```
+
+Sync stays deliberately light: only state snapshots cross iCloud — never raw
+data files, transcripts, or docking output — unchanged records are not
+republished, and artwork over 200 KB is dropped.
+
+CloudKit needs a paid Apple Developer account. Everything builds and runs
+without one (falling back to an empty in-memory backend); the exact Signing &
+Capabilities steps to activate real sync are in
+[`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md).
+
+---
+
+## Design System
+
+All three native surfaces — the Mac notch pill, the iPhone companion, the Watch
+glance — share one design system, shipped as a local Swift package at
+[`Packages/ShannonTheme`](Packages/ShannonTheme). Colour, type, motion and
+spacing are semantic tokens: feature code names a *role*, never a hex value, and
+the token resolves for the current colour scheme.
+
+**Day** is crisp, airy, high-contrast — near-white with cool undertones, deep
+indigo accent, dark type on light, and a frosted-glass pill with a subtle
+shadow. **Night** is deep and low-emission — `#0D0D10` rather than pure black,
+which reads as a hole punched in the screen — with an electric blue accent that
+pops without glare, and a pill barely visible at rest until an agent starts
+working and its accent border lights up.
+
+### Palette
+
+| Token | Day | Night | Role |
+|---|---|---|---|
+| `shannonBackground` | `#F5F6FA` | `#0D0D10` | window / scene |
+| `shannonSurface` | `#FFFFFF` | `#18181C` | cards, rows |
+| `shannonSurfaceElevated` | `#ECEDF2` | `#222228` | stacked on surface |
+| `pillBackground` | `rgba(255,255,255,.72)` | `rgba(18,18,20,.80)` | pill fill over HUD material |
+| `pillBorder` | `rgba(0,0,0,.08)` | `rgba(255,255,255,.10)` | pill hairline at rest |
+| `pillBorderActive` | `#4F6EF7` | `#7B9FFF` | pill hairline, agent active |
+| `shannonAccent` | `#3A5CF5` | `#6B8FFF` | primary interactive |
+| `shannonAccentSubtle` | `#EEF1FE` | `#1A2140` | badges, selected rows |
+| `shannonPrimary` | `#0F0F12` | `#F0F0F5` | titles, body |
+| `shannonSecondary` | `#6B6E80` | `#8A8D9F` | supporting copy |
+| `shannonTertiary` | `#A8ABBC` | `#4A4D5E` | disabled, separators |
+| `shannonSuccess` | `#1A7F4B` | `#34C77A` | run succeeded |
+| `shannonWarning` | `#C47A0A` | `#F5B934` | degraded, drifting |
+| `shannonError` | `#C0392B` | `#FF6B6B` | failure, collapse |
+| `shannonNeutral` | `#8A8D9F` | `#5A5D6E` | no signal |
+
+The two pill fills keep their alpha deliberately — they sit over an
+`NSVisualEffectView` using the `.hudWindow` material and must stay translucent.
+
+Adaptation happens below SwiftUI: a dynamic `NSColor` on macOS, a dynamic
+`UIColor` on iOS, and the night value unconditionally on watchOS, whose
+interface is always dark and which has no dynamic-provider API.
+
+### Typography
+
+| Token | Style | Weight | Face |
+|---|---|---|---|
+| `shannonLargeTitle` | `.largeTitle` | bold | SF Rounded |
+| `shannonTitle` | `.title2` | semibold | SF Pro |
+| `shannonHeadline` | `.headline` | semibold | SF Pro |
+| `shannonBody` | `.body` | regular | SF Pro |
+| `shannonCallout` | `.callout` | medium | SF Pro |
+| `shannonCaption` | `.caption` | regular | SF Pro, mono digits |
+| `shannonMono` | `.caption` | regular | SF Mono |
+
+Every token derives from a *text style* rather than a fixed point size, so
+Dynamic Type works throughout. `shannonMono` carries anything the eye compares
+column-wise — RMSD values, CF scores, entropy in bits, turn counts — and
+`shannonCaption` uses monospaced digits so live counters don't jitter as they
+tick.
+
+### Motion and spacing
+
+Three springs and nothing else: `shannonSnap` (`0.25`/`0.80`) for taps,
+`shannonEase` (`0.40`/`0.75`) for card expansion, `shannonFloat`
+(`0.60`/`0.65`) for the pill unfurling from the notch. Damping falls as travel
+grows. Spacing is an 8pt grid — `xs 4` (the one permitted half-step), `sm 8`,
+`md 16`, `lg 24`, `xl 32`, `xxl 48`.
+
+### Using it
+
+```swift
+import ShannonTheme
+
+Text("δ −3.4 bits")
+    .font(.shannonMono)
+    .foregroundStyle(Color.shannonAccent)
+    .padding(ShannonSpacing.md)
+    .background(Color.shannonSurface)
+
+// macOS: material, tint, hairline, shadow and the active accent glow.
+pillContent.shannonPill(isActive: agent.isRunning)
+
+// iOS / watchOS: correct radius and padding per platform, one call site.
+cardContent.shannonCard()
+```
+
+`ShannonThemeSpecimen` (DEBUG) renders every token, the type scale, the spacing
+grid and both pill states in Day and Night side by side — open
+`Packages/ShannonTheme/Sources/ShannonTheme/ShannonThemePreview.swift` in Xcode.
+
+```bash
+swift test --package-path Packages/ShannonTheme
+```
+
+Full detail, including the per-platform layout specs, in
+[`Packages/ShannonTheme/README.md`](Packages/ShannonTheme/README.md).
 
 ---
 

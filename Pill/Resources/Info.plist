@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Literal Info.plist for the SwiftPM bundle assembled by Scripts/make_app.sh.
+  Values are spelled out rather than using $(BUILD_VARIABLE) placeholders,
+  because nothing expands them outside an Xcode build.
+
+  The Xcode target generates its own plist at Resources/GeneratedInfo.plist
+  (gitignored) from project.yml — do not point XcodeGen at this file, or it
+  will overwrite these literals.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>ShannonPill</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.lebonhommepharma.shannon.pill</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Shannon Pill</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+
+	<!-- Agent app: no dock icon, no menu bar, no app switcher entry. -->
+	<key>LSUIElement</key>
+	<true/>
+
+	<!-- Usage strings. Now Playing control goes through MediaRemote, which
+	     needs Accessibility; see Pill/BLOCKED.md for the entitlement caveat. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Shannon Pill uses Apple Events to read media playback state from apps that do not publish to the system Now Playing centre.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Shannon Pill reads battery levels from connected Bluetooth devices such as AirPods.</string>
+</dict>
+</plist>

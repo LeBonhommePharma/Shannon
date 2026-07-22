@@ -24,3 +24,10 @@ python/shannon/_core*.so
 python/shannon/_core*.pyd
 
 .DS_Store
+
+# Swift / Pill app
+.build/
+.swiftpm/
+Pill/ShannonPill.xcodeproj/
+Pill/Resources/GeneratedInfo.plist
+*.xcuserdatad

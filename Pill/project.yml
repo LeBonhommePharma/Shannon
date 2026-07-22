@@ -1,0 +1,80 @@
+# XcodeGen spec for the Shannon Pill app.
+#
+# The canonical build is SwiftPM (`swift build` / `swift test`) — this spec
+# exists so the app can be opened, run and signed from Xcode:
+#
+#     cd Pill && xcodegen generate && open ShannonPill.xcodeproj
+#
+# Regenerate after adding source files; the .xcodeproj is not checked in.
+
+name: ShannonPill
+options:
+  bundleIdPrefix: com.lebonhommepharma.shannon
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # Universal binary: Apple Silicon + Intel.
+    ARCHS: "arm64 x86_64"
+    ONLY_ACTIVE_ARCH: NO
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  PillCore:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/PillCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lebonhommepharma.shannon.pill.core
+
+  ShannonPill:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/ShannonPill
+    dependencies:
+      - target: PillCore
+        embed: true
+    # Generated, not Resources/Info.plist — XcodeGen rewrites whatever file it
+    # is pointed at, and the SwiftPM bundle needs those literal values intact.
+    info:
+      path: Resources/GeneratedInfo.plist
+      properties:
+        LSUIElement: true
+        LSMinimumSystemVersion: "13.0"
+        CFBundleName: Shannon Pill
+        NSAppleEventsUsageDescription: Shannon Pill uses Apple Events to read media playback state from apps that do not publish to the system Now Playing centre.
+        NSBluetoothAlwaysUsageDescription: Shannon Pill reads battery levels from connected Bluetooth devices such as AirPods.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lebonhommepharma.shannon.pill
+        # Sandbox is off: MediaRemote and IOKit power sources are both
+        # unreachable from a sandboxed process.
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+
+  PillCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/PillCoreTests
+    dependencies:
+      - target: PillCore
+
+schemes:
+  ShannonPill:
+    build:
+      targets:
+        ShannonPill: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - PillCoreTests

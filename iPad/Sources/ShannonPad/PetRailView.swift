@@ -42,7 +42,7 @@ public struct PetRailView: View {
             .offset(pencilOffset)
             .rotationEffect(.degrees(idleRotation))
             .animation(.easeInOut(duration: 0.2), value: pencilOffset)
-            .onTapGesture { engine.handle(.tap); Haptics.light() }
+            .onTapGesture { engine.handle(.tap); PadHaptics.tap() }
             .accessibilityLabel("\(store.pet.name), feeling \(store.pet.mood.label)")
 
             Text(store.pet.name)

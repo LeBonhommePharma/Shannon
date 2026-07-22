@@ -45,6 +45,7 @@ import Observation
 
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, *)
 @MainActor
+@Observable
 public final class PetInteractionEngine {
     private let store: PetStore
     private let memory: PetMemoryStore

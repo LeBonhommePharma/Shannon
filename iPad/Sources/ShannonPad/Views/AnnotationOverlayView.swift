@@ -1,70 +1,141 @@
 import SwiftUI
 import ShannonTheme
+import ShannonCore
 #if canImport(PencilKit)
 import PencilKit
 #endif
 
-/// A Pencil canvas laid over a card.
+// MARK: - AnnotationOverlayView
+
+/// Full-featured Pencil annotation sheet.
 ///
-/// Vector paths only — the drawing is persisted as `PKDrawing` data, never as a
-/// rasterised image, so a note scribbled on an 11" iPad still reads sharp when
-/// the same record is opened on a 13".
+/// What this gives you compared to the basic PKCanvasView wrapper:
+///  - `drawingPolicy = .pencilOnly` — finger touches pass through to the hub
+///  - Pressure / tilt / azimuth → live `PencilStrokeMetrics` stream
+///  - Barrel-roll orientation (Pencil Pro, iPadOS 17.5+)
+///  - Hover preview ring before the tip touches (iPadOS 16+)
+///  - Double-tap respects system Settings → Apple Pencil preference
+///  - Squeeze (Pencil Pro) shows radial quick-action menu at tip position
+///  - OCR: after 1 s idle, Vision scans the drawing; confident text appears inline
+///  - UIScribbleInteraction on the search / name field
+///  - Export as PNG via PKDrawing snapshot
+///  - Persists via `PencilAnnotationStore` (FileProtection.complete)
 struct AnnotationOverlayView: View {
-    /// Namespaces the saved drawing. Agent cards pass the agent id; the docking
-    /// card passes its benchmark id, so an ROI sketch does not overwrite notes.
+
     var scopeID: String
-    var name: String = "canvas"
-    var title: String
-    /// Docking ROI mode draws over a pocket wireframe rather than a blank sheet.
+    var name:    String = "canvas"
+    var title:   String
+
+    /// Docking ROI mode overlays a binding-pocket wireframe schematic.
     var showsPocketWireframe: Bool = false
     var onClose: () -> Void
 
+    // MARK: State
+
     @State private var drawingData: Data?
-    @State private var isEmpty = true
+    @State private var isEmpty     = true
+    @State private var ocrLabel:   String?
+    @State private var ocrConfidence: Float = 0
+
+    @State private var lastMetrics:   PencilStrokeMetrics?
+    @State private var squeezeOrigin: CGPoint?
+    @State private var showRadialMenu = false
+
+    @State private var exportedImage: UIImage?
+    @State private var showingExport  = false
+
+    private let annotationStore: PencilAnnotationStore
+
+    init(
+        scopeID: String,
+        name:    String = "canvas",
+        title:   String,
+        showsPocketWireframe: Bool = false,
+        onClose: @escaping () -> Void
+    ) {
+        self.scopeID  = scopeID
+        self.name     = name
+        self.title    = title
+        self.showsPocketWireframe = showsPocketWireframe
+        self.onClose  = onClose
+        self.annotationStore = PencilAnnotationStore(agentID: scopeID)
+    }
+
+    // MARK: - Body
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
+        ZStack {
+            VStack(spacing: 0) {
+                header
 
-            ZStack {
-                if showsPocketWireframe {
-                    PocketWireframe()
-                        .padding(ShannonSpacing.lg)
+                ZStack(alignment: .topLeading) {
+                    if showsPocketWireframe { PocketWireframe().padding(ShannonSpacing.lg) }
+
+                    #if canImport(PencilKit)
+                    PencilCanvasRepresentable(
+                        drawingData:     $drawingData,
+                        isEmpty:         $isEmpty,
+                        accentColor:     UIColor(Color.shannonAccent),
+                        onMetrics:       { lastMetrics = $0 },
+                        onOCRComplete:   handleOCR,
+                        onSqueezeAction: handleSqueeze
+                    )
+                    #else
+                    Text("Pencil annotation requires PencilKit.")
+                        .shannonText(.shannonBody, color: .shannonSecondary)
+                    #endif
+
+                    // OCR label overlay (non-destructive, floats above strokes)
+                    if let label = ocrLabel {
+                        ocrOverlay(label)
+                    }
                 }
+                .background(Color.shannonSurface)
+            }
 
+            // Squeeze radial menu (Pencil Pro)
+            if showRadialMenu, let origin = squeezeOrigin {
                 #if canImport(PencilKit)
-                PencilCanvas(data: $drawingData, isEmpty: $isEmpty)
-                #else
-                Text("Pencil annotation needs PencilKit.")
-                    .shannonText(.shannonBody, color: .shannonSecondary)
+                RadialMenuView(
+                    origin:   origin,
+                    onAction: performQuickAction,
+                    onDismiss: { showRadialMenu = false }
+                )
+                .transition(.opacity)
+                .zIndex(50)
                 #endif
             }
-            .background(Color.shannonSurface)
         }
         .background(Color.shannonBackground)
-        .onAppear { drawingData = AnnotationStore.load(agentID: scopeID, name: name) }
-        .onChange(of: drawingData) { newValue in
-            guard let newValue else { return }
-            AnnotationStore.save(newValue, agentID: scopeID, name: name)
-        }
+        .onAppear { loadDrawing() }
+        .onChange(of: drawingData) { persist($0) }
+        .sheet(isPresented: $showingExport) { exportSheet }
     }
+
+    // MARK: - Header
 
     private var header: some View {
         HStack(spacing: ShannonSpacing.md) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .shannonText(.shannonHeadline)
+                Text(title).shannonText(.shannonHeadline)
                 Text(AnnotationStore.relativePath(agentID: scopeID, name: name))
                     .shannonNumeric(color: .shannonTertiary)
                     .lineLimit(1)
                     .truncationMode(.head)
             }
-
             Spacer()
+
+            Button { exportCanvas() } label: {
+                Label("Export", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.bordered)
+            .disabled(isEmpty)
 
             Button("Erase All") {
                 drawingData = Data()
                 AnnotationStore.delete(agentID: scopeID, name: name)
+                annotationStore.removeAll()
+                ocrLabel = nil
             }
             .disabled(isEmpty)
             .keyboardShortcut(.delete, modifiers: [.command, .shift])
@@ -77,25 +148,133 @@ struct AnnotationOverlayView: View {
         .padding(ShannonSpacing.md)
         .background(Color.shannonSurfaceElevated)
     }
+
+    // MARK: - OCR overlay
+
+    private func ocrOverlay(_ text: String) -> some View {
+        HStack(spacing: ShannonSpacing.xs) {
+            Image(systemName: ocrConfidence >= PencilAnnotation.ocrDisplayThreshold
+                  ? "text.viewfinder"
+                  : "questionmark.circle")
+                .font(.caption2)
+            Text(text)
+                .shannonText(.shannonCaption)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, ShannonSpacing.sm)
+        .padding(.vertical, ShannonSpacing.xs)
+        .background(
+            ocrConfidence >= PencilAnnotation.ocrDisplayThreshold
+                ? Color.shannonAccent.opacity(0.15)
+                : Color.shannonSurfaceElevated
+        )
+        .clipShape(RoundedRectangle(cornerRadius: ShannonRadius.sm))
+        .padding(ShannonSpacing.sm)
+    }
+
+    // MARK: - Export sheet
+
+    private var exportSheet: some View {
+        VStack(spacing: ShannonSpacing.lg) {
+            if let img = exportedImage {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 400)
+                    .clipShape(RoundedRectangle(cornerRadius: ShannonRadius.lg))
+            }
+            ShareLink(
+                "Share PNG",
+                item: exportedImage.map { Image(uiImage: $0) } ?? Image(systemName: "exclamationmark"),
+                preview: SharePreview(title, image: exportedImage.map { Image(uiImage: $0) } ?? Image(systemName: "pencil"))
+            )
+            .buttonStyle(.borderedProminent)
+
+            Button("Close", action: { showingExport = false })
+        }
+        .padding(ShannonSpacing.xl)
+        .presentationDetents([.medium])
+    }
+
+    // MARK: - Persistence
+
+    private func loadDrawing() {
+        drawingData = AnnotationStore.load(agentID: scopeID, name: name)
+    }
+
+    private func persist(_ newData: Data?) {
+        guard let data = newData else { return }
+        AnnotationStore.save(data, agentID: scopeID, name: name)
+
+        // Also persist in PencilAnnotationStore for sync
+        var annotation = annotationStore.annotations.first
+            ?? PencilAnnotation(linkedAgentID: scopeID)
+        annotation.pkDrawingData = data
+        if let label = ocrLabel {
+            annotation.ocrText       = label
+            annotation.ocrConfidence = ocrConfidence
+        }
+        annotationStore.upsert(annotation)
+    }
+
+    // MARK: - Event handlers
+
+    private func handleOCR(text: String, confidence: Float) {
+        ocrLabel       = text
+        ocrConfidence  = confidence
+    }
+
+    private func handleSqueeze(action: PencilQuickAction, at point: CGPoint) {
+        squeezeOrigin = point
+        withAnimation(.shannonSnap) { showRadialMenu = true }
+    }
+
+    private func exportCanvas() {
+        #if canImport(PencilKit)
+        guard let data = drawingData,
+              let drawing = try? PKDrawing(data: data) else { return }
+        let bounds = drawing.bounds.isEmpty
+            ? CGRect(x: 0, y: 0, width: 1024, height: 768)
+            : drawing.bounds
+        exportedImage = drawing.image(from: bounds, scale: UIScreen.main.scale)
+        showingExport = true
+        #endif
+    }
+
+    private func performQuickAction(_ action: PencilQuickAction) {
+        switch action {
+        case .annotate:
+            break // Already in annotate mode
+        case .summariseAgent:
+            break // Hook into AgentHubViewModel — caller's responsibility
+        case .clearCanvas:
+            drawingData = Data()
+            AnnotationStore.delete(agentID: scopeID, name: name)
+            annotationStore.removeAll()
+            ocrLabel = nil
+        case .exportDrawing:
+            exportCanvas()
+        case .toggleRuler:
+            break // PKToolPicker manages the ruler toggle via its own UI
+        }
+    }
 }
 
-/// Placeholder for the binding-pocket render. Real geometry arrives with the
-/// FlexAID∆S pocket export; until then the ROI is drawn over a stand-in that is
-/// obviously schematic rather than a fake structure.
+// MARK: - PocketWireframe (unchanged from prior commit)
+
 private struct PocketWireframe: View {
     var body: some View {
         Canvas { context, size in
-            let rect = CGRect(origin: .zero, size: size).insetBy(dx: 24, dy: 24)
+            let rect   = CGRect(origin: .zero, size: size).insetBy(dx: 24, dy: 24)
             let stroke = GraphicsContext.Shading.color(.shannonTertiary.opacity(0.55))
-
             for ring in 0..<4 {
                 let inset = CGFloat(ring) * min(rect.width, rect.height) / 12
-                let path = Path(ellipseIn: rect.insetBy(dx: inset, dy: inset * 1.4))
+                let path  = Path(ellipseIn: rect.insetBy(dx: inset, dy: inset * 1.4))
                 context.stroke(path, with: stroke, lineWidth: 0.75)
             }
             for spoke in 0..<12 {
                 let angle = Double(spoke) / 12 * 2 * .pi
-                var path = Path()
+                var path  = Path()
                 path.move(to: CGPoint(x: rect.midX, y: rect.midY))
                 path.addLine(to: CGPoint(
                     x: rect.midX + cos(angle) * rect.width / 2,
@@ -111,61 +290,3 @@ private struct PocketWireframe: View {
         .allowsHitTesting(false)
     }
 }
-
-#if canImport(PencilKit)
-
-/// `PKCanvasView` bridged with the two pieces of state SwiftUI needs: the
-/// serialised drawing, and whether there is anything to erase.
-private struct PencilCanvas: UIViewRepresentable {
-    @Binding var data: Data?
-    @Binding var isEmpty: Bool
-
-    func makeUIView(context: Context) -> PKCanvasView {
-        let canvas = PKCanvasView()
-        canvas.backgroundColor = .clear
-        canvas.isOpaque = false
-        // Finger input stays available: a Magic Keyboard trackpad and a finger
-        // are both legitimate ways to annotate when the Pencil is not to hand.
-        canvas.drawingPolicy = .anyInput
-        canvas.delegate = context.coordinator
-        canvas.tool = PKInkingTool(.pen, color: .systemBlue, width: 4)
-
-        if let data, let drawing = try? PKDrawing(data: data) {
-            canvas.drawing = drawing
-        }
-
-        let picker = context.coordinator.toolPicker
-        picker.setVisible(true, forFirstResponder: canvas)
-        picker.addObserver(canvas)
-        DispatchQueue.main.async { canvas.becomeFirstResponder() }
-        return canvas
-    }
-
-    func updateUIView(_ canvas: PKCanvasView, context: Context) {
-        // An externally cleared drawing (the Erase All button writes empty
-        // data) has to be pushed back down; ordinary strokes flow the other way
-        // and must not be echoed, or the canvas resets mid-stroke.
-        guard let data else { return }
-        if data.isEmpty, !canvas.drawing.strokes.isEmpty {
-            canvas.drawing = PKDrawing()
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, PKCanvasViewDelegate {
-        let toolPicker = PKToolPicker()
-        private let parent: PencilCanvas
-
-        init(_ parent: PencilCanvas) {
-            self.parent = parent
-        }
-
-        func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
-            parent.data = canvasView.drawing.dataRepresentation()
-            parent.isEmpty = canvasView.drawing.strokes.isEmpty
-        }
-    }
-}
-
-#endif

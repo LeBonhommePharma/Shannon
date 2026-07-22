@@ -35,6 +35,7 @@ struct ShannonComplication: Widget {
 struct ShannonComplicationBundle: WidgetBundle {
     var body: some Widget {
         ShannonComplication()
+        PetWatchComplication()
     }
 }
 

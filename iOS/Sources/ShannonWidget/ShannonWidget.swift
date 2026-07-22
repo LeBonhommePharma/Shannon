@@ -31,6 +31,7 @@ struct ShannonWidget: Widget {
 struct ShannonWidgetBundle: WidgetBundle {
     var body: some Widget {
         ShannonWidget()
+        PetWidget()
     }
 }
 

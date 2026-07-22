@@ -363,6 +363,9 @@ open build/ShannonPill.app
 | Shannon entropy readout via local socket | ✅ implemented |
 | Now Playing (art, scrubber, transport) | ⚠️ implemented, data source entitlement-gated |
 | Head-gesture confirmation (nod / shake) | ✅ implemented, macOS 14+ · untested on hardware |
+| Voice dictation (on-device) + spoken announcements | ✅ implemented · untested with a live mic |
+| AirPods route detection + model indicator | ✅ implemented |
+| AirPods in-ear / battery / stem press | ❌ no macOS API — see Pill/BLOCKED.md |
 | Notification mirror, Focus/DND, AirDrop, file shelf | ❌ not implemented |
 
 Now Playing is built but macOS has no public API to read another app's playback
@@ -400,6 +403,66 @@ Requires **macOS 14 Sonoma or later** (`CMHeadphoneMotionManager` is
 / Max or H1/H2 Beats. On macOS 13 the buttons remain and the pill says why
 gestures are unavailable. No entitlement is required — head motion is ordinary
 TCC consent, prompted by `NSMotionUsageDescription`, and nothing leaves the Mac.
+
+### AirPods Integration
+
+What macOS actually permits here is much narrower than iOS, so the shipped
+surface is deliberately small (full API-by-API findings in
+[`Pill/BLOCKED.md`](Pill/BLOCKED.md) §8):
+
+| Capability | Status |
+|---|---|
+| Detect AirPods connect/disconnect as audio output | ✅ CoreAudio device listener |
+| Identify model (Pro / Max / AirPods / Beats) for the pill icon | ✅ from device name |
+| Hold spoken announcements when AirPods disappear, resume on return | ✅ |
+| Head-nod / shake confirmation | ✅ see Gesture Controls |
+| In-ear vs out-of-ear detection | ❌ no macOS API exists |
+| AirPods battery level | ❌ no third-party API |
+| Stem / Digital Crown presses | ❌ would require hijacking Now Playing |
+| Noise-control mode, Conversation Awareness | ❌ not exposed to third parties |
+
+`AVAudioSession` — the basis for most of the iOS approach — is
+`API_UNAVAILABLE(macos)`. Route changes therefore come from a CoreAudio
+listener on `kAudioHardwarePropertyDefaultOutputDevice` instead.
+
+**Spoken announcements** (`AVSpeechSynthesizer`) cover docking completion,
+benchmark results, agent errors and pending confirmations. Two policies worth
+knowing: Shannon will not announce through the built-in speakers by default
+(`requireHeadworn`), so results are not read aloud to a room; and when output
+resumes after AirPods return, queued *routine* chatter is dropped while urgent
+items are kept — "agent blocked, input needed" is still true, "target 3
+complete" is just noise.
+
+### Voice Dictation
+
+Double-tap the pill to start listening; a live transcript appears as you speak.
+Escape or a second double-tap cancels.
+
+| Utterance | Effect |
+|---|---|
+| "confirm" / "yes" / "approve" | Same as a head-nod — **only** when a prompt is pending |
+| "deny" / "no" / "cancel" | Same as a head-shake — same gating |
+| "show status" | Expand to the agent status view |
+| "pause" / "stop" | Halt the active announcement |
+| "run benchmark" | Trigger DatasetRunner if idle |
+| "what's docking" | Speak the current target and RMSD |
+| anything else | Forwarded to the active agent as a query |
+
+Two safety rules, both enforced by tests:
+
+- **A command must be the entire utterance.** "yes" confirms; "yes, but check
+  the ligand first" is a query. Substring matching would let "no problem, run
+  the benchmark" read as a denial, and these commands gate things like
+  "commit and push".
+- **"yes" at an idle pill confirms nothing.** Confirm and deny are dispatched
+  only while a prompt is actually pending; otherwise they go to the agent as
+  text, so a stray word can never approve whatever ran last.
+
+**Privacy.** `requiresOnDeviceRecognition = true` is set unconditionally and
+never relaxed: if a locale has no on-device model, dictation reports
+unavailable rather than falling back to Apple's servers. No audio or transcript
+leaves the Mac, and the microphone is only live during an active session.
+Requires Microphone and Speech Recognition consent.
 
 ### Wiring the agent to the pill
 

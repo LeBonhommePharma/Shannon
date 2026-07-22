@@ -46,5 +46,13 @@
 	     entitlement, only TCC approval prompted by its presence. -->
 	<key>NSMotionUsageDescription</key>
 	<string>Shannon Pill uses AirPods head motion so you can nod to confirm or shake to deny a prompt. Motion is read only while a question is on screen, and never leaves your Mac.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Shannon Pill records audio only while you are dictating a command, so it can transcribe what you say on this Mac.</string>
+
+	<!-- Dictation is on-device only: SFSpeechAudioBufferRecognitionRequest sets
+	     requiresOnDeviceRecognition = true unconditionally, and refuses to run
+	     rather than falling back to Apple's servers. -->
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Shannon Pill transcribes your spoken commands entirely on this Mac. No audio or transcript is ever sent to a server.</string>
 </dict>
 </plist>

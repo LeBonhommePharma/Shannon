@@ -54,6 +54,8 @@ targets:
         # Head-gesture consent. No entitlement is needed for headphone motion —
         # this key is what triggers the TCC prompt.
         NSMotionUsageDescription: Shannon Pill uses AirPods head motion so you can nod to confirm or shake to deny a prompt. Motion is read only while a question is on screen, and never leaves your Mac.
+        NSMicrophoneUsageDescription: Shannon Pill records audio only while you are dictating a command, so it can transcribe what you say on this Mac.
+        NSSpeechRecognitionUsageDescription: Shannon Pill transcribes your spoken commands entirely on this Mac. No audio or transcript is ever sent to a server.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lebonhommepharma.shannon.pill

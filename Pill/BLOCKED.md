@@ -163,7 +163,106 @@ Pill/build/ShannonPill.app/Contents/MacOS/ShannonPill --demo   # poses a prompt
 
 ---
 
-## 7. Permissions summary
+## 8. AirPods integration — most of the requested API surface is iOS-only
+
+The AirPods brief was written against iOS APIs. Checked against the macOS 27
+SDK, here is what actually exists.
+
+**`AVAudioSession` does not exist on macOS.** The header is present in
+`AVFAudio.framework` but every member is annotated
+`API_AVAILABLE(ios, watchos, tvos) API_UNAVAILABLE(macos)`. That single fact
+blocks four requested items:
+
+| Requested | Status |
+|---|---|
+| `routeChangeNotification` for in-ear detection (§1) | ❌ no such notification on macOS |
+| `preferredMicrophoneMode = .voiceIsolation` (§5) | ❌ `AVAudioSession` unavailable |
+| `setPreferredMicrophoneInjectionMode` (§5) | ❌ same |
+| `isOtherAudioPlaying` guard (§ "never override a call") | ❌ same |
+| `currentRoute.outputs.first?.portType` (§8) | ❌ same |
+
+**What was built instead.** `CoreAudioRouteProvider` listens on
+`kAudioHardwarePropertyDefaultOutputDevice`, which is the macOS equivalent for
+route changes. It detects AirPods **connecting and disconnecting** as the
+default output, reads the device name and Bluetooth transport type, and
+classifies the model for the pill indicator (§8 minus noise-control mode).
+
+**In-ear detection is not achievable.** macOS exposes no ear-detection API at
+all. Removing an AirPod usually makes macOS switch the default output away
+after a delay, which surfaces here as a disconnect — but that is a side effect
+with different timing, not the requested signal. Announcements are held on
+disconnect, which covers the practical intent of §1.
+
+**Conversation Awareness (§4) has no public API** on any platform. Nothing to
+subscribe to; the feature works on the audio Apple renders, not on ours.
+
+**Noise-control mode (§8) is not readable.** No public API reports
+transparency/ANC state to third parties.
+
+### Stem and Digital Crown presses (§2) — compiles, but semantically wrong
+
+`MPRemoteCommandCenter` **is** available (`MP_API(macos(10.12.2))`), so the
+code in the brief would build. It would not work as intended:
+
+remote commands are delivered only to the app the system considers the **Now
+Playing app**. Shannon publishes no audio, so AirPods stem presses go to Music,
+Spotify, or whatever is actually playing. For Shannon to receive them it would
+have to claim the Now Playing role — at which point a stem press stops
+controlling the user's music, which is precisely the "never override" rule the
+brief itself sets out. §2 also conflicts directly with §4: speaking
+announcements through Shannon is what would make it the Now Playing app.
+
+Not implemented. Head gestures already provide contextual confirm/deny without
+hijacking anyone's transport controls.
+
+### AirPods battery (§3) — no third-party path
+
+AirPods do not expose the GATT Battery Service (0x180F / 0x2A19) to
+third-party `CoreBluetooth` clients; they are not connectable as a generic
+BLE peripheral. Battery percentages surface only through private
+`BluetoothManager`/`IORegistry` keys (`BatteryPercentCombined`,
+`BatteryPercentCase`) which are undocumented, unstable across releases, and
+absent entirely for some models. Not implemented. The Mac's own battery ring
+(shipped, §Battery) is unaffected.
+
+### Spatial positioning of announcements (§4)
+
+`AVAudioEnvironmentNode` exists on macOS, but `AVSpeechSynthesizer` renders to
+the system output device and cannot be inserted into an `AVAudioEngine` graph,
+so its output cannot be positioned at front-centre. Announcements are plain
+stereo. Routing synthesized speech through the engine would require rendering
+to buffers via `write(_:toBufferCallback:)` and losing system voice routing —
+judged not worth it for a positional cue.
+
+### Head-orientation browse mode (§6)
+
+Not implemented. `CMHeadphoneMotionManager` already streams continuous
+attitude, so this is genuinely available — it was descoped for time, not
+blocked. `HeadGestureDetector` would need a second mode that reports sustained
+yaw offset rather than discrete gestures.
+
+---
+
+## 9. Voice dictation — shipped, with one caveat
+
+`SFSpeechRecognizer` is `API_AVAILABLE(macos(10.15))` and
+`requiresOnDeviceRecognition` is `macos(10.15)`, so both clear the pill's
+macOS 13 floor. Dictation is implemented and on-device only.
+
+**The caveat:** `requiresOnDeviceRecognition = true` is set unconditionally and
+never relaxed. If the user's locale has no on-device model installed,
+`supportsOnDeviceRecognition` is false and dictation reports unavailable rather
+than falling back to server recognition. This is deliberate — the privacy
+promise is unconditional — but it means dictation silently does not work for
+some locales until the user downloads the language model.
+
+**Not verified against a live microphone.** The recognizer, audio tap and
+engine wiring are untested end to end; no microphone session was run during
+development. The parser and dispatch logic have 32 unit tests.
+
+---
+
+## 10. Permissions summary
 
 | Capability | Permission | Status |
 |---|---|---|
@@ -173,6 +272,11 @@ Pill/build/ShannonPill.app/Contents/MacOS/ShannonPill --demo   # poses a prompt
 | Now Playing transport control | Accessibility | untested (needs §1 resolved) |
 | AirPods battery | Bluetooth | not implemented |
 | Head-gesture confirm | Motion & Fitness (TCC only) | ✅ built, macOS 14+, untested on hardware |
+| Voice dictation | Microphone + Speech Recognition (TCC) | ✅ built, on-device only, untested with a live mic |
+| AirPods route / model indicator | none (CoreAudio) | ✅ built |
+| AirPods in-ear detection | — | ❌ no macOS API |
+| AirPods battery | — | ❌ no third-party API |
+| Stem / Crown presses | — | ❌ requires hijacking Now Playing |
 | Notification mirror | Accessibility + Automation | ❌ blocked (§3) |
 | Focus / DND | none available | ❌ blocked (§2) |
 | AirDrop | none available | ❌ blocked (§4) |

@@ -12,7 +12,15 @@ let package = Package(
         .library(name: "ShannonCore", targets: ["ShannonCore"]),
     ],
     targets: [
-        .target(name: "ShannonCore"),
+        .target(
+            name: "ShannonCore",
+            swiftSettings: [
+                // Strict concurrency: every shared type must prove it is
+                // Sendable, which is what keeps CloudKit and WatchConnectivity
+                // callbacks off the main actor by construction.
+                .enableExperimentalFeature("StrictConcurrency"),
+            ]
+        ),
         .testTarget(name: "ShannonCoreTests", dependencies: ["ShannonCore"]),
     ]
 )

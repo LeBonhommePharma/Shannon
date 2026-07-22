@@ -1,18 +1,35 @@
 import SwiftUI
-import UIKit
 import ShannonCore
+import ShannonTheme
 
+/// The phone's only screen.
+///
+/// Design rules it follows literally: monochrome plus one accent, no gradients
+/// or shadows, generous spacing, and nothing on screen when nothing matters.
+/// Every control updates local state first and reconciles with CloudKit after,
+/// so no tap ever waits on the network.
+@available(iOS 17.0, *)
 struct HomeView: View {
-    @EnvironmentObject private var environment: PhoneEnvironment
+    let model: PhoneModel
 
-    private var snapshot: ShannonSnapshot { environment.store.snapshot }
+    private var snapshot: ShannonSnapshot { model.store.snapshot }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(spacing: 14) {
-                    if let device = snapshot.device {
-                        MacStatusCard(device: device)
+                LazyVStack(spacing: ShannonLayout.IOSCard.interCardSpacing) {
+                    if let pending = snapshot.oldestPendingConfirmation() {
+                        ConfirmationCard(
+                            confirmation: pending,
+                            gesturesAvailable: model.isAwaitingConfirmation
+                        ) { answer in
+                            model.answer(answer, source: .tap)
+                        }
+                        .id(pending.id)
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.96).combined(with: .opacity),
+                            removal: .opacity
+                        ))
                     }
 
                     ForEach(snapshot.docking) { progress in
@@ -20,7 +37,7 @@ struct HomeView: View {
                     }
 
                     if let media = snapshot.nowPlaying, !media.isIdle {
-                        NowPlayingCard(media: media) { environment.send($0) }
+                        NowPlayingCard(media: media) { model.send($0) }
                     }
 
                     ForEach(snapshot.timers) { timer in
@@ -31,149 +48,192 @@ struct HomeView: View {
                         AgentCard(agent: agent)
                     }
 
-                    if !snapshot.notifications.isEmpty {
-                        NotificationFeed(notifications: snapshot.notifications)
+                    ForEach(snapshot.notifications) { note in
+                        NotificationCard(note: note)
                     }
 
                     if snapshot.isEmpty {
-                        EmptyStateView(error: environment.store.lastError)
-                            .padding(.top, 80)
+                        EmptyStateView(error: model.store.lastError)
+                            .padding(.top, 96)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .scrollTargetLayout()
+                .shannonPageInset()
+                .padding(.vertical, ShannonSpacing.sm)
             }
-            .background(Color(.systemGroupedBackground))
+            .scrollTargetBehavior(.viewAligned)
+            .background(Color.shannonBackground.ignoresSafeArea())
             .navigationTitle("Shannon")
-            .refreshable { await environment.store.refresh() }
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable { await model.store.refresh() }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    SyncIndicator(
-                        syncedAt: environment.store.lastSyncedAt,
-                        isRefreshing: environment.store.isRefreshing
-                    )
+                ToolbarItem(placement: .topBarLeading) { AirPodsIndicator(monitor: model.airPods) }
+                ToolbarItem(placement: .topBarTrailing) { MicButton(model: model) }
+            }
+            .animation(.shannonEase, value: snapshot.confirmations)
+            .animation(.shannonEase, value: snapshot.agents)
+            .animation(.shannonEase, value: snapshot.notifications)
+        }
+        .tint(.shannonAccent)
+    }
+}
+
+// MARK: - Confirmation
+
+/// The one card that interrupts. Everything else is passive status; this is
+/// Shannon waiting on LP, so it gets the accent border and the top slot.
+@available(iOS 17.0, *)
+struct ConfirmationCard: View {
+    let confirmation: PendingConfirmation
+    let gesturesAvailable: Bool
+    var onAnswer: (ConfirmationAnswer) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
+            Text(confirmation.question)
+                .font(.shannonHeadline)
+                .foregroundStyle(Color.shannonPrimary)
+
+            if !confirmation.detail.isEmpty {
+                Text(confirmation.detail)
+                    .font(.shannonCaption)
+                    .foregroundStyle(Color.shannonSecondary)
+            }
+
+            HStack(spacing: ShannonSpacing.sm) {
+                AnswerButton(title: "Confirm", symbol: "checkmark", tint: .shannonAccent) {
+                    onAnswer(.confirmed)
+                }
+                AnswerButton(title: "Deny", symbol: "xmark", tint: .shannonSecondary) {
+                    onAnswer(.denied)
                 }
             }
-        }
-    }
-}
+            .padding(.top, ShannonSpacing.xs)
 
-/// Cards share one chrome so the list reads as a single surface.
-struct Card<Content: View>: View {
-    var title: String
-    var systemImage: String
-    var accent: Color = .accentColor
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(accent)
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
-    }
-}
-
-struct MacStatusCard: View {
-    let device: MacDeviceState
-
-    var body: some View {
-        Card(title: device.deviceName, systemImage: "laptopcomputer", accent: .secondary) {
-            HStack(spacing: 12) {
-                Text(device.batteryLabel)
-                    .font(.title3.weight(.semibold).monospacedDigit())
-                ProgressView(value: device.fillFraction)
-                    .tint(device.batteryPercent <= 20 && !device.isCharging ? .red : .green)
-            }
-            if device.isStale() {
-                Text("Mac offline — last seen \(device.updatedAt.formatted(.relative(presentation: .named)))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if gesturesAvailable {
+                Label("Nod to confirm · shake to deny", systemImage: "airpodspro")
+                    .font(.shannonCaption)
+                    .foregroundStyle(Color.shannonTertiary)
             }
         }
+        .shannonCard(isHighlighted: true)
     }
 }
 
+/// Buttons animate from local state on press and never wait on the write.
+@available(iOS 17.0, *)
+struct AnswerButton: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    var action: () -> Void
+
+    @State private var isPressed = false
+
+    var body: some View {
+        Button {
+            action()
+        } label: {
+            Label(title, systemImage: symbol)
+                .font(.shannonCallout)
+                .foregroundStyle(tint)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, ShannonSpacing.sm)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: ShannonRadius.md))
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(isPressed ? 0.96 : 1)
+        .animation(.shannonSnap, value: isPressed)
+        .onLongPressGesture(minimumDuration: 0, pressing: { isPressed = $0 }, perform: {})
+    }
+}
+
+// MARK: - Status cards
+
+@available(iOS 17.0, *)
 struct AgentCard: View {
     let agent: AgentState
 
-    private var accent: Color {
+    private var state: ShannonStatusDot.State {
         switch agent.activity {
-        case .running:  return .blue
-        case .idle:     return .secondary
-        case .blocked:  return .orange
-        case .errored:  return .red
-        case .finished: return .green
+        case .running:  return .active
+        case .blocked:  return .warning
+        case .errored:  return .error
+        case .finished: return .success
+        case .idle:     return .neutral
         }
     }
 
     var body: some View {
-        Card(title: agent.name, systemImage: "cpu", accent: accent) {
-            HStack {
-                Text(agent.activity.rawValue.capitalized)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(accent.opacity(0.15), in: Capsule())
-                    .foregroundStyle(accent)
+        VStack(alignment: .leading, spacing: ShannonSpacing.xs) {
+            HStack(spacing: ShannonSpacing.sm) {
+                ShannonStatusDot(state: state)
+                Text(agent.name)
+                    .font(.shannonHeadline)
+                    .foregroundStyle(Color.shannonPrimary)
                 Spacer()
-                Text("\(agent.turnCount) turns")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                Text("\(agent.turnCount)")
+                    .shannonNumeric()
             }
 
             if !agent.taskTitle.isEmpty {
-                Text(agent.taskTitle).font(.body)
-            }
-            if !agent.lastAction.isEmpty {
-                Text(agent.lastAction)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(agent.taskTitle)
+                    .font(.shannonBody)
+                    .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(2)
             }
+
             if let entropy = agent.entropyLabel {
                 Text(entropy)
-                    .font(.caption.monospacedDigit())
+                    .font(.shannonMono)
                     // A collapsed distribution is the whole point of Shannon —
-                    // it must be visible at a glance, not buried in grey text.
-                    .foregroundStyle(agent.isCollapsed ? .red : .secondary)
+                    // it must read at a glance, not blend into grey text.
+                    .foregroundStyle(agent.isCollapsed ? Color.shannonError : Color.shannonTertiary)
+            }
+        }
+        .shannonCard()
+        .contextMenu {
+            Button("Copy last action") {
+                UIPasteboard.general.string = agent.lastAction
+                Haptics.transition()
             }
         }
     }
 }
 
+@available(iOS 17.0, *)
 struct DockingCard: View {
     let progress: DockingProgress
 
     var body: some View {
-        Card(title: progress.benchmarkName, systemImage: "atom", accent: .purple) {
-            HStack(spacing: 18) {
-                ProgressRing(fraction: progress.fraction, label: progress.countLabel)
-                    .frame(width: 84, height: 84)
+        HStack(spacing: ShannonSpacing.md) {
+            ProgressRing(fraction: progress.fraction, label: progress.countLabel)
+                .frame(width: 72, height: 72)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    if !progress.currentTarget.isEmpty {
-                        LabeledContent("Target", value: progress.currentTarget)
-                    }
-                    if let rmsd = progress.bestRMSD {
-                        LabeledContent("Best RMSD",
-                                       value: "\(String(format: "%.2f", rmsd)) Å")
-                    }
-                    if let rate = progress.successRate {
-                        LabeledContent("Success",
-                                       value: "\(Int((rate * 100).rounded()))%")
-                    }
-                    if let eta = progress.etaLabel {
-                        LabeledContent("ETA", value: eta)
-                    }
-                }
-                .font(.caption.monospacedDigit())
+            VStack(alignment: .leading, spacing: ShannonSpacing.xs) {
+                Text(progress.benchmarkName)
+                    .font(.shannonHeadline)
+                    .foregroundStyle(Color.shannonPrimary)
+                    .lineLimit(1)
+
+                Text(statusLine)
+                    .font(.shannonMono)
+                    .foregroundStyle(Color.shannonSecondary)
+                    .lineLimit(1)
             }
+            Spacer(minLength: 0)
         }
+        .shannonCard()
+    }
+
+    /// One dense line instead of a stack of labelled rows — the ring already
+    /// carries the headline number.
+    private var statusLine: String {
+        var parts: [String] = []
+        if let rmsd = progress.bestRMSD { parts.append(String(format: "%.2fÅ", rmsd)) }
+        if let eta = progress.etaLabel { parts.append(eta) }
+        if !progress.currentTarget.isEmpty { parts.append(progress.currentTarget) }
+        return parts.isEmpty ? "starting…" : parts.joined(separator: " · ")
     }
 }
 
@@ -183,57 +243,81 @@ struct ProgressRing: View {
 
     var body: some View {
         ZStack {
-            Circle().stroke(Color.purple.opacity(0.15), lineWidth: 9)
+            Circle().stroke(Color.shannonAccentSubtle, lineWidth: 6)
             Circle()
                 .trim(from: 0, to: max(fraction, 0.001))
-                .stroke(Color.purple, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                .stroke(Color.shannonAccent, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.4), value: fraction)
+                .animation(.shannonEase, value: fraction)
             Text(label)
-                .font(.caption.weight(.semibold).monospacedDigit())
+                .font(.shannonMono)
+                .foregroundStyle(Color.shannonPrimary)
         }
     }
 }
 
+@available(iOS 17.0, *)
 struct NowPlayingCard: View {
     let media: NowPlayingSnapshot
     var onCommand: (PlaybackCommand) -> Void
 
     var body: some View {
-        Card(title: "Now Playing", systemImage: "music.note", accent: .pink) {
-            HStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
+            HStack(spacing: ShannonSpacing.sm) {
                 Artwork(data: media.artworkJPEG)
-                    .frame(width: 60, height: 60)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: ShannonRadius.sm))
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(media.title).font(.body.weight(.medium)).lineLimit(1)
-                    Text(media.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(media.title)
+                        .font(.shannonCallout)
+                        .foregroundStyle(Color.shannonPrimary)
+                        .lineLimit(1)
+                    Text(media.artist)
+                        .font(.shannonCaption)
+                        .foregroundStyle(Color.shannonSecondary)
+                        .lineLimit(1)
                 }
-                Spacer()
+                Spacer(minLength: 0)
+
+                TransportButton(symbol: media.isPlaying ? "pause.fill" : "play.fill") {
+                    onCommand(.togglePlayPause)
+                }
+                TransportButton(symbol: "forward.fill") { onCommand(.nextTrack) }
             }
 
             if media.duration > 0 {
-                ProgressView(value: media.progress).tint(.pink)
+                ProgressView(value: media.progress)
+                    .tint(.shannonAccent)
             }
-
-            HStack(spacing: 34) {
-                Spacer()
-                Button { onCommand(.previousTrack) } label: {
-                    Image(systemName: "backward.fill")
-                }
-                Button { onCommand(.togglePlayPause) } label: {
-                    Image(systemName: media.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title2)
-                }
-                Button { onCommand(.nextTrack) } label: {
-                    Image(systemName: "forward.fill")
-                }
-                Spacer()
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.primary)
         }
+        .shannonCard()
+        .contextMenu {
+            Button("Previous track") { onCommand(.previousTrack) }
+        }
+    }
+}
+
+/// Optimistic transport control: the glyph flips the instant it is tapped,
+/// and the command reaches the Mac afterwards.
+@available(iOS 17.0, *)
+struct TransportButton: View {
+    let symbol: String
+    var action: () -> Void
+    @State private var isPressed = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Color.shannonPrimary)
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(isPressed ? 0.9 : 1)
+        .animation(.shannonSnap, value: isPressed)
+        .onLongPressGesture(minimumDuration: 0, pressing: { isPressed = $0 }, perform: {})
     }
 }
 
@@ -245,93 +329,196 @@ struct Artwork: View {
             Image(uiImage: image).resizable().scaledToFill()
         } else {
             ZStack {
-                Color.pink.opacity(0.15)
-                Image(systemName: "music.note").foregroundStyle(.pink)
+                Color.shannonSurfaceElevated
+                Image(systemName: "music.note")
+                    .foregroundStyle(Color.shannonTertiary)
             }
         }
     }
 }
 
+@available(iOS 17.0, *)
 struct TimerCard: View {
     let timer: TimerState
-    /// Drives the local countdown; only the deadline is synced.
-    @State private var now = Date()
-    private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        Card(title: timer.label.isEmpty ? "Timer" : timer.label,
-             systemImage: "timer", accent: .orange) {
+        // TimelineView drives the countdown without a per-second @State write,
+        // so only this label redraws each tick.
+        TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack {
-                Text(timer.remainingLabel(now: now))
-                    .font(.system(.title2, design: .rounded).monospacedDigit().weight(.semibold))
-                if timer.isPaused {
-                    Text("paused").font(.caption).foregroundStyle(.secondary)
+                Text(timer.label.isEmpty ? "Timer" : timer.label)
+                    .font(.shannonCallout)
+                    .foregroundStyle(Color.shannonSecondary)
+                Spacer()
+                Text(timer.remainingLabel(now: context.date))
+                    .font(.system(.title3, design: .rounded).monospacedDigit().weight(.medium))
+                    .foregroundStyle(timer.isPaused ? Color.shannonTertiary : Color.shannonPrimary)
+            }
+            .shannonCard()
+        }
+    }
+}
+
+/// Swipe to dismiss, long-press for the secondary action — no nested menus.
+@available(iOS 17.0, *)
+struct NotificationCard: View {
+    let note: NotificationMirror
+    @State private var offset: CGFloat = 0
+    @State private var isDismissed = false
+
+    var body: some View {
+        if !isDismissed {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(note.sender)
+                        .font(.shannonCaption)
+                        .foregroundStyle(Color.shannonAccent)
+                    Spacer()
+                    Text(note.postedAt.formatted(.relative(presentation: .numeric)))
+                        .font(.shannonCaption)
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+                if !note.title.isEmpty {
+                    Text(note.title)
+                        .font(.shannonCallout)
+                        .foregroundStyle(Color.shannonPrimary)
+                }
+                Text(note.body)
+                    .font(.shannonCaption)
+                    .foregroundStyle(Color.shannonSecondary)
+                    .lineLimit(2)
+            }
+            .shannonCard()
+            .offset(x: offset)
+            .gesture(
+                DragGesture()
+                    .onChanged { offset = $0.translation.width }
+                    .onEnded { value in
+                        if abs(value.translation.width) > 120 {
+                            withAnimation(.shannonSnap) {
+                                offset = value.translation.width > 0 ? 600 : -600
+                                isDismissed = true
+                            }
+                            Haptics.transition()
+                        } else {
+                            withAnimation(.shannonSnap) { offset = 0 }
+                        }
+                    }
+            )
+            .contextMenu {
+                Button("Copy") {
+                    UIPasteboard.general.string = "\(note.sender): \(note.body)"
+                    Haptics.transition()
                 }
             }
         }
-        .onReceive(tick) { now = $0 }
     }
 }
 
-struct NotificationFeed: View {
-    let notifications: [NotificationMirror]
+// MARK: - Toolbar
+
+@available(iOS 17.0, *)
+struct AirPodsIndicator: View {
+    let monitor: AirPodsMonitor
 
     var body: some View {
-        Card(title: "Mac notifications", systemImage: "bell.badge", accent: .teal) {
-            ForEach(notifications) { note in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(note.sender).font(.caption.weight(.semibold))
-                        Spacer()
-                        Text(note.postedAt.formatted(.relative(presentation: .numeric)))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    if !note.title.isEmpty {
-                        Text(note.title).font(.subheadline)
-                    }
-                    Text(note.body).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+        if monitor.isConnected {
+            HStack(spacing: 3) {
+                Image(systemName: monitor.kind.symbol)
+                // Battery is only ever shown when it is low enough to matter.
+                if monitor.showsLowBattery, let percent = monitor.batteryPercent {
+                    Text("\(percent)%").font(.shannonCaption)
                 }
-                .padding(.vertical, 4)
-                if note.id != notifications.last?.id { Divider() }
+            }
+            .foregroundStyle(monitor.showsLowBattery ? Color.shannonWarning : Color.shannonTertiary)
+            .transition(.opacity)
+        }
+    }
+}
+
+/// Press and hold to dictate; release submits. Double-tap toggles hands-free.
+@available(iOS 17.0, *)
+struct MicButton: View {
+    let model: PhoneModel
+    @State private var isHolding = false
+
+    var body: some View {
+        if model.voice.isAvailable && model.voice.isAuthorized {
+            Image(systemName: model.voice.isListening ? "mic.fill" : "mic")
+                .foregroundStyle(model.voice.isListening ? Color.shannonAccent : Color.shannonTertiary)
+                .scaleEffect(isHolding ? 1.15 : 1)
+                .animation(.shannonSnap, value: isHolding)
+                .accessibilityLabel("Dictate")
+                .onLongPressGesture(minimumDuration: 0.15) {
+                    // Fires on hold begin.
+                } onPressingChanged: { pressing in
+                    isHolding = pressing
+                    if pressing {
+                        Haptics.transition()
+                        model.startDictation()
+                    } else if !model.voice.isHandsFree {
+                        model.finishDictation()
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if model.voice.isListening {
+                        VoiceOverlay(voice: model.voice)
+                            .offset(y: 64)
+                    }
+                }
+        }
+    }
+}
+
+/// Live waveform plus the transcript, and a preview of the command that
+/// releasing will run.
+@available(iOS 17.0, *)
+struct VoiceOverlay: View {
+    let voice: VoiceDictation
+
+    var body: some View {
+        VStack(spacing: ShannonSpacing.xs) {
+            HStack(spacing: 2) {
+                ForEach(Array(voice.levels.enumerated()), id: \.offset) { _, level in
+                    Capsule()
+                        .fill(Color.shannonAccent)
+                        .frame(width: 2, height: max(3, CGFloat(level) * 22))
+                }
+            }
+            .animation(.shannonSnap, value: voice.levels)
+
+            if !voice.transcript.isEmpty {
+                Text(voice.transcript)
+                    .font(.shannonCaption)
+                    .foregroundStyle(Color.shannonPrimary)
+                    .lineLimit(2)
+                    .frame(maxWidth: 220)
             }
         }
+        .padding(ShannonSpacing.sm)
+        .background(Color.shannonSurfaceElevated, in: RoundedRectangle(cornerRadius: ShannonRadius.md))
+        .fixedSize()
     }
 }
 
-struct SyncIndicator: View {
-    let syncedAt: Date?
-    let isRefreshing: Bool
-
-    var body: some View {
-        if isRefreshing {
-            ProgressView()
-        } else if let syncedAt {
-            Text(syncedAt.formatted(date: .omitted, time: .shortened))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
+@available(iOS 17.0, *)
 struct EmptyStateView: View {
     let error: String?
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text("Nothing running").font(.headline)
+        VStack(spacing: ShannonSpacing.sm) {
+            Text(error == nil ? "Nothing running" : "Can't reach iCloud")
+                .font(.shannonHeadline)
+                .foregroundStyle(Color.shannonSecondary)
             Text(error == nil
                  ? "Agent state from your Mac appears here."
-                 // The distinction matters: an idle Mac and a broken iCloud
-                 // link look identical otherwise.
-                 : "Can't reach iCloud. Check that Shannon is signed in on this device.")
-                .font(.caption)
+                 // An idle Mac and a broken iCloud link look identical
+                 // otherwise, and only one of them is worth acting on.
+                 : "Check that this device is signed in to iCloud.")
+                .font(.shannonCaption)
+                .foregroundStyle(Color.shannonTertiary)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 40)
+        .padding(.horizontal, ShannonSpacing.xl)
     }
 }

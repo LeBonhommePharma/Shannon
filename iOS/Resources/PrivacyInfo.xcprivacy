@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Shannon collects nothing and tracks no one. There are no analytics or
+      telemetry SDKs in this app, and no third-party SDKs at all: the only
+      dependencies are the local ShannonCore and ShannonTheme packages.
+
+      All state stays in the user's own private CloudKit database. Speech is
+      transcribed on device (requiresOnDeviceRecognition = true) and heart rate,
+      where enabled on the watch, never leaves the device.
+    -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+    <!--
+      No API in Apple's required-reason list is used: no UserDefaults, no file
+      timestamp APIs, no disk space checks, no active keyboard queries, and no
+      system boot time.
+    -->
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array/>
+</dict>
+</plist>

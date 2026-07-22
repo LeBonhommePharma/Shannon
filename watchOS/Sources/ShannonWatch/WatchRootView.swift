@@ -1,146 +1,210 @@
 import SwiftUI
 import ShannonCore
+import ShannonTheme
 
-/// Three cards maximum, scrolled with the Digital Crown. Anything that needs
-/// more detail belongs on the phone.
+/// One screen at a time; the Digital Crown moves between them. No tab bar, no
+/// nested navigation — on a watch, the crown is the navigation.
+@available(watchOS 10.0, *)
 struct WatchRootView: View {
-    @EnvironmentObject private var relay: WatchRelay
-
-    private var snapshot: ShannonSnapshot { relay.snapshot }
+    @Bindable var model: WatchModel
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 8) {
-                    if let docking = snapshot.docking.first(where: { $0.isRunning })
-                        ?? snapshot.docking.first {
-                        WatchDockingCard(progress: docking)
-                    }
-
-                    if let agent = snapshot.agents.rankedForDisplay().first {
-                        WatchAgentCard(agent: agent)
-                    }
-
-                    if let media = snapshot.nowPlaying, !media.isIdle {
-                        WatchNowPlayingCard(media: media) { relay.send($0) }
-                    }
-
-                    if snapshot.isEmpty {
-                        Text("Waiting for iPhone")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 30)
-                    }
-                }
-                .padding(.horizontal, 4)
-            }
-            .navigationTitle("Shannon")
-        }
-    }
-}
-
-private struct WatchCard<Content: View>: View {
-    var accent: Color
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-struct WatchDockingCard: View {
-    let progress: DockingProgress
-
-    var body: some View {
-        WatchCard(accent: .purple) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(progress.benchmarkName)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(progress.countLabel)
-                    .font(.system(.title3, design: .rounded).monospacedDigit().weight(.semibold))
-                ProgressView(value: progress.fraction).tint(.purple)
-                HStack {
-                    if let rmsd = progress.bestRMSD {
-                        Text("\(String(format: "%.2f", rmsd))Å").font(.caption2.monospacedDigit())
-                    }
-                    Spacer()
-                    if let eta = progress.etaLabel {
-                        Text(eta).font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
+        Group {
+            switch model.screen {
+            case .face:
+                ShannonFaceView(model: model)
+            case .agents:
+                AgentListView(model: model)
+            case .nowPlaying:
+                WatchNowPlayingView(model: model)
+            case .notifications:
+                NotificationListView(model: model)
             }
         }
+        .animation(.shannonEase, value: model.screen)
+        .focusable()
+        .digitalCrownRotation(
+            $model.crownPosition,
+            from: 0,
+            through: Double(WatchScreen.allCases.count - 1),
+            by: 1,
+            sensitivity: .medium,
+            isContinuous: false,
+            isHapticFeedbackEnabled: true
+        )
+        .onChange(of: model.crownPosition) { _, value in
+            model.crownChanged(to: value)
+        }
+        // Double Tap (Series 9 and later): the primary action of whichever
+        // screen is showing.
+        .shannonPrimaryHandGesture()
+        .onTapGesture(count: 2) { model.primaryAction() }
     }
 }
 
-struct WatchAgentCard: View {
-    let agent: AgentState
-
-    private var accent: Color {
-        switch agent.activity {
-        case .running:  return .blue
-        case .blocked:  return .orange
-        case .errored:  return .red
-        case .finished: return .green
-        case .idle:     return .gray
-        }
-    }
+/// Confirm / deny buttons, shown on the face only while a question is pending.
+@available(watchOS 10.0, *)
+struct ConfirmationControls: View {
+    let model: WatchModel
 
     var body: some View {
-        WatchCard(accent: accent) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("\(agent.activity.glyph) \(agent.name)")
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                if !agent.taskTitle.isEmpty {
-                    Text(agent.taskTitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+        HStack(spacing: ShannonSpacing.sm) {
+            Button {
+                model.answer(.confirmed, source: .tap)
+            } label: {
+                Label("Confirm", systemImage: "checkmark")
+                    .labelStyle(.iconOnly)
+                    .frame(maxWidth: .infinity)
+            }
+            .tint(.shannonAccent)
+            // Double Tap maps here: the affirmative action, never the
+            // destructive one.
+            .shannonPrimaryHandGesture()
+
+            Button {
+                model.answer(.denied, source: .tap)
+            } label: {
+                Label("Deny", systemImage: "xmark")
+                    .labelStyle(.iconOnly)
+                    .frame(maxWidth: .infinity)
+            }
+            .tint(.shannonNeutral)
+        }
+        .buttonStyle(.bordered)
+    }
+}
+
+@available(watchOS 10.0, *)
+struct AgentListView: View {
+    let model: WatchModel
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: ShannonSpacing.sm) {
+                ForEach(model.snapshot.agents.rankedForDisplay()) { agent in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(agent.activity.glyph) \(agent.name)")
+                            .font(.system(.body, design: .rounded).weight(.semibold))
+                            .foregroundStyle(Color.shannonPrimary)
+                            .lineLimit(1)
+                        // Two lines maximum per card: anything longer is
+                        // unreadable at a glance on a wrist.
+                        Text(agent.taskTitle.isEmpty ? "\(agent.turnCount) turns"
+                                                     : agent.taskTitle)
+                            .font(.shannonCaption)
+                            .foregroundStyle(Color.shannonSecondary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(ShannonLayout.WatchCard.padding)
+                    .background(Color.shannonSurface,
+                                in: RoundedRectangle(cornerRadius: ShannonLayout.WatchCard.radius))
+                    .contextMenu {
+                        Button("Back to face") { model.goHome() }
+                    }
+                }
+
+                if model.snapshot.agents.isEmpty {
+                    Text("No agents")
+                        .font(.shannonCaption)
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+            }
+        }
+        .containerBackground(Color.shannonBackground.gradient, for: .navigation)
+    }
+}
+
+@available(watchOS 10.0, *)
+struct WatchNowPlayingView: View {
+    let model: WatchModel
+
+    var body: some View {
+        VStack(spacing: ShannonSpacing.sm) {
+            if let media = model.snapshot.nowPlaying, !media.isIdle {
+                VStack(spacing: 2) {
+                    Text(media.title)
+                        .font(.system(.body, design: .rounded).weight(.semibold))
+                        .foregroundStyle(Color.shannonPrimary)
                         .lineLimit(2)
+                    Text(media.artist)
+                        .font(.shannonCaption)
+                        .foregroundStyle(Color.shannonSecondary)
+                        .lineLimit(1)
                 }
-                HStack {
-                    Text("\(agent.turnCount) turns").font(.caption2.monospacedDigit())
-                    Spacer()
-                    if let entropy = agent.entropyLabel {
-                        Text(entropy)
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(agent.isCollapsed ? .red : .secondary)
-                    }
-                }
-            }
-        }
-    }
-}
 
-struct WatchNowPlayingCard: View {
-    let media: NowPlayingSnapshot
-    var onCommand: (PlaybackCommand) -> Void
-
-    var body: some View {
-        WatchCard(accent: .pink) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(media.title).font(.caption.weight(.medium)).lineLimit(1)
-                Text(media.artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                HStack(spacing: 20) {
-                    Spacer()
-                    Button { onCommand(.previousTrack) } label: {
+                HStack(spacing: ShannonSpacing.md) {
+                    Button { model.send(.previousTrack) } label: {
                         Image(systemName: "backward.fill")
                     }
-                    Button { onCommand(.togglePlayPause) } label: {
+                    Button { model.send(.togglePlayPause) } label: {
                         Image(systemName: media.isPlaying ? "pause.fill" : "play.fill")
                     }
-                    Button { onCommand(.nextTrack) } label: {
+                    .shannonPrimaryHandGesture()
+                    Button { model.send(.nextTrack) } label: {
                         Image(systemName: "forward.fill")
                     }
-                    Spacer()
                 }
                 .buttonStyle(.plain)
+                .foregroundStyle(Color.shannonPrimary)
+            } else {
+                Text("Nothing playing")
+                    .font(.shannonCaption)
+                    .foregroundStyle(Color.shannonTertiary)
             }
+        }
+        .containerBackground(Color.shannonBackground.gradient, for: .navigation)
+    }
+}
+
+@available(watchOS 10.0, *)
+struct NotificationListView: View {
+    let model: WatchModel
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: ShannonSpacing.sm) {
+                ForEach(model.snapshot.notifications) { note in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(note.sender)
+                            .font(.shannonCaption)
+                            .foregroundStyle(Color.shannonAccent)
+                        Text(note.title.isEmpty ? note.body : note.title)
+                            .font(.shannonCaption)
+                            .foregroundStyle(Color.shannonPrimary)
+                            .lineLimit(2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(ShannonLayout.WatchCard.padding)
+                    .background(Color.shannonSurface,
+                                in: RoundedRectangle(cornerRadius: ShannonLayout.WatchCard.radius))
+                }
+
+                if model.snapshot.notifications.isEmpty {
+                    Text("No notifications")
+                        .font(.shannonCaption)
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+            }
+        }
+        .containerBackground(Color.shannonBackground.gradient, for: .navigation)
+    }
+}
+
+/// Double Tap binding.
+///
+/// `handGestureShortcut` landed in watchOS 11, while Shannon's floor is
+/// watchOS 10 — so it is applied only where available. On watchOS 10 the
+/// double-tap-on-screen gesture in `WatchRootView` remains the way in, and
+/// every action reachable by Double Tap also has an ordinary button.
+@available(watchOS 10.0, *)
+extension View {
+    @ViewBuilder
+    func shannonPrimaryHandGesture() -> some View {
+        if #available(watchOS 11.0, *) {
+            self.handGestureShortcut(.primaryAction)
+        } else {
+            self
         }
     }
 }

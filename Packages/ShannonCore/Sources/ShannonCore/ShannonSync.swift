@@ -8,7 +8,10 @@ import CloudKit
 public enum ShannonSyncConfig {
     /// Must match the iCloud container in Signing & Capabilities on every target.
     public static let containerID = "iCloud.com.lebonhommepharma.shannon"
-    /// All Shannon state lives in the private database — none of it is shared.
+    /// All Shannon state lives in the **private** database, in a custom zone.
+    /// Agent task titles, notification previews and confirmation questions are
+    /// user data; nothing Shannon syncs is ever written to the public database,
+    /// and `CloudKitSyncBackend` exposes no way to reach it.
     public static let zoneName = "ShannonState"
     /// Subscription id for push-driven refresh.
     public static let subscriptionID = "shannon-state-changes"
@@ -21,6 +24,8 @@ public enum ShannonSyncConfig {
         NotificationMirror.recordType,
         TimerState.recordType,
         RemoteCommand.recordType,
+        PendingConfirmation.recordType,
+        ConfirmationResponse.recordType,
     ]
 }
 
@@ -273,6 +278,7 @@ public struct ShannonSnapshot: Codable, Equatable, Sendable {
     public var device: MacDeviceState?
     public var notifications: [NotificationMirror]
     public var timers: [TimerState]
+    public var confirmations: [PendingConfirmation]
     public var capturedAt: Date
 
     public init(
@@ -282,6 +288,7 @@ public struct ShannonSnapshot: Codable, Equatable, Sendable {
         device: MacDeviceState? = nil,
         notifications: [NotificationMirror] = [],
         timers: [TimerState] = [],
+        confirmations: [PendingConfirmation] = [],
         capturedAt: Date = Date()
     ) {
         self.agents = agents
@@ -290,18 +297,25 @@ public struct ShannonSnapshot: Codable, Equatable, Sendable {
         self.device = device
         self.notifications = notifications
         self.timers = timers
+        self.confirmations = confirmations
         self.capturedAt = capturedAt
     }
 
     public var isEmpty: Bool {
         agents.isEmpty && docking.isEmpty && nowPlaying == nil
             && device == nil && notifications.isEmpty && timers.isEmpty
+            && confirmations.isEmpty
     }
 
     /// The single line a watch complication shows. Docking progress wins when
     /// a benchmark is running (that is what LP is waiting on), then an
     /// alerting agent, then media.
     public func complicationLine() -> String {
+        // A blocked agent outranks everything: it is the one state where
+        // Shannon is waiting on LP rather than the other way round.
+        if let pending = oldestPendingConfirmation() {
+            return "? \(pending.question)"
+        }
         if let run = docking.first(where: { $0.isRunning }) ?? docking.first {
             var line = run.complicationLine()
             if let h = agents.rankedForDisplay().first?.entropyBits {
@@ -317,9 +331,20 @@ public struct ShannonSnapshot: Codable, Equatable, Sendable {
         return "Shannon"
     }
 
+    /// The oldest confirmation still awaiting an answer, ignoring expired
+    /// ones so a prompt LP never saw cannot block the display forever.
+    public func oldestPendingConfirmation(now: Date = Date()) -> PendingConfirmation? {
+        confirmations
+            .filter { !$0.isExpired(now: now) }
+            .min { $0.createdAt < $1.createdAt }
+    }
+
+    public var isAwaitingConfirmation: Bool { oldestPendingConfirmation() != nil }
+
     /// The three cards the watch shows, in order.
     public func watchCards(limit: Int = 3) -> [String] {
         var cards: [String] = []
+        if let pending = oldestPendingConfirmation() { cards.append("? \(pending.question)") }
         if let agent = agents.rankedForDisplay().first { cards.append(agent.compactLine()) }
         if let run = docking.first(where: { $0.isRunning }) ?? docking.first {
             cards.append(run.complicationLine())
@@ -359,5 +384,61 @@ public enum WatchRelayCodec {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(ShannonSnapshot.self, from: data)
+    }
+}
+
+/// Everything that crosses the phone↔watch link, as one Codable envelope.
+///
+/// The wire format is a single JSON payload under one key rather than a
+/// dictionary of loose string keys: agent questions and notification text are
+/// user data, and a typed envelope means no caller can improvise a key holding
+/// something sensitive.
+public enum WatchMessage: Codable, Equatable, Sendable {
+    /// Full state mirror. Sent via `updateApplicationContext` — latest-wins,
+    /// coalesced by the system, and far cheaper on battery than a message per
+    /// change.
+    case snapshot(ShannonSnapshot)
+    /// Something just happened and the watch should tap now. Sent as an
+    /// immediate message, because a haptic that arrives late is worse than none.
+    case alert(String)
+    /// Playback command issued on the watch, relayed to the phone.
+    case command(PlaybackCommand)
+    /// Answer to a pending question, issued on the watch.
+    case answer(id: String, answer: ConfirmationAnswer, source: ConfirmationSource)
+
+    /// True for messages that must go out immediately rather than riding the
+    /// next application-context update.
+    public var isTimeCritical: Bool {
+        switch self {
+        case .snapshot:                 return false
+        case .alert, .command, .answer: return true
+        }
+    }
+}
+
+public enum WatchMessageCodec {
+    public static let payloadKey = "shannonMessage"
+
+    public static func encode(_ message: WatchMessage) throws -> [String: Any] {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        // Snapshots are trimmed before they cross: no artwork, few
+        // notifications. WatchConnectivity payloads are size-capped.
+        let trimmed: WatchMessage
+        if case .snapshot(let snapshot) = message {
+            trimmed = .snapshot(snapshot.trimmedForWatch())
+        } else {
+            trimmed = message
+        }
+        return [payloadKey: try encoder.encode(trimmed)]
+    }
+
+    public static func decode(_ payload: [String: Any]) throws -> WatchMessage {
+        guard let data = payload[payloadKey] as? Data else {
+            throw CloudDecodeError.missingField(payloadKey)
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(WatchMessage.self, from: data)
     }
 }

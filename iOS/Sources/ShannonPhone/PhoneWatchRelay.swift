@@ -1,24 +1,29 @@
 import Foundation
-import Combine
 import ShannonCore
 #if canImport(WatchConnectivity)
 import WatchConnectivity
 #endif
 
 /// Phone → Watch relay. The watch never queries CloudKit in the common case:
-/// it renders whatever the phone last handed it, which keeps the watch's
-/// radio and battery out of the sync path.
+/// it renders whatever the phone last handed it, which keeps the watch's radio
+/// and battery out of the sync path.
+///
+/// State goes out via `updateApplicationContext` (latest-wins, system-coalesced,
+/// cheap). Only genuinely time-critical things — an alert to tap for, a command
+/// to relay — use `sendMessage`.
 @MainActor
-final class PhoneWatchRelay: NSObject, ObservableObject {
-    private var cancellables = Set<AnyCancellable>()
+public final class PhoneWatchRelay: NSObject {
+    public var onWatchCommand: ((PlaybackCommand) -> Void)?
+    public var onWatchAnswer: ((ConfirmationAnswer, ConfirmationSource) -> Void)?
+
     /// Coalesces bursts — an agent that ticks several times a second must not
-    /// produce one WatchConnectivity message per tick.
+    /// produce one WatchConnectivity update per tick.
     private var lastSentAt = Date.distantPast
     private let minimumInterval: TimeInterval = 2
     private var pending: ShannonSnapshot?
-    private var flushTimer: Timer?
+    private var flushTask: Task<Void, Never>?
 
-    func activate() {
+    public func activate() {
         #if canImport(WatchConnectivity)
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
@@ -27,65 +32,61 @@ final class PhoneWatchRelay: NSObject, ObservableObject {
         #endif
     }
 
-    func observe(store: ShannonStore) {
-        store.$snapshot
-            .sink { [weak self] snapshot in self?.send(snapshot) }
-            .store(in: &cancellables)
-    }
-
-    /// Uses `updateApplicationContext`, which keeps only the latest payload
-    /// queued — exactly the semantics wanted for a state mirror.
-    func send(_ snapshot: ShannonSnapshot) {
+    public func send(_ snapshot: ShannonSnapshot) {
         pending = snapshot
         let elapsed = Date().timeIntervalSince(lastSentAt)
-        guard elapsed >= minimumInterval else {
-            scheduleFlush(in: minimumInterval - elapsed)
+
+        // A pending question bypasses throttling: the watch showing it two
+        // seconds late is the difference between answering from the wrist and
+        // walking back to the desk.
+        if snapshot.isAwaitingConfirmation || elapsed >= minimumInterval {
+            flush()
             return
         }
-        flush()
+        scheduleFlush(in: minimumInterval - elapsed)
     }
 
     private func scheduleFlush(in delay: TimeInterval) {
-        guard flushTimer == nil else { return }
-        let t = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                self?.flushTimer = nil
-                self?.flush()
-            }
+        guard flushTask == nil else { return }
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled else { return }
+            self.flushTask = nil
+            self.flush()
         }
-        RunLoop.main.add(t, forMode: .common)
-        flushTimer = t
     }
 
     private func flush() {
         guard let snapshot = pending else { return }
         pending = nil
         lastSentAt = Date()
+
         #if canImport(WatchConnectivity)
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .activated else { return }
-        do {
-            try session.updateApplicationContext(try WatchRelayCodec.encode(snapshot))
-        } catch {
-            // A failed relay is not worth surfacing — the watch keeps showing
-            // its previous snapshot and the next update will carry the state.
-        }
+        guard let payload = try? WatchMessageCodec.encode(.snapshot(snapshot)) else { return }
+        // A failed relay is not worth surfacing — the watch keeps showing its
+        // previous snapshot and the next update carries the state.
+        try? session.updateApplicationContext(payload)
         #endif
     }
 
-    /// Alerts travel as a separate immediate message so the watch can tap even
-    /// when the throttled state update has not gone out yet.
-    func notifyWatch(of alert: SnapshotAssembler.Alert) {
+    /// Alerts travel as an immediate message so the watch can tap even when
+    /// the throttled state update has not gone out yet.
+    public func notifyWatch(of alert: SnapshotAssembler.Alert) {
         #if canImport(WatchConnectivity)
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else { return }
-        session.sendMessage(["alert": Self.describe(alert)], replyHandler: nil) { _ in }
+        guard let payload = try? WatchMessageCodec.encode(.alert(Self.describe(alert))) else {
+            return
+        }
+        session.sendMessage(payload, replyHandler: nil) { _ in }
         #endif
     }
 
-    static func describe(_ alert: SnapshotAssembler.Alert) -> String {
+    public static func describe(_ alert: SnapshotAssembler.Alert) -> String {
         switch alert {
         case .docking(.targetCompleted(let benchmark, let done, let total)):
             return "\(benchmark) \(done)/\(total)"
@@ -97,43 +98,46 @@ final class PhoneWatchRelay: NSObject, ObservableObject {
             return "\(name) finished"
         case .notification(let note):
             return "\(note.sender): \(note.title)"
+        case .confirmationRequested(let pending):
+            return pending.question
+        }
+    }
+
+    private func handle(_ message: WatchMessage) {
+        switch message {
+        case .command(let command):
+            onWatchCommand?(command)
+        case .answer(_, let answer, let source):
+            onWatchAnswer?(answer, source)
+        case .snapshot, .alert:
+            // Phone → watch only.
+            break
         }
     }
 }
 
 #if canImport(WatchConnectivity)
 extension PhoneWatchRelay: WCSessionDelegate {
-    nonisolated func session(
+    nonisolated public func session(
         _ session: WCSession,
         activationDidCompleteWith state: WCSessionActivationState,
         error: Error?
     ) {}
 
-    nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}
+    nonisolated public func sessionDidBecomeInactive(_ session: WCSession) {}
 
     /// After a watch switch the session must be reactivated, or the relay goes
     /// permanently silent.
-    nonisolated func sessionDidDeactivate(_ session: WCSession) {
+    nonisolated public func sessionDidDeactivate(_ session: WCSession) {
         WCSession.default.activate()
     }
 
-    /// The watch can issue playback commands too; the phone forwards them to
-    /// CloudKit for the Mac to execute.
-    nonisolated func session(
+    nonisolated public func session(
         _ session: WCSession,
         didReceiveMessage message: [String: Any]
     ) {
-        guard let raw = message["command"] as? String,
-              let command = PlaybackCommand(rawValue: raw) else { return }
-        Task { @MainActor in
-            NotificationCenter.default.post(
-                name: .shannonWatchCommand, object: nil, userInfo: ["command": command]
-            )
-        }
+        guard let decoded = try? WatchMessageCodec.decode(message) else { return }
+        Task { @MainActor in self.handle(decoded) }
     }
 }
 #endif
-
-extension Notification.Name {
-    static let shannonWatchCommand = Notification.Name("shannonWatchCommand")
-}

@@ -5,20 +5,26 @@
 #
 # Regenerate after adding source files; the .xcodeproj is not checked in.
 #
-# CloudKit and App Groups need a real Apple Developer account — see
-# docs/MULTI_DEVICE.md for the exact Signing & Capabilities steps.
+# CloudKit, App Groups and the shared Keychain group all need a real Apple
+# Developer account — see docs/MULTI_DEVICE.md for the exact steps.
+#
+# Deployment targets are iOS 17 / watchOS 10. That is a hard floor, not a
+# preference: the Observation framework, `scrollTargetBehavior`, Double Tap
+# (`handGestureShortcut`) and Smart Stack all require it.
 
 name: Shannon
 options:
   bundleIdPrefix: com.lebonhommepharma.shannon
   deploymentTarget:
-    iOS: "16.0"
-    watchOS: "9.0"
+    iOS: "17.0"
+    watchOS: "10.0"
   createIntermediateGroups: true
 
 packages:
   ShannonCore:
     path: ../Packages/ShannonCore
+  ShannonTheme:
+    path: ../Packages/ShannonTheme
 
 settings:
   base:
@@ -30,6 +36,9 @@ settings:
     # everything below builds unsigned for the Simulator without it.
     DEVELOPMENT_TEAM: ""
     GENERATE_INFOPLIST_FILE: YES
+    # Complete concurrency checking across every app target, matching the
+    # setting ShannonCore builds with.
+    SWIFT_STRICT_CONCURRENCY: complete
 
 targets:
   # MARK: iPhone
@@ -39,9 +48,11 @@ targets:
     platform: iOS
     sources:
       - path: Sources/ShannonPhone
-      - path: Sources/Shared
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: ShannonCore
+      - package: ShannonTheme
       - target: ShannonWidget
         embed: true
       - target: ShannonWatch
@@ -54,6 +65,17 @@ targets:
         UIBackgroundModes:
           # Silent CloudKit pushes wake the app to refresh state.
           - remote-notification
+        # App Transport Security: HTTPS only, no arbitrary loads, no
+        # per-domain exceptions. Shannon talks to CloudKit and nothing else,
+        # so there is nothing legitimate to exempt.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+          NSAllowsArbitraryLoadsInWebContent: false
+          NSAllowsLocalNetworking: false
+        NSMotionUsageDescription: Shannon reads AirPods head motion so you can nod to confirm or shake to deny an agent's question. Motion is only read while a question is waiting.
+        NSMicrophoneUsageDescription: Shannon uses the microphone for voice commands such as "confirm" or "status".
+        NSSpeechRecognitionUsageDescription: Shannon transcribes your voice commands on this device. Speech is never sent to a server.
+        NSBluetoothAlwaysUsageDescription: Shannon reads the battery level of connected AirPods.
     entitlements:
       path: Resources/ShannonPhone.entitlements
       properties:
@@ -61,9 +83,12 @@ targets:
           - iCloud.com.lebonhommepharma.shannon
         com.apple.developer.icloud-services:
           - CloudKit
-        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
         com.apple.security.application-groups:
           - group.com.lebonhommepharma.shannon
+        # Shared with the Mac app, so a token provisioned there is readable
+        # here without a second sign-in.
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.lebonhommepharma.shannon
         aps-environment: development
     settings:
       base:
@@ -75,15 +100,19 @@ targets:
     platform: iOS
     sources:
       - path: Sources/ShannonWidget
-      - path: Sources/Shared
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: ShannonCore
+      - package: ShannonTheme
     info:
       path: Resources/GeneratedWidgetInfo.plist
       properties:
         CFBundleDisplayName: Shannon
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
     entitlements:
       path: Resources/ShannonWidget.entitlements
       properties:
@@ -104,9 +133,11 @@ targets:
     platform: watchOS
     sources:
       - path: ../watchOS/Sources/ShannonWatch
-      - path: ../watchOS/Sources/Shared
+      - path: ../watchOS/Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: ShannonCore
+      - package: ShannonTheme
       - target: ShannonComplication
         embed: true
     info:
@@ -115,11 +146,21 @@ targets:
         CFBundleDisplayName: Shannon
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.lebonhommepharma.shannon.phone
+        WKRunsIndependentlyOfCompanionApp: false
+        # Pre-warms state on wrist raise so the face is never a spinner.
+        WKBackgroundModes:
+          - app-refresh
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+        NSMotionUsageDescription: Shannon reads wrist motion to wake the Shannon face with a flick of the wrist.
+        NSHealthShareUsageDescription: Shannon can tint the Shannon face when your heart rate rises during a docking run. This is off by default, opt-in, and heart-rate data never leaves your watch.
     entitlements:
       path: ../watchOS/Resources/ShannonWatch.entitlements
       properties:
         com.apple.security.application-groups:
           - group.com.lebonhommepharma.shannon
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.lebonhommepharma.shannon
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lebonhommepharma.shannon.phone.watchkitapp
@@ -130,15 +171,19 @@ targets:
     platform: watchOS
     sources:
       - path: ../watchOS/Sources/ShannonWatchComplication
-      - path: ../watchOS/Sources/Shared
+      - path: ../watchOS/Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
     dependencies:
       - package: ShannonCore
+      - package: ShannonTheme
     info:
       path: ../watchOS/Resources/GeneratedComplicationInfo.plist
       properties:
         CFBundleDisplayName: Shannon
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
     entitlements:
       path: ../watchOS/Resources/ShannonComplication.entitlements
       properties:

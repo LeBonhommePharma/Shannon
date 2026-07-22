@@ -502,13 +502,15 @@ same account can follow what the agents are doing.
   and live entropy; a FlexAID∆S progress ring with best RMSD and ETA; Now
   Playing with controls that reach back to the Mac; a mirrored notification
   feed; and a WidgetKit widget for the Lock and Home Screens.
-- **Apple Watch** (watchOS 9+): a glanceable complication —
-  `34/85 ✓ 1.42Å H=0.61` or `▶ Track — Artist` — plus at most three cards on
-  the Crown. No computation happens on the watch; it is a display relay.
+- **Apple Watch** (watchOS 10+): the **Shannon Face** — a full-screen view
+  styled as a watch face (large SF Rounded clock, active agent progress, Now
+  Playing), plus complications in every family Apple allows third parties.
+  The Digital Crown moves between face, agents, Now Playing and alerts. No
+  computation happens on the watch; it is a display relay.
 - **Shared model**: [`Packages/ShannonCore/`](Packages/ShannonCore) is a local
   Swift package all three platforms import, holding the snapshot structs, the
-  CloudKit serialization, and the alert edge-triggering. Its 41 tests run
-  without an iCloud container.
+  CloudKit serialization, the gesture and voice-command logic, and the alert
+  edge-triggering. Its 78 tests run without an iCloud container.
 
 ```bash
 cd Packages/ShannonCore && swift test          # shared model
@@ -523,6 +525,75 @@ CloudKit needs a paid Apple Developer account. Everything builds and runs
 without one (falling back to an empty in-memory backend); the exact Signing &
 Capabilities steps to activate real sync are in
 [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md).
+
+### Gesture controls
+
+When an agent blocks on a question, the prompt syncs to the phone and watch and
+can be answered without touching the Mac. Every route below writes the same
+`ConfirmationResponse` record, which the Mac drains and acts on.
+
+| Gesture | Device | Meaning |
+|---|---|---|
+| **Nod** | iPhone + AirPods | Confirm |
+| **Shake** | iPhone + AirPods | Deny |
+| **Double Tap** (pinch) | Apple Watch Series 9+ | Confirm (primary action of the current screen) |
+| **Stem press** | AirPods | 1× confirm · 2× deny · 3× dismiss |
+| **Voice** | all three | "confirm" / "deny" |
+| **Tap** | iPhone + Watch | Confirm / Deny buttons |
+
+Head gestures use `CMHeadphoneMotionManager` with the same detector, thresholds
+(15° excursion, 0.8 s window) and **2 s debounce** as the Mac pill —
+`HeadGestureDetector` in ShannonCore is the single implementation.
+
+Two safety properties are enforced in code and covered by tests: the detector is
+**disarmed unless a question is actually pending**, so ordinary head movement can
+never answer anything, and neutral is captured **when the detector arms**, so a
+head that rests tilted still reads correctly.
+
+Beyond confirmations, the watch offers Double Tap for play/pause on the Now
+Playing screen, Crown rotation between screens with haptic detents, long-press
+context menus for secondary actions, and a wrist flick to jump back to the
+Shannon Face. Always-On drops the face to time plus one status line at 15%
+accent opacity.
+
+### Voice
+
+Press and hold the mic in the iPhone app's header to dictate; release submits.
+Recognition is **on-device only** (`requiresOnDeviceRecognition = true`) — agent
+questions and answers never reach a speech server. The watch uses the system
+dictation sheet with "confirm" / "deny" / "status" suggestions.
+
+All three platforms parse with the same `VoiceCommand.parse` in ShannonCore, so
+a phrase means the same thing everywhere. Negation is checked first and wins
+outright: **"no, don't confirm" denies**, never confirms.
+
+### AirPods
+
+In-ear and route changes are tracked via `AVAudioSession.routeChangeNotification`
+— pulling out an AirPod cuts any in-flight announcement rather than sending it to
+the phone speaker. Announcements use `AVSpeechSynthesizer` with the
+`.spokenAudio` category so AirPods Pro 3 Conversation Awareness can duck Shannon
+when LP starts talking, and are suppressed entirely when other audio is playing
+or a call is active. A status icon appears in the navigation bar when AirPods are
+connected; battery is shown only at or below 30%.
+
+### Security
+
+- **Secrets never sync.** Credentials and agent tokens live in the Keychain via
+  `SecureStore`, in the shared `com.lebonhommepharma.shannon` access group so a
+  token provisioned on the Mac is readable on iPhone without re-auth. Nothing in
+  the sync layer accepts a secret — a test asserts no synced record has a field
+  that looks like a credential.
+- **Encrypted at rest.** Cached snapshots are written with iOS/watchOS Data
+  Protection (`completeUnlessOpen` — encrypted at rest, still readable while
+  locked, which is when widgets render).
+- **Private database only.** All state lives in the private CloudKit database in
+  a custom zone. Nothing is ever written to the public database.
+- **ATS enforced** in all Info.plists, with no `NSAllowsArbitraryLoads`
+  exceptions.
+- **No telemetry, no analytics, no third-party SDKs.** The privacy manifests
+  declare no tracking and no collected data. Heart-rate biofeedback on the watch
+  is opt-in, off by default, and never leaves the device.
 
 ---
 

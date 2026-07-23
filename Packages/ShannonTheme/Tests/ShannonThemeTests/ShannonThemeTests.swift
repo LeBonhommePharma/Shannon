@@ -45,7 +45,7 @@ final class ShannonThemeTests: XCTestCase {
     }
 
     func testColorCatalogueCoversEveryGroup() {
-        XCTAssertEqual(ShannonColorCatalogue.all.count, 15)
+        XCTAssertEqual(ShannonColorCatalogue.all.count, 21)
         XCTAssertEqual(ShannonColorCatalogue.groups.count, 5)
         let names = Set(ShannonColorCatalogue.all.map(\.name))
         XCTAssertEqual(names.count, ShannonColorCatalogue.all.count, "token names must be unique")

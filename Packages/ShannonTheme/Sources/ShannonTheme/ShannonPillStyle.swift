@@ -58,27 +58,34 @@ public struct PillStyle: ViewModifier {
             .background {
                 ZStack {
                     PillMaterial()
-                    // Slightly stronger tint than stock pillBackground so the
-                    // slab reads against both light and dark wallpapers on 27.x.
-                    Color.pillBackground.opacity(0.92)
-                    Color.black.opacity(0.18)
+                    // Near-opaque tint. Daylight legibility beats translucency:
+                    // a 72%-white slab over a busy wallpaper leaves the 11 pt
+                    // status text fighting whatever is behind it.
+                    Color.pillBackground.opacity(0.96)
+                    // Scrim direction follows the scheme — white in day, black
+                    // at night. See `Color.pillScrim`.
+                    Color.pillScrim
                 }
                 .clipShape(shape)
             }
             .overlay {
                 shape.strokeBorder(
-                    isActive ? Color.pillBorderActive : Color.pillBorder.opacity(0.85),
-                    lineWidth: isActive ? ShannonStroke.hairline * 1.5 : ShannonStroke.hairline * 1.25
+                    isActive ? Color.pillBorderActive : Color.pillBorder,
+                    // A hairline is invisible on a bright desk; the resting
+                    // border is a full point so the pill always has an edge.
+                    lineWidth: isActive ? 2 : 1
                 )
             }
             .shadow(
                 color: isActive
                     ? Color.shannonAccent.opacity(ShannonStroke.glowOpacity)
-                    : Color.black.opacity(0.28),
-                radius: isActive ? ShannonStroke.glowRadius : 5,
+                    : Color.shannonShadow,
+                radius: isActive ? ShannonStroke.glowRadius : 4,
                 y: isActive ? 0 : 1
             )
-            .shadow(color: .black.opacity(0.22), radius: 8, y: 2)
+            // Contact shadow only — lifts the pill off the desktop without the
+            // heavy bloom that read as grime under a white slab.
+            .shadow(color: Color.shannonShadow, radius: 10, y: 3)
             .animation(.shannonSnap, value: isActive)
     }
 }

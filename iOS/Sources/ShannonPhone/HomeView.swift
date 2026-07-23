@@ -4,10 +4,12 @@ import ShannonTheme
 
 /// The phone's only screen.
 ///
-/// Design rules it follows literally: monochrome plus one accent, no gradients
-/// or shadows, generous spacing, and nothing on screen when nothing matters.
-/// Every control updates local state first and reconciles with CloudKit after,
-/// so no tap ever waits on the network.
+/// Design rules: monochrome plus one accent, generous spacing, and nothing on
+/// screen when nothing matters. The passive status list stays flat and
+/// shadowless; the one exception is the confirmation banner, which floats over
+/// the list on `.ultraThinMaterial` so it reads as a transient interruption
+/// rather than another card. Every control updates local state first and
+/// reconciles with CloudKit after, so no tap ever waits on the network.
 @available(iOS 17.0, *)
 struct HomeView: View {
     let model: PhoneModel
@@ -18,20 +20,6 @@ struct HomeView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: ShannonLayout.IOSCard.interCardSpacing) {
-                    if let pending = snapshot.oldestPendingConfirmation() {
-                        ConfirmationCard(
-                            confirmation: pending,
-                            gesturesAvailable: model.isAwaitingConfirmation
-                        ) { answer in
-                            model.answer(answer, source: .tap)
-                        }
-                        .id(pending.id)
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.96).combined(with: .opacity),
-                            removal: .opacity
-                        ))
-                    }
-
                     ForEach(snapshot.docking) { progress in
                         DockingCard(progress: progress)
                     }
@@ -70,45 +58,109 @@ struct HomeView: View {
                 ToolbarItem(placement: .topBarLeading) { AirPodsIndicator(monitor: model.airPods) }
                 ToolbarItem(placement: .topBarTrailing) { MicButton(model: model) }
             }
+            // The confirmation rides above the scroll content as a compact
+            // banner, so status keeps scrolling underneath it instead of being
+            // shoved down the page. This is the one thing Shannon interrupts
+            // for, and it is still only ever a banner — never a takeover.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let pending = snapshot.oldestPendingConfirmation() {
+                    ConfirmationBanner(
+                        confirmation: pending,
+                        gesturesAvailable: model.isAwaitingConfirmation
+                    ) { answer in
+                        model.answer(answer, source: .tap)
+                    }
+                    .id(pending.id)
+                    .padding(.horizontal, ShannonLayout.IOSCard.pageMargin)
+                    .padding(.top, ShannonSpacing.xs)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            // A quiet, non-blocking hint that the Mac hub is unreachable, shown
+            // only when there is other content on screen (an empty screen
+            // already explains the disconnect through EmptyStateView).
+            .safeAreaInset(edge: .bottom) {
+                if model.store.lastError != nil && !snapshot.isEmpty {
+                    DisconnectedPill()
+                        .padding(.bottom, ShannonSpacing.xs)
+                        .transition(.opacity)
+                }
+            }
             .animation(.shannonEase, value: snapshot.confirmations)
             .animation(.shannonEase, value: snapshot.agents)
             .animation(.shannonEase, value: snapshot.notifications)
+            .animation(.shannonEase, value: model.store.lastError)
         }
         .tint(.shannonAccent)
     }
 }
 
+// MARK: - Press style
+
+/// The one press treatment every tappable control uses.
+///
+/// Why this exists: the old controls wrapped a `Button` and *also* attached a
+/// `.onLongPressGesture(minimumDuration: 0)` to drive the pressed scale. Inside
+/// a `ScrollView` that long-press recognizer competes with both the button's
+/// own tap gesture and the scroll's drag, and routinely wins the touch — so
+/// the button's `action` never fired. On the confirmation card that read as
+/// the app being *stuck*: the tap appeared to do nothing and the prompt never
+/// cleared. Driving the pressed state from `ButtonStyle.Configuration.isPressed`
+/// keeps a tap a tap, with no second gesture to swallow it.
+struct ShannonPressStyle: ButtonStyle {
+    var pressedScale: CGFloat = 0.96
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .scaleEffect(configuration.isPressed ? pressedScale : 1)
+            .animation(.shannonSnap, value: configuration.isPressed)
+    }
+}
+
 // MARK: - Confirmation
 
-/// The one card that interrupts. Everything else is passive status; this is
-/// Shannon waiting on LP, so it gets the accent border and the top slot.
+/// The one thing Shannon interrupts for, as a compact notification-style banner
+/// rather than a full card in the list: a translucent `.ultraThinMaterial`
+/// surface pinned above the scroll content, with the question and two inline
+/// answers. It floats over status instead of pushing it around.
 @available(iOS 17.0, *)
-struct ConfirmationCard: View {
+struct ConfirmationBanner: View {
     let confirmation: PendingConfirmation
     let gesturesAvailable: Bool
     var onAnswer: (ConfirmationAnswer) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
-            Text(confirmation.question)
-                .font(.shannonHeadline)
-                .foregroundStyle(Color.shannonPrimary)
+            HStack(alignment: .top, spacing: ShannonSpacing.sm) {
+                Image(systemName: "questionmark.bubble.fill")
+                    .symbolRenderingMode(.hierarchical)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color.shannonAccent)
 
-            if !confirmation.detail.isEmpty {
-                Text(confirmation.detail)
-                    .font(.shannonCaption)
-                    .foregroundStyle(Color.shannonSecondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(confirmation.question)
+                        .font(.shannonCallout)
+                        .foregroundStyle(Color.shannonPrimary)
+                        .lineLimit(2)
+                    if !confirmation.detail.isEmpty {
+                        Text(confirmation.detail)
+                            .font(.shannonCaption)
+                            .foregroundStyle(Color.shannonSecondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 0)
             }
 
             HStack(spacing: ShannonSpacing.sm) {
-                AnswerButton(title: "Confirm", symbol: "checkmark", tint: .shannonAccent) {
-                    onAnswer(.confirmed)
-                }
                 AnswerButton(title: "Deny", symbol: "xmark", tint: .shannonSecondary) {
                     onAnswer(.denied)
                 }
+                AnswerButton(title: "Confirm", symbol: "checkmark", tint: .shannonAccent) {
+                    onAnswer(.confirmed)
+                }
             }
-            .padding(.top, ShannonSpacing.xs)
 
             if gesturesAvailable {
                 Label("Nod to confirm · shake to deny", systemImage: "airpodspro")
@@ -116,11 +168,23 @@ struct ConfirmationCard: View {
                     .foregroundStyle(Color.shannonTertiary)
             }
         }
-        .shannonCard(isHighlighted: true)
+        .padding(ShannonSpacing.md)
+        .background(
+            .ultraThinMaterial,
+            in: RoundedRectangle(cornerRadius: ShannonRadius.xl, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: ShannonRadius.xl, style: .continuous)
+                .strokeBorder(Color.shannonAccent.opacity(0.25), lineWidth: 1)
+        )
+        .shadow(color: Color.shannonShadow.opacity(0.5), radius: 12, y: 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Confirmation required. \(confirmation.question)"))
     }
 }
 
-/// Buttons animate from local state on press and never wait on the write.
+/// A single inline answer. Just a styled `Button` — no extra gesture — so a tap
+/// always reaches `action`. See `ShannonPressStyle` for why that matters here.
 @available(iOS 17.0, *)
 struct AnswerButton: View {
     let title: String
@@ -128,12 +192,8 @@ struct AnswerButton: View {
     let tint: Color
     var action: () -> Void
 
-    @State private var isPressed = false
-
     var body: some View {
-        Button {
-            action()
-        } label: {
+        Button(action: action) {
             Label(title, systemImage: symbol)
                 .font(.shannonCallout)
                 .foregroundStyle(tint)
@@ -141,10 +201,23 @@ struct AnswerButton: View {
                 .padding(.vertical, ShannonSpacing.sm)
                 .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: ShannonRadius.md))
         }
-        .buttonStyle(.plain)
-        .scaleEffect(isPressed ? 0.96 : 1)
-        .animation(.shannonSnap, value: isPressed)
-        .onLongPressGesture(minimumDuration: 0, pressing: { isPressed = $0 }, perform: {})
+        .buttonStyle(ShannonPressStyle())
+    }
+}
+
+/// Quiet "hub offline" chip. Subtle by design: a missed sync is worth noting,
+/// not alarming.
+@available(iOS 17.0, *)
+struct DisconnectedPill: View {
+    var body: some View {
+        Label("Hub offline", systemImage: "bolt.horizontal.circle")
+            .font(.shannonCaption)
+            .foregroundStyle(Color.shannonSecondary)
+            .padding(.horizontal, ShannonSpacing.sm)
+            .padding(.vertical, 6)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.shannonSeparator, lineWidth: ShannonStroke.hairline))
+            .accessibilityLabel("Mac hub unreachable")
     }
 }
 
@@ -304,7 +377,6 @@ struct NowPlayingCard: View {
 struct TransportButton: View {
     let symbol: String
     var action: () -> Void
-    @State private var isPressed = false
 
     var body: some View {
         Button(action: action) {
@@ -312,12 +384,8 @@ struct TransportButton: View {
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(Color.shannonPrimary)
                 .frame(width: 36, height: 36)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .scaleEffect(isPressed ? 0.9 : 1)
-        .animation(.shannonSnap, value: isPressed)
-        .onLongPressGesture(minimumDuration: 0, pressing: { isPressed = $0 }, perform: {})
+        .buttonStyle(ShannonPressStyle(pressedScale: 0.9))
     }
 }
 

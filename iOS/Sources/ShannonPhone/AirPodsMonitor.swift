@@ -151,26 +151,21 @@ public final class AirPodsMonitor {
     private func registerRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
 
-        center.togglePlayPauseCommand.addTarget { [weak self] _ in
-            MainActor.assumeIsolated { self?.onRemoteCommand?(.primary) }
-            return .success
+        // MPRemoteCommandCenter does not promise these handlers run on the main
+        // thread, so `MainActor.assumeIsolated` here would trap the moment a
+        // stem press arrived on a background queue — and this is the path that
+        // answers a pending confirmation, so that crash landed exactly when LP
+        // was trying to respond. Hop to the main actor instead of asserting we
+        // are already on it.
+        func dispatch(_ command: RemoteCommand) {
+            Task { @MainActor [weak self] in self?.onRemoteCommand?(command) }
         }
-        center.playCommand.addTarget { [weak self] _ in
-            MainActor.assumeIsolated { self?.onRemoteCommand?(.primary) }
-            return .success
-        }
-        center.pauseCommand.addTarget { [weak self] _ in
-            MainActor.assumeIsolated { self?.onRemoteCommand?(.primary) }
-            return .success
-        }
-        center.nextTrackCommand.addTarget { [weak self] _ in
-            MainActor.assumeIsolated { self?.onRemoteCommand?(.secondary) }
-            return .success
-        }
-        center.previousTrackCommand.addTarget { [weak self] _ in
-            MainActor.assumeIsolated { self?.onRemoteCommand?(.tertiary) }
-            return .success
-        }
+
+        center.togglePlayPauseCommand.addTarget { _ in dispatch(.primary); return .success }
+        center.playCommand.addTarget { _ in dispatch(.primary); return .success }
+        center.pauseCommand.addTarget { _ in dispatch(.primary); return .success }
+        center.nextTrackCommand.addTarget { _ in dispatch(.secondary); return .success }
+        center.previousTrackCommand.addTarget { _ in dispatch(.tertiary); return .success }
     }
 
     // MARK: Speech

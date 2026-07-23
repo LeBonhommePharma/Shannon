@@ -201,12 +201,17 @@ def status_from_payload(
     payload: dict[str, Any],
 ) -> AgentStatusUpdate:
     """Map a gate message to a UI-facing status update (shipped entry point)."""
-    text = (
-        str(payload.get("text") or payload.get("summary") or payload.get("task") or "")
-        .strip()
-    )
+    text = str(
+        payload.get("text")
+        or payload.get("message")
+        or payload.get("summary")
+        or payload.get("task")
+        or payload.get("output")
+        or payload.get("label")
+        or ""
+    ).strip()
     if not text:
-        text = str(payload.get("output") or payload.get("label") or message_type)
+        text = message_type
     text = text[:200]
 
     status = "active"
@@ -236,21 +241,24 @@ def ask_from_payload(
     agent_id: str,
     payload: dict[str, Any],
     interaction_id: Optional[str] = None,
+    *,
+    force: bool = False,
 ) -> Optional[PendingAsk]:
-    """Build a pending ask if the payload requests human approval."""
-    needs = (
+    """Build a pending ask if the payload requests human approval.
+
+    Parameters
+    ----------
+    force:
+        When True (e.g. message_type == approval_needed), create an ask even if
+        the payload omits the approval_needed flag.
+    """
+    needs = force or (
         payload.get("approval_needed") is True
         or payload.get("require_approval") is True
         or str(payload.get("kind", "")).lower() in ("approval", "yes_no", "confirm")
     )
-    if not needs and "prompt" not in payload and "question" not in payload:
+    if not needs:
         return None
-    if not needs and not payload.get("approval_needed"):
-        # Only create ask when explicitly flagged or message type handled by caller
-        if not payload.get("question") and not payload.get("prompt"):
-            return None
-        if not needs:
-            return None
 
     prompt = str(
         payload.get("prompt")

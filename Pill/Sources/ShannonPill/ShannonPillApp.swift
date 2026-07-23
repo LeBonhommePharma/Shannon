@@ -174,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ("claude_code", "Claude"),
             ("codex", "Codex"),
             ("chatgpt", "ChatGPT"),
-            ("grok_build", "SuperGrok"),
+            ("grok_build", "Grok Build"),
             ("terminal", "Terminal"),
             ("browser", "Browser"),
             ("cursor", "Cursor"),

@@ -112,7 +112,9 @@ VALID_MESSAGE_TYPES: frozenset[str] = frozenset({
     "alert",
     "code_suggestion",
     "benchmark_update",
-    "system_event",   # resource alerts from the HUD
+    "system_event",   # resource alerts / approvals from the HUD
+    "approval_needed",  # agent asks human for yes/no
+    "approval_response",  # human resolution echoed back
     "ping",
 })
 
@@ -506,6 +508,9 @@ class AuditDB:
         last_seen_ns: int,
         entropy_score: float,
         task_id: str,
+        *,
+        task_summary: str = "",
+        status: str = "active",
     ) -> None:
         """Increment message_count, refresh last_seen_ns and entropy after each message."""
         with self._connect() as conn:
@@ -516,11 +521,133 @@ class AuditDB:
                     entropy_score = ?,
                     task_id       = ?,
                     message_count = message_count + 1,
-                    status        = 'active'
+                    status        = ?,
+                    task_summary  = CASE
+                        WHEN ? != '' THEN ?
+                        ELSE task_summary
+                    END
                 WHERE agent_id = ?
                 """,
-                (last_seen_ns, entropy_score, task_id, agent_id),
+                (
+                    last_seen_ns,
+                    entropy_score,
+                    task_id,
+                    status or "active",
+                    task_summary or "",
+                    task_summary or "",
+                    agent_id,
+                ),
             )
+
+    def upsert_interaction(
+        self,
+        interaction_id: str,
+        agent_id: str,
+        prompt: str,
+        status: str = "pending",
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_interactions (
+                    interaction_id TEXT PRIMARY KEY,
+                    agent_id       TEXT NOT NULL,
+                    prompt         TEXT NOT NULL,
+                    status         TEXT NOT NULL DEFAULT 'pending',
+                    created_at_ns  INTEGER NOT NULL,
+                    resolved_at_ns INTEGER
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO agent_interactions
+                    (interaction_id, agent_id, prompt, status, created_at_ns)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(interaction_id) DO UPDATE SET
+                    prompt = excluded.prompt,
+                    status = excluded.status,
+                    resolved_at_ns = CASE
+                        WHEN excluded.status IN ('approved','denied')
+                        THEN ? ELSE agent_interactions.resolved_at_ns END
+                """,
+                (
+                    interaction_id,
+                    agent_id,
+                    prompt,
+                    status,
+                    time.time_ns(),
+                    time.time_ns(),
+                ),
+            )
+
+    def resolve_interaction(self, interaction_id: str, approved: bool) -> Optional[dict]:
+        status = "approved" if approved else "denied"
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_interactions (
+                    interaction_id TEXT PRIMARY KEY,
+                    agent_id       TEXT NOT NULL,
+                    prompt         TEXT NOT NULL,
+                    status         TEXT NOT NULL DEFAULT 'pending',
+                    created_at_ns  INTEGER NOT NULL,
+                    resolved_at_ns INTEGER
+                )
+                """
+            )
+            conn.execute(
+                """
+                UPDATE agent_interactions SET
+                    status = ?,
+                    resolved_at_ns = ?
+                WHERE interaction_id = ?
+                """,
+                (status, time.time_ns(), interaction_id),
+            )
+            row = conn.execute(
+                "SELECT interaction_id, agent_id, prompt, status FROM agent_interactions "
+                "WHERE interaction_id = ?",
+                (interaction_id,),
+            ).fetchone()
+            if not row:
+                return None
+            return {
+                "interaction_id": row[0],
+                "agent_id": row[1],
+                "prompt": row[2],
+                "status": row[3],
+            }
+
+    def list_pending_interactions(self) -> list[dict]:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_interactions (
+                    interaction_id TEXT PRIMARY KEY,
+                    agent_id       TEXT NOT NULL,
+                    prompt         TEXT NOT NULL,
+                    status         TEXT NOT NULL DEFAULT 'pending',
+                    created_at_ns  INTEGER NOT NULL,
+                    resolved_at_ns INTEGER
+                )
+                """
+            )
+            rows = conn.execute(
+                "SELECT interaction_id, agent_id, prompt, status, created_at_ns "
+                "FROM agent_interactions WHERE status = 'pending' "
+                "ORDER BY created_at_ns DESC LIMIT 50"
+            ).fetchall()
+            return [
+                {
+                    "interaction_id": r[0],
+                    "agent_id": r[1],
+                    "prompt": r[2],
+                    "status": r[3],
+                    "created_at_ns": r[4],
+                }
+                for r in rows
+            ]
 
     def update_agent_disconnect(self, agent_id: str, disconnected_at_ns: int) -> None:
         """Mark agent idle on socket disconnect."""
@@ -815,8 +942,9 @@ class AgentHub:
         self.db = AuditDB(DB_PATH)
         self.gate = ShannonGate(self.db)
         self._connections: dict[str, AgentConn] = {}
-        self._lock = asyncio.Lock()
-        self._shutdown = asyncio.Event()
+        # Create Lock/Event inside the running loop (not at import/__init__).
+        self._lock: Optional[asyncio.Lock] = None
+        self._shutdown: Optional[asyncio.Event] = None
 
         # Live benchmark state (updated by dataset_runner agent)
         self._benchmark: dict[str, Any] = {
@@ -941,12 +1069,56 @@ class AgentHub:
             await self._answer_query(msg, source)
             return
 
+        # Human approval resolution from hub UI (does not re-gate).
+        if msg.message_type in ("approval_response", "system_event") and (
+            "approved" in msg.payload or msg.payload.get("kind") == "approval_response"
+        ):
+            iid = str(
+                msg.payload.get("interaction_id")
+                or msg.message_id
+                or f"ask-{msg.agent_id}"
+            )
+            approved = bool(msg.payload.get("approved"))
+            resolved = self.db.resolve_interaction(iid, approved)
+            self.db.log_activity_event(
+                msg.agent_id,
+                "approval_response",
+                f"{'approved' if approved else 'denied'}: {iid}",
+                event_output=json.dumps(resolved or {}),
+            )
+            await source.send_json({
+                "type": "approval_ack",
+                "interaction_id": iid,
+                "approved": approved,
+                "record": resolved,
+            })
+            return
+
         # Run Shannon gate
         decision = self.gate.evaluate(msg)
 
-        # Refresh agent registry — last_seen, entropy, message count
+        # Map payload → UI status (shared pure helper)
+        try:
+            from agent_identity import ask_from_payload, status_from_payload
+        except ImportError:
+            from hub.agent_identity import ask_from_payload, status_from_payload  # type: ignore
+
+        status_upd = status_from_payload(
+            msg.agent_id, msg.message_type, msg.payload
+        )
+        if msg.message_type == "approval_needed" or msg.payload.get("approval_needed"):
+            status_upd = status_from_payload(
+                msg.agent_id, "approval_needed", msg.payload
+            )
+
+        # Refresh agent registry — last_seen, entropy, task text for HUD/pill
         self.db.update_agent_seen(
-            msg.agent_id, time.time_ns(), decision.computed_H, msg.task_id
+            msg.agent_id,
+            time.time_ns(),
+            decision.computed_H,
+            msg.task_id,
+            task_summary=status_upd.task_summary,
+            status=status_upd.status if decision.decision != "blocked" else "blocked",
         )
 
         if decision.decision in ("flagged", "blocked"):
@@ -969,7 +1141,45 @@ class AgentHub:
         })
 
         if decision.decision == "blocked":
+            self.db.log_activity_event(
+                msg.agent_id, "blocked", status_upd.event_label,
+                event_output="; ".join(decision.reasons),
+            )
             return
+
+        # Feed + activity for live surfaces
+        self.db.log_activity_event(
+            msg.agent_id,
+            status_upd.event_type,
+            status_upd.event_label,
+            event_output=json.dumps(msg.payload)[:2000],
+        )
+
+        # Approval ask → persisted pending interaction for hub UI
+        if (
+            msg.message_type == "approval_needed"
+            or msg.payload.get("approval_needed")
+            or msg.payload.get("require_approval")
+        ):
+            ask = ask_from_payload(
+                msg.agent_id,
+                msg.payload,
+                interaction_id=str(
+                    msg.payload.get("interaction_id") or msg.message_id or ""
+                )
+                or None,
+                force=True,
+            )
+            assert ask is not None
+            self.db.upsert_interaction(
+                ask.interaction_id, ask.agent_id, ask.prompt, "pending"
+            )
+            self.db.log_activity_event(
+                msg.agent_id,
+                "approval_needed",
+                ask.prompt,
+                event_output=ask.interaction_id,
+            )
 
         # Update shared benchmark state
         if msg.message_type == "benchmark_update":
@@ -991,6 +1201,8 @@ class AgentHub:
             "gate_decision": decision.decision,
             "gate_H": decision.computed_H,
             "timestamp_ns": msg.timestamp_ns,
+            "task_summary": status_upd.task_summary,
+            "ui_status": status_upd.status,
         }
         if decision.decision == "flagged":
             envelope["gate_alert"] = {
@@ -1200,6 +1412,10 @@ class AgentHub:
     # ── Main run loop ─────────────────────────────────────────────────────────
 
     async def run(self) -> None:
+        # Bind asyncio primitives to the running loop (fixes "attached to a different loop").
+        self._lock = asyncio.Lock()
+        self._shutdown = asyncio.Event()
+
         # Clean up stale socket
         if os.path.exists(SOCKET_PATH):
             os.unlink(SOCKET_PATH)
@@ -1215,7 +1431,10 @@ class AgentHub:
         # Signal handlers
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, self._on_shutdown)
+            try:
+                loop.add_signal_handler(sig, self._on_shutdown)
+            except NotImplementedError:
+                pass  # Windows
 
         logger.info(
             f"Shannon Gate ready  (H_flag={H_THRESHOLD}, "
@@ -1237,7 +1456,8 @@ class AgentHub:
 
     def _on_shutdown(self) -> None:
         logger.info("Signal received — initiating graceful shutdown")
-        self._shutdown.set()
+        if self._shutdown is not None:
+            self._shutdown.set()
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

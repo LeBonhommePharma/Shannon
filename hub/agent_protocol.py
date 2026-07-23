@@ -72,35 +72,17 @@ except ImportError:
 # ── Constants ─────────────────────────────────────────────────────────────────
 SOCKET_PATH: str = "/tmp/shannon.sock"
 DEFAULT_HTTP_URL: str = "http://127.0.0.1:8765"
-VALID_AGENTS: frozenset[str] = frozenset({
-    "codex", "cowork", "dispatch", "science", "grok_build",
-    "claude_code",      # local coding agent — C++ compilation, git, shell tasks
-    "dataset_runner", "local_test",
-})
+try:
+    from agent_identity import IDENTITIES, identity_for
+except ImportError:  # package-relative when imported as hub.agent_protocol
+    from hub.agent_identity import IDENTITIES, identity_for  # type: ignore
+
+VALID_AGENTS: frozenset[str] = frozenset(IDENTITIES.keys())
 RECV_BUFFER: int = 65536
 
-# ── Agent identity metadata (2026-07-22 corrected icon map) ──────────────────
-AGENT_ICONS: dict[str, str] = {
-    "codex":          "🔵",   # OpenAI / GitHub Copilot
-    "cowork":         "🟢",   # Claude Cowork            (was 🟣)
-    "dispatch":       "🟤",   # Claude Dispatch
-    "science":        "🔶",   # Claude Science (Fable 5)
-    "grok_build":     "🟣",   # Grok Build / xAI         (was ⚫️)
-    "claude_code":    "🟠",   # Claude Code — local C++/git  (was 🟢)
-    "dataset_runner": "⚙️",   # DatasetRunner file watcher
-    "local_test":     "⚪️",   # Integration testing
-}
-
-AGENT_AUTH_TYPE: dict[str, str] = {
-    "codex":          "cloud",   # requires API key / OAuth
-    "grok_build":     "cloud",   # requires API key / OAuth
-    "cowork":         "local",   # authenticated via Unix socket shared secret
-    "dispatch":       "local",
-    "science":        "local",
-    "claude_code":    "local",
-    "dataset_runner": "local",
-    "local_test":     "local",
-}
+# ── Agent identity metadata (single source: agent_identity.py) ───────────────
+AGENT_ICONS: dict[str, str] = {k: v.emoji for k, v in IDENTITIES.items()}
+AGENT_AUTH_TYPE: dict[str, str] = {k: v.auth_kind for k, v in IDENTITIES.items()}
 
 
 # ── Auth error ────────────────────────────────────────────────────────────────
@@ -528,6 +510,32 @@ class AgentClient:
         combined = f"{suggested_code}\n{rationale}"
         H = _token_entropy(combined) if self.auto_entropy else 0.0
         return self._send("code_suggestion", payload, confidence, H)
+
+    def send_approval_needed(
+        self,
+        prompt: str,
+        *,
+        interaction_id: Optional[str] = None,
+        details: Optional[dict[str, Any]] = None,
+        confidence: float = 1.0,
+    ) -> dict[str, Any]:
+        """
+        Request a human yes/no decision through Shannon (hub + pill).
+
+        The gate persists a pending interaction and logs approval_needed so the
+        HUD can show an agent-attributed prompt.
+        """
+        payload: dict[str, Any] = {
+            "approval_needed": True,
+            "prompt": prompt,
+            "text": prompt,
+        }
+        if interaction_id:
+            payload["interaction_id"] = interaction_id
+        if details:
+            payload.update(details)
+        H = _token_entropy(prompt) if self.auto_entropy else 0.0
+        return self._send("approval_needed", payload, confidence, H)
 
     def send_alert(
         self,

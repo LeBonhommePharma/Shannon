@@ -1,0 +1,281 @@
+"""
+agent_identity.py — single source of truth for named Shannon agents.
+
+Used by agent_protocol, shannon_gate, and tests so Pill/hub never diverge on
+labels for: grok_build, codex, claude_code, dispatch, cowork, science.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Optional
+
+
+# The six primary agents required by product UX.
+CORE_AGENT_IDS: tuple[str, ...] = (
+    "grok_build",
+    "codex",
+    "claude_code",
+    "dispatch",
+    "cowork",
+    "science",
+)
+
+
+@dataclass(frozen=True)
+class AgentIdentity:
+    id: str
+    display_name: str
+    short_name: str
+    emoji: str
+    # RGB 0..1 for Swift interop / docs
+    color_rgb: tuple[float, float, float]
+    system_image: str  # SF Symbol name for macOS surfaces
+    auth_kind: str  # "local" | "cloud"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "short_name": self.short_name,
+            "emoji": self.emoji,
+            "color_rgb": list(self.color_rgb),
+            "system_image": self.system_image,
+            "auth_kind": self.auth_kind,
+        }
+
+
+# Distinct brand cues: Science ≠ Grok Build ≠ Claude Code ≠ Codex ≠ Dispatch ≠ Cowork
+IDENTITIES: dict[str, AgentIdentity] = {
+    "science": AgentIdentity(
+        id="science",
+        display_name="Claude Science",
+        short_name="Sci",
+        emoji="🔬",
+        color_rgb=(1.00, 0.72, 0.10),
+        system_image="flask.fill",
+        auth_kind="local",
+    ),
+    "grok_build": AgentIdentity(
+        id="grok_build",
+        display_name="Grok Build",
+        short_name="Grok",
+        emoji="🟣",
+        color_rgb=(0.68, 0.28, 0.98),
+        system_image="sparkles",
+        auth_kind="cloud",
+    ),
+    "claude_code": AgentIdentity(
+        id="claude_code",
+        display_name="Claude Code",
+        short_name="CC",
+        emoji="🟠",
+        color_rgb=(1.00, 0.50, 0.08),
+        system_image="bubble.left.and.bubble.right.fill",
+        auth_kind="local",
+    ),
+    "codex": AgentIdentity(
+        id="codex",
+        display_name="Codex",
+        short_name="Codex",
+        emoji="🔵",
+        color_rgb=(0.30, 0.55, 1.00),
+        system_image="chevron.left.forwardslash.chevron.right",
+        auth_kind="cloud",
+    ),
+    "dispatch": AgentIdentity(
+        id="dispatch",
+        display_name="Dispatch",
+        short_name="Disp",
+        emoji="🟤",
+        color_rgb=(0.72, 0.50, 0.28),
+        system_image="paperplane.fill",
+        auth_kind="local",
+    ),
+    "cowork": AgentIdentity(
+        id="cowork",
+        display_name="Cowork",
+        short_name="CWork",
+        emoji="🟢",
+        color_rgb=(0.20, 0.85, 0.45),
+        system_image="person.2.fill",
+        auth_kind="local",
+    ),
+}
+
+# Extended optional agents (still valid on the wire)
+IDENTITIES.update(
+    {
+        "chatgpt": AgentIdentity(
+            id="chatgpt",
+            display_name="ChatGPT",
+            short_name="GPT",
+            emoji="🟢",
+            color_rgb=(0.10, 0.72, 0.55),
+            system_image="text.bubble.fill",
+            auth_kind="cloud",
+        ),
+        "dataset_runner": AgentIdentity(
+            id="dataset_runner",
+            display_name="DatasetRunner",
+            short_name="DR",
+            emoji="📊",
+            color_rgb=(0.15, 0.70, 0.80),
+            system_image="tablecells",
+            auth_kind="local",
+        ),
+        "local_test": AgentIdentity(
+            id="local_test",
+            display_name="Local Test",
+            short_name="Test",
+            emoji="⚪️",
+            color_rgb=(0.55, 0.55, 0.58),
+            system_image="cpu",
+            auth_kind="local",
+        ),
+        "terminal": AgentIdentity(
+            id="terminal",
+            display_name="Terminal",
+            short_name="Term",
+            emoji="⬛",
+            color_rgb=(0.55, 0.60, 0.65),
+            system_image="terminal.fill",
+            auth_kind="local",
+        ),
+        "browser": AgentIdentity(
+            id="browser",
+            display_name="Browser",
+            short_name="Web",
+            emoji="🌐",
+            color_rgb=(0.35, 0.55, 0.95),
+            system_image="globe",
+            auth_kind="local",
+        ),
+    }
+)
+
+
+def identity_for(agent_id: str) -> AgentIdentity:
+    if agent_id in IDENTITIES:
+        return IDENTITIES[agent_id]
+    return AgentIdentity(
+        id=agent_id,
+        display_name=agent_id.replace("_", " ").title(),
+        short_name=agent_id[:4].upper(),
+        emoji="⚙️",
+        color_rgb=(0.55, 0.55, 0.58),
+        system_image="cpu",
+        auth_kind="local",
+    )
+
+
+def label_for(agent_id: str) -> str:
+    """Human label for UI lists: '🔬 Claude Science'."""
+    ident = identity_for(agent_id)
+    return f"{ident.emoji} {ident.display_name}"
+
+
+# ── Status / ask pure reducers (testable without sockets) ─────────────────────
+
+
+@dataclass
+class AgentStatusUpdate:
+    agent_id: str
+    task_summary: str
+    status: str  # active | idle | blocked | waiting
+    event_type: str
+    event_label: str
+
+
+@dataclass
+class PendingAsk:
+    agent_id: str
+    interaction_id: str
+    prompt: str
+    status: str  # pending | approved | denied
+
+
+def status_from_payload(
+    agent_id: str,
+    message_type: str,
+    payload: dict[str, Any],
+) -> AgentStatusUpdate:
+    """Map a gate message to a UI-facing status update (shipped entry point)."""
+    text = (
+        str(payload.get("text") or payload.get("summary") or payload.get("task") or "")
+        .strip()
+    )
+    if not text:
+        text = str(payload.get("output") or payload.get("label") or message_type)
+    text = text[:200]
+
+    status = "active"
+    if message_type in ("alert",) or payload.get("blocked"):
+        status = "blocked"
+    elif payload.get("waiting") or message_type == "approval_needed":
+        status = "waiting"
+    elif payload.get("idle"):
+        status = "idle"
+
+    event_type = message_type
+    if payload.get("approval_needed") or message_type == "approval_needed":
+        event_type = "approval_needed"
+    elif message_type == "result":
+        event_type = "task_complete"
+
+    return AgentStatusUpdate(
+        agent_id=agent_id,
+        task_summary=text,
+        status=status,
+        event_type=event_type,
+        event_label=text or identity_for(agent_id).display_name,
+    )
+
+
+def ask_from_payload(
+    agent_id: str,
+    payload: dict[str, Any],
+    interaction_id: Optional[str] = None,
+) -> Optional[PendingAsk]:
+    """Build a pending ask if the payload requests human approval."""
+    needs = (
+        payload.get("approval_needed") is True
+        or payload.get("require_approval") is True
+        or str(payload.get("kind", "")).lower() in ("approval", "yes_no", "confirm")
+    )
+    if not needs and "prompt" not in payload and "question" not in payload:
+        return None
+    if not needs and not payload.get("approval_needed"):
+        # Only create ask when explicitly flagged or message type handled by caller
+        if not payload.get("question") and not payload.get("prompt"):
+            return None
+        if not needs:
+            return None
+
+    prompt = str(
+        payload.get("prompt")
+        or payload.get("question")
+        or payload.get("text")
+        or "Approval required"
+    ).strip()[:300]
+    iid = interaction_id or str(payload.get("interaction_id") or f"ask-{agent_id}")
+    return PendingAsk(
+        agent_id=agent_id,
+        interaction_id=iid,
+        prompt=prompt,
+        status="pending",
+    )
+
+
+def resolve_ask(ask: PendingAsk, approved: bool) -> PendingAsk:
+    """Return a new PendingAsk with approved/denied status."""
+    return PendingAsk(
+        agent_id=ask.agent_id,
+        interaction_id=ask.interaction_id,
+        prompt=ask.prompt,
+        status="approved" if approved else "denied",
+    )
+
+
+def core_identities() -> list[AgentIdentity]:
+    return [IDENTITIES[i] for i in CORE_AGENT_IDS]

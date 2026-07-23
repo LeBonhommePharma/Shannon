@@ -1,0 +1,7 @@
+git_url "https://github.com/LeBonhommePharma/shannon-certs"  # private cert repo
+storage_mode "git"
+type "development"
+app_identifier ["com.lebonhommepharma.shannon.ios",
+                "com.lebonhommepharma.shannon.pill",
+                "com.lebonhommepharma.shannon.ipad",
+                "com.lebonhommepharma.shannon.watchkitapp"]

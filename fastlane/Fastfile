@@ -1,0 +1,248 @@
+# fastlane/Fastfile — Shannon multi-platform lanes
+#
+# Available lanes:
+#   fastlane setup         — run setup.sh (install all dev dependencies)
+#   fastlane pill          — build + launch the macOS Pill (no signing needed)
+#   fastlane ios_sim       — build + launch on iPhone 16 Pro simulator
+#   fastlane ipad_sim      — build + launch on iPad Pro 11" simulator
+#   fastlane all_sim       — pill + ios_sim + ipad_sim in sequence
+#   fastlane ios_device    — install on connected iPhone (requires Apple Dev account)
+#   fastlane ipad_device   — install on connected iPad
+#   fastlane watch_device  — iOS build that embeds + syncs the Watch app
+#   fastlane all_device    — ios_device + ipad_device
+#   fastlane beta          — build all platforms and upload to TestFlight
+
+REPO_ROOT = File.expand_path("..", __dir__)
+
+# ─── Helpers ───────────────────────────────────────────────────────────────────
+
+def xcodegen_for(dir)
+  spec = File.join(REPO_ROOT, dir, "project.yml")
+  UI.user_error!("project.yml not found: #{spec}") unless File.exist?(spec)
+  sh("cd '#{File.join(REPO_ROOT, dir)}' && xcodegen generate --spec project.yml")
+end
+
+def xcodebuild_sim(project:, scheme:, destination:, derived_data:, app_bundle_id:, app_path:)
+  sh(<<~CMD)
+    xcodebuild \
+      -project '#{project}' \
+      -scheme '#{scheme}' \
+      -configuration Debug \
+      -destination '#{destination}' \
+      -derivedDataPath '#{derived_data}' \
+      CODE_SIGNING_ALLOWED=NO \
+      build
+  CMD
+  sh("xcrun simctl install booted '#{app_path}'")
+  sh("xcrun simctl launch --console-pty booted '#{app_bundle_id}' &")
+end
+
+# ─── Lane: setup ───────────────────────────────────────────────────────────────
+
+lane :setup do
+  # Alias so `fastlane setup` works identically to running setup.sh directly.
+  sh("'#{REPO_ROOT}/setup.sh'")
+end
+
+# ─── Lane: pill (macOS) ────────────────────────────────────────────────────────
+
+lane :pill do
+  UI.message("▶ Building Shannon Pill (macOS)...")
+
+  xcodegen_for("Pill")
+
+  project   = File.join(REPO_ROOT, "Pill/ShannonPill.xcodeproj")
+  derived   = File.join(REPO_ROOT, "Pill/DerivedData")
+  app_path  = File.join(derived, "Build/Products/Debug/ShannonPill.app")
+
+  sh(<<~CMD)
+    xcodebuild \
+      -project '#{project}' \
+      -scheme ShannonPill \
+      -configuration Debug \
+      -derivedDataPath '#{derived}' \
+      CODE_SIGNING_ALLOWED=NO \
+      build
+  CMD
+
+  if File.exist?(app_path)
+    UI.success("Build succeeded → #{app_path}")
+    sh("open '#{app_path}'")
+  else
+    UI.user_error!("Build completed but app bundle not found at #{app_path}")
+  end
+end
+
+# ─── Lane: ios_sim (iPhone simulator) ─────────────────────────────────────────
+
+lane :ios_sim do
+  UI.message("▶ Building Shannon for iPhone simulator...")
+
+  xcodegen_for("iOS")
+
+  project  = File.join(REPO_ROOT, "iOS/Shannon.xcodeproj")
+  derived  = File.join(REPO_ROOT, "iOS/DerivedData")
+  app_path = File.join(derived, "Build/Products/Debug-iphonesimulator/Shannon.app")
+
+  xcodebuild_sim(
+    project:       project,
+    scheme:        "ShannonPhone",
+    destination:   "platform=iOS Simulator,name=iPhone 16 Pro",
+    derived_data:  derived,
+    app_bundle_id: "com.lebonhommepharma.shannon.phone",
+    app_path:      app_path
+  )
+
+  UI.success("Shannon is running on the iPhone 16 Pro simulator.")
+end
+
+# ─── Lane: ipad_sim (iPad simulator) ──────────────────────────────────────────
+
+lane :ipad_sim do
+  UI.message("▶ Building Shannon for iPad simulator...")
+
+  xcodegen_for("iPad")
+
+  project  = File.join(REPO_ROOT, "iPad/ShannonPad.xcodeproj")
+  derived  = File.join(REPO_ROOT, "iPad/DerivedData")
+  app_path = File.join(derived, "Build/Products/Debug-iphonesimulator/ShannonPad.app")
+
+  xcodebuild_sim(
+    project:       project,
+    scheme:        "ShannonPad",
+    destination:   "platform=iOS Simulator,name=iPad Pro 11-inch (M4)",
+    derived_data:  derived,
+    app_bundle_id: "com.lebonhommepharma.shannon.pad",
+    app_path:      app_path
+  )
+
+  UI.success("Shannon is running on the iPad Pro 11\" simulator.")
+end
+
+# ─── Lane: all_sim ─────────────────────────────────────────────────────────────
+
+lane :all_sim do
+  UI.message("▶ Running all simulators + macOS Pill...")
+  pill
+  ios_sim
+  ipad_sim
+  UI.success("All simulator targets are running.")
+end
+
+# ─── Lane: ios_device (connected iPhone) ──────────────────────────────────────
+
+lane :ios_device do
+  # watchOS deploys automatically via the iPhone companion app.
+  # The watch app is already embedded in the ShannonPhone target (iOS/project.yml).
+  UI.message("▶ Installing Shannon on connected iPhone (Watch syncs automatically)...")
+
+  xcodegen_for("iOS")
+  match(type: "development")
+
+  gym(
+    project:         File.join(REPO_ROOT, "iOS/Shannon.xcodeproj"),
+    scheme:          "ShannonPhone",
+    configuration:   "Debug",
+    destination:     "generic/platform=iOS",
+    output_directory: File.join(REPO_ROOT, "build"),
+    output_name:     "Shannon"
+  )
+
+  install_on_device(
+    ipa: File.join(REPO_ROOT, "build/Shannon.ipa")
+  )
+  UI.success("Shannon installed on iPhone. Watch app will sync via the iPhone.")
+end
+
+# ─── Lane: watch_device ────────────────────────────────────────────────────────
+#
+# watchOS apps must be embedded in their companion iOS app to install on device.
+# The ShannonWatch target lives inside iOS/project.yml and is embedded in
+# ShannonPhone. Building and installing ShannonPhone is all that is needed —
+# the Watch app syncs from iPhone to Apple Watch automatically via Xcode / the
+# Watch app.
+
+lane :watch_device do
+  UI.message("▶ Installing Shannon (iPhone + embedded Watch app) on connected iPhone...")
+  UI.message("   The Watch app will sync to the paired Apple Watch automatically.")
+  ios_device
+  UI.success("Shannon installed. The Watch app will sync to Apple Watch via the iPhone.")
+end
+
+# ─── Lane: ipad_device (connected iPad) ───────────────────────────────────────
+
+lane :ipad_device do
+  UI.message("▶ Installing Shannon on connected iPad...")
+
+  xcodegen_for("iPad")
+  match(type: "development")
+
+  gym(
+    project:          File.join(REPO_ROOT, "iPad/ShannonPad.xcodeproj"),
+    scheme:           "ShannonPad",
+    configuration:    "Debug",
+    destination:      "generic/platform=iOS",
+    output_directory: File.join(REPO_ROOT, "build"),
+    output_name:      "ShannonPad"
+  )
+
+  install_on_device(
+    ipa: File.join(REPO_ROOT, "build/ShannonPad.ipa")
+  )
+  UI.success("Shannon installed on iPad.")
+end
+
+# ─── Lane: all_device ──────────────────────────────────────────────────────────
+
+lane :all_device do
+  UI.message("▶ Installing Shannon on all connected devices...")
+  ios_device    # also covers Watch via embedded app
+  ipad_device
+  UI.success("Shannon installed on all connected devices.")
+end
+
+# ─── Lane: beta (TestFlight) ───────────────────────────────────────────────────
+
+lane :beta do
+  UI.message("▶ Building all platforms for TestFlight...")
+
+  match(type: "appstore")
+
+  # ── iPhone + Watch ──────────────────────────────────────────────────────────
+  xcodegen_for("iOS")
+
+  gym(
+    project:          File.join(REPO_ROOT, "iOS/Shannon.xcodeproj"),
+    scheme:           "ShannonPhone",
+    configuration:    "Release",
+    destination:      "generic/platform=iOS",
+    export_method:    "app-store",
+    output_directory: File.join(REPO_ROOT, "build"),
+    output_name:      "Shannon"
+  )
+
+  pilot(
+    ipa:                                File.join(REPO_ROOT, "build/Shannon.ipa"),
+    skip_waiting_for_build_processing:  true
+  )
+
+  # ── iPad ────────────────────────────────────────────────────────────────────
+  xcodegen_for("iPad")
+
+  gym(
+    project:          File.join(REPO_ROOT, "iPad/ShannonPad.xcodeproj"),
+    scheme:           "ShannonPad",
+    configuration:    "Release",
+    destination:      "generic/platform=iOS",
+    export_method:    "app-store",
+    output_directory: File.join(REPO_ROOT, "build"),
+    output_name:      "ShannonPad"
+  )
+
+  pilot(
+    ipa:                                File.join(REPO_ROOT, "build/ShannonPad.ipa"),
+    skip_waiting_for_build_processing:  true
+  )
+
+  UI.success("All builds uploaded to TestFlight.")
+end

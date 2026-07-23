@@ -1,3 +1,21 @@
+## Quick Start
+
+```bash
+git clone https://github.com/LeBonhommePharma/Shannon
+cd Shannon
+./setup.sh          # installs all dependencies, generates Xcode projects
+
+fastlane pill       # run the macOS Pill
+fastlane ios_sim    # run on iPhone simulator
+fastlane ipad_sim   # run on iPad simulator
+fastlane all_sim    # run all simulators + Pill at once
+
+fastlane ios_device # install on connected iPhone (requires Apple Developer account)
+fastlane beta       # upload to TestFlight
+```
+
+---
+
 <div align="center">
 
 # Shannon

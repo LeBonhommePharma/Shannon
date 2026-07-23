@@ -15,3 +15,10 @@ brew "swiftformat"
 
 # GitHub CLI – used to cut releases and upload DMG artifacts
 brew "gh"
+
+# Fastlane: CI/CD automation for Pill, iOS, iPad, and TestFlight builds.
+brew "fastlane"
+
+# ios-deploy: used by fastlane's install_on_device action to sideload .ipa files
+# onto connected iPhones and iPads without going through Xcode.
+brew "ios-deploy"

@@ -1,0 +1,4 @@
+clean true
+export_method "development"
+output_directory "./build"
+output_name "Shannon"

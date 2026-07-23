@@ -1,0 +1,10 @@
+app_identifier "com.lebonhommepharma.shannon"
+apple_id "lp@thebonhomme.com"
+
+# Per-platform overrides
+for_platform :ios do
+  app_identifier "com.lebonhommepharma.shannon.ios"
+end
+for_platform :mac do
+  app_identifier "com.lebonhommepharma.shannon.pill"
+end

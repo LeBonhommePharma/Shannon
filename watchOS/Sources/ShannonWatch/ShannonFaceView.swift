@@ -41,9 +41,14 @@ struct ShannonFaceView: View {
 
                 if !isLuminanceReduced {
                     if let pending = model.pendingConfirmation {
-                        PendingRow(question: pending.question, accent: accent)
-                        ConfirmationControls(model: model)
+                        // The gate takes over the face — no sheet, no stack.
+                        GateApprovalView(model: model, pending: pending)
                     } else {
+                        if model.delivery != .idle {
+                            // Answer in flight: show where it is instead of
+                            // pretending nothing happened.
+                            DeliveryRow(delivery: model.delivery, accent: accent)
+                        }
                         if let docking { DockingRow(progress: docking, accent: accent) }
                         if let agent { AgentRow(agent: agent) }
                         if let media = snapshot.nowPlaying, !media.isIdle {
@@ -80,23 +85,30 @@ struct ShannonFaceView: View {
     }
 }
 
-/// The one row that asks for something. Double Tap answers it — the primary
-/// action of the whole screen.
+/// Where the last answer is on its way to the phone.
 @available(watchOS 10.0, *)
-struct PendingRow: View {
-    let question: String
+struct DeliveryRow: View {
+    let delivery: WatchModel.AnswerDelivery
     let accent: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(question)
-                .font(.system(.body, design: .rounded).weight(.semibold))
-                .foregroundStyle(accent)
-                .lineLimit(2)
-            Text("Double tap to confirm")
-                .font(.shannonCaption)
-                .foregroundStyle(Color.shannonTertiary)
+        HStack(spacing: ShannonSpacing.xs) {
+            switch delivery {
+            case .idle:
+                EmptyView()
+            case .sending:
+                ProgressView().controlSize(.mini)
+                Text("Sending answer…")
+            case .sent:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(accent)
+                Text("Answer sent")
+            case .queued:
+                Image(systemName: "tray.and.arrow.up")
+                Text("Answer queued for iPhone")
+            }
         }
+        .font(.shannonCaption)
+        .foregroundStyle(Color.shannonSecondary)
     }
 }
 

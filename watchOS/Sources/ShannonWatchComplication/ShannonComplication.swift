@@ -88,6 +88,11 @@ struct ComplicationView: View {
 
     private var agent: AgentState? { snapshot.agents.rankedForDisplay().first }
 
+    /// Unexpired gates awaiting an answer — the number worth glancing for.
+    private var pendingGateCount: Int {
+        snapshot.confirmations.filter { !$0.isExpired() }.count
+    }
+
     var body: some View {
         switch family {
         case .accessoryCircular:
@@ -111,12 +116,19 @@ struct ComplicationView: View {
     private var circular: some View {
         if let pending = snapshot.oldestPendingConfirmation() {
             // A blocked agent is the only thing worth overriding progress for.
+            // The count says how many gates are waiting, not just that one is.
             ZStack {
                 AccessoryWidgetBackground()
-                Image(systemName: "questionmark")
-                    .font(.title3)
+                if pendingGateCount > 1 {
+                    Text("\(pendingGateCount)")
+                        .font(.system(.title3, design: .rounded).weight(.bold))
+                } else {
+                    Image(systemName: "questionmark")
+                        .font(.title3)
+                }
             }
-            .accessibilityLabel("Shannon question: \(pending.question)")
+            .accessibilityLabel(
+                "\(pendingGateCount) Shannon gates pending: \(pending.question)")
         } else if let docking {
             Gauge(value: docking.fraction) {
                 Text("Å")
@@ -165,7 +177,8 @@ struct ComplicationView: View {
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: isInSmartStack ? 3 : 1) {
             if let pending = snapshot.oldestPendingConfirmation() {
-                Text("Shannon asks")
+                Text(pendingGateCount > 1 ? "Shannon asks (\(pendingGateCount))"
+                                          : "Shannon asks")
                     .font(.caption2.weight(.semibold))
                     .widgetAccentable()
                 Text(pending.question)

@@ -139,5 +139,28 @@ extension PhoneWatchRelay: WCSessionDelegate {
         guard let decoded = try? WatchMessageCodec.decode(message) else { return }
         Task { @MainActor in self.handle(decoded) }
     }
+
+    /// The watch sends gate answers with a reply handler so it can show a
+    /// delivered state; the reply is the ack, its content is irrelevant.
+    nonisolated public func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        replyHandler(["ok": true])
+        guard let decoded = try? WatchMessageCodec.decode(message) else { return }
+        Task { @MainActor in self.handle(decoded) }
+    }
+
+    /// Gate answers queued while the phone was unreachable arrive here once
+    /// connectivity returns. Without this handler they would be received by
+    /// the system and dropped on the floor.
+    nonisolated public func session(
+        _ session: WCSession,
+        didReceiveUserInfo userInfo: [String: Any] = [:]
+    ) {
+        guard let decoded = try? WatchMessageCodec.decode(userInfo) else { return }
+        Task { @MainActor in self.handle(decoded) }
+    }
 }
 #endif

@@ -58,7 +58,9 @@ else
     exit 1
 fi
 
+# Install-friendly names: package_pill renames to Shannon.app for /Applications.
 echo
 echo "Built ${APP}"
 echo "Run with:  open ${APP}            # or --args --demo for the stub media source"
-echo "Stop with: pkill -f ShannonPill"
+echo "Probe:     ${APP}/Contents/MacOS/ShannonPill --probe"
+echo "Stop with: pkill -x ShannonPill   # exact name — do not use pkill -f"

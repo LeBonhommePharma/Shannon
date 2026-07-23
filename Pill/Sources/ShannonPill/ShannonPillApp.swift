@@ -1,69 +1,230 @@
 import AppKit
 import PillCore
 
+/// Notification posted by a second launch so the living instance re-shows itself.
+private let activateNotification = Notification.Name("com.lebonhommepharma.shannon.pill.activate")
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    /// `--demo` drives the pill from a stub media source so the UI can be shown
-    /// without a live media session (and on systems where MediaRemote is gated).
-    static var useDemo: Bool { CommandLine.arguments.contains("--demo") }
+    static var useDemo: Bool {
+        CommandLine.arguments.contains("--demo")
+            || ProcessInfo.processInfo.environment["SHANNON_PILL_DEMO"] == "1"
+    }
 
+    private var processLock: ProcessGuard.LockHandle?
     private var controller: PillWindowController?
+    private var menuBar: MenuBarController?
     private var nowPlaying: NowPlayingModel?
     private var battery: BatteryMonitor?
     private var bridge: ShannonBridge?
+    private var idle: IdleTelemetryPublisher?
+    private var ingest: AgentIngestService?
+    private var activity: AgentActivityMonitor?
+    private var hotkey: HotkeyMonitor?
     private var demoProvider: StubNowPlayingProvider?
     private var demoMotion: StubHeadphoneMotionProvider?
     private var confirmation: ConfirmationController?
+    private var cloud: CloudPublisher?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // LSUIElement is set in Info.plist; assert it at runtime too so a bare
-        // `swift run` still behaves like an agent app with no dock icon.
+        guard claimSingleInstance() else { return }
+
         NSApp.setActivationPolicy(.accessory)
+        logBoot()
+        watchForReactivate()
+        FrontmostAppTracker.shared.start()
 
-        let mediaProvider: NowPlayingProviding
-        if Self.useDemo {
-            let stub = StubNowPlayingProvider()
-            demoProvider = stub
-            mediaProvider = stub
-        } else {
-            mediaProvider = MediaRemoteProvider()
-        }
+        // Core models
+        let media: NowPlayingProviding = Self.useDemo
+            ? { let s = StubNowPlayingProvider(); demoProvider = s; return s }()
+            : MediaRemoteProvider()
+        let motion: HeadphoneMotionProviding = Self.useDemo
+            ? { let s = StubHeadphoneMotionProvider(); demoMotion = s; return s }()
+            : makeHeadphoneMotionProvider()
 
-        let np = NowPlayingModel(provider: mediaProvider)
+        let np = NowPlayingModel(provider: media)
         let bat = BatteryMonitor(provider: IOKitBatteryProvider())
         let br = ShannonBridge()
+        let idlePub = IdleTelemetryPublisher()
+        let ingestSvc = AgentIngestService()
+        let activityMon = AgentActivityMonitor()
+        let confirm = ConfirmationController(provider: motion, feedback: SystemConfirmationFeedback())
 
-        let motionProvider: HeadphoneMotionProviding
+        // UI
+        let ctl = PillWindowController(
+            nowPlaying: np, battery: bat, bridge: br, idle: idlePub,
+            confirmation: confirm, ingest: ingestSvc, activity: activityMon
+        )
+        ctl.show()
+
+        let menu = MenuBarController(
+            bridge: br, idle: idlePub, battery: bat, ingest: ingestSvc, activity: activityMon
+        )
+        menu.onShowPill = { [weak ctl] in ctl?.reassertVisibility(); ctl?.expand() }
+        menu.onReposition = { [weak ctl] in ctl?.reposition() }
+        menu.onAddAgent = { [weak self] in self?.addAgentFromFrontApp() }
+        menu.start()
+
+        // Global ⌘D (Carbon) — works while you're in Terminal / Claude / browser.
+        let hk = HotkeyMonitor()
+        hk.onCmdD = { [weak self] in self?.addAgentFromFrontApp() }
+        hk.start()
+
+        // Services
+        np.start(); bat.start(); br.start(); idlePub.start(); activityMon.start()
+        bootstrapDefaultPets()
+        sanitizePollutedTasks()
+        let cloudPub = CloudPublisher(nowPlaying: np, battery: bat, bridge: br)
+        cloudPub.start()
+
+        nowPlaying = np; battery = bat; bridge = br; idle = idlePub
+        ingest = ingestSvc; activity = activityMon; hotkey = hk
+        cloud = cloudPub; confirmation = confirm
+        controller = ctl; menuBar = menu
+
         if Self.useDemo {
-            let stub = StubHeadphoneMotionProvider()
-            demoMotion = stub
-            motionProvider = stub
-        } else {
-            motionProvider = makeHeadphoneMotionProvider()
+            injectDemoMedia()
+            confirm.ask(ConfirmationPrompt(question: "Dock this ligand?", detail: "1a4g · Astex Diverse")) {
+                answer, source in print("demo: \(answer.rawValue) via \(source.rawValue)")
+            }
         }
-        let confirm = ConfirmationController(
-            provider: motionProvider,
-            feedback: SystemConfirmationFeedback()
-        )
 
-        let controller = PillWindowController(
-            nowPlaying: np, battery: bat, bridge: br, confirmation: confirm
-        )
-        controller.show()
+        // Hello flash so a first launch is obviously alive, then tuck into the notch.
+        ctl.expand()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak ctl, weak confirm] in
+            guard confirm?.isAwaitingConfirmation != true else { return }
+            ctl?.presentation.isExpanded = false
+        }
+    }
 
-        np.start()
-        bat.start()
-        br.start()
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-        // pill must work regardless.
+    func applicationWillTerminate(_ notification: Notification) {
+        hotkey?.stop()
+        menuBar?.stop()
+        bridge?.stop()
+        idle?.stop()
+        activity?.stop()
+        nowPlaying?.stop()
+        battery?.stop()
+        cloud?.stop()
+        FrontmostAppTracker.shared.stop()
+        processLock = nil
+    }
 
-        nowPlaying = np
-        battery = bat
-        bridge = br
-        confirmation = confirm
-        self.controller = controller
+    // MARK: - ⌘D: add agent from frontmost app
 
-        demoProvider?.emit(.updated(NowPlayingInfo(
+    /// Capture Terminal / Claude / ChatGPT / Codex / browser / Cursor / … as an
+    /// agent, write its pet under `~/.shannon/pets/`, update the registry, and
+    /// flash the pill. Fully offline-safe; gate notify is best-effort.
+    private func addAgentFromFrontApp() {
+        guard let ingest else { return }
+        let result = ingest.captureFromFrontApp()
+        activity?.refresh()
+        menuBar?.flashSuccess("+\(result.agent.id)")
+        controller?.reassertVisibility()
+        controller?.expand()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+            guard self?.confirmation?.isAwaitingConfirmation != true else { return }
+            self?.controller?.presentation.isExpanded = false
+        }
+        fputs("Shannon ingest: \(result.message) ← \(result.sourceApp)\n", stderr)
+    }
+
+    /// One-shot cleanup for pets polluted by earlier clipboard leaks (API keys, etc.).
+    private func sanitizePollutedTasks() {
+        let root = PetBootstrap.petsRoot
+        guard let kids = try? FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil
+        ) else { return }
+        for dir in kids {
+            let stateURL = dir.appendingPathComponent("state.json")
+            guard let data = try? Data(contentsOf: stateURL),
+                  var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let task = obj["last_task"] as? String,
+                  AgentActivitySnapshot.looksLikeSecretOrJunk(task) else { continue }
+            obj["last_task"] = ""
+            obj["status"] = "idle"
+            obj["resumable"] = false
+            if let out = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) {
+                try? out.write(to: stateURL, options: .atomic)
+            }
+        }
+        // Registry too
+        let reg = PetBootstrap.registryURL
+        if let data = try? Data(contentsOf: reg),
+           var arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            var changed = false
+            for i in arr.indices {
+                if let task = arr[i]["last_task"] as? String,
+                   AgentActivitySnapshot.looksLikeSecretOrJunk(task) {
+                    arr[i]["last_task"] = ""
+                    changed = true
+                }
+            }
+            if changed, let out = try? JSONSerialization.data(withJSONObject: arr, options: [.prettyPrinted, .sortedKeys]) {
+                try? out.write(to: reg, options: .atomic)
+            }
+        }
+    }
+
+    private func bootstrapDefaultPets() {
+        let defaults = [
+            ("claude_code", "Claude"),
+            ("codex", "Codex"),
+            ("chatgpt", "ChatGPT"),
+            ("grok_build", "Grok"),
+            ("terminal", "Terminal"),
+            ("browser", "Browser"),
+            ("cursor", "Cursor"),
+            ("dataset_runner", "DatasetRunner"),
+        ]
+        for (id, name) in defaults {
+            // task: nil → idle skeleton only (does not clobber an active capture).
+            let dir = PetBootstrap.petsRoot.appendingPathComponent(id)
+            if FileManager.default.fileExists(atPath: dir.path) { continue }
+            _ = try? PetBootstrap.ensurePet(agentID: id, displayName: name, task: nil)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func claimSingleInstance() -> Bool {
+        let (outcome, handle) = ProcessGuard.acquire()
+        switch outcome {
+        case .acquired:
+            processLock = handle
+            return true
+        case .alreadyRunning(let pid):
+            fputs("Shannon already running (pid \(pid)) — activating.\n", stderr)
+            DistributedNotificationCenter.default().postNotificationName(
+                activateNotification, object: nil, userInfo: nil, deliverImmediately: true
+            )
+            NSApp.terminate(nil)
+            return false
+        case .failed(let msg):
+            fputs("Shannon lock warning: \(msg)\n", stderr)
+            return true
+        }
+    }
+
+    private func watchForReactivate() {
+        DistributedNotificationCenter.default().addObserver(
+            forName: activateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.controller?.reassertVisibility()
+                self?.controller?.expand()
+            }
+        }
+    }
+
+    private func injectDemoMedia() {
+        guard let demoProvider else {
+            controller?.expand()
+            return
+        }
+        demoProvider.emit(.updated(NowPlayingInfo(
             title: "Configurational Entropy",
             artist: "Shannon",
             album: "Notch Sessions",
@@ -71,18 +232,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             elapsed: 37,
             isPlaying: true
         )))
-
-        if Self.useDemo {
-            confirm.ask(
-                ConfirmationPrompt(question: "Dock this ligand?", detail: "1a4g · Astex Diverse")
-            ) { answer, source in
-                print("demo prompt answered: \(answer.rawValue) via \(source.rawValue)")
-            }
-        }
+        controller?.expand()
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        false
+    private func logBoot() {
+        let line = "Shannon boot — \(ProcessInfo.processInfo.operatingSystemVersionString) demo=\(Self.useDemo)\n"
+        fputs(line, stderr)
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/Shannon", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("pill.log")
+        guard let data = line.data(using: .utf8) else { return }
+        if FileManager.default.fileExists(atPath: file.path),
+           let h = try? FileHandle(forWritingTo: file) {
+            defer { try? h.close() }
+            _ = try? h.seekToEnd()
+            try? h.write(contentsOf: data)
+        } else {
+            try? data.write(to: file)
+        }
     }
 }
 
@@ -90,56 +258,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 struct ShannonPillMain {
     static func main() {
-        if CommandLine.arguments.contains("--probe") {
-            probeAndExit()
+        let args = CommandLine.arguments
+        if args.contains("--probe") { probeAndExit() }
+        if args.contains("--help") || args.contains("-h") {
+            print(
+                """
+                Shannon — macOS notch + menu-bar agent
+
+                  ./scripts/shannon                 build, install, start
+                  ./scripts/shannon stop|status|probe
+
+                  ⌘D   Add agent from frontmost app (Terminal, Claude, ChatGPT,
+                       Codex, browser, Cursor, …) and create its pet.
+                       Clipboard override:  agent: science fix the CF floor
+
+                  ShannonPill --demo                 stub media
+                  ShannonPill --probe                diagnostics
+                """
+            )
+            exit(0)
         }
+
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
         app.run()
-        // Keep the delegate alive for the process lifetime.
         withExtendedLifetime(delegate) {}
     }
 
-    /// `--probe` reports which live-activity sources actually work on this
-    /// machine, then exits. Useful on a new macOS release, where MediaRemote
-    /// may resolve but return nothing (see BLOCKED.md).
     private static func probeAndExit() -> Never {
-        let os = ProcessInfo.processInfo.operatingSystemVersionString
-        print("Shannon Pill probe — \(os)")
+        print("Shannon probe — \(ProcessInfo.processInfo.operatingSystemVersionString)")
 
-        let battery = IOKitBatteryProvider().currentSnapshots()
-        if let first = battery.first {
-            print("  battery:     OK — \(first.percentage)% "
-                  + "\(first.isCharging ? "charging" : "discharging"), \(first.timeLabel)")
+        if let b = IOKitBatteryProvider().currentSnapshots().first {
+            print("  battery:     \(b.percentage)% \(b.isCharging ? "charging" : "discharging")")
         } else {
-            print("  battery:     no power sources reported (desktop Mac?)")
+            print("  battery:     none (desktop?)")
         }
 
         let media = MediaRemoteProvider()
-        print("  mediaremote: symbols \(media.isAvailable ? "resolved" : "NOT resolved")")
+        print("  mediaremote: \(media.isAvailable ? "ok" : "missing")")
         if media.isAvailable {
             media.start { _ in }
-            // Give the async callback a moment to land.
-            RunLoop.main.run(until: Date().addingTimeInterval(2.0))
+            RunLoop.main.run(until: Date().addingTimeInterval(1.5))
             media.stop()
-            print("  now playing: \(media.hasDelivered ? "delivering data" : "no data (entitlement-gated, or nothing playing)")")
+            print("  now playing: \(media.hasDelivered ? "live" : "gated / idle")")
         }
 
-        let motion = makeHeadphoneMotionProvider()
-        print("  gestures:    \(motion.isAvailable ? "available" : "unavailable") — \(motion.authorizationDescription)")
-
-        let bridgePath = ShannonBridge.defaultSocketPath
-        let client = UnixSocketClient()
-        do {
-            try client.connect(to: bridgePath)
-            let status = try client.request(BridgeRequest(command: "status"))
-            client.close()
-            print("  bridge:      OK at \(bridgePath) — \(status.pillLabel), backend \(status.backend)")
-        } catch {
-            print("  bridge:      not reachable at \(bridgePath) (agent offline)")
-        }
+        print("  bridge:      \(FileManager.default.fileExists(atPath: ShannonBridge.defaultSocketPath) ? "socket present" : "offline")")
+        print("  pets:        \(PetBootstrap.petsRoot.path)")
+        print("  registry:    \(PetBootstrap.listRegistry().count) agent(s)")
+        print("  hotkey:      ⌘D = add agent from frontmost app")
+        print("  verdict:     READY")
         exit(0)
     }
 }

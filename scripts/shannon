@@ -1,0 +1,356 @@
+#!/usr/bin/env bash
+# shannon — one command to bootstrap the macOS Shannon experience
+#
+#   ./scripts/shannon              # PRIMARY: pets + app (+ optional gate/bridge)
+#   ./scripts/shannon app          # rebuild/install/start app only
+#   ./scripts/shannon start|stop|restart|status|probe
+#   ./scripts/shannon pets         # create default pets only
+#   ./scripts/shannon help
+#
+# Fast path: SwiftPM release → /Applications/Shannon.app. No DMG.
+# For signed release artifacts: scripts/package_pill.sh
+
+set -euo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PILL="${REPO}/Pill"
+HUB="${REPO}/hub"
+APP="/Applications/Shannon.app"
+BIN="${APP}/Contents/MacOS/ShannonPill"
+PETS_DIR="${HOME}/.shannon/pets"
+CMD="${1:-}"
+# Default with no args = full bootstrap (plan acceptance #1).
+if [[ -z "${CMD}" ]]; then
+  CMD="bootstrap"
+else
+  shift
+fi
+
+info()  { printf '→ %s\n' "$*"; }
+ok()    { printf '✓ %s\n' "$*"; }
+die()   { printf '✗ %s\n' "$*" >&2; exit 1; }
+warn()  { printf '! %s\n' "$*" >&2; }
+
+is_running() { pgrep -x ShannonPill >/dev/null 2>&1; }
+
+# ── App lifecycle ─────────────────────────────────────────────────────────────
+
+stop_app() {
+  if is_running; then
+    info "Stopping Shannon…"
+    pkill -x ShannonPill 2>/dev/null || true
+    for _ in 1 2 3 4 5 6; do
+      is_running || break
+      sleep 0.5
+    done
+    pkill -9 -x ShannonPill 2>/dev/null || true
+    rm -f "${HOME}/.shannon/pill.lock"
+    ok "Stopped"
+  else
+    ok "Not running"
+  fi
+}
+
+start_app() {
+  [[ -x "${BIN}" ]] || die "Not installed. Run: ./scripts/shannon app"
+  if is_running; then
+    open "${APP}" 2>/dev/null || true
+    ok "Already running — brought forward"
+    return 0
+  fi
+  rm -f "${HOME}/.shannon/pill.lock"
+  xattr -dr com.apple.quarantine "${APP}" 2>/dev/null || true
+  if ! open "${APP}" 2>/dev/null; then
+    # Headless / no GUI session — still consider install success.
+    warn "Could not open GUI (no display?). App is installed at ${APP}"
+    warn "Start later with: open ${APP}   or   ./scripts/shannon start"
+    return 0
+  fi
+  sleep 1.2
+  if is_running; then
+    ok "Shannon is running"
+  else
+    warn "Launched but process not seen yet — try: ./scripts/shannon probe"
+  fi
+}
+
+build_and_install() {
+  command -v swift >/dev/null || die "swift not found (install Xcode)"
+  info "Building release…"
+  (
+    cd "${PILL}"
+    if ! ./Scripts/make_app.sh release; then
+      die "Build failed"
+    fi
+  )
+  local src="${PILL}/build/ShannonPill.app"
+  [[ -d "${src}" ]] || die "Build did not produce ${src}"
+
+  info "Installing → ${APP}"
+  if [[ -e "${APP}" && ! -w "${APP}" ]]; then
+    die "Cannot write ${APP} (permission denied). Once: sudo rm -rf ${APP}"
+  fi
+  rm -rf "${APP}"
+  ditto "${src}" "${APP}"
+  codesign --force --deep --sign - --timestamp=none "${APP}" 2>/dev/null \
+    || warn "codesign warning (may still launch)"
+  xattr -dr com.apple.quarantine "${APP}" 2>/dev/null || true
+  ok "Installed ${APP}"
+}
+
+status_app() {
+  if is_running; then
+    ok "Running (pid $(pgrep -x ShannonPill | tr '\n' ' '))"
+    [[ -x "${BIN}" ]] && info "Binary: ${BIN}"
+  else
+    info "Not running"
+    [[ -x "${BIN}" ]] && info "Installed at ${APP}" || info "Not installed"
+  fi
+  if [[ -d "${PETS_DIR}" ]]; then
+    local n
+    n="$(find "${PETS_DIR}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+    info "Pets: ${n} under ${PETS_DIR}"
+  else
+    info "Pets: none yet (run ./scripts/shannon pets)"
+  fi
+}
+
+probe_app() {
+  if [[ -x "${BIN}" ]]; then
+    "${BIN}" --probe
+    return $?
+  fi
+  local local_bin="${PILL}/build/ShannonPill.app/Contents/MacOS/ShannonPill"
+  if [[ -x "${local_bin}" ]]; then
+    "${local_bin}" --probe
+    return $?
+  fi
+  die "No binary. Run: ./scripts/shannon app"
+}
+
+# ── Pets (always offline-safe) ────────────────────────────────────────────────
+
+bootstrap_pets() {
+  info "Bootstrapping pets under ${PETS_DIR}…"
+  mkdir -p "${HOME}/.shannon"
+  # Prefer hub pet_manager when present; pure-Python fallback otherwise.
+  if [[ -f "${HUB}/pet_manager.py" ]]; then
+    PYTHONPATH="${HUB}${PYTHONPATH:+:$PYTHONPATH}" python3 - <<'PY' || true
+from pet_manager import PetManager, ALL_AGENTS
+pm = PetManager()
+for a in ALL_AGENTS:
+    pm.ensure_pet(a)
+    print(f"  pet ready: {a}")
+print(f"ok {len(ALL_AGENTS)} pets via pet_manager")
+PY
+  fi
+  # Guarantee core set even if pet_manager import failed.
+  python3 - <<'PY'
+import json, os, time
+from pathlib import Path
+home = Path(os.environ.get("SHANNON_LOG_DIR", Path.home() / ".shannon"))
+pets = home / "pets"
+pets.mkdir(parents=True, exist_ok=True)
+agents = [
+    ("claude_code", "Claude"),
+    ("codex", "Codex"),
+    ("chatgpt", "ChatGPT"),
+    ("grok_build", "Grok"),
+    ("terminal", "Terminal"),
+    ("browser", "Browser"),
+    ("cursor", "Cursor"),
+    ("dataset_runner", "DatasetRunner"),
+    ("science", "Science"),
+    ("dispatch", "Dispatch"),
+    ("cowork", "Cowork"),
+]
+for aid, name in agents:
+    d = pets / aid
+    d.mkdir(parents=True, exist_ok=True)
+    for fname in ("memory.md", "history.jsonl"):
+        f = d / fname
+        if not f.exists():
+            if fname == "memory.md":
+                f.write_text(f"# {name}\n\nPet memory for agent `{aid}`.\n", encoding="utf-8")
+            else:
+                f.touch()
+    cfg = d / "config.json"
+    if not cfg.exists():
+        cfg.write_text(json.dumps({
+            "voice_enabled": True,
+            "notify_threshold": 3.5,
+            "memory_limit_kb": 256,
+            "display_name": name,
+        }, indent=2), encoding="utf-8")
+    st = d / "state.json"
+    if not st.exists():
+        st.write_text(json.dumps({
+            "status": "idle",
+            "last_task": "",
+            "last_cf_delta": None,
+            "memory_size": 0,
+            "history_count": 0,
+            "updated_at": time.time(),
+            "resumable": False,
+        }, indent=2), encoding="utf-8")
+    print(f"  ensured: {aid}")
+print("ok pets under", pets)
+PY
+  local n
+  n="$(find "${PETS_DIR}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+  ok "Pets ready (${n}) → ${PETS_DIR}"
+}
+
+# ── Optional daemons (best-effort) ────────────────────────────────────────────
+
+start_gate() {
+  info "Starting Shannon gate (optional agent broker)…"
+  if pgrep -f "shannon_gate.py" >/dev/null 2>&1; then
+    ok "Gate already running"
+    return 0
+  fi
+  [[ -f "${HUB}/shannon_gate.py" ]] || { warn "No hub/shannon_gate.py — skip"; return 0; }
+  mkdir -p "${HOME}/.shannon"
+  nohup python3 "${HUB}/shannon_gate.py" \
+    >>"${HOME}/.shannon/gate.log" 2>&1 &
+  sleep 0.6
+  if pgrep -f "shannon_gate.py" >/dev/null 2>&1; then
+    ok "Gate up (log: ~/.shannon/gate.log)"
+  else
+    warn "Gate did not start (pill works offline). See ~/.shannon/gate.log"
+  fi
+}
+
+start_bridge_demo() {
+  info "Starting pill bridge demo (optional live H)…"
+  if pgrep -f "shannon.pill_bridge" >/dev/null 2>&1; then
+    ok "Bridge already running"
+    return 0
+  fi
+  local py="python3"
+  [[ -x "${REPO}/.venv/bin/python" ]] && py="${REPO}/.venv/bin/python"
+  if ! "${py}" -c "import shannon" 2>/dev/null; then
+    warn "Python package not installed — pill uses local idle H (ok)."
+    warn "Optional: pip install -e '.[dev]' then re-run for live bridge."
+    return 0
+  fi
+  mkdir -p "${HOME}/.shannon"
+  nohup "${py}" -m shannon.pill_bridge --demo \
+    >>"${HOME}/.shannon/bridge.log" 2>&1 &
+  sleep 0.5
+  if pgrep -f "shannon.pill_bridge" >/dev/null 2>&1; then
+    ok "Bridge demo up (log: ~/.shannon/bridge.log)"
+  else
+    warn "Bridge did not start — pill still shows agent pets + idle H"
+  fi
+}
+
+# ── Primary bootstrap ─────────────────────────────────────────────────────────
+
+finish_banner() {
+  echo
+  ok "Shannon is ready"
+  echo
+  printf '  Next:\n'
+  printf '    1. Look for the menu-bar Shannon glyph (○ ready / agent name)\n'
+  printf '    2. Press ⌘D in Terminal, Claude, ChatGPT, Codex, or a browser\n'
+  printf '       to attach that app as an agent + pet\n'
+  printf '    Clipboard tip:  agent: science fix the CF floor\n'
+  printf '    Pets:           ls ~/.shannon/pets\n'
+  printf '    Quit:           menu → Quit Shannon   or  ./scripts/shannon stop\n'
+  echo
+}
+
+bootstrap_all() {
+  # 1) Pets first so disk state exists even if the app build fails later.
+  bootstrap_pets
+  # 2) Optional enhancements (never hard-fail bootstrap).
+  start_gate || true
+  start_bridge_demo || true
+  # 3) App: rebuild if missing or SHANNON_FORCE_BUILD=1.
+  if [[ ! -x "${BIN}" || "${SHANNON_FORCE_BUILD:-0}" == "1" ]]; then
+    stop_app || true
+    build_and_install
+  else
+    ok "App already installed (${APP})"
+  fi
+  start_app
+  finish_banner
+}
+
+app_only() {
+  stop_app || true
+  build_and_install
+  start_app
+  bootstrap_pets
+  finish_banner
+}
+
+usage() {
+  cat <<'EOF'
+shannon — simple macOS Shannon bootstrap
+
+PRIMARY (first run / everyday):
+  ./scripts/shannon                 pets + app (+ optional gate/bridge)
+
+Also:
+  ./scripts/shannon app             rebuild & restart the app only
+  ./scripts/shannon start|stop|restart|status|probe
+  ./scripts/shannon pets            create default pet directories
+  ./scripts/shannon gate            start agent gate daemon only
+  ./scripts/shannon help
+
+In the app:
+  ⌘D   Capture the frontmost app (Terminal, Claude, ChatGPT, Codex,
+       browser, Cursor, …) as an agent and create/update its pet.
+       Clipboard:  agent: science my task summary
+
+Optional later:
+  pip install -e ".[dev]"           live entropy bridge
+  ./setup.sh                        full dev toolchain (Xcode projects, etc.)
+  brew install --cask …/shannon-pill   signed release (when published)
+EOF
+}
+
+case "${CMD}" in
+  bootstrap|hub|up|"")
+    bootstrap_all
+    ;;
+  app|run|r)
+    app_only
+    ;;
+  install|i)
+    stop_app || true
+    build_and_install
+    bootstrap_pets
+    ok "Installed. Start with: ./scripts/shannon start"
+    ;;
+  start|open)
+    start_app
+    ;;
+  stop|kill|down)
+    stop_app
+    ;;
+  restart)
+    stop_app
+    start_app
+    ;;
+  status|st)
+    status_app
+    ;;
+  probe|doctor)
+    probe_app
+    ;;
+  pets|pet)
+    bootstrap_pets
+    ;;
+  gate)
+    start_gate
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    die "Unknown command: ${CMD}. Try: ./scripts/shannon help"
+    ;;
+esac

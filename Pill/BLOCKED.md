@@ -6,6 +6,23 @@ with Xcode 27 / Swift 6.4, via `ShannonPill --probe`.
 
 ---
 
+## 0. CloudKit traps on unsigned launch — FIXED (failsafe)
+
+**Symptom (macOS 27):** double-clicking `/Applications/Shannon.app` appeared to
+"do nothing". Process wrote a boot line then died with `EXC_BREAKPOINT`.
+
+**Root cause:** `CloudPublisher.defaultBackend()` constructed
+`CloudKitSyncBackend()` → `CKContainer(identifier:)` whenever CloudKit headers
+were importable. Without an iCloud entitlement (ad-hoc / Homebrew install),
+AppKit traps hard — not a catchable Swift error.
+
+**Fix:** default backend is always `InMemorySyncBackend`. CloudKit is only
+constructed when `SHANNON_ICLOUD=1` **and** an embedded provisioning profile is
+present. Menu-bar status item + idle telemetry keep the UI alive even with no
+Python bridge.
+
+---
+
 ## 1. Now Playing for *other* apps has no public API — BLOCKED, partially mitigated
 
 **What the brief asked for:** read track/artist/artwork from Apple Music,

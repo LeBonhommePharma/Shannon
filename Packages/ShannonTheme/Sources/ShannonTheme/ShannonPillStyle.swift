@@ -13,25 +13,33 @@ public struct PillMaterial: NSViewRepresentable {
 
     public func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
+        // macOS 27 Liquid Glass: `.hudWindow` still resolves; force `.active`
+        // and the app's effective appearance so the material does not wash out
+        // to fully clear when the panel is non-key (LSUIElement).
         view.material = .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
-        view.isEmphasized = false
+        view.isEmphasized = true
+        view.appearance = NSApp.effectiveAppearance
         return view
     }
 
     public func updateNSView(_ view: NSVisualEffectView, context: Context) {
         view.material = .hudWindow
         view.state = .active
+        view.isEmphasized = true
+        view.appearance = NSApp.effectiveAppearance
     }
 }
 
 /// Applies the full pill appearance — material, tint, hairline border, shadow,
 /// and the accent glow that marks an active agent.
 ///
-/// At rest at night the pill is close to invisible: a dark translucent slab with
-/// a 10%-white seam. When an agent starts working the seam turns accent and a
-/// soft accent glow blooms behind it.
+/// macOS 27 ("Liquid Glass") made the menu bar more translucent; a 10%-white
+/// seam on a near-clear slab was effectively invisible and users reported the
+/// app "does nothing". Idle chrome now keeps a readable border and a soft
+/// ambient shadow even when `isActive` is false; the accent glow still only
+/// blooms when an agent is live.
 public struct PillStyle: ViewModifier {
     public var isActive: Bool
     public var cornerRadius: CGFloat
@@ -50,23 +58,27 @@ public struct PillStyle: ViewModifier {
             .background {
                 ZStack {
                     PillMaterial()
-                    Color.pillBackground
+                    // Slightly stronger tint than stock pillBackground so the
+                    // slab reads against both light and dark wallpapers on 27.x.
+                    Color.pillBackground.opacity(0.92)
+                    Color.black.opacity(0.18)
                 }
                 .clipShape(shape)
             }
             .overlay {
                 shape.strokeBorder(
-                    isActive ? Color.pillBorderActive : Color.pillBorder,
-                    lineWidth: ShannonStroke.hairline
+                    isActive ? Color.pillBorderActive : Color.pillBorder.opacity(0.85),
+                    lineWidth: isActive ? ShannonStroke.hairline * 1.5 : ShannonStroke.hairline * 1.25
                 )
             }
             .shadow(
                 color: isActive
                     ? Color.shannonAccent.opacity(ShannonStroke.glowOpacity)
-                    : .clear,
-                radius: isActive ? ShannonStroke.glowRadius : 0
+                    : Color.black.opacity(0.28),
+                radius: isActive ? ShannonStroke.glowRadius : 5,
+                y: isActive ? 0 : 1
             )
-            .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+            .shadow(color: .black.opacity(0.22), radius: 8, y: 2)
             .animation(.shannonSnap, value: isActive)
     }
 }

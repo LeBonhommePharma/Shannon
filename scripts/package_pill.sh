@@ -312,8 +312,9 @@ if [[ "${DO_INSTALL}" -eq 1 ]]; then
   if [[ "${IDENTITY}" == "-" ]]; then
     codesign --force --deep --sign - --timestamp=none "${DEST}" 2>/dev/null || true
   fi
-  echo "    Installed. Launch with: open ${DEST}"
-  echo "    Stop with:             pkill -f ShannonPill || pkill -f Shannon.app"
+  echo "    Installed. Launch with:  open ${DEST}"
+  echo "    Or day-to-day:           ./scripts/shannon start|stop|status"
+  echo "    Stop with:               pkill -x ShannonPill"
 fi
 
 # ---------------------------------------------------------------------------

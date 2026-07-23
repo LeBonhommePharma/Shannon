@@ -1,13 +1,13 @@
 import SwiftUI
 import PillCore
+import ShannonTheme
 
-/// Sizes for the two pill states. The collapsed height matches the notch so
-/// the pill reads as part of the hardware.
+/// Sizes for the two pill states.
 public enum PillMetrics {
     public static let collapsedHeight: CGFloat = 32
-    public static let collapsedWidth: CGFloat = 240
-    public static let expandedWidth: CGFloat = 380
-    public static let expandedHeight: CGFloat = 168
+    public static let collapsedWidth: CGFloat = 260
+    public static let expandedWidth: CGFloat = 400
+    public static let expandedHeight: CGFloat = 196
     public static let corner: CGFloat = 16
 }
 
@@ -15,19 +15,28 @@ struct PillView: View {
     @ObservedObject var nowPlaying: NowPlayingModel
     @ObservedObject var battery: BatteryMonitor
     @ObservedObject var bridge: ShannonBridge
+    @ObservedObject var idle: IdleTelemetryPublisher
     @ObservedObject var confirmation: ConfirmationController
+    @ObservedObject var ingest: AgentIngestService
+    @ObservedObject var activity: AgentActivityMonitor
     @Binding var isExpanded: Bool
 
-    /// A pending question forces the pill open — an approval prompt the user
-    /// has to hover to discover would be worse than useless.
     private var showExpanded: Bool { isExpanded || confirmation.isAwaitingConfirmation }
 
-    /// The pill lights its accent border whenever the agent bridge is live —
-    /// that glow is the only at-rest signal that Shannon is watching.
-    private var isAgentActive: Bool { bridge.connected }
+    private var entropy: ShannonStatus { bridge.status ?? idle.status }
+    private var summary: AgentActivitySummary { activity.summary }
+    private var primary: AgentActivitySnapshot? { summary.primary }
+    private var busy: [AgentActivitySnapshot] { summary.busy }
+
+    /// True when media is playing *and* no agent is busy — media never hides agent work.
+    private var showMedia: Bool {
+        nowPlaying.state.info != nil && busy.isEmpty
+    }
+
+    private var agentActive: Bool { !busy.isEmpty || bridge.connected }
 
     private var corner: CGFloat {
-        PillMetrics.corner
+        showExpanded ? ShannonRadius.xl : ShannonRadius.lg
     }
 
     var body: some View {
@@ -46,15 +55,19 @@ struct PillView: View {
             width: showExpanded ? PillMetrics.expandedWidth : PillMetrics.collapsedWidth,
             height: showExpanded ? PillMetrics.expandedHeight : PillMetrics.collapsedHeight
         )
-        .shannonPill(isActive: isAgentActive, cornerRadius: corner)
+        .shannonPill(isActive: agentActive, cornerRadius: corner)
         .overlay(flashOverlay)
         .animation(.shannonFloat, value: showExpanded)
+        .animation(.shannonSnap, value: summary.busyCount)
         .onHover { hovering in
-            isExpanded = hovering
+            if hovering { isExpanded = true }
         }
+        .onTapGesture { isExpanded.toggle() }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(collapsedText)
+        .accessibilityHint("Click to expand agent status")
     }
 
-    /// Green wash on confirm, red on deny — the visual half of the gesture ack.
     private var flashOverlay: some View {
         RoundedRectangle(cornerRadius: corner, style: .continuous)
             .fill(confirmation.flash == .confirm ? Color.shannonSuccess : Color.shannonError)
@@ -67,171 +80,386 @@ struct PillView: View {
 
     private var collapsed: some View {
         HStack(spacing: 8) {
-            if let art = artworkImage {
-                Image(nsImage: art)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 18, height: 18)
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            }
+            statusGlyph
+                .frame(width: 16, height: 16)
 
             Text(collapsedText)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(Color.shannonPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 2)
+
+            if summary.busyCount > 1 {
+                Text("\(summary.busyCount)")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.shannonAccent)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.shannonAccentSubtle))
+            }
+
+            if entropy.collapsed {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.shannonWarning)
+            }
 
             if let snap = battery.snapshot {
-                BatteryRing(snapshot: snap, diameter: 16)
+                BatteryRing(snapshot: snap, diameter: 15)
             }
         }
         .padding(.horizontal, 10)
         .frame(height: PillMetrics.collapsedHeight)
     }
 
-    /// Media wins the collapsed strip when something is playing; otherwise the
-    /// pill falls back to the Shannon entropy readout, then to a bare label.
+    @ViewBuilder
+    private var statusGlyph: some View {
+        if let p = busy.first {
+            Image(systemName: iconName(for: p))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(color(for: p.status))
+        } else if showMedia {
+            Image(systemName: "music.note")
+                .font(.system(size: 11))
+                .foregroundStyle(Color.shannonSecondary)
+        } else {
+            Circle()
+                .fill(statusDotColor)
+                .frame(width: 7, height: 7)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var statusDotColor: Color {
+        if entropy.collapsed { return .shannonWarning }
+        if bridge.connected { return .shannonSuccess }
+        if !busy.isEmpty { return .shannonAccent }
+        return .shannonTertiary
+    }
+
+    /// Priority: busy agents → fresh ingest → media → quiet.
     private var collapsedText: String {
+        if !busy.isEmpty { return summary.collapsedText }
+        if ingest.isHighlighting, let last = ingest.lastResult {
+            return "+\(last.agent.displayName)"
+        }
         if let label = nowPlaying.collapsedLabel { return label }
-        if let status = bridge.status { return status.pillLabel }
-        return "Shannon"
+        if let recent = primary, !recent.lastTask.isEmpty,
+           Date().timeIntervalSince(recent.updatedAt) < 600 {
+            return recent.collapsedLine
+        }
+        return "Shannon · ready"
     }
 
     // MARK: Expanded
 
     private var expanded: some View {
-        VStack(spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
-                artworkView
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(nowPlaying.state.info?.title ?? "Nothing playing")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.shannonPrimary)
-                        .lineLimit(1)
-                    Text(nowPlaying.state.info?.artist ?? "")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.shannonSecondary)
-                        .lineLimit(1)
-                    if !nowPlaying.providerAvailable {
-                        Text("Now Playing unavailable — see BLOCKED.md")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Color.shannonWarning)
-                            .lineLimit(2)
-                    }
-                }
-                Spacer()
-                if let snap = battery.snapshot {
-                    VStack(spacing: 2) {
-                        BatteryRing(snapshot: snap, diameter: 30)
-                        Text(snap.timeLabel)
-                            .font(.system(size: 9))
-                            .foregroundStyle(Color.shannonSecondary)
-                    }
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            headerRow
+
+            if showMedia {
+                mediaBlock
+            } else if !busy.isEmpty || primary != nil {
+                agentBoard
+            } else {
+                emptyBoard
             }
 
-            scrubber
-            transport
             Spacer(minLength: 0)
             footer
         }
         .padding(12)
     }
 
-    private var artworkView: some View {
-        Group {
-            if let art = artworkImage {
-                Image(nsImage: art).resizable().aspectRatio(contentMode: .fill)
-            } else {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+    private var headerRow: some View {
+        HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.shannonSurfaceElevated)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .foregroundStyle(Color.shannonTertiary)
-                    )
+                Image(systemName: headerIcon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(headerIconColor)
+            }
+            .frame(width: 40, height: 40)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(headerTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.shannonPrimary)
+                    .lineLimit(1)
+                Text(headerSubtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.shannonSecondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 4)
+
+            if let snap = battery.snapshot {
+                VStack(spacing: 2) {
+                    BatteryRing(snapshot: snap, diameter: 28)
+                    Text(snap.timeLabel)
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color.shannonTertiary)
+                        .lineLimit(1)
+                }
             }
         }
-        .frame(width: 46, height: 46)
-        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
-    private var artworkImage: NSImage? {
-        guard let data = nowPlaying.state.info?.artworkData else { return nil }
-        return NSImage(data: data)
+    private var headerIcon: String {
+        if entropy.collapsed { return "exclamationmark.triangle.fill" }
+        if let p = busy.first { return iconName(for: p) }
+        if showMedia { return "music.note" }
+        return "waveform.path.ecg"
     }
 
-    private var scrubber: some View {
-        let info = nowPlaying.state.info
-        return VStack(spacing: 2) {
+    private var headerIconColor: Color {
+        if entropy.collapsed { return .shannonWarning }
+        if let p = busy.first { return color(for: p.status) }
+        if bridge.connected { return .shannonSuccess }
+        return .shannonAccent
+    }
+
+    private var headerTitle: String {
+        if entropy.collapsed { return "Entropy collapse" }
+        if let p = busy.first {
+            return busy.count == 1 ? p.displayName : "\(busy.count) agents active"
+        }
+        if showMedia { return nowPlaying.state.info?.title ?? "Now Playing" }
+        return "Shannon"
+    }
+
+    private var headerSubtitle: String {
+        if entropy.collapsed {
+            return String(format: "H %.1f  ΔH %+.1f · %@", entropy.entropy, entropy.deltaH,
+                          entropy.agent ?? entropy.backend)
+        }
+        if let p = busy.first {
+            let task = AgentActivitySnapshot.shorten(p.lastTask, max: 52)
+            if busy.count == 1 {
+                return task.isEmpty ? "\(p.status.label) · \(p.relativeAge)" : task
+            }
+            return task.isEmpty
+                ? busy.map(\.displayName).prefix(3).joined(separator: " · ")
+                : task
+        }
+        if showMedia {
+            return nowPlaying.state.info?.artist ?? ""
+        }
+        return "⌘D capture · pets in ~/.shannon/pets"
+    }
+
+    // MARK: Agent board
+
+    private var agentBoard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            let rows = Array((busy.isEmpty ? summary.agents.prefix(3) : busy.prefix(4)))
+            ForEach(rows) { agent in
+                agentRow(agent)
+            }
+            if bridge.connected || entropy.collapsed {
+                entropyStrip
+            }
+        }
+    }
+
+    private func agentRow(_ a: AgentActivitySnapshot) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(color(for: a.status))
+                .frame(width: 6, height: 6)
+            Image(systemName: iconName(for: a))
+                .font(.system(size: 10))
+                .foregroundStyle(Color.shannonSecondary)
+                .frame(width: 14)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(a.displayName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.shannonPrimary)
+                    Text(a.status.label)
+                        .font(.system(size: 9, weight: .medium, design: .rounded))
+                        .foregroundStyle(color(for: a.status))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(color(for: a.status).opacity(0.15)))
+                    Spacer(minLength: 0)
+                    Text(a.relativeAge)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+                if !a.lastTask.isEmpty {
+                    Text(a.lastTask)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.shannonSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var emptyBoard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("No agents running")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.shannonSecondary)
+            Text("Switch to Terminal, Claude, ChatGPT, Codex, or a browser and press ⌘D to attach that session as an agent with its own pet.")
+                .font(.system(size: 10))
+                .foregroundStyle(Color.shannonTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                hintChip("⌘D", "capture")
+                hintChip("agent: id", "clipboard")
+                if bridge.connected {
+                    hintChip("H \(String(format: "%.1f", entropy.entropy))", "live")
+                }
+            }
+        }
+    }
+
+    private func hintChip(_ key: String, _ label: String) -> some View {
+        HStack(spacing: 3) {
+            Text(key)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.shannonPrimary)
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundStyle(Color.shannonTertiary)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.shannonSurfaceElevated))
+    }
+
+    private var entropyStrip: some View {
+        HStack(spacing: 8) {
+            Text(String(format: "H %.2f", entropy.entropy))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(entropy.collapsed ? Color.shannonWarning : Color.shannonSecondary)
+            Text(String(format: "ΔH %+.2f", entropy.deltaH))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(entropy.deltaH < -1 ? Color.shannonWarning : Color.shannonTertiary)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.shannonTertiary.opacity(0.35))
+                    Capsule()
+                        .fill(entropy.collapsed ? Color.shannonWarning
+                              : (bridge.connected ? Color.shannonSuccess : Color.shannonAccent))
+                        .frame(width: geo.size.width * CGFloat(min(max(entropy.entropy / 12.0, 0.04), 1)))
+                }
+            }
+            .frame(height: 3)
+            Text(bridge.connected ? entropy.backend : "idle")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(Color.shannonTertiary)
+        }
+        .padding(.top, 2)
+    }
+
+    // MARK: Media (secondary)
+
+    private var mediaBlock: some View {
+        VStack(spacing: 6) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.shannonTertiary.opacity(0.5))
                     Capsule()
                         .fill(Color.shannonAccent)
-                        .frame(width: geo.size.width * (info?.progress ?? 0))
+                        .frame(width: geo.size.width * (nowPlaying.state.info?.progress ?? 0))
                 }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0).onEnded { value in
-                        guard geo.size.width > 0 else { return }
-                        nowPlaying.seek(to: value.location.x / geo.size.width)
-                    }
-                )
             }
-            .frame(height: 4)
-
-            HStack {
-                Text(NowPlayingInfo.formatTime(info?.elapsed ?? 0))
+            .frame(height: 3)
+            HStack(spacing: 18) {
+                mediaBtn("backward.fill") { nowPlaying.previousTrack() }
+                mediaBtn(nowPlaying.state.info?.isPlaying == true ? "pause.fill" : "play.fill") {
+                    nowPlaying.togglePlayPause()
+                }
+                mediaBtn("forward.fill") { nowPlaying.nextTrack() }
                 Spacer()
-                Text(NowPlayingInfo.formatTime(info?.duration ?? 0))
+                Text(NowPlayingInfo.formatTime(nowPlaying.state.info?.elapsed ?? 0))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Color.shannonTertiary)
             }
-            .font(.system(size: 9, design: .monospaced))
-            .foregroundStyle(Color.shannonTertiary)
         }
     }
 
-    private var transport: some View {
-        HStack(spacing: 22) {
-            transportButton("backward.fill") { nowPlaying.previousTrack() }
-            transportButton(nowPlaying.state.info?.isPlaying == true
-                            ? "pause.fill" : "play.fill") {
-                nowPlaying.togglePlayPause()
-            }
-            transportButton("forward.fill") { nowPlaying.nextTrack() }
-        }
-    }
-
-    private func transportButton(_ systemName: String, action: @escaping () -> Void) -> some View {
+    private func mediaBtn(_ name: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 13))
+            Image(systemName: name)
+                .font(.system(size: 12))
                 .foregroundStyle(Color.shannonPrimary)
         }
         .buttonStyle(.plain)
     }
 
+    // MARK: Footer
+
     private var footer: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(bridge.connected ? Color.shannonSuccess : Color.shannonTertiary)
-                .frame(width: 6, height: 6)
-            if let status = bridge.status {
-                Text("\(status.pillLabel) · \(status.backend)")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(status.collapsed ? Color.shannonWarning : Color.shannonSecondary)
-            } else {
-                Text("agent offline")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(Color.shannonTertiary)
-            }
+                .fill(bridge.connected ? Color.shannonSuccess
+                      : (busy.isEmpty ? Color.shannonTertiary : Color.shannonAccent))
+                .frame(width: 5, height: 5)
+            Text(footerText)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(Color.shannonTertiary)
+                .lineLimit(1)
             Spacer()
+            if ingest.isHighlighting, let last = ingest.lastResult {
+                Text("+\(last.agent.id)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.shannonSuccess)
+            }
+        }
+    }
+
+    private var footerText: String {
+        if bridge.connected {
+            let agent = entropy.agent.map { " · \($0)" } ?? ""
+            return "bridge \(entropy.backend)\(agent)"
+        }
+        if !busy.isEmpty {
+            return "\(busy.count) active · disk pets"
+        }
+        return "ready · ⌘D capture"
+    }
+
+    // MARK: Icons / colours
+
+    private func iconName(for a: AgentActivitySnapshot) -> String {
+        switch a.source {
+        case "terminal": return "terminal.fill"
+        case "browser": return "globe"
+        case "chat": return "bubble.left.and.bubble.right.fill"
+        case "ide": return "chevron.left.forwardslash.chevron.right"
+        default:
+            switch a.id {
+            case "terminal": return "terminal.fill"
+            case "browser": return "globe"
+            case "claude_code", "chatgpt", "codex", "grok_build": return "bubble.left.and.bubble.right.fill"
+            case "cursor", "vscode": return "chevron.left.forwardslash.chevron.right"
+            case "dataset_runner", "science": return "flask.fill"
+            default: return "cpu"
+            }
+        }
+    }
+
+    private func color(for status: AgentRunStatus) -> Color {
+        switch status {
+        case .active, .midTask: return .shannonSuccess
+        case .blocked: return .shannonWarning
+        case .idle, .unknown: return .shannonTertiary
         }
     }
 }
 
-/// The question the pill asks, answerable by head gesture or by clicking.
+// MARK: - Confirmation (unchanged behaviour)
+
 struct ConfirmationPromptView: View {
     @ObservedObject var confirmation: ConfirmationController
 
@@ -245,16 +473,13 @@ struct ConfirmationPromptView: View {
                     .foregroundStyle(Color.shannonPrimary)
                     .lineLimit(2)
             }
-
             if let detail = confirmation.prompt?.detail {
                 Text(detail)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(1)
             }
-
             Spacer(minLength: 0)
-
             HStack(spacing: 10) {
                 answerButton("Yes", systemImage: "checkmark", tint: .shannonSuccess) {
                     confirmation.answer(.confirmed)
@@ -263,9 +488,6 @@ struct ConfirmationPromptView: View {
                     confirmation.answer(.denied)
                 }
             }
-
-            // Always say which input is live: a user who nods at a pill that
-            // is not listening deserves to know why nothing happened.
             HStack(spacing: 5) {
                 Image(systemName: confirmation.gesturesAvailable
                       ? "airpods.gen3" : "airpods.gen3.slash")
@@ -283,10 +505,7 @@ struct ConfirmationPromptView: View {
     }
 
     private func answerButton(
-        _ title: String,
-        systemImage: String,
-        tint: Color,
-        action: @escaping () -> Void
+        _ title: String, systemImage: String, tint: Color, action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
@@ -303,11 +522,9 @@ struct ConfirmationPromptView: View {
     }
 }
 
-/// Circular charge ring; pulses amber at ≤20% and red at ≤10%.
 struct BatteryRing: View {
     let snapshot: BatterySnapshot
     var diameter: CGFloat = 18
-
     @State private var pulsing = false
 
     private var tint: Color {
@@ -320,8 +537,7 @@ struct BatteryRing: View {
 
     var body: some View {
         ZStack {
-            Circle()
-                .stroke(Color.shannonTertiary, lineWidth: 2)
+            Circle().stroke(Color.shannonTertiary, lineWidth: 2)
             Circle()
                 .trim(from: 0, to: snapshot.fillFraction)
                 .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))

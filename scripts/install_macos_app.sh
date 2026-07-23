@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
-# Install Shannon Pill on this Mac without requiring a GitHub release / cask asset.
+# Local install helper — delegates to the primary ./scripts/shannon path.
 #
-# Builds Shannon.app (SwiftPM or Xcode), ad-hoc signs it, and installs to
-# /Applications. This is the supported path until a signed/notarized DMG is
-# published for `brew install --cask shannon-pill`.
-#
-# Usage:
-#   ./scripts/install_macos_app.sh
-#   ./scripts/install_macos_app.sh 0.1.0
-#   CODESIGN_IDENTITY="Developer ID Application: …" ./scripts/install_macos_app.sh
+#   ./scripts/install_macos_app.sh           # install app + pets
+#   ./scripts/install_macos_app.sh --launch  # full bootstrap (same as ./scripts/shannon)
 
 set -euo pipefail
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LAUNCH=0
+for arg in "$@"; do
+  case "${arg}" in
+    --launch|-l) LAUNCH=1 ;;
+    --help|-h)
+      sed -n '2,6p' "$0" | sed 's/^# \?//'
+      exit 0
+      ;;
+  esac
+done
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-exec "${REPO_ROOT}/scripts/package_pill.sh" ${1:+"$1"} --install
+if [[ "${LAUNCH}" -eq 1 ]]; then
+  exec "${REPO}/scripts/shannon"
+else
+  exec "${REPO}/scripts/shannon" install
+fi

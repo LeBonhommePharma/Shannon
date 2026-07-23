@@ -18,6 +18,10 @@ let package = Package(
             dependencies: [
                 .product(name: "ShannonTheme", package: "ShannonTheme"),
                 .product(name: "ShannonCore", package: "ShannonCore"),
+            ],
+            linkerSettings: [
+                .linkedFramework("Carbon"),
+                .linkedFramework("AppKit"),
             ]
         ),
         .executableTarget(

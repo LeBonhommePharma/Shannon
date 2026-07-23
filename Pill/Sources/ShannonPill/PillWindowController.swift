@@ -9,11 +9,14 @@ final class PillPresentation: ObservableObject {
     @Published var isExpanded = false
 }
 
-/// Borderless, non-activating panel pinned to the notch.
+/// Borderless, non-activating panel pinned to the notch / menu bar.
 ///
-/// `.nonactivatingPanel` keeps the pill from stealing focus from whatever the
-/// user is typing in, and `.statusBar + 1` puts it above the menu bar so it
-/// visually merges with the notch.
+/// macOS 27 adaptations:
+/// - Window level sits above the menu bar (`statusWindow + 2`) so Liquid Glass
+///   menu-bar chrome does not composite the pill underneath and hide it.
+/// - `collectionBehavior` joins all Spaces and survives full-screen apps.
+/// - `alphaValue` forced to 1; some AppKit paths leave new panels at 0.
+/// - `hidesOnDeactivate = false` so switching apps never vanishes the agent.
 final class PillPanel: NSPanel {
     init(contentRect: CGRect) {
         super.init(
@@ -25,13 +28,25 @@ final class PillPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 1)
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        // statusWindow + 2: above menu bar and above typical HUD overlays on
+        // macOS 15–27 without fighting screen recording / Keynote presenter.
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 2)
+        collectionBehavior = [
+            .canJoinAllSpaces,
+            .stationary,
+            .fullScreenAuxiliary,
+            .ignoresCycle,
+        ]
         isMovable = false
         hidesOnDeactivate = false
+        alphaValue = 1.0
+        isReleasedWhenClosed = false
+        ignoresMouseEvents = false
+        // Do NOT use .transient — on macOS 15–27 it removes the panel from the
+        // window list when another app activates, which made the notch pill
+        // vanish and look dead.
     }
 
-    // A borderless panel refuses key status by default; the pill never needs it.
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
@@ -39,64 +54,123 @@ final class PillPanel: NSPanel {
 @MainActor
 final class PillWindowController {
     private var panel: PillPanel?
-    private let presentation = PillPresentation()
+    let presentation = PillPresentation()
     private var cancellables = Set<AnyCancellable>()
+    private var reassertTimer: Timer?
 
     private let nowPlaying: NowPlayingModel
     private let battery: BatteryMonitor
     private let bridge: ShannonBridge
+    private let idle: IdleTelemetryPublisher
     private let confirmation: ConfirmationController
+    private let ingest: AgentIngestService
+    private let activity: AgentActivityMonitor
 
     init(
         nowPlaying: NowPlayingModel,
         battery: BatteryMonitor,
         bridge: ShannonBridge,
-        confirmation: ConfirmationController
+        idle: IdleTelemetryPublisher,
+        confirmation: ConfirmationController,
+        ingest: AgentIngestService,
+        activity: AgentActivityMonitor
     ) {
         self.nowPlaying = nowPlaying
         self.battery = battery
         self.bridge = bridge
+        self.idle = idle
         self.confirmation = confirmation
+        self.ingest = ingest
+        self.activity = activity
     }
 
-    func show() {
-        guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
-                ?? NSScreen.main else { return }
+    var isVisible: Bool { panel?.isVisible == true }
 
+    func show() {
+        let screen = NotchGeometry.preferredScreen()
         let geometry = NotchGeometry(screen: screen)
         let frame = geometry.windowFrame(
             contentSize: CGSize(width: PillMetrics.expandedWidth,
                                 height: PillMetrics.expandedHeight)
         )
 
-        let panel = PillPanel(contentRect: frame)
-        let root = PillHost(
-            presentation: presentation,
-            nowPlaying: nowPlaying,
-            battery: battery,
-            bridge: bridge,
-            confirmation: confirmation
-        )
-        panel.contentView = NSHostingView(rootView: root)
-        panel.orderFrontRegardless()
-        self.panel = panel
+        let panel: PillPanel
+        if let existing = self.panel {
+            panel = existing
+            panel.setFrame(frame, display: true)
+        } else {
+            panel = PillPanel(contentRect: frame)
+            let root = PillHost(
+                presentation: presentation,
+                nowPlaying: nowPlaying,
+                battery: battery,
+                bridge: bridge,
+                idle: idle,
+                confirmation: confirmation,
+                ingest: ingest,
+                activity: activity
+            )
+            let host = NSHostingView(rootView: root)
+            host.frame = CGRect(origin: .zero, size: frame.size)
+            panel.contentView = host
+            self.panel = panel
 
-        // Reposition when displays change (dock a monitor, change resolution).
-        NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
-            .sink { [weak self] _ in self?.reposition() }
-            .store(in: &cancellables)
+            NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
+                .sink { [weak self] _ in self?.reposition() }
+                .store(in: &cancellables)
+
+            // Active Space changes (Mission Control) can leave the panel behind.
+            NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
+                .sink { [weak self] _ in self?.reassertVisibility() }
+                .store(in: &cancellables)
+        }
+
+        reassertVisibility()
+        // First 8 seconds: re-front every second in case launch services /
+        // Stage Manager / fullscreen steal the first orderFront.
+        reassertTimer?.invalidate()
+        var ticks = 0
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] timer in
+            Task { @MainActor in
+                self?.reassertVisibility()
+                ticks += 1
+                if ticks >= 8 {
+                    timer.invalidate()
+                }
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        reassertTimer = t
     }
 
-    private func reposition() {
-        guard let panel,
-              let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
-                ?? NSScreen.main else { return }
-        let geometry = NotchGeometry(screen: screen)
+    /// Force the panel on-screen. Safe to call repeatedly (menu-bar action).
+    func reassertVisibility() {
+        guard let panel else {
+            show()
+            return
+        }
+        panel.alphaValue = 1.0
+        panel.orderFrontRegardless()
+        // Also nudge content view layout — macOS 27 can leave hosting views
+        // at zero intrinsic size until the next runloop turn.
+        panel.contentView?.needsLayout = true
+        panel.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    func reposition() {
+        guard let panel else { return }
+        let geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
         panel.setFrame(
             geometry.windowFrame(contentSize: CGSize(width: PillMetrics.expandedWidth,
                                                      height: PillMetrics.expandedHeight)),
             display: true
         )
+        reassertVisibility()
+    }
+
+    func expand() {
+        presentation.isExpanded = true
+        reassertVisibility()
     }
 }
 
@@ -109,7 +183,10 @@ private struct PillHost: View {
     @ObservedObject var nowPlaying: NowPlayingModel
     @ObservedObject var battery: BatteryMonitor
     @ObservedObject var bridge: ShannonBridge
+    @ObservedObject var idle: IdleTelemetryPublisher
     @ObservedObject var confirmation: ConfirmationController
+    @ObservedObject var ingest: AgentIngestService
+    @ObservedObject var activity: AgentActivityMonitor
 
     var body: some View {
         VStack {
@@ -117,7 +194,10 @@ private struct PillHost: View {
                 nowPlaying: nowPlaying,
                 battery: battery,
                 bridge: bridge,
+                idle: idle,
                 confirmation: confirmation,
+                ingest: ingest,
+                activity: activity,
                 isExpanded: Binding(
                     get: { presentation.isExpanded },
                     set: { presentation.isExpanded = $0 }
@@ -126,5 +206,7 @@ private struct PillHost: View {
             Spacer(minLength: 0)
         }
         .frame(width: PillMetrics.expandedWidth, height: PillMetrics.expandedHeight)
+        // Transparent host must still accept hits on the pill only.
+        .contentShape(Rectangle())
     }
 }

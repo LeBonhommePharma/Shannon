@@ -1,21 +1,3 @@
-## Quick Start
-
-```bash
-git clone https://github.com/LeBonhommePharma/Shannon
-cd Shannon
-./setup.sh          # installs all dependencies, generates Xcode projects
-
-fastlane pill       # run the macOS Pill
-fastlane ios_sim    # run on iPhone simulator
-fastlane ipad_sim   # run on iPad simulator
-fastlane all_sim    # run all simulators + Pill at once
-
-fastlane ios_device # install on connected iPhone (requires Apple Developer account)
-fastlane beta       # upload to TestFlight
-```
-
----
-
 <div align="center">
 
 # Shannon
@@ -36,6 +18,31 @@ fastlane beta       # upload to TestFlight
 > Directly ported from the configurational entropy engine in [FlexAIDdS](https://github.com/LeBonhommePharma/FlexAIDdS) — validated on 590 protein-drug complexes (r=0.93 ITC, 92% binding mode rescue).
 
 </div>
+
+---
+
+## Quick Start (macOS)
+
+One command from a clone:
+
+```bash
+git clone https://github.com/LeBonhommePharma/Shannon
+cd Shannon
+./scripts/shannon
+```
+
+That installs `/Applications/Shannon.app`, creates agent pets under `~/.shannon/pets/`, and starts the menu-bar + notch pill. Then:
+
+1. Look for the **Shannon glyph** in the menu bar (`○ ready` or an agent name).
+2. Press **⌘D** in Terminal, Claude, ChatGPT, Codex, or a browser to attach that app as an agent + pet.
+
+```bash
+./scripts/shannon help      # all commands
+./scripts/shannon stop      # quit
+./scripts/shannon probe     # diagnostics
+```
+
+**Optional later:** `./setup.sh` (full dev toolchain), `pip install -e ".[dev]"` (live entropy bridge), Fastlane / iOS simulators, Homebrew cask after a signed release.
 
 ---
 
@@ -166,27 +173,20 @@ shannon-agent --help
 # Optional Metal GPU path (needs Xcode Metal toolchain):
 #   brew reinstall --build-from-source --HEAD --with-metal lebonhommepharma/shannon/shannon
 
-# ── macOS Pill app (cask) ───────────────────────────────────────────────────
-# After a GitHub release that publishes Shannon-<ver>.dmg:
-brew trust --cask lebonhommepharma/shannon/shannon-pill
-brew install --cask lebonhommepharma/shannon/shannon-pill
-
-# Before the first signed release (local build + install to /Applications):
-./scripts/install_macos_app.sh
-# equivalent: ./scripts/package_pill.sh --install
+# ── macOS app (same primary path as Quick Start) ────────────────────────────
+./scripts/shannon                 # pets + app (+ optional gate/bridge)
+./scripts/shannon stop            # quit
+./scripts/shannon status          # running?
+./scripts/shannon probe           # diagnostics
 ```
-
-If Gatekeeper blocks an ad-hoc-signed build:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Shannon.app
-open /Applications/Shannon.app
+# Optional — Homebrew cask after a signed release:
+brew install --cask lebonhommepharma/shannon/shannon-pill
+
+# Maintainers only — DMG/zip/cask checksums:
+./scripts/package_pill.sh 0.1.0 --update-cask
 ```
-
-Release maintainers: after tagging `vX.Y.Z`, update checksums with
-`./scripts/update_homebrew_artifacts.sh vX.Y.Z --apply` (or let
-`scripts/package_pill.sh --update-cask` + the release workflow handle the DMG).
-
 ---
 
 ## Installation

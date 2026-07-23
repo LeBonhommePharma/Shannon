@@ -3,15 +3,17 @@
 A notch-hugging live-activity pill for macOS, and the Swift front end for the
 Shannon agent coordination layer.
 
-The pill sits in (or under) the notch as an `LSUIElement` agent app — no dock
-icon, no menu bar item, no app-switcher entry. Hovering expands it. Collapsed,
-it shows whichever signal is most relevant: media if something is playing,
-otherwise the live Shannon entropy readout from the Python agent.
+The pill sits in (or under) the notch as an `LSUIElement` agent app — **no dock
+icon and no app-switcher entry**, but a **menu-bar status item is always present**
+(glyph + `○ ready` or the active agent name) so the app is never invisible and
+you can always quit from that menu. Hover or click the notch pill to expand it.
+Collapsed, it shows live agent/pet activity when available; otherwise an honest
+idle state (and Now Playing only when media is active and no agent is busy).
 
-> **Status: P0 partial.** Battery and the Python bridge are implemented and
-> verified end to end. Now Playing is implemented but gated by a private Apple
-> entitlement on current macOS — see [BLOCKED.md](BLOCKED.md). Notification
-> mirroring, Focus/DND, AirDrop and the file shelf are **not** implemented.
+> **Status:** Notch + menu bar + ⌘D agent capture ship with `./scripts/shannon`.
+> Now Playing for *other* apps is still entitlement-gated on current macOS —
+> see [BLOCKED.md](BLOCKED.md). Notification mirroring, Focus/DND, AirDrop and
+> the file shelf are **not** implemented.
 
 ---
 
@@ -20,12 +22,18 @@ otherwise the live Shannon entropy readout from the Python agent.
 The canonical build is SwiftPM:
 
 ```bash
-cd Pill
-swift build              # compile
-swift test               # 73 unit tests
-./Scripts/make_app.sh    # assemble build/ShannonPill.app (adds LSUIElement)
-open build/ShannonPill.app
+# From the repo root — primary path (same as top-level README):
+./scripts/shannon                 # pets + app (+ optional gate/bridge)
+./scripts/shannon stop            # quit
+./scripts/shannon probe           # diagnostics
 ```
+
+On launch you should see:
+1. A **menu-bar** glyph: `○ ready` or an active agent name
+2. A **notch pill** driven by real agent pets (`~/.shannon/pets/`) — task + status
+3. **⌘D** captures the frontmost app (Terminal / Claude / ChatGPT / Codex / browser)
+
+Quit from the menu-bar item → **Quit Shannon**.
 
 For Xcode (signing, Instruments, debugging the UI):
 

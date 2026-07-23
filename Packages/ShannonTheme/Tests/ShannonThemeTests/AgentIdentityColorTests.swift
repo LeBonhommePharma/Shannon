@@ -98,3 +98,60 @@ final class AgentIdentityColorTests: XCTestCase {
         XCTAssertEqual(washed.blendedTowardWhite(0.5).alpha, 0.10, accuracy: 1e-9)
     }
 }
+
+/// LP's constraint: the light theme must not read as grey.
+///
+/// "Warm" is testable — red must exceed blue on every day surface and grey. A
+/// neutral or cool value (B >= R) is what makes a light UI feel clinical, so
+/// this fails the build rather than waiting for someone to notice by eye.
+final class WarmDayPaletteTests: XCTestCase {
+
+    /// (label, day hex, minimum red-minus-blue in 0-255 units)
+    private let daySurfaces: [(String, UInt32, Int)] = [
+        ("background", 0xFAF8F3, 4),
+        ("surfaceElevated", 0xF2EEE5, 8),
+        ("surfaceSunken", 0xF6F2EA, 8),
+        ("quaternary", 0xDED6C8, 12),
+        ("tertiary", 0x7D7365, 12),
+        ("secondary", 0x6B6257, 12),
+        ("primary", 0x1C1917, 3),
+        ("neutral", 0x857C6E, 12),
+        ("separator tint", 0x7A5C3A, 40),
+        ("shadow tint", 0x5C482D, 40),
+    ]
+
+    func testEveryDaySurfaceIsWarm() {
+        for (name, hex, minWarmth) in daySurfaces {
+            let r = Int((hex >> 16) & 0xFF)
+            let b = Int(hex & 0xFF)
+            XCTAssertGreaterThanOrEqual(
+                r - b, minWarmth,
+                "\(name) has red \(r) vs blue \(b) — reads grey or cool, not warm"
+            )
+        }
+    }
+
+    /// The greys must still descend monotonically, or the surface ladder stops
+    /// communicating depth.
+    func testDayGreyLadderDescends() {
+        let ladder: [UInt32] = [0xFFFFFF, 0xFAF8F3, 0xF6F2EA, 0xF2EEE5,
+                                0xDED6C8, 0x857C6E, 0x7D7365, 0x6B6257, 0x1C1917]
+        let lums = ladder.map { AgentColor.luminance(ShannonRGBA(hex: $0)) }
+        for i in 1 ..< lums.count {
+            XCTAssertLessThan(lums[i], lums[i - 1],
+                              "day ladder is not monotonically darker at index \(i)")
+        }
+    }
+
+    /// Text tokens must still clear their contrast bars after the warm shift.
+    func testWarmTextStillMeetsContrastOnWhite() {
+        let white = AgentColor.luminance(ShannonRGBA(hex: 0xFFFFFF))
+        for (name, hex, target) in [("primary", UInt32(0x1C1917), 7.0),
+                                    ("secondary", UInt32(0x6B6257), 4.5),
+                                    ("tertiary", UInt32(0x7D7365), 4.5)] {
+            let l = AgentColor.luminance(ShannonRGBA(hex: hex))
+            let ratio = (max(l, white) + 0.05) / (min(l, white) + 0.05)
+            XCTAssertGreaterThanOrEqual(ratio, target, "\(name) is \(ratio):1 on white")
+        }
+    }
+}

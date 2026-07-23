@@ -22,7 +22,9 @@ struct PillView: View {
     @Binding var isExpanded: Bool
 
     /// Drives the pulsing red border shown when entropy collapses (deception alert).
-    @State private var collapsePulse = false
+    @State private var collapsePulse  = false
+    /// Drives the subtle breathing animation on the idle waveform (no agents busy).
+    @State private var idleBreath     = false
 
     private var showExpanded: Bool { isExpanded || confirmation.isAwaitingConfirmation }
 
@@ -81,6 +83,8 @@ struct PillView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(collapsedText)
         .accessibilityHint("Click to expand agent status")
+        // Kick off the idle breathing animation once the view appears.
+        .onAppear { idleBreath = true }
     }
 
     private var flashOverlay: some View {
@@ -108,8 +112,9 @@ struct PillView: View {
 
     private var collapsed: some View {
         HStack(spacing: 8) {
+            // Wider frame so 15 pt emoji has breathing room without clipping.
             statusGlyph
-                .frame(width: 16, height: 16)
+                .frame(width: 20, height: 18)
 
             Text(collapsedText)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -118,6 +123,13 @@ struct PillView: View {
                 .truncationMode(.tail)
 
             Spacer(minLength: 2)
+
+            // Entropy score: always present when > 0, muted so it's secondary.
+            if entropy.entropy > 0 {
+                Text("H\(String(format: "%.1f", entropy.entropy))")
+                    .font(.system(size: 9, weight: .regular, design: .monospaced))
+                    .foregroundStyle(Color.shannonTertiary)
+            }
 
             if summary.busyCount > 1 {
                 Text("\(summary.busyCount)")
@@ -142,21 +154,45 @@ struct PillView: View {
         .frame(height: PillMetrics.collapsedHeight)
     }
 
+    /// Leading indicator in the collapsed pill.
+    ///
+    /// • 1 active agent  → brand emoji (15 pt) — more distinctive than an SF symbol
+    /// • 2-4 active      → micro dot cluster, each dot in the agent's brand colour
+    /// • Media / idle    → music note or breathing waveform
     @ViewBuilder
     private var statusGlyph: some View {
-        if let p = busy.first {
-            Image(systemName: iconName(for: p))
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(color(for: p))
-                .help("\(style(for: p).emoji) \(style(for: p).displayName)")
+        if busy.count == 1, let p = busy.first {
+            // Single active agent: prominent emoji communicates identity at a glance.
+            Text(style(for: p).emoji)
+                .font(.system(size: 15))
+                .help("\(style(for: p).displayName) · \(p.status.label)")
+        } else if busy.count > 1 {
+            // Multiple agents: overlapping coloured dots (max 3 visible).
+            ZStack {
+                ForEach(Array(busy.prefix(3).enumerated()), id: \.offset) { pair in
+                    Circle()
+                        .fill(color(for: pair.element))
+                        .frame(width: 7, height: 7)
+                        .offset(
+                            x: CGFloat(pair.offset - 1) * 5,
+                            y: pair.offset % 2 == 0 ? -2 : 2
+                        )
+                }
+            }
         } else if showMedia {
             Image(systemName: "music.note")
                 .font(.system(size: 11))
                 .foregroundStyle(Color.shannonSecondary)
         } else {
-            // Idle state: animated Shannon waveform in the agent's status colour.
+            // Idle: subtle breathing waveform — scale and opacity pulse at ~1.5 s.
             WaveformIdleView(color: statusDotColor)
                 .frame(width: 16, height: 14)
+                .scaleEffect(idleBreath ? 0.84 : 1.0)
+                .opacity(idleBreath ? 0.50 : 1.0)
+                .animation(
+                    .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
+                    value: idleBreath
+                )
         }
     }
 

@@ -25,8 +25,18 @@ struct PillView: View {
     @State private var collapsePulse  = false
     /// Drives the subtle breathing animation on the idle waveform (no agents busy).
     @State private var idleBreath     = false
+    /// Drives the amber pulse shown while the gate is waiting on a human answer.
+    @State private var askPulse       = false
+
+    /// The oldest open approval. Source: agent_interactions (status = pending).
+    private var pendingAsk: GateDBReader.PendingAsk? { activity.pendingAsks.last }
+    private var hasPendingAsk: Bool { pendingAsk != nil }
 
     private var showExpanded: Bool { isExpanded || confirmation.isAwaitingConfirmation }
+
+    /// Tapping a pulsing pill goes straight to the approval, rather than making
+    /// LP open the pill and then hunt for what needs answering.
+    private var showAskCard: Bool { showExpanded && hasPendingAsk && !confirmation.isAwaitingConfirmation }
 
     private var entropy: ShannonStatus { bridge.status ?? idle.status }
     private var summary: AgentActivitySummary { activity.summary }
@@ -40,6 +50,16 @@ struct PillView: View {
 
     private var agentActive: Bool { !busy.isEmpty || bridge.connected }
 
+    /// No agent has been seen for over 30 s. Source: max(updatedAt) across the
+    /// agent snapshots, i.e. the newest gate/pet timestamp. The breathing idle
+    /// animation is bound to this and nothing else — previously it ran whenever
+    /// no agent was *busy*, which included the very-much-alive moment just after
+    /// a task finished.
+    private var isQuiet: Bool {
+        guard let newest = summary.agents.map(\.updatedAt).max() else { return true }
+        return Date().timeIntervalSince(newest) > 30
+    }
+
     private var corner: CGFloat {
         showExpanded ? ShannonRadius.xl : ShannonRadius.lg
     }
@@ -49,6 +69,10 @@ struct PillView: View {
             if showExpanded {
                 if confirmation.isAwaitingConfirmation {
                     ConfirmationPromptView(confirmation: confirmation)
+                } else if let ask = pendingAsk {
+                    GateAskCard(ask: ask) { approved in
+                        resolve(ask, approved: approved)
+                    }
                 } else {
                     expanded
                 }
@@ -70,6 +94,32 @@ struct PillView: View {
             if hovering { isExpanded = true }
         }
         .onTapGesture { isExpanded.toggle() }
+        // Right-click / long-press. Every item below changes real state.
+        .contextMenu {
+            Button(activity.isPaused ? "Resume monitoring" : "Pause monitoring") {
+                activity.isPaused.toggle()
+            }
+            if hasPendingAsk, let ask = pendingAsk {
+                Divider()
+                Button("Approve: \(AgentStyleCatalog.style(for: ask.agentId).displayName)") {
+                    resolve(ask, approved: true)
+                }
+                Button("Deny: \(AgentStyleCatalog.style(for: ask.agentId).displayName)") {
+                    resolve(ask, approved: false)
+                }
+            }
+            Divider()
+            Button("Refresh now") { activity.refresh() }
+        }
+        .onChange(of: hasPendingAsk) { pending in
+            if pending {
+                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                    askPulse = true
+                }
+            } else {
+                withAnimation(.default) { askPulse = false }
+            }
+        }
         // Start / stop the entropy-collapse pulse border.
         .onChange(of: entropy.collapsed) { collapsed in
             if collapsed {
@@ -95,6 +145,14 @@ struct PillView: View {
                 .opacity(confirmation.flash == nil ? 0 : 0.35)
                 .allowsHitTesting(false)
                 .animation(.easeOut(duration: 0.25), value: confirmation.flash)
+
+            // Pending-approval border. Amber, and strictly distinct from the red
+            // collapse border below: one means "answer me", the other means
+            // "this agent may be deceiving you".
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .stroke(Color.shannonWarning, lineWidth: askPulse ? 2.0 : 1.0)
+                .opacity(hasPendingAsk ? (askPulse ? 0.95 : 0.35) : 0)
+                .allowsHitTesting(false)
 
             // Entropy-collapse deception-alert border: always present,
             // invisible until entropy collapses, then pulses red.
@@ -132,6 +190,7 @@ struct PillView: View {
                 Text("H\(String(format: "%.1f", entropy.entropy))")
                     .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(Color.shannonTertiary)
+                    .help(entropyTooltip)
             }
 
             if summary.busyCount > 1 {
@@ -141,6 +200,15 @@ struct PillView: View {
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(Capsule().fill(Color.shannonAccentSubtle))
+                    .help("\(summary.busyCount) agents currently busy")
+            }
+
+            // Pending-approval marker. Source: agent_interactions.
+            if hasPendingAsk {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.shannonWarning)
+                    .help("An agent is waiting for your approval — click to answer")
             }
 
             if entropy.collapsed {
@@ -170,38 +238,59 @@ struct PillView: View {
                 .font(.system(size: 15))
                 .help("\(style(for: p).displayName) · \(p.status.label) · \(style(for: p).pet)")
         } else if busy.count > 1 {
-            // Multiple agents: overlapping coloured dots (max 3 visible).
-            // Dots stay bare colour — at 7 pt a companion glyph is unreadable,
-            // so the companion rides in the tooltip instead.
+            // One dot per agent in its own brand colour, ordered by last-seen so
+            // the most recently active sits leftmost. Dots stay bare colour — at
+            // 7 pt a companion glyph is unreadable, so the companion and the
+            // last-seen age ride in the tooltip instead.
+            let ordered = Array(busy.sorted { $0.updatedAt > $1.updatedAt }.prefix(3))
             ZStack {
-                ForEach(Array(busy.prefix(3).enumerated()), id: \.offset) { pair in
+                ForEach(Array(ordered.enumerated()), id: \.offset) { pair in
                     Circle()
                         .fill(color(for: pair.element))
                         .frame(width: 7, height: 7)
+                        // Keeps a light brand colour off a light pill.
+                        .overlay(Circle().strokeBorder(Color.pillBorder, lineWidth: 0.5))
                         .offset(
                             x: CGFloat(pair.offset - 1) * 5,
                             y: pair.offset % 2 == 0 ? -2 : 2
                         )
                 }
             }
-            .help(busy.prefix(3)
-                .map { "\(style(for: $0).displayName) (\(style(for: $0).pet))" }
-                .joined(separator: " · "))
+            .help(ordered
+                .map { "\(style(for: $0).displayName) (\(style(for: $0).pet)) · \($0.relativeAge)" }
+                .joined(separator: "\n"))
         } else if showMedia {
             Image(systemName: "music.note")
                 .font(.system(size: 11))
                 .foregroundStyle(Color.shannonSecondary)
         } else {
-            // Idle: subtle breathing waveform — scale and opacity pulse at ~1.5 s.
+            // Quiet: breathing waveform. Bound to `isQuiet` (>30 s since any
+            // agent was seen), so the breath means "nothing has happened for a
+            // while" rather than merely "nothing is busy this instant".
             WaveformIdleView(color: statusDotColor)
                 .frame(width: 16, height: 14)
-                .scaleEffect(idleBreath ? 0.84 : 1.0)
-                .opacity(idleBreath ? 0.50 : 1.0)
+                .scaleEffect(idleBreath && isQuiet ? 0.84 : 1.0)
+                .opacity(idleBreath && isQuiet ? 0.50 : 1.0)
                 .animation(
                     .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
-                    value: idleBreath
+                    value: idleBreath && isQuiet
                 )
+                .help(isQuiet
+                      ? "No agent activity for over 30 s"
+                      : "Agents idle but recently active")
         }
+    }
+
+    /// Spells out the entropy reading against the gate's own thresholds.
+    private var entropyTooltip: String {
+        let h = entropy.entropy
+        let verdict = entropy.collapsed
+            ? "collapse detected"
+            : (h < 5.0 ? "approaching the block threshold 5.0" : "healthy")
+        return String(
+            format: "Shannon entropy H=%.2f bits, \u{0394}H %+.2f \u{2014} %@ (source: %@)",
+            h, entropy.deltaH, verdict, entropy.agent ?? entropy.backend
+        )
     }
 
     private var statusDotColor: Color {
@@ -503,6 +592,23 @@ struct PillView: View {
 
     // MARK: Icons / colours — brand per agent (Science amber flask ≠ SuperGrok purple)
 
+    /// Send the approval over the gate socket, then drop the card. Failure is
+    /// surfaced by leaving the ask in place — the pulse keeps going, so a dead
+    /// gate never looks like a successful answer.
+    private func resolve(_ ask: GateDBReader.PendingAsk, approved: Bool) {
+        do {
+            try GateApprovalClient.resolve(
+                interactionId: ask.interactionId,
+                agentId: ask.agentId,
+                approved: approved
+            )
+            activity.clearAsk(ask.interactionId)
+            isExpanded = false
+        } catch {
+            fputs("Shannon pill: approval failed — \(error)\n", stderr)
+        }
+    }
+
     private func style(for a: AgentActivitySnapshot) -> AgentStyle {
         AgentStyleCatalog.style(for: a.id)
     }
@@ -678,5 +784,81 @@ private struct WaveformIdleView: View {
         let freqs:  [Double] = [1.10, 0.85, 1.30, 1.00, 1.20]
         let amp = (sin(t * freqs[i] * .pi * 2 + phases[i]) + 1.0) * 0.5   // 0…1
         return CGFloat(2 + amp * 10)
+    }
+}
+
+// MARK: - GateAskCard
+
+/// The approval the gate is blocked on, answerable straight from the notch.
+///
+/// Data source: one `agent_interactions` row with status = 'pending'. Approving
+/// or denying writes back over the gate socket via `GateApprovalClient`, using
+/// the row's own `interaction_id` — the gate matches on that id and will not
+/// clear the row for anything else.
+struct GateAskCard: View {
+    let ask: GateDBReader.PendingAsk
+    let onAnswer: (Bool) -> Void
+
+    private var style: AgentStyle { AgentStyleCatalog.style(for: ask.agentId) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(style.emoji).font(.system(size: 14))
+                Text(style.displayName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(style.palette.ink)
+                Text("needs approval")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color.shannonWarning)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.shannonWarning.opacity(0.18)))
+                Spacer(minLength: 0)
+            }
+
+            Text(ask.prompt)
+                .font(.system(size: 11))
+                .foregroundStyle(Color.shannonPrimary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 10) {
+                answerButton("Approve", systemImage: "checkmark", tint: .shannonSuccess) {
+                    onAnswer(true)
+                }
+                answerButton("Deny", systemImage: "xmark", tint: .shannonError) {
+                    onAnswer(false)
+                }
+                Spacer(minLength: 0)
+                Text("right-click for more")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color.shannonTertiary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func answerButton(
+        _ title: String, systemImage: String, tint: Color, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage).font(.system(size: 10, weight: .bold))
+                Text(title).font(.system(size: 11, weight: .semibold))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(tint))
+            .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
+        .help("\(title) this request — sends interaction_id \(ask.interactionId) to the gate")
+        .onHover { h in
+            if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
     }
 }

@@ -44,6 +44,63 @@ public enum GateDBReader {
         #endif
     }
 
+    /// A human approval the gate is waiting on.
+    ///
+    /// Source: `agent_interactions` rows with status = 'pending', the same table
+    /// the hub popup treats as authoritative. `interactionId` is the gate's own
+    /// id — it must be echoed back verbatim to resolve the ask.
+    public struct PendingAsk: Identifiable, Equatable, Sendable {
+        public var id: String { interactionId }
+        public let interactionId: String
+        public let agentId: String
+        public let prompt: String
+
+        public init(interactionId: String, agentId: String, prompt: String) {
+            self.interactionId = interactionId
+            self.agentId = agentId
+            self.prompt = prompt
+        }
+    }
+
+    /// Read open approvals, newest first. Returns [] when the table is absent,
+    /// which is the normal case on a gate that has never asked anything.
+    public static func readPendingAsks(path: String, limit: Int = 5) -> [PendingAsk] {
+        #if canImport(SQLite3)
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            return []
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+            SELECT interaction_id, agent_id, prompt
+            FROM agent_interactions
+            WHERE status = 'pending'
+            ORDER BY created_at_ns DESC
+            LIMIT \(max(1, limit));
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var out: [PendingAsk] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let iid = string(stmt, 0)
+            guard !iid.isEmpty else { continue }
+            out.append(PendingAsk(
+                interactionId: iid,
+                agentId: string(stmt, 1),
+                prompt: AgentActivitySnapshot.shorten(string(stmt, 2), max: 160)
+            ))
+        }
+        return out
+        #else
+        return []
+        #endif
+    }
+
     #if canImport(SQLite3)
     private static func query(_ db: OpaquePointer, _ sql: String) -> [AgentActivitySnapshot]? {
         var stmt: OpaquePointer?

@@ -348,6 +348,17 @@ public enum AgentActivityReader {
 @MainActor
 public final class AgentActivityMonitor: ObservableObject {
     @Published public private(set) var summary = AgentActivitySummary()
+    /// Open human approvals the gate is blocked on.
+    /// Source: agent_interactions rows with status = 'pending'.
+    @Published public private(set) var pendingAsks: [GateDBReader.PendingAsk] = []
+
+    /// Suspends polling. Real state: while true, `refresh` does no disk or
+    /// SQLite work at all, so "Pause monitoring" in the pill's context menu
+    /// genuinely stops this app reading. It does not pause the agents — the gate
+    /// exposes no such control.
+    @Published public var isPaused = false {
+        didSet { if !isPaused { refresh() } }
+    }
 
     private var timer: Timer?
     private let interval: TimeInterval
@@ -371,6 +382,16 @@ public final class AgentActivityMonitor: ObservableObject {
     }
 
     public func refresh() {
+        guard !isPaused else { return }
         summary = AgentActivityReader.load()
+        pendingAsks = GateDBReader.readPendingAsks(
+            path: PetBootstrap.shannonHome.appendingPathComponent("agent_hub.db").path
+        )
+    }
+
+    /// Drop a resolved ask immediately so the pill stops pulsing before the next
+    /// poll observes the gate's own update.
+    public func clearAsk(_ interactionId: String) {
+        pendingAsks.removeAll { $0.interactionId == interactionId }
     }
 }

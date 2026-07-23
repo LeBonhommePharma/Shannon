@@ -109,9 +109,24 @@ public enum AgentAppMapper {
         "chatgpt", "browser", "terminal", "cursor", "vscode",
     ]
 
-    public static func map(bundleID: String?, appName: String?) -> AgentKind {
+    public static func map(
+        bundleID: String?,
+        appName: String?,
+        page: BrowserPageContext? = nil
+    ) -> AgentKind {
         let bid = (bundleID ?? "").lowercased()
         let name = (appName ?? "").lowercased()
+
+        // Browser tab wins over generic "browser" bundle mapping.
+        if let page, !page.isEmpty, let web = BrowserAgentDetector.detect(page: page) {
+            var refined = web
+            refined.bundleHint = bid.isEmpty ? web.bundleHint : bid
+            return refined
+        }
+        // Even without URL, title-only page context can refine.
+        if let page, !page.title.isEmpty, let web = BrowserAgentDetector.detect(page: page) {
+            return web
+        }
 
         // Explicit bundle rules (most specific first).
         let rules: [(String, AgentKind)] = [
@@ -129,14 +144,14 @@ public enum AgentAppMapper {
             ("com.openai.codex", .init(id: "codex", displayName: "Codex", source: "chat")),
             ("com.anthropic.claudefordesktop", .init(id: "claude_code", displayName: "Claude", source: "chat")),
             ("com.anthropic.claude", .init(id: "claude_code", displayName: "Claude", source: "chat")),
-            ("com.xai.grok", .init(id: "grok_build", displayName: "Grok", source: "chat")),
-            ("ai.x.grok", .init(id: "grok_build", displayName: "Grok", source: "chat")),
+            ("com.xai.grok", .init(id: "grok_build", displayName: "SuperGrok", source: "chat")),
+            ("ai.x.grok", .init(id: "grok_build", displayName: "SuperGrok", source: "chat")),
             // IDEs
             ("com.todesktop.", .init(id: "cursor", displayName: "Cursor", source: "ide")), // prefix match below
             ("com.microsoft.vscode", .init(id: "vscode", displayName: "VS Code", source: "ide")),
             ("com.microsoft.VSCode", .init(id: "vscode", displayName: "VS Code", source: "ide")),
             ("com.apple.dt.xcode", .init(id: "claude_code", displayName: "Xcode", source: "ide")),
-            // Browsers
+            // Browsers — only used when tab probe could not identify a web agent.
             ("com.apple.safari", .init(id: "browser", displayName: "Safari", source: "browser")),
             ("com.google.chrome", .init(id: "browser", displayName: "Chrome", source: "browser")),
             ("company.thebrowser.browser", .init(id: "browser", displayName: "Arc", source: "browser")),
@@ -144,6 +159,9 @@ public enum AgentAppMapper {
             ("org.mozilla.firefox", .init(id: "browser", displayName: "Firefox", source: "browser")),
             ("com.microsoft.edgemac", .init(id: "browser", displayName: "Edge", source: "browser")),
         ]
+
+        // Native Grok app should read as SuperGrok
+        // (handled below in name fallbacks + bundle rules above)
 
         for (key, kind) in rules {
             if key.hasSuffix(".") {
@@ -161,7 +179,9 @@ public enum AgentAppMapper {
         if name.contains("claude") { return .init(id: "claude_code", displayName: "Claude", source: "chat", bundleHint: bid) }
         if name.contains("chatgpt") || name == "chat gpt" { return .init(id: "chatgpt", displayName: "ChatGPT", source: "chat", bundleHint: bid) }
         if name.contains("codex") { return .init(id: "codex", displayName: "Codex", source: "chat", bundleHint: bid) }
-        if name.contains("grok") { return .init(id: "grok_build", displayName: "Grok", source: "chat", bundleHint: bid) }
+        if name.contains("grok") || name.contains("supergrok") {
+            return .init(id: "grok_build", displayName: "SuperGrok", source: "chat", bundleHint: bid)
+        }
         if name.contains("cursor") { return .init(id: "cursor", displayName: "Cursor", source: "ide", bundleHint: bid) }
         if name.contains("code") || name.contains("vscode") { return .init(id: "vscode", displayName: "VS Code", source: "ide", bundleHint: bid) }
         if name.contains("terminal") || name.contains("iterm") || name.contains("warp") || name.contains("ghostty") || name.contains("kitty") {
@@ -389,25 +409,68 @@ public final class AgentIngestService: ObservableObject {
             ?? front?.bundleIdentifier
         let name = tracked.lastAppName
             ?? front?.localizedName
+        // Browser tab title/URL distinguishes Claude Science vs SuperGrok, etc.
+        let page: BrowserPageContext? = {
+            if BrowserPageProbe.isBrowser(bundleID: bid) {
+                return BrowserPageProbe.probe(bundleID: bid, appName: name)
+            }
+            // Still probe window title for non-browser apps that embed webviews.
+            let t = BrowserPageProbe.probe(bundleID: bid, appName: name)
+            return t.isEmpty ? nil : t
+        }()
         #else
         let bid: String? = nil
         let name: String? = nil
+        let page: BrowserPageContext? = nil
         #endif
 
         let clip = clipboardText ?? Self.readClipboard()
         let (clipAgent, clipTask) = AgentAppMapper.parseClipboard(clip)
 
-        var kind = AgentAppMapper.map(bundleID: bid, appName: name)
+        var kind = AgentAppMapper.map(bundleID: bid, appName: name, page: page)
+        // Prefer catalog display names / colors for known ids.
+        let style = AgentStyleCatalog.style(for: kind.id)
+        if AgentStyleCatalog.all.contains(where: { $0.id == kind.id }) {
+            kind = AgentKind(
+                id: kind.id,
+                displayName: style.displayName,
+                source: kind.source,
+                bundleHint: kind.bundleHint
+            )
+        }
         if let force = forceAgentID, !force.isEmpty {
-            kind = AgentKind(id: force, displayName: force, source: kind.source, bundleHint: bid)
+            let forced = AgentStyleCatalog.style(for: AgentKind.sanitizeID(force))
+            kind = AgentKind(
+                id: forced.id,
+                displayName: forced.displayName,
+                source: kind.source,
+                bundleHint: bid
+            )
         } else if let clipAgent {
-            kind = AgentKind(id: clipAgent, displayName: clipAgent, source: kind.source, bundleHint: bid)
+            let forced = AgentStyleCatalog.style(for: clipAgent)
+            kind = AgentKind(
+                id: forced.id,
+                displayName: forced.displayName,
+                source: kind.source,
+                bundleHint: bid
+            )
         }
 
-        // Prefer intentional clipboard task; otherwise a short, safe label from the app.
+        // Prefer intentional clipboard task; else tab title; else short app label.
+        let pageTitle = page?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let taskFromTitle: String? = {
+            guard !pageTitle.isEmpty else { return nil }
+            if AgentActivitySnapshot.looksLikeSecretOrJunk(pageTitle) { return nil }
+            return AgentActivitySnapshot.shorten(pageTitle, max: 80)
+        }()
         let task = clipTask
+            ?? taskFromTitle
             ?? "Working in \(name ?? kind.displayName)"
-        let sourceApp = name ?? bid ?? "unknown"
+        let sourceApp = {
+            if let page, !page.url.isEmpty { return "\(name ?? "Browser") · \(page.url)" }
+            if !pageTitle.isEmpty { return "\(name ?? "App") · \(pageTitle)" }
+            return name ?? bid ?? "unknown"
+        }()
 
         let result: AgentIngestResult
         do {

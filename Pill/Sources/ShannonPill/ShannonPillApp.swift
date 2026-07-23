@@ -170,10 +170,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func bootstrapDefaultPets() {
         let defaults = [
+            ("science", "Claude Science"),
             ("claude_code", "Claude"),
             ("codex", "Codex"),
             ("chatgpt", "ChatGPT"),
-            ("grok_build", "Grok"),
+            ("grok_build", "SuperGrok"),
             ("terminal", "Terminal"),
             ("browser", "Browser"),
             ("cursor", "Cursor"),

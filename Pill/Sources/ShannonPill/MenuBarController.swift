@@ -74,9 +74,12 @@ final class MenuBarController {
             button.contentTintColor = NSColor.systemGreen
         } else if !summary.busy.isEmpty {
             let head = summary.busy[0]
+            let style = AgentStyleCatalog.style(for: head.id)
             let extra = summary.busy.count > 1 ? " +\(summary.busy.count - 1)" : ""
-            button.title = " \(head.displayName)\(extra)"
-            button.contentTintColor = NSColor.systemGreen
+            button.title = " \(style.emoji) \(style.shortName)\(extra)"
+            button.contentTintColor = NSColor(
+                calibratedRed: style.red, green: style.green, blue: style.blue, alpha: 1
+            )
         } else if entropy.collapsed {
             button.title = String(format: " H %.1f!", entropy.entropy)
             button.contentTintColor = NSColor.systemOrange
@@ -106,10 +109,11 @@ final class MenuBarController {
         menu.addItem(header)
 
         for agent in summary.busy.prefix(6) {
+            let style = AgentStyleCatalog.style(for: agent.id)
             let task = AgentActivitySnapshot.shorten(agent.lastTask, max: 40)
             let title = task.isEmpty
-                ? "  \(agent.displayName) · \(agent.status.label)"
-                : "  \(agent.displayName) · \(task)"
+                ? "  \(style.emoji) \(style.displayName) · \(agent.status.label)"
+                : "  \(style.emoji) \(style.displayName) · \(task)"
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)

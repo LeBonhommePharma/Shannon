@@ -147,7 +147,8 @@ struct PillView: View {
         if let p = busy.first {
             Image(systemName: iconName(for: p))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(color(for: p.status))
+                .foregroundStyle(color(for: p))
+                .help("\(style(for: p).emoji) \(style(for: p).displayName)")
         } else if showMedia {
             Image(systemName: "music.note")
                 .font(.system(size: 11))
@@ -245,7 +246,7 @@ struct PillView: View {
 
     private var headerIconColor: Color {
         if entropy.collapsed { return .shannonWarning }
-        if let p = busy.first { return color(for: p.status) }
+        if let p = busy.first { return color(for: p) }
         if bridge.connected { return .shannonSuccess }
         return .shannonAccent
     }
@@ -295,23 +296,23 @@ struct PillView: View {
     private func agentRow(_ a: AgentActivitySnapshot) -> some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(color(for: a.status))
+                .fill(color(for: a))
                 .frame(width: 6, height: 6)
             Image(systemName: iconName(for: a))
-                .font(.system(size: 10))
-                .foregroundStyle(Color.shannonSecondary)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(color(for: a))
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text(a.displayName)
+                    Text("\(style(for: a).emoji) \(style(for: a).displayName)")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.shannonPrimary)
+                        .foregroundStyle(color(for: a))
                     Text(a.status.label)
                         .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(color(for: a.status))
+                        .foregroundStyle(color(for: a))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Capsule().fill(color(for: a.status).opacity(0.15)))
+                        .background(Capsule().fill(color(for: a).opacity(0.15)))
                     Spacer(minLength: 0)
                     Text(a.relativeAge)
                         .font(.system(size: 9, design: .monospaced))
@@ -455,23 +456,23 @@ struct PillView: View {
         return "ready · ⌘D capture"
     }
 
-    // MARK: Icons / colours
+    // MARK: Icons / colours — brand per agent (Science amber flask ≠ SuperGrok purple)
+
+    private func style(for a: AgentActivitySnapshot) -> AgentStyle {
+        AgentStyleCatalog.style(for: a.id)
+    }
 
     private func iconName(for a: AgentActivitySnapshot) -> String {
-        switch a.source {
-        case "terminal": return "terminal.fill"
-        case "browser": return "globe"
-        case "chat": return "bubble.left.and.bubble.right.fill"
-        case "ide": return "chevron.left.forwardslash.chevron.right"
-        default:
-            switch a.id {
-            case "terminal": return "terminal.fill"
-            case "browser": return "globe"
-            case "claude_code", "chatgpt", "codex", "grok_build": return "bubble.left.and.bubble.right.fill"
-            case "cursor", "vscode": return "chevron.left.forwardslash.chevron.right"
-            case "dataset_runner", "science": return "flask.fill"
-            default: return "cpu"
-            }
+        style(for: a).systemImage
+    }
+
+    /// Brand color modulated by run status.
+    private func color(for a: AgentActivitySnapshot) -> Color {
+        let brand = style(for: a).color
+        switch a.status {
+        case .active, .midTask: return brand
+        case .blocked: return .shannonWarning
+        case .idle, .unknown: return brand.opacity(0.45)
         }
     }
 

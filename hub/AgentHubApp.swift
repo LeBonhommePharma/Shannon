@@ -76,7 +76,7 @@ struct AgentIdentity: Identifiable, Equatable {
         AgentIdentity(id: "dispatch",    icon: "🟤",
                       color: Color(red: 0.72, green: 0.50, blue: 0.28),
                       shortKey: "d", shortName: "Disp",  authKind: .local),
-        AgentIdentity(id: "science",     icon: "🔶",
+        AgentIdentity(id: "science",     icon: "🔬",
                       color: Color(red: 1.00, green: 0.72, blue: 0.10),
                       shortKey: "s", shortName: "Sci",   authKind: .local),
         AgentIdentity(id: "grok_build",  icon: "🟣",
@@ -85,6 +85,12 @@ struct AgentIdentity: Identifiable, Equatable {
         AgentIdentity(id: "codex",       icon: "🔵",
                       color: Color(red: 0.30, green: 0.55, blue: 1.00),
                       shortKey: "x", shortName: "Codex", authKind: .cloud),
+        AgentIdentity(id: "chatgpt",     icon: "🟢",
+                      color: Color(red: 0.10, green: 0.72, blue: 0.55),
+                      shortKey: "p", shortName: "GPT",   authKind: .cloud),
+        AgentIdentity(id: "browser",     icon: "🌐",
+                      color: Color(red: 0.35, green: 0.55, blue: 0.95),
+                      shortKey: "b", shortName: "Web",   authKind: .local),
     ]
 
     static func find(_ id: String) -> AgentIdentity? { all.first { $0.id == id } }

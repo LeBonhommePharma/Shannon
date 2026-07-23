@@ -328,30 +328,15 @@ public enum AgentActivityReader {
            let name = obj["display_name"] as? String, !name.isEmpty {
             return name
         }
-        let map: [String: String] = [
-            "claude_code": "Claude",
-            "codex": "Codex",
-            "chatgpt": "ChatGPT",
-            "grok_build": "Grok",
-            "terminal": "Terminal",
-            "browser": "Browser",
-            "cursor": "Cursor",
-            "vscode": "VS Code",
-            "dataset_runner": "DatasetRunner",
-            "science": "Science",
-            "dispatch": "Dispatch",
-            "cowork": "Cowork",
-            "local_test": "Local",
-        ]
-        return map[id] ?? id.replacingOccurrences(of: "_", with: " ").capitalized
+        return AgentStyleCatalog.style(for: id).displayName
     }
 
     private static func guessSource(_ id: String) -> String {
         switch id {
         case "terminal": return "terminal"
         case "browser": return "browser"
-        case "cursor", "vscode", "claude_code": return "ide"
-        case "chatgpt", "codex", "grok_build": return "chat"
+        case "cursor", "vscode": return "ide"
+        case "claude_code", "chatgpt", "codex", "grok_build", "science": return "chat"
         default: return "other"
         }
     }

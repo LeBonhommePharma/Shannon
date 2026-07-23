@@ -211,11 +211,25 @@ start_gate() {
   fi
   [[ -f "${HUB}/shannon_gate.py" ]] || { warn "No hub/shannon_gate.py — skip"; return 0; }
   mkdir -p "${HOME}/.shannon"
+  # Free default HTTP port if a stale process holds it (common after crashed gate).
+  local port="${SHANNON_HTTP_PORT:-8765}"
+  local hold
+  hold="$(lsof -nP -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [[ -n "${hold}" ]]; then
+    warn "Port ${port} busy (pid ${hold}) — attempting to free for gate"
+    # shellcheck disable=SC2086
+    kill ${hold} 2>/dev/null || true
+    sleep 0.4
+    # shellcheck disable=SC2086
+    kill -9 ${hold} 2>/dev/null || true
+  fi
+  rm -f /tmp/shannon.sock
   nohup python3 "${HUB}/shannon_gate.py" \
+    --http-port "${port}" \
     >>"${HOME}/.shannon/gate.log" 2>&1 &
-  sleep 0.6
+  sleep 0.8
   if pgrep -f "shannon_gate.py" >/dev/null 2>&1; then
-    ok "Gate up (log: ~/.shannon/gate.log)"
+    ok "Gate up (log: ~/.shannon/gate.log, port ${port})"
   else
     warn "Gate did not start (pill works offline). See ~/.shannon/gate.log"
   fi
@@ -302,8 +316,10 @@ Also:
   ./scripts/shannon help
 
 In the app:
-  ⌘D   Capture the frontmost app (Terminal, Claude, ChatGPT, Codex,
-       browser, Cursor, …) as an agent and create/update its pet.
+  ⌘D   Capture the frontmost app as an agent + pet.
+       In a browser, the active tab is classified:
+         Claude Science · SuperGrok · ChatGPT · Codex · Claude
+       (title + URL via AppleScript / window name — offline-safe).
        Clipboard:  agent: science my task summary
 
 Optional later:

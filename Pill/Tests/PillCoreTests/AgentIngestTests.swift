@@ -23,6 +23,74 @@ final class AgentIngestTests: XCTestCase {
         XCTAssertEqual(AgentAppMapper.map(bundleID: "com.anthropic.claudefordesktop", appName: "Claude").id, "claude_code")
         XCTAssertEqual(AgentAppMapper.map(bundleID: "com.openai.codex", appName: "Codex").id, "codex")
         XCTAssertEqual(AgentAppMapper.map(bundleID: "com.xai.grok", appName: "Grok").id, "grok_build")
+        XCTAssertEqual(
+            AgentAppMapper.map(bundleID: "com.xai.grok", appName: "Grok").displayName,
+            "SuperGrok"
+        )
+    }
+
+    func testBrowserTabClaudeScienceNotGrok() {
+        let science = BrowserPageContext(
+            title: "Claude Science — FlexAID docking",
+            url: "https://claude.ai/chat/abc"
+        )
+        let k = AgentAppMapper.map(
+            bundleID: "com.google.chrome",
+            appName: "Google Chrome",
+            page: science
+        )
+        XCTAssertEqual(k.id, "science")
+        XCTAssertEqual(k.displayName, "Claude Science")
+        XCTAssertEqual(AgentStyleCatalog.style(for: k.id).systemImage, "flask.fill")
+    }
+
+    func testBrowserTabSuperGrokNotScience() {
+        let grok = BrowserPageContext(
+            title: "SuperGrok",
+            url: "https://grok.x.ai/"
+        )
+        let k = AgentAppMapper.map(
+            bundleID: "com.apple.Safari",
+            appName: "Safari",
+            page: grok
+        )
+        XCTAssertEqual(k.id, "grok_build")
+        XCTAssertEqual(k.displayName, "SuperGrok")
+        XCTAssertEqual(AgentStyleCatalog.style(for: k.id).systemImage, "sparkles")
+        // Distinct colours
+        let sci = AgentStyleCatalog.style(for: "science")
+        let grk = AgentStyleCatalog.style(for: "grok_build")
+        XCTAssertNotEqual(sci.red, grk.red)
+        XCTAssertNotEqual(sci.systemImage, grk.systemImage)
+    }
+
+    func testBrowserTabChatGPTAndCodex() {
+        let gpt = AgentAppMapper.map(
+            bundleID: "com.google.chrome", appName: "Chrome",
+            page: BrowserPageContext(title: "ChatGPT", url: "https://chatgpt.com/")
+        )
+        XCTAssertEqual(gpt.id, "chatgpt")
+        let codex = AgentAppMapper.map(
+            bundleID: "com.google.chrome", appName: "Chrome",
+            page: BrowserPageContext(title: "Codex", url: "https://chatgpt.com/codex")
+        )
+        XCTAssertEqual(codex.id, "codex")
+    }
+
+    func testBrowserDetectorScienceURL() {
+        let k = BrowserAgentDetector.detect(page: BrowserPageContext(
+            title: "Project notes",
+            url: "https://claude.ai/project/science-flexaid"
+        ))
+        XCTAssertEqual(k?.id, "science")
+    }
+
+    func testBrowserDetectorGrokXCom() {
+        let k = BrowserAgentDetector.detect(page: BrowserPageContext(
+            title: "Grok / X",
+            url: "https://x.com/i/grok"
+        ))
+        XCTAssertEqual(k?.id, "grok_build")
     }
 
     func testMapBrowsersAndIDE() {

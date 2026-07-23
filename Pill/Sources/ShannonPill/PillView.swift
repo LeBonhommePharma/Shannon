@@ -548,34 +548,6 @@ struct ConfirmationPromptView: View {
     }
 }
 
-/// Compact animated bars for the idle collapsed glyph (Claude polish).
-struct WaveformIdleView: View {
-    var color: Color
-    @State private var phase = false
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 2) {
-            ForEach(0..<4, id: \.self) { i in
-                RoundedRectangle(cornerRadius: 1, style: .continuous)
-                    .fill(color)
-                    .frame(width: 2, height: barHeight(i))
-                    .animation(
-                        .easeInOut(duration: 0.55)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(i) * 0.08),
-                        value: phase
-                    )
-            }
-        }
-        .onAppear { phase = true }
-    }
-
-    private func barHeight(_ i: Int) -> CGFloat {
-        let base: [CGFloat] = [6, 12, 9, 14]
-        return phase ? base[i] : base[i] * 0.45
-    }
-}
-
 struct BatteryRing: View {
     let snapshot: BatterySnapshot
     var diameter: CGFloat = 18

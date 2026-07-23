@@ -84,11 +84,24 @@ struct PillView: View {
     }
 
     private var flashOverlay: some View {
-        RoundedRectangle(cornerRadius: corner, style: .continuous)
-            .fill(confirmation.flash == .confirm ? Color.shannonSuccess : Color.shannonError)
-            .opacity(confirmation.flash == nil ? 0 : 0.35)
-            .allowsHitTesting(false)
-            .animation(.easeOut(duration: 0.25), value: confirmation.flash)
+        ZStack {
+            // Confirmation flash fill (approve = green, deny = red).
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .fill(confirmation.flash == .confirm ? Color.shannonSuccess : Color.shannonError)
+                .opacity(confirmation.flash == nil ? 0 : 0.35)
+                .allowsHitTesting(false)
+                .animation(.easeOut(duration: 0.25), value: confirmation.flash)
+
+            // Entropy-collapse deception-alert border: always present,
+            // invisible until entropy collapses, then pulses red.
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .stroke(
+                    Color.shannonError,
+                    lineWidth: (entropy.collapsed && collapsePulse) ? 2.0 : 0.5
+                )
+                .opacity(entropy.collapsed ? (collapsePulse ? 0.90 : 0.22) : 0)
+                .allowsHitTesting(false)
+        }
     }
 
     // MARK: Collapsed
@@ -140,10 +153,9 @@ struct PillView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(Color.shannonSecondary)
         } else {
-            Circle()
-                .fill(statusDotColor)
-                .frame(width: 7, height: 7)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Idle state: animated Shannon waveform in the agent's status colour.
+            WaveformIdleView(color: statusDotColor)
+                .frame(width: 16, height: 14)
         }
     }
 
@@ -275,9 +287,8 @@ struct PillView: View {
             ForEach(rows) { agent in
                 agentRow(agent)
             }
-            if bridge.connected || entropy.collapsed {
-                entropyStrip
-            }
+            // Entropy strip is always visible — ambient signal even when bridge is idle.
+            entropyStrip
         }
     }
 
@@ -368,7 +379,7 @@ struct PillView: View {
                         .frame(width: geo.size.width * CGFloat(min(max(entropy.entropy / 12.0, 0.04), 1)))
                 }
             }
-            .frame(height: 3)
+            .frame(height: 5)
             Text(bridge.connected ? entropy.backend : "idle")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(Color.shannonTertiary)
@@ -537,6 +548,34 @@ struct ConfirmationPromptView: View {
     }
 }
 
+/// Compact animated bars for the idle collapsed glyph (Claude polish).
+struct WaveformIdleView: View {
+    var color: Color
+    @State private var phase = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 2) {
+            ForEach(0..<4, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(color)
+                    .frame(width: 2, height: barHeight(i))
+                    .animation(
+                        .easeInOut(duration: 0.55)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(i) * 0.08),
+                        value: phase
+                    )
+            }
+        }
+        .onAppear { phase = true }
+    }
+
+    private func barHeight(_ i: Int) -> CGFloat {
+        let base: [CGFloat] = [6, 12, 9, 14]
+        return phase ? base[i] : base[i] * 0.45
+    }
+}
+
 struct BatteryRing: View {
     let snapshot: BatterySnapshot
     var diameter: CGFloat = 18
@@ -579,5 +618,36 @@ struct BatteryRing: View {
         .onChange(of: snapshot.alertLevel) { level in
             pulsing = level != .normal
         }
+    }
+}
+
+// MARK: - WaveformIdleView
+
+/// Five-bar animated waveform shown in the collapsed pill when no agent is active.
+/// Each bar oscillates at a slightly different frequency to mimic an ECG-style signal.
+/// Uses TimelineView for smooth, GPU-backed animation without a Timer.
+private struct WaveformIdleView: View {
+    let color: Color
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .center, spacing: 1.5) {
+                ForEach(0..<5, id: \.self) { i in
+                    Capsule()
+                        .fill(color)
+                        .frame(width: 2, height: barHeight(i: i, t: t))
+                }
+            }
+        }
+    }
+
+    /// Returns bar height in points (2…12) driven by independent sine oscillators.
+    private func barHeight(i: Int, t: Double) -> CGFloat {
+        // Phase offsets and frequencies give each bar a distinct rhythm.
+        let phases: [Double] = [0.00, 1.26, 2.51, 0.94, 1.88]
+        let freqs:  [Double] = [1.10, 0.85, 1.30, 1.00, 1.20]
+        let amp = (sin(t * freqs[i] * .pi * 2 + phases[i]) + 1.0) * 0.5   // 0…1
+        return CGFloat(2 + amp * 10)
     }
 }

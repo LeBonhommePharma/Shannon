@@ -748,10 +748,11 @@ final class GateSocketClient {
         if let reply, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             payload["user_reply"] = reply
         }
+        payload["kind"] = "approval_response"
         sendMessage([
             "agent_id":     "local_test",
             "task_id":      "hub_ui",
-            "message_type": "status",
+            "message_type": "approval_response",
             "confidence":   1.0,
             "shannon_H":    0.0,
             "payload":      payload,
@@ -1977,8 +1978,12 @@ private struct AgentRowCard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            VStack(spacing: 2) {
-                Text(identity.icon).font(.title3)
+            // Emoji icon + short name with a subtle entropy arc halo behind the icon.
+            VStack(spacing: 1) {
+                ZStack {
+                    entropyArc
+                    Text(identity.icon).font(.title3)
+                }
                 Text(identity.shortName)
                     .font(.system(size: 8, weight: .medium))
                     .foregroundColor(identity.color.opacity(0.8))
@@ -2005,6 +2010,12 @@ private struct AgentRowCard: View {
                             .foregroundColor(c)
                     }
                     Spacer()
+                    // Relative last-activity time — muted, secondary
+                    if let r = row {
+                        Text(relativeTime(r.lastSeen))
+                            .font(.system(size: 8))
+                            .foregroundColor(.white.opacity(0.28))
+                    }
                     statusBadge
                 }
                 if let r = row, !r.taskSummary.isEmpty {
@@ -2050,6 +2061,37 @@ private struct AgentRowCard: View {
         .background(Color.white.opacity(0.04))
         .cornerRadius(8)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(identity.color.opacity(0.12)))
+    }
+
+    /// Half-circle entropy gauge displayed as a halo behind the agent emoji.
+    /// Arc fills left→right proportional to entropy / kH_block.
+    private var entropyArc: some View {
+        let ent  = row?.entropy ?? 0
+        let frac = CGFloat(min(ent / kH_block, 1.0))
+        let fill: Color = ent >= kH_block       ? .red
+                        : ent >= kH_threshold   ? .orange
+                        : identity.color.opacity(0.5)
+        return ZStack {
+            // Background track — full top semicircle
+            Circle()
+                .trim(from: 0.5, to: 1.0)
+                .stroke(Color.white.opacity(0.07), lineWidth: 2.5)
+            // Filled portion — expands from left as entropy rises
+            Circle()
+                .trim(from: 0.5, to: 0.5 + frac * 0.5)
+                .stroke(fill, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+        }
+        .frame(width: 28, height: 28)
+    }
+
+    /// Human-readable elapsed time since an agent was last active.
+    private func relativeTime(_ date: Date) -> String {
+        let secs = max(0, Int(-date.timeIntervalSinceNow))
+        if secs < 5  { return "now" }
+        if secs < 60 { return "\(secs)s ago" }
+        let mins = secs / 60
+        if mins < 60 { return "\(mins)m ago" }
+        return "\(mins / 60)h ago"
     }
 
     private var statusBadge: some View {
@@ -2098,20 +2140,46 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         }
     }
 
+    /// One coloured dot → instant system health read.
+    /// Red → blocked/error  |  Orange → activity  |  Green → all idle  |  dim → no data
+    private func healthColor() -> NSColor {
+        let rows = AgentIdentity.all.compactMap { vm.db.agents[$0.id] }
+        if rows.isEmpty { return NSColor.secondaryLabelColor }
+        if rows.contains(where: { $0.status == .blocked || $0.status == .error }) {
+            return NSColor.systemRed
+        }
+        if rows.contains(where: { $0.status == .active || $0.status == .waiting }) {
+            return NSColor.systemOrange
+        }
+        return NSColor.systemGreen
+    }
+
+    /// Menu-bar pill: single coloured dot for instant health + wave glyph during activity.
     private func updatePill() {
         guard let btn = statusItem.button else { return }
-        let dots = AgentIdentity.all.map { a -> String in
-            let status = vm.db.agents[a.id]?.status ?? .idle
-            switch status {
-            case .active:  return a.icon
-            case .waiting: return "○"
-            case .blocked: return "⊘"
-            case .error:   return "✗"
-            case .idle:    return "·"
-            }
-        }.joined(separator: " ")
-        btn.title = dots
-        btn.font  = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let hColor = healthColor()
+        let attr = NSMutableAttributedString(
+            string: "●",
+            attributes: [
+                .foregroundColor: hColor,
+                .font: NSFont.systemFont(ofSize: 13, weight: .medium)
+            ]
+        )
+        // ∿ wave appears only when work is in-flight
+        let hasActivity = AgentIdentity.all.contains {
+            let s = vm.db.agents[$0.id]?.status ?? .idle
+            return s == .active || s == .waiting
+        }
+        if hasActivity {
+            attr.append(NSAttributedString(
+                string: " ∿",
+                attributes: [
+                    .foregroundColor: hColor.withAlphaComponent(0.7),
+                    .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+                ]
+            ))
+        }
+        btn.attributedTitle = attr
     }
 
     @objc private func togglePopover(_ sender: Any?) {

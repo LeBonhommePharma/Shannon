@@ -305,6 +305,7 @@ struct AgentInteraction: Identifiable {
     let kind:      InteractionKind
     var timeoutAt: Date? = nil
     var diff:      String? = nil   // unified diff to show in DiffReviewView
+    var content:   String  = ""    // agent's detailed output (event_output) shown under the prompt
 }
 
 struct ToolEvent: Identifiable {
@@ -706,19 +707,25 @@ final class GateSocketClient {
         ])
     }
 
-    func sendApproval(agentId: String, interactionId: String, approved: Bool) {
+    func sendApproval(agentId: String, interactionId: String, approved: Bool,
+                      reply: String? = nil) {
+        var payload: [String: Any] = [
+            "target_agent":    agentId,
+            "approved":        approved,
+            "interaction_id":  interactionId,
+            "source":          "hub_ui",
+        ]
+        // Optional free-text user reply — forwarded verbatim to the agent.
+        if let reply, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["user_reply"] = reply
+        }
         sendMessage([
             "agent_id":     "local_test",
             "task_id":      "hub_ui",
             "message_type": "status",
             "confidence":   1.0,
             "shannon_H":    0.0,
-            "payload": [
-                "target_agent":    agentId,
-                "approved":        approved,
-                "interaction_id":  interactionId,
-                "source":          "hub_ui",
-            ] as [String: Any],
+            "payload":      payload,
         ])
     }
 }
@@ -933,18 +940,22 @@ final class HubViewModel: ObservableObject {
     }
 
     private func pushInteraction(for evt: GateEvent) {
+        // Carry the agent's full output content so the review card can show
+        // what the agent actually produced, not just the one-line prompt.
         let interaction = AgentInteraction(agentId: evt.agentId, prompt: evt.payload, kind: .yesNo,
-                                           timeoutAt: Date().addingTimeInterval(30))
+                                           timeoutAt: Date().addingTimeInterval(30),
+                                           content: evt.output)
         DispatchQueue.main.async { self.interactions.append(interaction) }
     }
 
-    func resolveInteraction(_ id: UUID, approved: Bool) {
+    func resolveInteraction(_ id: UUID, approved: Bool, reply: String? = nil) {
         guard let ia = interactions.first(where: { $0.id == id }) else { return }
-        // Send approval/denial to the gate over the socket
+        // Send approval/denial (plus optional user reply text) to the gate
         GateSocketClient.shared.sendApproval(
             agentId:       ia.agentId,
             interactionId: id.uuidString,
-            approved:      approved
+            approved:      approved,
+            reply:         reply
         )
         interactions.removeAll { $0.id == id }
     }
@@ -1152,22 +1163,32 @@ struct PlanReviewView: View {
     let onApprove:   () -> Void
     let onDeny:      () -> Void
     let onChoice:    (Int) -> Void
+    /// Optional free-text reply — sent alongside approval when non-empty.
+    var onReply:     ((String) -> Void)? = nil
 
-    @State private var timeLeft: Double = 30
+    @State private var timeLeft:  Double = 30
+    @State private var replyText: String = ""
 
     private var timer: Publishers.Autoconnect<Timer.TimerPublisher> {
         Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     }
 
+    private var identity: AgentIdentity { AgentIdentity[interaction.agentId] }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Header
+            // Header — who is asking
             HStack {
-                Text(AgentIdentity[interaction.agentId].icon)
+                Text(identity.icon)
                     .font(.title2)
-                Text(AgentIdentity[interaction.agentId].shortName)
-                    .font(.system(.headline, design: .rounded))
-                    .foregroundColor(AgentIdentity[interaction.agentId].color)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(identity.shortName)
+                        .font(.system(.headline, design: .rounded))
+                        .foregroundColor(identity.color)
+                    Text("needs your input")
+                        .font(.system(size: 9))
+                        .foregroundColor(.white.opacity(0.45))
+                }
                 Spacer()
                 // Timeout arc
                 ZStack {
@@ -1183,23 +1204,61 @@ struct PlanReviewView: View {
                     .foregroundColor(.yellow)
             }
 
-            // Prompt
+            // Prompt — the agent's question
             Text(interaction.prompt)
                 .font(.system(.body, design: .default))
                 .foregroundColor(.white.opacity(0.9))
                 .fixedSize(horizontal: false, vertical: true)
+
+            // Agent content — what the agent actually produced (scrollable)
+            if !interaction.content.isEmpty {
+                ScrollView(.vertical, showsIndicators: true) {
+                    Text(interaction.content)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.7))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .frame(maxHeight: 120)
+                .background(Color.black.opacity(0.25))
+                .cornerRadius(8)
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .stroke(identity.color.opacity(0.15)))
+            }
 
             // Diff view (if present)
             if let d = interaction.diff, !d.isEmpty {
                 DiffReviewView(diff: d)
             }
 
+            // Optional reply — gentle invitation, never required
+            if onReply != nil {
+                HStack(spacing: 6) {
+                    TextField("Reply to \(identity.shortName) (optional)…", text: $replyText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11))
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(6)
+                        .onSubmit { submitReply(approved: true) }
+                    if !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button { submitReply(approved: true) } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 16))
+                                .foregroundColor(identity.color)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Send reply and approve")
+                    }
+                }
+            }
+
             // Action buttons
             HStack(spacing: 8) {
                 switch interaction.kind {
                 case .yesNo:
-                    PlanButton(label: "Approve", key: "⌘Y", accent: .green) { onApprove() }
-                    PlanButton(label: "Deny",    key: "⌘N", accent: .red)   { onDeny()    }
+                    PlanButton(label: "Approve", key: "⌘Y", accent: .green) { submitOrApprove() }
+                    PlanButton(label: "Deny",    key: "⌘N", accent: .red)   { onDeny() }
                 case .choice(let opts):
                     FlowLayout(spacing: 6) {
                         ForEach(Array(opts.enumerated()), id: \.offset) { i, opt in
@@ -1219,6 +1278,22 @@ struct PlanReviewView: View {
         .onReceive(timer) { _ in
             if timeLeft > 0 { timeLeft -= 0.5 }
         }
+    }
+
+    /// Approve, attaching the typed reply when present.
+    private func submitOrApprove() {
+        let trimmed = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty, let onReply {
+            onReply(trimmed)
+        } else {
+            onApprove()
+        }
+    }
+
+    private func submitReply(approved: Bool) {
+        let trimmed = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onReply?(trimmed)
     }
 }
 
@@ -1749,7 +1824,8 @@ struct HubPopoverView: View {
                     interaction: ia,
                     onApprove: { vm.resolveInteraction(ia.id, approved: true) },
                     onDeny:    { vm.resolveInteraction(ia.id, approved: false) },
-                    onChoice:  { _ in vm.resolveInteraction(ia.id, approved: true) }
+                    onChoice:  { _ in vm.resolveInteraction(ia.id, approved: true) },
+                    onReply:   { text in vm.resolveInteraction(ia.id, approved: true, reply: text) }
                 )
             }
         }

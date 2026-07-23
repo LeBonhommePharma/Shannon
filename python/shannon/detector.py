@@ -238,16 +238,22 @@ class ShannonCollapseDetector:
         self._running_sum_sq = 0.0
         self._token_count = 0
 
-        # C++ detector (optional fast path)
+        # C++ detector (optional fast path) — the v2 engine bound in
+        # shannon._core. (This previously imported `_shannon_cpp`, a module
+        # that never existed, so the fast path could never activate.)
         self._cpp_detector = None
         try:
-            from _shannon_cpp import CollapseDetector as CppDetector
+            from shannon._core import CollapseDetector as CppDetector
 
             self._cpp_detector = CppDetector(
                 window_size, threshold, expansion_threshold, oscillation_window
             )
             if self._callback:
-                self._cpp_detector.set_callback(self._callback)
+                # Wrap so Python callbacks receive the Python CollapseResult
+                # dataclass, not the raw C++ binding object.
+                self._cpp_detector.set_callback(
+                    lambda r: self._callback(self._wrap_cpp_result(r))
+                )
         except ImportError:
             pass
 
@@ -398,6 +404,8 @@ class ShannonCollapseDetector:
     @property
     def token_count(self) -> int:
         """Total number of tokens processed."""
+        if self._cpp_detector is not None:
+            return self._cpp_detector.token_count
         return self._token_count
 
     @property

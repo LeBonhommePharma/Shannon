@@ -21,6 +21,11 @@
 #include "energy_matrix.h"
 #include "fast_optics.h"
 
+// v2 engine — collapse detector + unified hardware dispatch
+#include "shannon/types.hpp"
+#include "shannon/collapse_detector.hpp"
+#include "shannon/unified_dispatch.hpp"
+
 namespace py = pybind11;
 
 // Helper: accept float32 or float64 numpy arrays, return double*
@@ -364,6 +369,110 @@ PYBIND11_MODULE(_core, m) {
         },
         py::arg("matrix"),
         "Project 256x256 matrix to 32x32 SYBYL-equivalent (block-mean)");
+
+    // ── v2 engine: CollapseDetector + unified dispatch ─────────────────────
+    //
+    // The flagship v2 safety engine (z-score classification, oscillation
+    // detection, SIMD/GPU dispatch). Previously only the v1
+    // SlidingWindowEntropy was bound, and python/shannon/detector.py tried
+    // to import a module (`_shannon_cpp`) that never existed — so the C++
+    // fast path could not activate at all.
+
+    py::enum_<shannon::EntropyEvent>(m, "EntropyEvent")
+        .value("NONE",        shannon::EntropyEvent::NONE)
+        .value("COLLAPSE",    shannon::EntropyEvent::COLLAPSE)
+        .value("EXPANSION",   shannon::EntropyEvent::EXPANSION)
+        .value("OSCILLATION", shannon::EntropyEvent::OSCILLATION);
+
+    py::class_<shannon::CollapseResult>(m, "CollapseResult")
+        .def_readonly("entropy",      &shannon::CollapseResult::entropy)
+        .def_readonly("window_mean",  &shannon::CollapseResult::window_mean)
+        .def_readonly("window_std",   &shannon::CollapseResult::window_std)
+        .def_readonly("delta",        &shannon::CollapseResult::delta)
+        .def_readonly("z_score",      &shannon::CollapseResult::z_score)
+        .def_readonly("collapsed",    &shannon::CollapseResult::collapsed)
+        .def_readonly("expanded",     &shannon::CollapseResult::expanded)
+        .def_readonly("oscillating",  &shannon::CollapseResult::oscillating)
+        .def_readonly("event",        &shannon::CollapseResult::event)
+        .def_readonly("token_index",  &shannon::CollapseResult::token_index)
+        .def("__repr__",
+            [](const shannon::CollapseResult& r) {
+                return "CollapseResult(entropy=" + std::to_string(r.entropy)
+                    + ", delta=" + std::to_string(r.delta)
+                    + ", z_score=" + std::to_string(r.z_score)
+                    + ", collapsed=" + (r.collapsed ? std::string("True") : std::string("False"))
+                    + ", token_index=" + std::to_string(r.token_index) + ")";
+            });
+
+    py::class_<shannon::CollapseDetector>(m, "CollapseDetector")
+        .def(py::init<std::size_t, double, double, std::size_t>(),
+             py::arg("window_size") = 8,
+             py::arg("collapse_threshold") = -3.2,
+             py::arg("expansion_threshold") = 3.2,
+             py::arg("oscillation_window") = 16)
+        .def("add_logits",
+            [](shannon::CollapseDetector& self, py::array logits) {
+                auto vec = to_double_vec(logits);
+                py::gil_scoped_release release;
+                return self.add_logits(vec.data(), vec.size());
+            },
+            py::arg("logits"),
+            "Feed raw logits; returns CollapseResult")
+        .def("add_probs",
+            [](shannon::CollapseDetector& self, py::array probs) {
+                auto vec = to_double_vec(probs);
+                py::gil_scoped_release release;
+                return self.add_probs(vec.data(), vec.size());
+            },
+            py::arg("probs"),
+            "Feed a normalized probability distribution; returns CollapseResult")
+        .def("add_logprobs",
+            [](shannon::CollapseDetector& self, py::array logprobs) {
+                auto vec = to_double_vec(logprobs);
+                py::gil_scoped_release release;
+                return self.add_logprobs(vec.data(), vec.size());
+            },
+            py::arg("logprobs"),
+            "Feed log-probabilities (base e); returns CollapseResult")
+        .def("push_entropy", &shannon::CollapseDetector::push_entropy,
+             py::arg("entropy_bits"),
+             "Feed a pre-computed entropy value; returns CollapseResult")
+        .def("set_callback",
+            [](shannon::CollapseDetector& self, py::function callback) {
+                self.set_callback([callback](const shannon::CollapseResult& r) {
+                    py::gil_scoped_acquire acquire;
+                    callback(r);
+                });
+            },
+            py::arg("callback"),
+            "Callback fired on collapse/expansion/oscillation events")
+        .def("set_window_size", &shannon::CollapseDetector::set_window_size)
+        .def("set_collapse_threshold", &shannon::CollapseDetector::set_collapse_threshold)
+        .def("set_expansion_threshold", &shannon::CollapseDetector::set_expansion_threshold)
+        .def("set_oscillation_window", &shannon::CollapseDetector::set_oscillation_window)
+        .def("set_max_trace_size", &shannon::CollapseDetector::set_max_trace_size)
+        .def("reset", &shannon::CollapseDetector::reset)
+        .def_property_readonly("token_count", &shannon::CollapseDetector::token_count)
+        .def_property_readonly("trace",
+            [](const shannon::CollapseDetector& self) {
+                const auto& t = self.entropy_trace();
+                return std::vector<double>(t.begin(), t.end());
+            },
+            "Entropy trace (bounded by max_trace_size)");
+
+    // v2 dispatch introspection
+    m.def("v2_hardware_report",
+        []() { return shannon::dispatch::UnifiedDispatch::instance().hardware_report(); },
+        "Human-readable hardware capability summary from the v2 dispatcher");
+
+    m.def("v2_best_backend",
+        [](std::size_t n) {
+            auto& d = shannon::dispatch::UnifiedDispatch::instance();
+            return std::string(shannon::dispatch::UnifiedDispatch::backend_name(
+                d.best_backend(shannon::KernelType::CONFIGURATIONAL_ENTROPY, n)));
+        },
+        py::arg("n") = 0,
+        "Backend the v2 dispatcher selects for configurational entropy at size n");
 
     // ── Module-level constants ─────────────────────────────────────────────
     m.attr("__version__") = "0.2.0";

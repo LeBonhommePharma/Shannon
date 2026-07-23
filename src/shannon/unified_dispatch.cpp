@@ -114,22 +114,24 @@ bool UnifiedDispatch::has_kernel(Backend b, KernelType kernel) const noexcept {
 #endif
     case Backend::CUDA:
 #if defined(SHANNON_USE_CUDA)
-        return hw_.has_cuda;
+        // CUDA implements configurational entropy only (entropy_gpu.cu).
+        // Claiming other kernels would make best_backend() select CUDA and
+        // silently fall through to scalar.
+        return hw_.has_cuda && kernel == KernelType::CONFIGURATIONAL_ENTROPY;
 #else
         return false;
 #endif
     case Backend::METAL:
-#if defined(SHANNON_USE_METAL)
-        return hw_.has_metal;
-#else
+        // entropy_metal.metal compiles to a .metallib, but no host-side
+        // loader is wired yet. Claiming a kernel here would beat NEON in
+        // best_backend() and then degrade to scalar — a net regression on
+        // Apple Silicon. Report none until the loader lands.
         return false;
-#endif
     case Backend::ROCM:
-#if defined(SHANNON_USE_ROCM)
-        return hw_.has_rocm;
-#else
+        // SHANNON_USE_ROCM defines the macro but compiles no HIP kernel
+        // (entropy_gpu.cu is only added under SHANNON_USE_CUDA). No kernel,
+        // no claim.
         return false;
-#endif
     case Backend::AUTO:
         return true;
     }
@@ -219,9 +221,23 @@ DispatchResult UnifiedDispatch::compute_configurational_entropy(
     // Track whether a real kernel ran; fallthrough must not leave a stale backend.
     bool ran = false;
     switch (result.used_backend) {
+    case Backend::CUDA:
+#if defined(SHANNON_USE_CUDA)
+        if (hw_.has_cuda) {
+            const double h = kernels::cuda::configurational_entropy_cuda(log_weights, n);
+            if (h >= 0.0) {  // negative = device error → fall back to CPU
+                out_entropy = h;
+                result.used_backend = Backend::CUDA;
+                ran = true;
+                break;
+            }
+        }
+#endif
+        [[fallthrough]];
     case Backend::AVX512:
 #if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
         out_entropy = kernels::configurational_entropy_avx512(log_weights, n);
+        result.used_backend = Backend::AVX512;
         ran = true;
         break;
 #endif

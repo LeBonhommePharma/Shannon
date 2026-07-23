@@ -47,6 +47,12 @@ if(SHANNON_USE_OPENMP)
 endif()
 if(SHANNON_USE_CUDA)
     list(APPEND SHANNON_DEFS SHANNON_USE_CUDA)
+    # CMake >= 3.18 (CMP0104) errors out if no CUDA architectures are set.
+    # "native" targets the GPU present at build time; override with
+    # -DCMAKE_CUDA_ARCHITECTURES=... for distribution builds.
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        set(CMAKE_CUDA_ARCHITECTURES native)
+    endif()
     enable_language(CUDA)
 endif()
 if(SHANNON_USE_ROCM)
@@ -196,7 +202,9 @@ if(SHANNON_BUILD_PYTHON)
     # Module name must match PYBIND11_MODULE(_core, ...) in bindings.cpp and
     # the Python import path shannon._core.
     pybind11_add_module(_core src/bindings.cpp)
-    target_link_libraries(_core PRIVATE shannon_core)
+    # shannon_v2 provides CollapseDetector + UnifiedDispatch (v2 bindings);
+    # shannon_core provides the v1 surface + energy matrix + FastOPTICS.
+    target_link_libraries(_core PRIVATE shannon_core shannon_v2)
     set_target_properties(_core PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/shannon"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/shannon"

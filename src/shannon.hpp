@@ -62,7 +62,17 @@ inline double shannon_entropy_from_logprobs(std::span<const double> logprobs) {
     return shannon_entropy_from_logprobs(logprobs.data(), logprobs.size());
 }
 
-// ─── Sliding-Window Collapse Detector ────────────────────────────────────────
+// ─── Sliding-Window Collapse Detector (legacy v1) ────────────────────────────
+//
+// The canonical detector is shannon::CollapseDetector in
+// src/shannon/collapse_detector.hpp (v2: expansion/oscillation events,
+// unified dispatch). This interim version is kept for the legacy test suite.
+// The inline namespace keeps `shannon::CollapseDetector` working for code
+// that includes only this header, while giving these symbols distinct
+// mangled names so both libraries can be linked into one binary
+// (the pybind11 _core module links shannon_core AND shannon_v2).
+
+inline namespace v1 {
 
 /// Result from a single step of collapse detection.
 struct CollapseResult {
@@ -128,5 +138,7 @@ private:
     double                running_sum_sq_ = 0.0;
     CollapseCallback      callback_;
 };
+
+}  // inline namespace v1
 
 }  // namespace shannon

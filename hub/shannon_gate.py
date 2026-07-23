@@ -173,7 +173,9 @@ class ShannonAnalyzer:
         if n < 2:
             return 0.0
         counts = Counter(tokens)
-        return -sum((c / n) * math.log2(c / n) for c in counts.values())
+        # max(0.0, …) collapses the -0.0 that a degenerate (single-token)
+        # distribution produces, since -1.0 * log2(1.0) is negative zero.
+        return max(0.0, -sum((c / n) * math.log2(c / n) for c in counts.values()))
 
     @staticmethod
     def structural_entropy(payload: dict[str, Any]) -> float:
@@ -187,7 +189,7 @@ class ShannonAnalyzer:
         if n < 4:
             return 0.0
         counts = Counter(text)
-        return -sum((c / n) * math.log2(c / n) for c in counts.values())
+        return max(0.0, -sum((c / n) * math.log2(c / n) for c in counts.values()))
 
     @classmethod
     def combined_entropy(cls, payload: dict[str, Any]) -> float:
@@ -230,7 +232,7 @@ class ShannonAnalyzer:
         exp_v = [math.exp(v - max_neg) for v in neg]   # numerically stable
         total = sum(exp_v)
         probs = [e / total for e in exp_v]
-        return round(-sum(p * math.log2(p) for p in probs if p > 1e-12), 4)
+        return round(max(0.0, -sum(p * math.log2(p) for p in probs if p > 1e-12)), 4)
 
     # ── Temporal entropy ──────────────────────────────────────────────────────
 
@@ -247,8 +249,8 @@ class ShannonAnalyzer:
             return 0.0
         counts = Counter(history)
         total = len(history)
-        return round(-sum((c / total) * math.log2(c / total)
-                          for c in counts.values()), 4)
+        return round(max(0.0, -sum((c / total) * math.log2(c / total)
+                                   for c in counts.values())), 4)
 
 
 # ── Audit Database ────────────────────────────────────────────────────────────

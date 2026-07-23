@@ -985,29 +985,36 @@ struct AgentDotView: View {
 
     var body: some View {
         ZStack {
-            // Outer glow
+            // Outer glow — 30×30, active agents only
             if row?.status == .active {
                 Circle()
                     .fill(identity.color.opacity(glowPhase ? 0.55 : 0.20))
-                    .frame(width: 22, height: 22)
+                    .frame(width: 30, height: 30)
                     .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true),
                                value: glowPhase)
             }
 
-            // Entropy arc background
-            if let ent = row?.entropy, ent > 2.0 {
-                let frac = min((ent - 2.0) / (kH_block - 2.0), 1.0)
+            // Entropy arc — full arc = healthy (H/12), draining arc = collapsing.
+            // Color: identity.color when H ≥ kH_block (healthy ceiling),
+            //        orange when approaching kH_block, red at/below kH_threshold.
+            if let ent = row?.entropy {
+                let frac = max(0, min(ent / 12.0, 1.0))
+                let arcColor: Color = ent <= kH_threshold ? .red
+                                    : ent < kH_block      ? .orange
+                                    :                        identity.color
                 Circle()
                     .trim(from: 0, to: frac)
-                    .stroke(entropyColor(ent), lineWidth: 2)
-                    .frame(width: 18, height: 18)
+                    .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .foregroundColor(arcColor)
+                    .frame(width: 24, height: 24)
                     .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.6), value: frac)
             }
 
-            // Core dot
+            // Core dot — 14×14
             Circle()
                 .fill(dotColor)
-                .frame(width: 10, height: 10)
+                .frame(width: 14, height: 14)
                 .overlay(
                     // Timeout countdown arc
                     Group {
@@ -1026,7 +1033,7 @@ struct AgentDotView: View {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 6, weight: .bold))
                     .foregroundColor(.red)
-                    .offset(x: 5, y: -5)
+                    .offset(x: 7, y: -7)
             }
 
             // Memory-access pulsing dot (directive Pet)
@@ -1034,7 +1041,7 @@ struct AgentDotView: View {
                 Circle()
                     .fill(Color.cyan.opacity(memPulse ? 0.9 : 0.3))
                     .frame(width: 4, height: 4)
-                    .offset(x: 5, y: 5)
+                    .offset(x: 7, y: 7)
                     .animation(.easeInOut(duration: 0.4).repeatForever(autoreverses: true),
                                value: memPulse)
             }
@@ -1044,10 +1051,10 @@ struct AgentDotView: View {
                 Circle()
                     .fill(Color.orange.opacity(0.85))
                     .frame(width: 4, height: 4)
-                    .offset(x: -5, y: 5)
+                    .offset(x: -7, y: 7)
             }
         }
-        .frame(width: 22, height: 22)
+        .frame(width: 30, height: 30)
         .onAppear { glowPhase = true; memPulse = true }
         .onChange(of: isMemAccess) { _ in memPulse = isMemAccess }
         .help(tooltipText)
@@ -1056,10 +1063,6 @@ struct AgentDotView: View {
     private var dotColor: Color {
         guard let row else { return .gray.opacity(0.4) }
         return row.status.color
-    }
-
-    private func entropyColor(_ h: Double) -> Color {
-        h >= kH_block ? .red : .orange
     }
 
     private var tooltipText: String {
@@ -1562,12 +1565,30 @@ struct SettingsView: View {
 
 struct HubPopoverView: View {
     @ObservedObject var vm: HubViewModel
-    @State private var selectedTab = 0   // 0=agents 1=feed 2=resources 3=delegate
+    @State private var selectedTab = 0          // 0=agents 1=feed 2=resources
+    @State private var expandedAgentId: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
             // ── Pill header ──────────────────────────────────────────
             pillHeader
+
+            // ── Inline agent detail (tap a dot to expand) ────────────
+            if let aid = expandedAgentId,
+               let identity = AgentIdentity.all.first(where: { $0.id == aid }) {
+                Divider().opacity(0.15)
+                AgentInlineDetail(
+                    identity:   identity,
+                    row:        vm.db.agents[aid],
+                    bench:      vm.db.benchmarks[aid],
+                    pet:        vm.pets.states[aid] ?? PetState(),
+                    onDelegate: {
+                        vm.prefillDelegation(for: aid)
+                        expandedAgentId = nil
+                    }
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             Divider().opacity(0.2)
 
@@ -1580,28 +1601,34 @@ struct HubPopoverView: View {
                 case 0: agentsTab
                 case 1: feedTab
                 case 2: resourcesTab
-                case 3: delegateTab
                 default: EmptyView()
                 }
             }
-            .frame(minHeight: 260)
+            .frame(minHeight: 220)
 
             // ── Pending interactions ─────────────────────────────────
             if !vm.interactions.isEmpty {
                 Divider().opacity(0.2)
                 interactionsPanel
             }
+
+            // ── Persistent delegation bar ────────────────────────────
+            Divider().opacity(0.2)
+            DelegationBarView(vm: vm)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
         }
         .frame(width: 420)
         .background(.ultraThinMaterial)
         .preferredColorScheme(.dark)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: expandedAgentId)
     }
 
     // MARK: Pill header with agent dots
 
     private var pillHeader: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 ForEach(AgentIdentity.all) { a in
                     AgentDotView(
                         identity:       a,
@@ -1611,17 +1638,28 @@ struct HubPopoverView: View {
                         isMemAccess:    vm.pets.memoryAccessingAgents.contains(a.id),
                         isPetResumable: vm.pets.states[a.id]?.resumable ?? false
                     )
-                    .onTapGesture { vm.prefillDelegation(for: a.id) }
+                    // Selection ring — appears when this dot is expanded
+                    .overlay(
+                        Circle()
+                            .stroke(a.color, lineWidth: 1.5)
+                            .opacity(expandedAgentId == a.id ? 1 : 0)
+                            .padding(-3)
+                    )
+                    .onTapGesture {
+                        withAnimation {
+                            expandedAgentId = expandedAgentId == a.id ? nil : a.id
+                        }
+                    }
                 }
             }
             Spacer()
-            // Entropy indicator
-            if let maxEnt = vm.db.agents.values.map(\.entropy).max(), maxEnt > kH_threshold {
+            // Worst-case entropy badge (only shown when below warning threshold)
+            if let maxEnt = vm.db.agents.values.map(\.entropy).max(), maxEnt <= kH_block {
                 Text("H=\(String(format:"%.1f",maxEnt))")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(maxEnt >= kH_block ? .red : .orange)
+                    .foregroundColor(maxEnt <= kH_threshold ? .red : .orange)
                     .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background((maxEnt >= kH_block ? Color.red : .orange).opacity(0.15))
+                    .background((maxEnt <= kH_threshold ? Color.red : .orange).opacity(0.15))
                     .cornerRadius(4)
             }
             Button {
@@ -1639,12 +1677,12 @@ struct HubPopoverView: View {
         .padding(.vertical, 10)
     }
 
-    // MARK: Tab picker
+    // MARK: Tab picker (3 tabs — Delegate moved to persistent bar)
 
     private var tabPicker: some View {
         HStack(spacing: 0) {
-            ForEach([("Agents","person.3"), ("Feed","bolt"), ("Resources","cpu"),
-                     ("Delegate","arrow.turn.down.right")].enumerated().map { $0 }, id: \.offset) { i, tab in
+            ForEach([("Agents","person.3"), ("Feed","bolt"),
+                     ("Resources","cpu")].enumerated().map { $0 }, id: \.offset) { i, tab in
                 Button {
                     withAnimation(.spring(response: 0.25)) { selectedTab = i }
                 } label: {
@@ -1695,13 +1733,6 @@ struct HubPopoverView: View {
         }
     }
 
-    // MARK: Delegate tab
-
-    private var delegateTab: some View {
-        DelegationBarView(vm: vm)
-            .padding(10)
-    }
-
     // MARK: Interactions panel
 
     private var interactionsPanel: some View {
@@ -1716,6 +1747,104 @@ struct HubPopoverView: View {
             }
         }
         .padding(8)
+    }
+}
+
+// MARK: - Agent Inline Detail  (shown when a dot in pillHeader is tapped)
+
+private struct AgentInlineDetail: View {
+    let identity:   AgentIdentity
+    let row:        AgentRow?
+    let bench:      BenchmarkState?
+    let pet:        PetState
+    let onDelegate: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            // Entropy arc + H value
+            ZStack {
+                let ent = row?.entropy ?? 0
+                let frac = max(0, min(ent / 12.0, 1.0))
+                let arcColor: Color = ent <= kH_threshold ? .red
+                                    : ent < kH_block      ? .orange
+                                    :                        identity.color
+                Circle()
+                    .stroke(Color.white.opacity(0.08), lineWidth: 2)
+                    .frame(width: 32, height: 32)
+                Circle()
+                    .trim(from: 0, to: frac)
+                    .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .foregroundColor(arcColor)
+                    .frame(width: 32, height: 32)
+                    .rotationEffect(.degrees(-90))
+                Text(String(format: "%.1f", ent))
+                    .font(.system(size: 7, weight: .semibold, design: .monospaced))
+                    .foregroundColor(arcColor)
+            }
+            .frame(width: 32, height: 32)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(identity.shortName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(identity.color)
+                    // Status badge
+                    let s = row?.status ?? .idle
+                    Text(s.rawValue)
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(s.color)
+                        .padding(.horizontal, 4).padding(.vertical, 2)
+                        .background(s.color.opacity(0.15))
+                        .cornerRadius(3)
+                    Spacer()
+                }
+                if let r = row, !r.taskSummary.isEmpty {
+                    Text(r.taskSummary)
+                        .font(.system(size: 9))
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(2)
+                }
+                if let b = bench, b.progress > 0 {
+                    HStack(spacing: 6) {
+                        ProgressView(value: Double(b.progress) / 100.0)
+                            .progressViewStyle(.linear)
+                            .tint(identity.color)
+                            .frame(width: 80)
+                        Text("\(b.progress)%")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.5))
+                        if let cf = b.bestCF {
+                            Text("CF=\(String(format:"%.1f",cf))")
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundColor(identity.color.opacity(0.7))
+                        }
+                        if let rm = b.bestRMSD {
+                            Text("RMSD=\(String(format:"%.2f",rm))Å")
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.45))
+                        }
+                    }
+                }
+                if !pet.lastTask.isEmpty {
+                    Text("pet: \(pet.lastTask.prefix(60))")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(.cyan.opacity(0.5))
+                }
+            }
+
+            Button(action: onDelegate) {
+                Label("Delegate", systemImage: "arrow.turn.down.right")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(identity.color)
+                    .padding(.horizontal, 7).padding(.vertical, 4)
+                    .background(identity.color.opacity(0.12))
+                    .cornerRadius(5)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(identity.color.opacity(0.05))
     }
 }
 
@@ -1743,6 +1872,13 @@ private struct AgentRowCard: View {
                     Text(identity.shortName)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(identity.color)
+                    // Entropy mini-display — monospaced, always visible
+                    if let ent = row?.entropy {
+                        let c: Color = ent <= kH_threshold ? .red : ent < kH_block ? .orange : .white.opacity(0.35)
+                        Text("H=\(String(format:"%.1f",ent))")
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundColor(c)
+                    }
                     Spacer()
                     statusBadge
                 }
@@ -1874,7 +2010,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         let content             = HubPopoverView(vm: vm)
         let hosting             = NSHostingController(rootView: content)
         popover.contentViewController = hosting
-        popover.contentSize     = CGSize(width: 420, height: 520)
+        popover.contentSize     = CGSize(width: 420, height: 580)
     }
 
     // MARK: Keyboard monitor  (directive H — Y/N/1-9/Tab/Space/Esc/⌘A/⌘Return)

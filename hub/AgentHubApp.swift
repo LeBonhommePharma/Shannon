@@ -42,6 +42,35 @@ struct AgentIdentity: Identifiable, Equatable {
     let shortName: String
     let authKind:  AuthKind
 
+    /// Full human label — mirrors hub/agent_identity.py display_name.
+    var displayName: String {
+        switch id {
+        case "claude_code": return "Claude Code"
+        case "cowork":      return "Cowork"
+        case "dispatch":    return "Dispatch"
+        case "science":     return "Claude Science"
+        case "grok_build":  return "Grok Build"
+        case "codex":       return "Codex"
+        case "chatgpt":     return "ChatGPT"
+        case "browser":     return "Browser"
+        case "dataset_runner": return "DatasetRunner"
+        case "terminal":    return "Terminal"
+        default:            return id.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    /// Underlying model family — shown as a small tag next to the agent name.
+    var modelTag: String {
+        switch id {
+        case "claude_code", "cowork", "dispatch": return "Claude"
+        case "science":     return "Claude Fable 5"
+        case "grok_build":  return "Grok · xAI"
+        case "codex", "chatgpt": return "GPT · OpenAI"
+        case "browser":     return "web"
+        default:            return "local"
+        }
+    }
+
     // Per-agent Apple TTS voice — distinct identifier + pitch per directive E
     var voiceIdentifier: String {
         switch id {
@@ -1868,9 +1897,15 @@ private struct AgentInlineDetail: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(identity.shortName)
+                    Text("\(identity.icon) \(identity.displayName)")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(identity.color)
+                    Text(identity.modelTag)
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(3)
                     // Status badge
                     let s = row?.status ?? .idle
                     Text(s.rawValue)
@@ -1952,9 +1987,16 @@ private struct AgentRowCard: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(identity.shortName)
+                    Text(identity.displayName)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(identity.color)
+                    // Model family tag — mirrors agent_identity.py
+                    Text(identity.modelTag)
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(3)
                     // Entropy mini-display — monospaced, always visible
                     if let ent = row?.entropy {
                         let c: Color = ent <= kH_threshold ? .red : ent < kH_block ? .orange : .white.opacity(0.35)

@@ -1653,13 +1653,14 @@ struct HubPopoverView: View {
                 }
             }
             Spacer()
-            // Worst-case entropy badge (only shown when below warning threshold)
-            if let maxEnt = vm.db.agents.values.map(\.entropy).max(), maxEnt <= kH_block {
-                Text("H=\(String(format:"%.1f",maxEnt))")
+            // Worst-case entropy badge — shows min entropy across agents when
+            // any agent falls below kH_block (deception risk zone).
+            if let minEnt = vm.db.agents.values.map(\.entropy).min(), minEnt < kH_block {
+                Text("H=\(String(format:"%.1f",minEnt))")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(maxEnt <= kH_threshold ? .red : .orange)
+                    .foregroundColor(minEnt <= kH_threshold ? .red : .orange)
                     .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background((maxEnt <= kH_threshold ? Color.red : .orange).opacity(0.15))
+                    .background((minEnt <= kH_threshold ? Color.red : .orange).opacity(0.15))
                     .cornerRadius(4)
             }
             Button {

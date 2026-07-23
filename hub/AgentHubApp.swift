@@ -328,13 +328,65 @@ struct BenchmarkState {
 
 struct AgentInteraction: Identifiable {
     enum InteractionKind { case yesNo, choice([String]), info }
-    let id       = UUID()
+    /// Gate `agent_interactions.interaction_id` — MUST be the real id, never a fresh UUID.
+    /// Resolve sends this string so AuditDB.resolve_interaction can match the row.
+    let id:        String
     let agentId:   String
     let prompt:    String
     let kind:      InteractionKind
     var timeoutAt: Date? = nil
     var diff:      String? = nil   // unified diff to show in DiffReviewView
     var content:   String  = ""    // agent's detailed output (event_output) shown under the prompt
+}
+
+/// Pure helpers for the hub ask path (extract gate id + build resolve envelope).
+/// Kept free of AppKit so the contract is unit-testable via the Python twin in agent_identity.
+enum HubAskPipeline {
+    /// Derive the gate interaction_id from an activity event.
+    /// Gate stores `ask.interaction_id` in `event_output` for approval_needed rows.
+    static func gateInteractionId(
+        eventOutput: String,
+        agentId: String,
+        at: Date = Date()
+    ) -> String {
+        let trimmed = eventOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return "ask-\(agentId)-\(Int(at.timeIntervalSince1970))"
+        }
+        // JSON payload with interaction_id field
+        if trimmed.hasPrefix("{"),
+           let data = trimmed.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let iid = obj["interaction_id"] as? String,
+           !iid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return iid.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // Bare id (normal path: event_output = interaction_id)
+        if !trimmed.contains("\n"), trimmed.count <= 200 {
+            return trimmed
+        }
+        return "ask-\(agentId)-\(Int(at.timeIntervalSince1970))"
+    }
+
+    /// Payload fields GateSocketClient.sendApproval must put on the wire.
+    static func resolvePayload(
+        gateInteractionId: String,
+        agentId: String,
+        approved: Bool,
+        reply: String? = nil
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "target_agent":   agentId,
+            "approved":       approved,
+            "interaction_id": gateInteractionId,
+            "source":         "hub_ui",
+            "kind":           "approval_response",
+        ]
+        if let reply, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["user_reply"] = reply
+        }
+        return payload
+    }
 }
 
 struct ToolEvent: Identifiable {
@@ -362,6 +414,17 @@ struct GateEvent {
     var payload:   String   // event_label from agent_activity
     var output:    String   // event_output from agent_activity
     var at:        Date
+    /// SQLite rowid — stable key for one-shot sound/voice/UI side effects.
+    var rowid:     Int64 = 0
+}
+
+/// Pending row from agent_interactions (authoritative ask source for the hub UI).
+struct PendingGateAsk: Identifiable, Equatable {
+    var id: String { interactionId }
+    let interactionId: String
+    let agentId: String
+    let prompt: String
+    let status: String
 }
 
 // MARK: - Sound Controller  (AVFoundation 8-bit square wave synthesis — local only)
@@ -738,17 +801,13 @@ final class GateSocketClient {
 
     func sendApproval(agentId: String, interactionId: String, approved: Bool,
                       reply: String? = nil) {
-        var payload: [String: Any] = [
-            "target_agent":    agentId,
-            "approved":        approved,
-            "interaction_id":  interactionId,
-            "source":          "hub_ui",
-        ]
-        // Optional free-text user reply — forwarded verbatim to the agent.
-        if let reply, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            payload["user_reply"] = reply
-        }
-        payload["kind"] = "approval_response"
+        // HubAskPipeline builds the wire payload so interaction_id is the gate id.
+        let payload = HubAskPipeline.resolvePayload(
+            gateInteractionId: interactionId,
+            agentId: agentId,
+            approved: approved,
+            reply: reply
+        )
         sendMessage([
             "agent_id":     "local_test",
             "task_id":      "hub_ui",
@@ -766,6 +825,8 @@ final class AuditDBReader: ObservableObject {
     @Published var agents:      [String: AgentRow]       = [:]
     @Published var benchmarks:  [String: BenchmarkState] = [:]
     @Published var events:      [GateEvent]               = []
+    /// Pending human asks from agent_interactions (gate interaction_id is authoritative).
+    @Published var pendingAsks: [PendingGateAsk]         = []
     @Published var isConnected  = false
 
     private var db:    OpaquePointer?
@@ -794,8 +855,16 @@ final class AuditDBReader: ObservableObject {
         guard let db else { return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
-            let a = self.fetchAgents(db); let b = self.fetchBenchmarks(db); let e = self.fetchEvents(db)
-            DispatchQueue.main.async { self.agents = a; self.benchmarks = b; self.events = e }
+            let a = self.fetchAgents(db)
+            let b = self.fetchBenchmarks(db)
+            let e = self.fetchEvents(db)
+            let p = self.fetchPendingAsks(db)
+            DispatchQueue.main.async {
+                self.agents = a
+                self.benchmarks = b
+                self.events = e
+                self.pendingAsks = p
+            }
         }
     }
 
@@ -851,11 +920,13 @@ final class AuditDBReader: ObservableObject {
 
     private func fetchEvents(_ db: OpaquePointer) -> [GateEvent] {
         // Fixed columns: event_label (not payload), event_at_ns→seconds (not timestamp)
+        // rowid is included so processGateEvents can fire side-effects once per row.
         let sql = """
             SELECT event_type, agent_id,
                    event_label,
                    CAST(event_at_ns / 1000000000.0 AS REAL) AS at,
-                   COALESCE(event_output, '')
+                   COALESCE(event_output, ''),
+                   rowid
             FROM agent_activity
             ORDER BY rowid DESC LIMIT 60;
             """
@@ -865,7 +936,30 @@ final class AuditDBReader: ObservableObject {
         while sqlite3_step(stmt) == SQLITE_ROW {
             result.append(GateEvent(eventType: str(stmt, 0), agentId: str(stmt, 1),
                                     payload: str(stmt, 2), output: str(stmt, 4),
-                                    at: Date(timeIntervalSince1970: dbl(stmt, 3))))
+                                    at: Date(timeIntervalSince1970: dbl(stmt, 3)),
+                                    rowid: sqlite3_column_int64(stmt, 5)))
+        }
+        return result
+    }
+
+    private func fetchPendingAsks(_ db: OpaquePointer) -> [PendingGateAsk] {
+        let sql = """
+            SELECT interaction_id, agent_id, prompt, status
+            FROM agent_interactions
+            WHERE status = 'pending'
+            ORDER BY created_at_ns DESC
+            LIMIT 20;
+            """
+        var stmt: OpaquePointer?; var result: [PendingGateAsk] = []
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return result }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            result.append(PendingGateAsk(
+                interactionId: str(stmt, 0),
+                agentId: str(stmt, 1),
+                prompt: str(stmt, 2),
+                status: str(stmt, 3)
+            ))
         }
         return result
     }
@@ -911,12 +1005,20 @@ final class HubViewModel: ObservableObject {
     let sound    = SoundController.shared
 
     private var cancellables = Set<AnyCancellable>()
+    /// Side-effect keys already handled (rowid or interaction id) — prevents 0.5s poll spam.
+    private var seenSideEffectKeys = Set<String>()
 
     init() {
         // Watch events from DB → signal pet memory access + dispatch voice/sound
         db.$events
             .receive(on: DispatchQueue.main)
             .sink { [weak self] events in self?.processGateEvents(events) }
+            .store(in: &cancellables)
+
+        // Authoritative pending asks from agent_interactions (correct gate ids)
+        db.$pendingAsks
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] asks in self?.syncPendingAsks(asks) }
             .store(in: &cancellables)
 
         // Thermal alerts → voice
@@ -940,8 +1042,21 @@ final class HubViewModel: ObservableObject {
                       detail:  evt.output)
         }
 
-        // Sound / voice / interaction callouts (dedupe by only looking at fresh events)
-        for evt in events.prefix(5) {
+        // Sound / voice / interaction callouts — each activity row fires at most once.
+        for evt in events {
+            let key: String
+            if evt.rowid != 0 {
+                key = "row:\(evt.rowid)"
+            } else {
+                key = "evt:\(evt.eventType)|\(evt.agentId)|\(evt.payload)|\(evt.output)|\(evt.at.timeIntervalSince1970)"
+            }
+            if seenSideEffectKeys.contains(key) { continue }
+            seenSideEffectKeys.insert(key)
+            // Bound memory: keep only recent keys
+            if seenSideEffectKeys.count > 500 {
+                seenSideEffectKeys = Set(seenSideEffectKeys.suffix(250))
+            }
+
             switch evt.eventType {
             case "pet_memory_access":
                 pets.signalMemoryAccess(for: evt.agentId)
@@ -961,6 +1076,26 @@ final class HubViewModel: ObservableObject {
         }
     }
 
+    /// Source of truth for open asks: agent_interactions rows with status=pending.
+    /// IDs are always the real gate interaction_id (never a fresh UUID).
+    private func syncPendingAsks(_ asks: [PendingGateAsk]) {
+        let pendingIds = Set(asks.map(\.interactionId))
+        // Drop cards that are no longer pending (resolved via UI or elsewhere).
+        interactions.removeAll { !pendingIds.contains($0.id) }
+        // Ensure every pending row has a card with the gate id.
+        for ask in asks {
+            if interactions.contains(where: { $0.id == ask.interactionId }) { continue }
+            interactions.append(AgentInteraction(
+                id: ask.interactionId,
+                agentId: ask.agentId,
+                prompt: ask.prompt,
+                kind: .yesNo,
+                timeoutAt: Date().addingTimeInterval(60),
+                content: ask.interactionId
+            ))
+        }
+    }
+
     private func checkResourceAlerts(_ m: SystemMetrics) {
         if m.thermalState >= 3 {
             voice.resourceAlert("CPU thermal throttling.")
@@ -970,20 +1105,31 @@ final class HubViewModel: ObservableObject {
     }
 
     private func pushInteraction(for evt: GateEvent) {
-        // Carry the agent's full output content so the review card can show
-        // what the agent actually produced, not just the one-line prompt.
-        let interaction = AgentInteraction(agentId: evt.agentId, prompt: evt.payload, kind: .yesNo,
-                                           timeoutAt: Date().addingTimeInterval(30),
-                                           content: evt.output)
-        DispatchQueue.main.async { self.interactions.append(interaction) }
+        // Gate writes interaction_id into event_output — never invent a UUID.
+        let gateId = HubAskPipeline.gateInteractionId(
+            eventOutput: evt.output,
+            agentId: evt.agentId,
+            at: evt.at
+        )
+        if interactions.contains(where: { $0.id == gateId }) { return }
+        seenSideEffectKeys.insert("ask:\(gateId)")
+        let interaction = AgentInteraction(
+            id: gateId,
+            agentId: evt.agentId,
+            prompt: evt.payload,
+            kind: .yesNo,
+            timeoutAt: Date().addingTimeInterval(30),
+            content: evt.output
+        )
+        interactions.append(interaction)
     }
 
-    func resolveInteraction(_ id: UUID, approved: Bool, reply: String? = nil) {
+    func resolveInteraction(_ id: String, approved: Bool, reply: String? = nil) {
         guard let ia = interactions.first(where: { $0.id == id }) else { return }
-        // Send approval/denial (plus optional user reply text) to the gate
+        // MUST send the gate interaction_id (ia.id), never a fresh UUID.
         GateSocketClient.shared.sendApproval(
             agentId:       ia.agentId,
-            interactionId: id.uuidString,
+            interactionId: ia.id,
             approved:      approved,
             reply:         reply
         )

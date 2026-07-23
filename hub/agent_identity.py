@@ -7,6 +7,7 @@ labels for: grok_build, codex, claude_code, dispatch, cowork, science.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -283,6 +284,62 @@ def resolve_ask(ask: PendingAsk, approved: bool) -> PendingAsk:
         prompt=ask.prompt,
         status="approved" if approved else "denied",
     )
+
+
+def interaction_id_from_activity_output(
+    event_output: str,
+    agent_id: str,
+    *,
+    fallback_ts: Optional[float] = None,
+) -> str:
+    """Extract gate interaction_id from agent_activity.event_output.
+
+    Mirrors HubAskPipeline.gateInteractionId in AgentHubApp.swift — the hub UI
+    must use this id on Approve/Deny, never a freshly generated UUID.
+    Gate writes bare ``ask.interaction_id`` into event_output for approval_needed.
+    """
+    import time as _time
+
+    trimmed = (event_output or "").strip()
+    if not trimmed:
+        ts = int(fallback_ts if fallback_ts is not None else _time.time())
+        return f"ask-{agent_id}-{ts}"
+    if trimmed.startswith("{"):
+        try:
+            obj = json.loads(trimmed)
+            if isinstance(obj, dict):
+                iid = str(obj.get("interaction_id") or "").strip()
+                if iid:
+                    return iid
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if "\n" not in trimmed and len(trimmed) <= 200:
+        return trimmed
+    ts = int(fallback_ts if fallback_ts is not None else _time.time())
+    return f"ask-{agent_id}-{ts}"
+
+
+def hub_ui_resolve_payload(
+    interaction_id: str,
+    agent_id: str,
+    approved: bool,
+    reply: Optional[str] = None,
+) -> dict[str, Any]:
+    """Wire payload AgentHubApp sendApproval / HubAskPipeline.resolvePayload emit.
+
+    The interaction_id field MUST be the gate row id (from agent_interactions or
+    activity event_output), not a random UI UUID.
+    """
+    payload: dict[str, Any] = {
+        "target_agent": agent_id,
+        "approved": bool(approved),
+        "interaction_id": interaction_id,
+        "source": "hub_ui",
+        "kind": "approval_response",
+    }
+    if reply and str(reply).strip():
+        payload["user_reply"] = str(reply).strip()
+    return payload
 
 
 def core_identities() -> list[AgentIdentity]:

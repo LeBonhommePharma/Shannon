@@ -1388,6 +1388,9 @@ final class HubViewModel: ObservableObject {
     @Published var composeText:    String                = ""
     /// Transient per-agent confirmation ("sent", "pinged") shown on the card.
     @Published var actionFeedback: [String: String]      = [:]
+    /// Agents whose ask a human approved within the last `happyDuration`.
+    /// Drives the companion pet's one-shot `happy` bounce and nothing else.
+    @Published var recentlyApproved: Set<String>         = []
     /// Suspends this hub's own sound and voice output. Does NOT pause the agents
     /// — the gate has no such control — so the UI labels it "Mute alerts", not
     /// "Pause all". Real local state: consulted before every sound/voice call.
@@ -1535,6 +1538,19 @@ final class HubViewModel: ObservableObject {
             reply:         reply
         )
         interactions.removeAll { $0.id == id }
+
+        // Approving is the one moment the pet celebrates. Denials get nothing:
+        // a bouncing animal after a human blocks an action would read as the
+        // hub disagreeing with the human.
+        if approved {
+            let agentId = ia.agentId
+            recentlyApproved.insert(agentId)
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + PetAnimationState.happyDuration + 0.1
+            ) { [weak self] in
+                self?.recentlyApproved.remove(agentId)
+            }
+        }
     }
 
     /// Ping an agent over the gate socket. Real wire traffic — see
@@ -2519,6 +2535,7 @@ struct HubPopoverView: View {
                         isExpanded:  vm.expandedAgentId == a.id,
                         isComposing: vm.composingAgentId == a.id,
                         feedback:    vm.actionFeedback[a.id],
+                        justApproved: vm.recentlyApproved.contains(a.id),
                         messages:    vm.db.messages[a.id] ?? [],
                         composeText: $vm.composeText,
                         onToggleExpand:  { vm.toggleExpanded(a.id) },
@@ -2691,9 +2708,13 @@ private struct AgentInlineDetail: View {
 ///   pet line               → ~/.shannon/pets/<id>/state.json last_task
 ///   message list           → agent_messages rows for this agent
 ///
-/// The one exception is the companion glyph next to the model tag
-/// (AgentIdentity.petSymbol): it is fixed branding per agent and carries no
-/// runtime signal, so it must never be styled to look like status.
+///   companion pet          → PetRenderer. Which animal is fixed branding
+///                            (AgentIdentity.petName); its mood is derived in
+///                            PetAnimationState.forAgent from the same status,
+///                            streaming and last_seen signals above, plus an
+///                            approval the human just granted. It is a softer
+///                            restatement of status, never a new signal, and
+///                            must not be the only place a state is shown.
 private struct AgentRowCard: View {
     let identity:    AgentIdentity
     let row:         AgentRow?
@@ -2703,6 +2724,7 @@ private struct AgentRowCard: View {
     let isExpanded:  Bool
     let isComposing: Bool
     let feedback:    String?
+    let justApproved: Bool
     let messages:    [AgentMessageRow]
     @Binding var composeText: String
     let onToggleExpand:  () -> Void
@@ -2717,6 +2739,20 @@ private struct AgentRowCard: View {
     /// Ping is only offered for agents the registry actually knows about —
     /// pinging an agent with no gate record would be a button that does nothing.
     private var canPing: Bool { row != nil && !isLive }
+
+    /// The companion's drawable form, or nil for agents whose pet has no
+    /// artwork yet (parrot, tortoise, gecko) — those keep the SF Symbol.
+    private var petKind: PetKind? { PetKind(petName: identity.petName) }
+
+    /// Mood, derived entirely from signals already on this card.
+    private var petAnimationState: PetAnimationState {
+        PetAnimationState.forAgent(
+            isActive: isLive,
+            isStreaming: isStreaming,
+            justApproved: justApproved,
+            secondsSinceLastSeen: row.map { Date().timeIntervalSince($0.lastSeen) }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -2804,11 +2840,19 @@ private struct AgentRowCard: View {
                 .background(Color.hubSurfaceElevated)
                 .cornerRadius(3)
                 .help("Underlying model family")
-            // Companion glyph — fixed per agent, part of its visual identity.
-            Image(systemName: identity.petSymbol)
-                .font(.system(size: 9))
-                .foregroundColor(identity.palette.tint)
-                .help("\(identity.displayName)'s companion: the \(identity.petName)")
+            // Companion pet. The character is fixed per agent; only its mood
+            // moves, and that mood is derived from this card's own signals.
+            if let petKind {
+                PetRenderer(pet: petKind,
+                            state: petAnimationState,
+                            agentColor: identity.palette.tint)
+                    .help("\(identity.displayName)'s companion: the \(identity.petName) — \(petAnimationState.rawValue)")
+            } else {
+                Image(systemName: identity.petSymbol)
+                    .font(.system(size: 9))
+                    .foregroundColor(identity.palette.tint)
+                    .help("\(identity.displayName)'s companion: the \(identity.petName)")
+            }
             // Streaming bars: gate messages arriving right now.
             if isStreaming {
                 StreamingBars(color: identity.palette.tint)

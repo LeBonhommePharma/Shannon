@@ -266,7 +266,7 @@ struct AgentIdentity: Identifiable, Equatable {
         case "dispatch":       return "wolf"
         case "cowork":         return "beaver"
         case "chatgpt":        return "parrot"
-        case "dataset_runner": return "ant"
+        case "dataset_runner": return "gear"   // machinery, not an animal
         case "terminal":       return "tortoise"
         case "browser":        return "gecko"
         default:               return "creature"
@@ -285,7 +285,7 @@ struct AgentIdentity: Identifiable, Equatable {
         case "dispatch":       return "dog.fill"
         case "cowork":         return "pawprint.fill"
         case "chatgpt":        return "bird.circle"
-        case "dataset_runner": return "ant.fill"
+        case "dataset_runner": return "gearshape.fill"
         case "terminal":       return "tortoise.fill"
         case "browser":        return "lizard.fill"
         default:               return "pawprint.fill"

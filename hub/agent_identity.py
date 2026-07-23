@@ -150,8 +150,10 @@ IDENTITIES.update(
             color_rgb=(0.15, 0.70, 0.80),
             system_image="tablecells",
             auth_kind="local",
-            pet="ant",  # tireless, methodical, many small loads
-            pet_symbol="ant.fill",
+            # Not an animal, unlike the rest — DatasetRunner is machinery,
+            # grinding through entries rather than acting with intent.
+            pet="gear",
+            pet_symbol="gearshape.fill",
         ),
         "local_test": AgentIdentity(
             id="local_test",

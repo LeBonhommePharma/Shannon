@@ -113,7 +113,7 @@ public enum AgentStyleCatalog {
         .init(id: "dataset_runner", displayName: "DatasetRunner", shortName: "DR",
               systemImage: "tablecells", emoji: "📊",
               red: 0.15, green: 0.70, blue: 0.80,
-              pet: "ant", petSymbol: "ant.fill"),
+              pet: "gear", petSymbol: "gearshape.fill"),
     ]
 
     public static func style(for id: String) -> AgentStyle {

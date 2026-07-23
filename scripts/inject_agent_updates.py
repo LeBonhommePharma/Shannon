@@ -86,24 +86,77 @@ def main() -> int:
         "cowork",
     ]
     results = []
+    # Prefer raw Unix exchange (register → welcome → msg) to avoid AgentClient
+    # recv-thread races when used for short fire-and-forget injects.
+    import socket as _socket
+    import uuid as _uuid
+
+    def _exchange(agent_id: str, envelope: dict, timeout: float = 8.0) -> dict:
+        s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect(SOCKET_PATH)
+        s.sendall(
+            (json.dumps({"agent_id": agent_id, "task_id": envelope.get("task_id", "inject")}) + "\n").encode()
+        )
+        welcome = json.loads(s.recv(65536).decode().splitlines()[0])
+        if welcome.get("type") != "welcome":
+            s.close()
+            return {"error": "no_welcome", "raw": welcome}
+        s.sendall((json.dumps(envelope) + "\n").encode())
+        resp_raw = s.recv(65536)
+        time.sleep(0.1)  # let gate finish post-response DB writes
+        s.close()
+        out: dict = {}
+        for line in resp_raw.decode().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+        return out
+
     if not args.ask_only:
         for aid in sample:
-            with AgentClient(aid, task_id="inject_demo", mode="socket") as c:
-                r = c.send_status(
-                    f"{label_for(aid)}: demo status at {time.strftime('%H:%M:%S')}",
-                    details={"step": 1, "source": "inject_agent_updates"},
-                )
-                results.append({"agent_id": aid, "gate": r})
-                print(f"status {aid}: {r.get('decision')} H={r.get('gate_H')}")
+            env = {
+                "agent_id": aid,
+                "task_id": "inject_demo",
+                "message_type": "status",
+                "confidence": 1.0,
+                "shannon_H": 2.0,
+                "message_id": f"inject-status-{aid}-{_uuid.uuid4().hex[:8]}",
+                "timestamp_ns": time.time_ns(),
+                "payload": {
+                    "message": f"{label_for(aid)}: demo status at {time.strftime('%H:%M:%S')}",
+                    "text": f"{label_for(aid)}: demo status",
+                    "source": "inject_agent_updates",
+                },
+            }
+            r = _exchange(aid, env)
+            results.append({"agent_id": aid, "gate": r})
+            print(f"status {aid}: {r.get('decision')} H={r.get('gate_H')}")
 
     # One full ask from science
-    with AgentClient("science", task_id="inject_demo", mode="socket") as c:
-        r = c.send_approval_needed(
-            "Apply Softβ canary config for Astex Arm A?",
-            interaction_id=f"inject-ask-science-{int(time.time())}",
-        )
-        results.append({"agent_id": "science", "ask_gate": r})
-        print(f"ask science: {r.get('decision')} {r}")
+    iid = f"inject-ask-science-{int(time.time())}"
+    ask_env = {
+        "agent_id": "science",
+        "task_id": "inject_demo",
+        "message_type": "approval_needed",
+        "confidence": 1.0,
+        "shannon_H": 1.5,
+        "message_id": f"inject-ask-{_uuid.uuid4().hex[:8]}",
+        "timestamp_ns": time.time_ns(),
+        "payload": {
+            "approval_needed": True,
+            "prompt": "Apply Softβ canary config for Astex Arm A?",
+            "text": "Apply Softβ canary config for Astex Arm A?",
+            "interaction_id": iid,
+        },
+    }
+    r = _exchange("science", ask_env)
+    results.append({"agent_id": "science", "ask_gate": r, "interaction_id": iid})
+    print(f"ask science: {r.get('decision')} {r}")
 
     dump = dump_db(Path(args.db))
     print(json.dumps({"results": results, "db": dump}, indent=2))

@@ -51,10 +51,10 @@ public enum AgentStyleCatalog {
         .init(id: "science", displayName: "Claude Science", shortName: "Sci",
               systemImage: "flask.fill", emoji: "🔬",
               red: 1.00, green: 0.72, blue: 0.10),
-        .init(id: "grok_build", displayName: "SuperGrok", shortName: "Grok",
+        .init(id: "grok_build", displayName: "Grok Build", shortName: "Grok",
               systemImage: "sparkles", emoji: "🟣",
               red: 0.68, green: 0.28, blue: 0.98),
-        .init(id: "claude_code", displayName: "Claude", shortName: "CC",
+        .init(id: "claude_code", displayName: "Claude Code", shortName: "CC",
               systemImage: "bubble.left.and.bubble.right.fill", emoji: "🟠",
               red: 1.00, green: 0.50, blue: 0.08),
         .init(id: "chatgpt", displayName: "ChatGPT", shortName: "GPT",
@@ -146,7 +146,7 @@ public enum BrowserAgentDetector {
         if matchesGrok(title: title, url: url, blob: blob) {
             return AgentKind(
                 id: "grok_build",
-                displayName: "SuperGrok",
+                displayName: "Grok Build",
                 source: "browser",
                 bundleHint: page.url.isEmpty ? nil : page.url
             )
@@ -176,14 +176,25 @@ public enum BrowserAgentDetector {
     }
 
     private static func matchesScience(title: String, url: String, blob: String) -> Bool {
-        // Explicit product name
+        // Explicit product name (native app window + marketing pages)
         if title.contains("claude science") || title.contains("science · claude")
-            || title.contains("science - claude") || title.contains("science | claude") {
+            || title.contains("science - claude") || title.contains("science | claude")
+            || title == "claude science" || title.hasPrefix("claude science ") {
             return true
         }
-        // URL cues
-        if url.contains("claude.ai") && (
-            url.contains("science") || url.contains("project") && blob.contains("flexaid")
+        // Official product URLs (claude.com/science, claude.com/product/claude-science)
+        if url.contains("claude.com/science") || url.contains("claude.com/product/claude-science")
+            || url.contains("claude.ai/science") || url.contains("/claude-science") {
+            return true
+        }
+        if (url.contains("claude.ai") || url.contains("claude.com") || url.contains("anthropic.com"))
+            && (url.contains("/science") || url.contains("science=")) {
+            return true
+        }
+        // Project / chat URLs with science + research cues
+        if (url.contains("claude.ai") || url.contains("claude.com")) && (
+            url.contains("science")
+                || (url.contains("project") && blob.contains("flexaid"))
         ) {
             return true
         }
@@ -200,6 +211,8 @@ public enum BrowserAgentDetector {
         if title.hasPrefix("science") && (title.contains("claude") || blob.contains("anthropic")) {
             return true
         }
+        // Window title from native Claude Science.app
+        if title.contains("operon") { return true }
         return false
     }
 
@@ -207,23 +220,30 @@ public enum BrowserAgentDetector {
         if title.contains("supergrok") || title.contains("super grok") {
             return true
         }
-        // Official hosts
+        // Official hosts (never map these to science)
         if url.contains("grok.x.ai") || url.contains("x.ai/grok")
+            || url.contains("grok.com") || url.contains("grok.x.com")
             || url.contains("x.com/i/grok") || url.contains("twitter.com/i/grok") {
             return true
         }
         // Title on X / grok.x.ai
         if title.contains("grok") && (
             url.contains("x.com") || url.contains("x.ai") || url.contains("twitter")
+                || url.contains("grok.com")
                 || title.contains("x /") || title.contains("x ·")
         ) {
             return true
         }
-        if title == "grok" || title.hasPrefix("grok ") || title.contains("grok by x") {
+        if title == "grok" || title.hasPrefix("grok ") || title.contains("grok by x")
+            || title.contains("grok build") {
             return true
         }
         // Catch-all for SuperGrok branding in title even without URL
         if blob.contains("supergrok") { return true }
+        // Never treat science URLs as Grok even if title mentions both
+        if blob.contains("claude science") || url.contains("claude.com/science") {
+            return false
+        }
         return false
     }
 }

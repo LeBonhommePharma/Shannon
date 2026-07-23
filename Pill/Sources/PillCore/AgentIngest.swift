@@ -118,14 +118,13 @@ public enum AgentAppMapper {
         let name = (appName ?? "").lowercased()
 
         // Browser tab wins over generic "browser" bundle mapping.
+        // Science (amber flask) vs SuperGrok/Grok Build (purple sparkles) etc.
         if let page, !page.isEmpty, let web = BrowserAgentDetector.detect(page: page) {
-            var refined = web
-            refined.bundleHint = bid.isEmpty ? web.bundleHint : bid
-            return refined
+            return withCatalogStyle(web, bundleHint: bid.isEmpty ? (web.bundleHint ?? "") : bid)
         }
         // Even without URL, title-only page context can refine.
         if let page, !page.title.isEmpty, let web = BrowserAgentDetector.detect(page: page) {
-            return web
+            return withCatalogStyle(web, bundleHint: bid)
         }
 
         // Explicit bundle rules (most specific first).
@@ -139,13 +138,16 @@ public enum AgentAppMapper {
             ("com.mitchellh.ghostty", .init(id: "terminal", displayName: "Ghostty", source: "terminal")),
             ("co.zeit.hyper", .init(id: "terminal", displayName: "Hyper", source: "terminal")),
             ("net.kovidgoyal.kitty", .init(id: "terminal", displayName: "Kitty", source: "terminal")),
-            // Chat / agents
+            // Chat / agents — Claude Science (operon) BEFORE generic Claude desktop
             ("com.openai.chat", .init(id: "chatgpt", displayName: "ChatGPT", source: "chat")),
             ("com.openai.codex", .init(id: "codex", displayName: "Codex", source: "chat")),
-            ("com.anthropic.claudefordesktop", .init(id: "claude_code", displayName: "Claude", source: "chat")),
-            ("com.anthropic.claude", .init(id: "claude_code", displayName: "Claude", source: "chat")),
-            ("com.xai.grok", .init(id: "grok_build", displayName: "SuperGrok", source: "chat")),
-            ("ai.x.grok", .init(id: "grok_build", displayName: "SuperGrok", source: "chat")),
+            ("com.anthropic.operon", .init(id: "science", displayName: "Claude Science", source: "chat")),
+            ("com.anthropic.claudescience", .init(id: "science", displayName: "Claude Science", source: "chat")),
+            ("com.anthropic.claude-science", .init(id: "science", displayName: "Claude Science", source: "chat")),
+            ("com.anthropic.claudefordesktop", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            ("com.anthropic.claude", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            ("com.xai.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
+            ("ai.x.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
             // IDEs
             ("com.todesktop.", .init(id: "cursor", displayName: "Cursor", source: "ide")), // prefix match below
             ("com.microsoft.vscode", .init(id: "vscode", displayName: "VS Code", source: "ide")),
@@ -160,30 +162,65 @@ public enum AgentAppMapper {
             ("com.microsoft.edgemac", .init(id: "browser", displayName: "Edge", source: "browser")),
         ]
 
-        // Native Grok app should read as SuperGrok
-        // (handled below in name fallbacks + bundle rules above)
+        // Native Grok / SuperGrok app → grok_build (purple sparkles, not Science flask)
+        // Native Claude Science (com.anthropic.operon) → science above
 
         for (key, kind) in rules {
             if key.hasSuffix(".") {
                 if bid.hasPrefix(key) {
-                    return AgentKind(id: kind.id, displayName: kind.displayName,
-                                     source: kind.source, bundleHint: bid)
+                    return withCatalogStyle(kind, bundleHint: bid)
                 }
             } else if bid == key {
-                return AgentKind(id: kind.id, displayName: kind.displayName,
-                                 source: kind.source, bundleHint: bid)
+                return withCatalogStyle(kind, bundleHint: bid)
             }
         }
 
         // Name fallbacks (unsigned / electron apps with shifting bundle ids).
-        if name.contains("claude") { return .init(id: "claude_code", displayName: "Claude", source: "chat", bundleHint: bid) }
-        if name.contains("chatgpt") || name == "chat gpt" { return .init(id: "chatgpt", displayName: "ChatGPT", source: "chat", bundleHint: bid) }
-        if name.contains("codex") { return .init(id: "codex", displayName: "Codex", source: "chat", bundleHint: bid) }
-        if name.contains("grok") || name.contains("supergrok") {
-            return .init(id: "grok_build", displayName: "SuperGrok", source: "chat", bundleHint: bid)
+        // Science BEFORE generic "claude" — app name is "Claude Science".
+        if name.contains("claude science") || name == "claudescience"
+            || (name.contains("science") && name.contains("claude"))
+            || name.contains("operon") {
+            return withCatalogStyle(
+                .init(id: "science", displayName: "Claude Science", source: "chat"),
+                bundleHint: bid
+            )
         }
-        if name.contains("cursor") { return .init(id: "cursor", displayName: "Cursor", source: "ide", bundleHint: bid) }
-        if name.contains("code") || name.contains("vscode") { return .init(id: "vscode", displayName: "VS Code", source: "ide", bundleHint: bid) }
+        if name.contains("claude") {
+            return withCatalogStyle(
+                .init(id: "claude_code", displayName: "Claude Code", source: "chat"),
+                bundleHint: bid
+            )
+        }
+        if name.contains("chatgpt") || name == "chat gpt" {
+            return withCatalogStyle(
+                .init(id: "chatgpt", displayName: "ChatGPT", source: "chat"),
+                bundleHint: bid
+            )
+        }
+        if name.contains("codex") {
+            return withCatalogStyle(
+                .init(id: "codex", displayName: "Codex", source: "chat"),
+                bundleHint: bid
+            )
+        }
+        if name.contains("grok") || name.contains("supergrok") {
+            return withCatalogStyle(
+                .init(id: "grok_build", displayName: "Grok Build", source: "chat"),
+                bundleHint: bid
+            )
+        }
+        if name.contains("cursor") {
+            return withCatalogStyle(
+                .init(id: "cursor", displayName: "Cursor", source: "ide"),
+                bundleHint: bid
+            )
+        }
+        if name.contains("code") || name.contains("vscode") {
+            return withCatalogStyle(
+                .init(id: "vscode", displayName: "VS Code", source: "ide"),
+                bundleHint: bid
+            )
+        }
         if name.contains("terminal") || name.contains("iterm") || name.contains("warp") || name.contains("ghostty") || name.contains("kitty") {
             return .init(id: "terminal", displayName: appName ?? "Terminal", source: "terminal", bundleHint: bid)
         }
@@ -196,6 +233,18 @@ public enum AgentAppMapper {
         let fallbackID = AgentKind.sanitizeID(rawID)
         let label = appName.flatMap { $0.isEmpty ? nil : $0 } ?? (bid.isEmpty ? "Local" : bid)
         return AgentKind(id: fallbackID, displayName: label, source: "other", bundleHint: bid.isEmpty ? nil : bid)
+    }
+
+    /// Prefer catalog displayName (icons/colours key off id; labels stay consistent).
+    private static func withCatalogStyle(_ kind: AgentKind, bundleHint: String) -> AgentKind {
+        let style = AgentStyleCatalog.style(for: kind.id)
+        let known = AgentStyleCatalog.all.contains(where: { $0.id == kind.id })
+        return AgentKind(
+            id: kind.id,
+            displayName: known ? style.displayName : kind.displayName,
+            source: kind.source,
+            bundleHint: bundleHint.isEmpty ? kind.bundleHint : bundleHint
+        )
     }
 
     /// Optional clipboard override — **only** when the user is intentional.

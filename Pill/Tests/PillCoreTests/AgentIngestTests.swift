@@ -25,7 +25,7 @@ final class AgentIngestTests: XCTestCase {
         XCTAssertEqual(AgentAppMapper.map(bundleID: "com.xai.grok", appName: "Grok").id, "grok_build")
         XCTAssertEqual(
             AgentAppMapper.map(bundleID: "com.xai.grok", appName: "Grok").displayName,
-            "SuperGrok"
+            "Grok Build"
         )
     }
 
@@ -41,7 +41,42 @@ final class AgentIngestTests: XCTestCase {
         )
         XCTAssertEqual(k.id, "science")
         XCTAssertEqual(k.displayName, "Claude Science")
+        let style = AgentStyleCatalog.style(for: k.id)
+        XCTAssertEqual(style.systemImage, "flask.fill")
+        XCTAssertEqual(style.emoji, "🔬")
+        // Amber brand (not purple Grok)
+        XCTAssertGreaterThan(style.red, 0.9)
+        XCTAssertLessThan(style.blue, 0.3)
+    }
+
+    func testNativeClaudeScienceAppNotClaudeCode() {
+        // Real macOS bundle: /Applications/Claude Science.app → com.anthropic.operon
+        let k = AgentAppMapper.map(
+            bundleID: "com.anthropic.operon",
+            appName: "Claude Science"
+        )
+        XCTAssertEqual(k.id, "science")
+        XCTAssertEqual(k.displayName, "Claude Science")
         XCTAssertEqual(AgentStyleCatalog.style(for: k.id).systemImage, "flask.fill")
+
+        // Name-only (unsigned / shifted bundle)
+        let byName = AgentAppMapper.map(bundleID: "com.example.unknown", appName: "Claude Science")
+        XCTAssertEqual(byName.id, "science")
+        // Must NOT collapse to generic Claude Code
+        XCTAssertNotEqual(byName.id, "claude_code")
+    }
+
+    func testBrowserClaudeComScienceProductURL() {
+        let k = BrowserAgentDetector.detect(page: BrowserPageContext(
+            title: "Claude Science",
+            url: "https://claude.com/science"
+        ))
+        XCTAssertEqual(k?.id, "science")
+        let product = BrowserAgentDetector.detect(page: BrowserPageContext(
+            title: "Get started",
+            url: "https://claude.com/product/claude-science"
+        ))
+        XCTAssertEqual(product?.id, "science")
     }
 
     func testBrowserTabSuperGrokNotScience() {
@@ -55,12 +90,41 @@ final class AgentIngestTests: XCTestCase {
             page: grok
         )
         XCTAssertEqual(k.id, "grok_build")
-        XCTAssertEqual(k.displayName, "SuperGrok")
-        XCTAssertEqual(AgentStyleCatalog.style(for: k.id).systemImage, "sparkles")
-        // Distinct colours
+        XCTAssertEqual(k.displayName, "Grok Build")
+        let style = AgentStyleCatalog.style(for: k.id)
+        XCTAssertEqual(style.systemImage, "sparkles")
+        XCTAssertEqual(style.emoji, "🟣")
+        // Distinct colours: Science amber ≠ Grok purple
         let sci = AgentStyleCatalog.style(for: "science")
         let grk = AgentStyleCatalog.style(for: "grok_build")
         XCTAssertNotEqual(sci.red, grk.red)
+        XCTAssertNotEqual(sci.systemImage, grk.systemImage)
+        XCTAssertNotEqual(sci.emoji, grk.emoji)
+        XCTAssertGreaterThan(grk.blue, 0.8)
+    }
+
+    func testStyleCatalogScienceVsGrokDistinct() {
+        let pairs: [(String, String, String)] = [
+            ("science", "flask.fill", "🔬"),
+            ("grok_build", "sparkles", "🟣"),
+            ("claude_code", "bubble.left.and.bubble.right.fill", "🟠"),
+            ("codex", "chevron.left.forwardslash.chevron.right", "🔵"),
+            ("dispatch", "paperplane.fill", "🟤"),
+            ("cowork", "person.2.fill", "🟢"),
+        ]
+        var seenImages = Set<String>()
+        for (id, image, emoji) in pairs {
+            let s = AgentStyleCatalog.style(for: id)
+            XCTAssertEqual(s.systemImage, image, id)
+            XCTAssertEqual(s.emoji, emoji, id)
+            XCTAssertFalse(seenImages.contains(s.systemImage), "duplicate icon for \(id)")
+            seenImages.insert(s.systemImage)
+        }
+        // Science vs Grok must never share palette
+        let sci = AgentStyleCatalog.style(for: "science")
+        let grk = AgentStyleCatalog.style(for: "grok_build")
+        XCTAssertNotEqual(sci.red, grk.red)
+        XCTAssertNotEqual(sci.blue, grk.blue)
         XCTAssertNotEqual(sci.systemImage, grk.systemImage)
     }
 

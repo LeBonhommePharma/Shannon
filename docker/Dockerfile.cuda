@@ -24,7 +24,7 @@ COPY . .
 # Build with CUDA support and run C++ tests
 RUN mkdir build && cd build \
     && cmake .. -DCMAKE_BUILD_TYPE=Release \
-                -DSHANNON_CUDA=ON \
+                -DSHANNON_USE_CUDA=ON \
                 -DSHANNON_BUILD_TESTS=ON \
                 -DSHANNON_BUILD_PYTHON=OFF \
     && make -j$(nproc) \

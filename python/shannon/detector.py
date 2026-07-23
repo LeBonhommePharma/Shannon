@@ -257,6 +257,11 @@ class ShannonCollapseDetector:
         if enable_clustering:
             self._clusterer = _PyFastOPTICS()
 
+        # Last result seen from either backend — keeps the convenience
+        # properties (is_collapsed, collapse_score, …) truthful on the
+        # C++ fast path, which bypasses the Python window state.
+        self._last_result: CollapseResult | None = None
+
         # Backend label
         try:
             from shannon._core import SlidingWindowEntropy  # noqa: F401
@@ -276,6 +281,7 @@ class ShannonCollapseDetector:
         self._running_sum_sq = 0.0
         self._last_super_cluster = None
         self._active_types.clear()
+        self._last_result = None
 
     def add_logits(self, logits: ArrayLike) -> CollapseResult:
         """Feed raw logits for the current token.
@@ -285,7 +291,8 @@ class ShannonCollapseDetector:
         arr = _ensure_float64_1d(logits)
         if self._cpp_detector is not None:
             r = self._cpp_detector.add_logits(arr)
-            return self._wrap_cpp_result(r)
+            self._last_result = self._wrap_cpp_result(r)
+            return self._last_result
         h = shannon_configurational_entropy(arr)
         result = self._push(h)
 
@@ -304,7 +311,8 @@ class ShannonCollapseDetector:
         arr = _ensure_float64_1d(probs)
         if self._cpp_detector is not None:
             r = self._cpp_detector.add_probs(arr)
-            return self._wrap_cpp_result(r)
+            self._last_result = self._wrap_cpp_result(r)
+            return self._last_result
         h = _entropy_from_probs(arr)
         return self._push(h)
 
@@ -313,7 +321,8 @@ class ShannonCollapseDetector:
         arr = _ensure_float64_1d(logprobs)
         if self._cpp_detector is not None:
             r = self._cpp_detector.add_logprobs(arr)
-            return self._wrap_cpp_result(r)
+            self._last_result = self._wrap_cpp_result(r)
+            return self._last_result
         h = _entropy_from_logprobs(arr)
         return self._push(h)
 
@@ -340,28 +349,35 @@ class ShannonCollapseDetector:
     @property
     def is_collapsed(self) -> bool:
         """Whether the most recent token triggered a collapse event."""
-        if self._trace:
-            last_event = self._event_history[-1] if self._event_history else "none"
-            return last_event in ("collapse", "oscillation")
+        if self._last_result is not None:
+            return self._last_result.event in ("collapse", "oscillation")
         return False
 
     @property
     def collapse_score(self) -> float:
         """|delta / threshold|, >1.0 means collapsed."""
-        if abs(self._threshold) < 1e-15 or not self._trace:
+        if abs(self._threshold) < 1e-15 or self._last_result is None:
             return 0.0
-        return abs(self._trace[-1] - self._current_mean / max(1, len(self._window)) / abs(self._threshold))
+        return abs(self._last_result.delta / self._threshold)
 
     @property
     def current_entropy(self) -> float:
         """Most recent entropy value."""
+        if self._last_result is not None:
+            return self._last_result.entropy
         return self._trace[-1] if self._trace else 0.0
 
     @property
     def delta_h(self) -> float:
-        """Rate of entropy change via linear regression over the window."""
+        """Rate of entropy change via linear regression over the window.
+
+        On the C++ fast path the Python window is not populated, so this
+        falls back to the last deviation-from-window-mean (delta).
+        """
         n = len(self._window)
         if n < 2:
+            if self._last_result is not None:
+                return self._last_result.delta
             return 0.0
         sum_i = 0.0
         sum_h = 0.0
@@ -457,6 +473,7 @@ class ShannonCollapseDetector:
             event=event,
             token_index=self._token_count,
         )
+        self._last_result = result
         self._token_count += 1
 
         if (collapsed or expanded or oscillating) and self._callback:

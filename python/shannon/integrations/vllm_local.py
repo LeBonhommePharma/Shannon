@@ -84,7 +84,7 @@ def monitor_vllm_output(
                     [lp.logprob for lp in logprobs_dict.values()],
                     dtype=np.float64,
                 )
-                H = detector.add_logprobs(lps)
+                res = detector.add_logprobs(lps)
 
                 # Get the selected token
                 token_ids = list(logprobs_dict.keys())
@@ -100,7 +100,7 @@ def monitor_vllm_output(
                 events.append(VLLMTokenEvent(
                     token_id=token_id,
                     token_text=token_text,
-                    entropy=H,
+                    entropy=res.entropy,
                     delta_h=detector.delta_h,
                     collapse_score=detector.collapse_score,
                     is_collapsed=detector.is_collapsed,
@@ -145,11 +145,11 @@ def monitor_vllm_async(
                         [lp.logprob for lp in latest.values()],
                         dtype=np.float64,
                     )
-                    H = detector.add_logprobs(lps)
+                    res = detector.add_logprobs(lps)
                     yield VLLMTokenEvent(
                         token_id=0,
                         token_text="",
-                        entropy=H,
+                        entropy=res.entropy,
                         delta_h=detector.delta_h,
                         collapse_score=detector.collapse_score,
                         is_collapsed=detector.is_collapsed,

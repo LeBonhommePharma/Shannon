@@ -18,8 +18,8 @@ import time
 
 import numpy as np
 
-from shannon_entropy import ShannonCollapseDetector
-from shannon_entropy.core import get_backend
+from shannon import ShannonCollapseDetector
+from shannon import get_backend
 
 
 def generate_normal_trace(n_tokens: int = 500, vocab_size: int = 50000, seed: int = 42):

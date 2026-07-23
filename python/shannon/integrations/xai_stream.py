@@ -100,14 +100,15 @@ def monitor_xai_stream(
                     [tlp.logprob for tlp in token_logprobs.top_logprobs],
                     dtype=np.float64,
                 )
-                H = detector.add_logprobs(lps)
+                res = detector.add_logprobs(lps)
             else:
-                H = 0.0
-                detector._push_and_check(H)
+                # No alternatives reported → degenerate one-hot distribution,
+                # H = 0 bits, via the public API (both backends stay in sync).
+                res = detector.add_probs(np.array([1.0], dtype=np.float64))
 
             event = XAIStreamEvent(
                 token=token_text,
-                entropy=H,
+                entropy=res.entropy,
                 delta_h=detector.delta_h,
                 collapse_score=detector.collapse_score,
                 is_collapsed=detector.is_collapsed,

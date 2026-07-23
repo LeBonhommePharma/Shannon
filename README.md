@@ -318,7 +318,7 @@ int main() {
 
 ```python
 import numpy as np
-from shannon_entropy import ShannonCollapseDetector
+from shannon import ShannonCollapseDetector
 
 detector = ShannonCollapseDetector(
     window_size=8,
@@ -335,7 +335,7 @@ for logits in model_output_stream:
 
 ```python
 from openai import OpenAI
-from shannon_entropy import ShannonCollapseDetector
+from shannon import ShannonCollapseDetector
 
 client = OpenAI()
 detector = ShannonCollapseDetector()

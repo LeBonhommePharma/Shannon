@@ -14,7 +14,7 @@ import os
 
 import numpy as np
 
-from shannon_entropy import ShannonCollapseDetector
+from shannon import ShannonCollapseDetector
 
 
 def on_collapse(result):

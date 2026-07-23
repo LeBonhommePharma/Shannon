@@ -114,4 +114,23 @@ final class AgentActivityTests: XCTestCase {
         XCTAssertEqual(id, "science")
         XCTAssertEqual(task, "fix CF.com floor")
     }
+
+    /// Claude hub enhancement: live gate `agents` rows win when fresher/busy.
+    func testMergePrefersLiveGateAgent() {
+        let pet = AgentActivitySnapshot(
+            id: "claude_code", displayName: "Claude", status: .idle,
+            lastTask: "old offline task", source: "chat",
+            updatedAt: Date().addingTimeInterval(-120), resumable: false, historyCount: 0
+        )
+        let gate = AgentActivitySnapshot(
+            id: "claude_code", displayName: "Claude", status: .active,
+            lastTask: "docking canary", source: "gate",
+            updatedAt: Date(), resumable: true, historyCount: 4
+        )
+        let s = AgentActivityReader.merge(base: [pet], gate: [gate])
+        XCTAssertEqual(s.busyCount, 1)
+        XCTAssertEqual(s.primary?.lastTask, "docking canary")
+        XCTAssertEqual(s.primary?.status, .active)
+        XCTAssertTrue(s.collapsedText.contains("Claude"))
+    }
 }

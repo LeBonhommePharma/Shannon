@@ -157,16 +157,22 @@ public struct AgentActivitySummary: Sendable, Equatable {
 // MARK: - Disk reader (pure, testable)
 
 public enum AgentActivityReader {
+    /// Path to the hub SQLite DB written by `hub/shannon_gate.py` (Claude enhancements).
+    public static var defaultGateDB: URL {
+        PetBootstrap.shannonHome.appendingPathComponent("agent_hub.db")
+    }
+
     public static func load(
         petsRoot: URL = PetBootstrap.petsRoot,
         registryURL: URL = PetBootstrap.registryURL,
+        gateDB: URL? = defaultGateDB,
         now: Date = Date(),
         staleAfter: TimeInterval = 45 * 60
     ) -> AgentActivitySummary {
         let fm = FileManager.default
         var byID: [String: AgentActivitySnapshot] = [:]
 
-        // Registry first (display names / sources from ⌘D).
+        // 1) Registry first (display names / sources from ⌘D).
         if let data = try? Data(contentsOf: registryURL),
            let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             for entry in arr {
@@ -190,56 +196,80 @@ public enum AgentActivityReader {
             }
         }
 
-        // Pets override with live status.json.
-        guard let kids = try? fm.contentsOfDirectory(
+        // 2) Pets override with live state.json (offline path).
+        if let kids = try? fm.contentsOfDirectory(
             at: petsRoot,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
-        ) else {
-            return AgentActivitySummary(agents: Array(byID.values), scannedAt: now)
+        ) {
+            for dir in kids {
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { continue }
+                let id = dir.lastPathComponent
+                let stateURL = dir.appendingPathComponent("state.json")
+                guard let data = try? Data(contentsOf: stateURL),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    continue
+                }
+
+                let statusRaw = obj["status"] as? String ?? "idle"
+                var status = AgentRunStatus(raw: statusRaw)
+                let taskRaw = obj["last_task"] as? String ?? ""
+                let task = AgentActivitySnapshot.looksLikeSecretOrJunk(taskRaw)
+                    ? ""
+                    : AgentActivitySnapshot.shorten(taskRaw, max: 120)
+                let ts = obj["updated_at"] as? Double ?? 0
+                let updated = ts > 0 ? Date(timeIntervalSince1970: ts) : .distantPast
+                let resumable = obj["resumable"] as? Bool ?? false
+                let hist = obj["history_count"] as? Int ?? 0
+
+                if status.isBusy, now.timeIntervalSince(updated) > staleAfter {
+                    status = .idle
+                }
+
+                let existing = byID[id]
+                let display = existing?.displayName
+                    ?? displayName(for: id, config: dir.appendingPathComponent("config.json"))
+                let source = existing?.source ?? guessSource(id)
+
+                byID[id] = AgentActivitySnapshot(
+                    id: id,
+                    displayName: display,
+                    status: status,
+                    lastTask: task.isEmpty ? (existing?.lastTask ?? "") : task,
+                    source: source,
+                    updatedAt: updated,
+                    resumable: resumable,
+                    historyCount: hist
+                )
+            }
         }
 
-        for dir in kids {
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { continue }
-            let id = dir.lastPathComponent
-            let stateURL = dir.appendingPathComponent("state.json")
-            guard let data = try? Data(contentsOf: stateURL),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                continue
+        // 3) Live hub gate DB (Claude: agents table) wins for status/entropy when fresher.
+        if let gateDB {
+            for row in loadGateAgents(dbURL: gateDB) {
+                let existing = byID[row.id]
+                var status = row.status
+                if status.isBusy, now.timeIntervalSince(row.updatedAt) > staleAfter {
+                    status = .idle
+                }
+                // Prefer gate when it has a newer timestamp or is actively connected.
+                let preferGate = existing == nil
+                    || row.updatedAt >= (existing?.updatedAt ?? .distantPast)
+                    || status.isBusy
+                if preferGate {
+                    byID[row.id] = AgentActivitySnapshot(
+                        id: row.id,
+                        displayName: existing?.displayName ?? displayName(for: row.id, config: petsRoot.appendingPathComponent(row.id).appendingPathComponent("config.json")),
+                        status: status,
+                        lastTask: row.lastTask.isEmpty ? (existing?.lastTask ?? "") : row.lastTask,
+                        source: existing?.source ?? guessSource(row.id),
+                        updatedAt: row.updatedAt,
+                        resumable: existing?.resumable ?? status.isBusy,
+                        historyCount: max(existing?.historyCount ?? 0, row.historyCount)
+                    )
+                }
             }
-
-            let statusRaw = obj["status"] as? String ?? "idle"
-            var status = AgentRunStatus(raw: statusRaw)
-            let taskRaw = obj["last_task"] as? String ?? ""
-            let task = AgentActivitySnapshot.looksLikeSecretOrJunk(taskRaw)
-                ? ""
-                : AgentActivitySnapshot.shorten(taskRaw, max: 120)
-            let ts = obj["updated_at"] as? Double ?? 0
-            let updated = ts > 0 ? Date(timeIntervalSince1970: ts) : .distantPast
-            let resumable = obj["resumable"] as? Bool ?? false
-            let hist = obj["history_count"] as? Int ?? 0
-
-            // Stale "active" without recent updates → show as idle for UI.
-            if status.isBusy, now.timeIntervalSince(updated) > staleAfter {
-                status = .idle
-            }
-
-            let existing = byID[id]
-            let display = existing?.displayName
-                ?? displayName(for: id, config: dir.appendingPathComponent("config.json"))
-            let source = existing?.source ?? guessSource(id)
-
-            byID[id] = AgentActivitySnapshot(
-                id: id,
-                displayName: display,
-                status: status,
-                lastTask: task.isEmpty ? (existing?.lastTask ?? "") : task,
-                source: source,
-                updatedAt: updated,
-                resumable: resumable,
-                historyCount: hist
-            )
         }
 
         let agents = byID.values.sorted { lhs, rhs in
@@ -247,6 +277,49 @@ public enum AgentActivityReader {
             return lhs.updatedAt > rhs.updatedAt
         }
         return AgentActivitySummary(agents: agents, scannedAt: now)
+    }
+
+    /// Merge pure helper for tests: pets/registry map + gate rows → summary.
+    public static func merge(
+        base: [AgentActivitySnapshot],
+        gate: [AgentActivitySnapshot],
+        now: Date = Date(),
+        staleAfter: TimeInterval = 45 * 60
+    ) -> AgentActivitySummary {
+        var byID: [String: AgentActivitySnapshot] = [:]
+        for a in base { byID[a.id] = a }
+        for row in gate {
+            var status = row.status
+            if status.isBusy, now.timeIntervalSince(row.updatedAt) > staleAfter {
+                status = .idle
+            }
+            let existing = byID[row.id]
+            let preferGate = existing == nil
+                || row.updatedAt >= (existing?.updatedAt ?? .distantPast)
+                || status.isBusy
+            if preferGate {
+                byID[row.id] = AgentActivitySnapshot(
+                    id: row.id,
+                    displayName: existing?.displayName ?? row.displayName,
+                    status: status,
+                    lastTask: row.lastTask.isEmpty ? (existing?.lastTask ?? "") : row.lastTask,
+                    source: existing?.source ?? row.source,
+                    updatedAt: row.updatedAt,
+                    resumable: existing?.resumable ?? status.isBusy,
+                    historyCount: max(existing?.historyCount ?? 0, row.historyCount)
+                )
+            }
+        }
+        let agents = byID.values.sorted { lhs, rhs in
+            if lhs.status.isBusy != rhs.status.isBusy { return lhs.status.isBusy && !rhs.status.isBusy }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        return AgentActivitySummary(agents: agents, scannedAt: now)
+    }
+
+    /// Read `agents` table from hub SQLite (best-effort; empty if missing/locked).
+    public static func loadGateAgents(dbURL: URL) -> [AgentActivitySnapshot] {
+        GateDBReader.readAgents(path: dbURL.path)
     }
 
     private static func displayName(for id: String, config: URL) -> String {

@@ -257,6 +257,7 @@ finish_banner() {
   printf '       to attach that app as an agent + pet\n'
   printf '    Clipboard tip:  agent: science fix the CF floor\n'
   printf '    Pets:           ls ~/.shannon/pets\n'
+  printf '    Gate (live):    hub/shannon_gate.py — agents table feeds the pill\n'
   printf '    Quit:           menu → Quit Shannon   or  ./scripts/shannon stop\n'
   echo
 }

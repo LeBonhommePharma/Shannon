@@ -455,9 +455,8 @@ TEST(UnifiedDispatch, SelectsNeonOnArm) {
     EXPECT_TRUE(d.has_kernel(Backend::NEON, KernelType::LOGPROB_ENTROPY));
 
     Backend best = d.best_backend(KernelType::CONFIGURATIONAL_ENTROPY, /*n=*/256);
-    // Prefer NEON over OpenMP for moderate n; GPU only if compiled+available
-    EXPECT_TRUE(best == Backend::NEON || best == Backend::CUDA ||
-                best == Backend::METAL || best == Backend::ROCM);
+    // Prefer NEON over OpenMP for moderate n
+    EXPECT_EQ(best, Backend::NEON);
 
     std::vector<double> logits(32, 0.0);
     double h = 0.0;

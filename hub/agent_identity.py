@@ -33,6 +33,16 @@ class AgentIdentity:
     color_rgb: tuple[float, float, float]
     system_image: str  # SF Symbol name for macOS surfaces
     auth_kind: str  # "local" | "cloud"
+    # Companion animal — a fixed visual identity cue, one per agent. Purely
+    # decorative-adjacent branding: it never varies with runtime state.
+    #
+    # NOTE: unrelated to pet_manager.py / ~/.shannon/pets/, which uses "pet" to
+    # mean an agent's persistent memory directory. Same word, different concept.
+    pet: str = "creature"
+    # SF Symbol standing in for `pet`. SF Symbols has no owl/raven/fox/wolf/
+    # beaver/dolphin glyph, so these are nearest-match and deliberately kept
+    # distinct from one another — the animal *name* carries the identity.
+    pet_symbol: str = "pawprint.fill"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -43,6 +53,8 @@ class AgentIdentity:
             "color_rgb": list(self.color_rgb),
             "system_image": self.system_image,
             "auth_kind": self.auth_kind,
+            "pet": self.pet,
+            "pet_symbol": self.pet_symbol,
         }
 
 
@@ -56,6 +68,8 @@ IDENTITIES: dict[str, AgentIdentity] = {
         color_rgb=(1.00, 0.72, 0.10),
         system_image="flask.fill",
         auth_kind="local",
+        pet="owl",  # wise, observant — watches the run
+        pet_symbol="bird.fill",
     ),
     "grok_build": AgentIdentity(
         id="grok_build",
@@ -65,6 +79,8 @@ IDENTITIES: dict[str, AgentIdentity] = {
         color_rgb=(0.68, 0.28, 0.98),
         system_image="sparkles",
         auth_kind="cloud",
+        pet="raven",  # dark, clever, opportunistic
+        pet_symbol="bird",
     ),
     "claude_code": AgentIdentity(
         id="claude_code",
@@ -74,6 +90,8 @@ IDENTITIES: dict[str, AgentIdentity] = {
         color_rgb=(1.00, 0.50, 0.08),
         system_image="bubble.left.and.bubble.right.fill",
         auth_kind="local",
+        pet="fox",  # quick, adaptive
+        pet_symbol="hare.fill",
     ),
     "codex": AgentIdentity(
         id="codex",
@@ -83,6 +101,8 @@ IDENTITIES: dict[str, AgentIdentity] = {
         color_rgb=(0.30, 0.55, 1.00),
         system_image="chevron.left.forwardslash.chevron.right",
         auth_kind="cloud",
+        pet="dolphin",  # intelligent, communicative
+        pet_symbol="fish.fill",
     ),
     "dispatch": AgentIdentity(
         id="dispatch",
@@ -92,6 +112,8 @@ IDENTITIES: dict[str, AgentIdentity] = {
         color_rgb=(0.72, 0.50, 0.28),
         system_image="paperplane.fill",
         auth_kind="local",
+        pet="wolf",  # coordinating, pack-oriented
+        pet_symbol="dog.fill",
     ),
     "cowork": AgentIdentity(
         id="cowork",
@@ -101,6 +123,8 @@ IDENTITIES: dict[str, AgentIdentity] = {
         color_rgb=(0.20, 0.85, 0.45),
         system_image="person.2.fill",
         auth_kind="local",
+        pet="beaver",  # industrious builder
+        pet_symbol="pawprint.fill",
     ),
 }
 
@@ -115,6 +139,8 @@ IDENTITIES.update(
             color_rgb=(0.10, 0.72, 0.55),
             system_image="text.bubble.fill",
             auth_kind="cloud",
+            pet="parrot",  # fluent, conversational
+            pet_symbol="bird.circle",
         ),
         "dataset_runner": AgentIdentity(
             id="dataset_runner",
@@ -124,6 +150,8 @@ IDENTITIES.update(
             color_rgb=(0.15, 0.70, 0.80),
             system_image="tablecells",
             auth_kind="local",
+            pet="ant",  # tireless, methodical, many small loads
+            pet_symbol="ant.fill",
         ),
         "local_test": AgentIdentity(
             id="local_test",
@@ -133,6 +161,8 @@ IDENTITIES.update(
             color_rgb=(0.55, 0.55, 0.58),
             system_image="cpu",
             auth_kind="local",
+            pet="ladybug",  # small, benign, a test subject
+            pet_symbol="ladybug.fill",
         ),
         "terminal": AgentIdentity(
             id="terminal",
@@ -142,6 +172,8 @@ IDENTITIES.update(
             color_rgb=(0.55, 0.60, 0.65),
             system_image="terminal.fill",
             auth_kind="local",
+            pet="tortoise",  # old, slow, outlives everything
+            pet_symbol="tortoise.fill",
         ),
         "browser": AgentIdentity(
             id="browser",
@@ -151,6 +183,8 @@ IDENTITIES.update(
             color_rgb=(0.35, 0.55, 0.95),
             system_image="globe",
             auth_kind="local",
+            pet="gecko",  # clings to any surface
+            pet_symbol="lizard.fill",
         ),
     }
 )

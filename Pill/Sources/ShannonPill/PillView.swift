@@ -168,9 +168,11 @@ struct PillView: View {
             // Single active agent: prominent emoji communicates identity at a glance.
             Text(style(for: p).emoji)
                 .font(.system(size: 15))
-                .help("\(style(for: p).displayName) · \(p.status.label)")
+                .help("\(style(for: p).displayName) · \(p.status.label) · \(style(for: p).pet)")
         } else if busy.count > 1 {
             // Multiple agents: overlapping coloured dots (max 3 visible).
+            // Dots stay bare colour — at 7 pt a companion glyph is unreadable,
+            // so the companion rides in the tooltip instead.
             ZStack {
                 ForEach(Array(busy.prefix(3).enumerated()), id: \.offset) { pair in
                     Circle()
@@ -182,6 +184,9 @@ struct PillView: View {
                         )
                 }
             }
+            .help(busy.prefix(3)
+                .map { "\(style(for: $0).displayName) (\(style(for: $0).pet))" }
+                .joined(separator: " · "))
         } else if showMedia {
             Image(systemName: "music.note")
                 .font(.system(size: 11))

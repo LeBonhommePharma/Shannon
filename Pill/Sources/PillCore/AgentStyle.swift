@@ -19,6 +19,12 @@ public struct AgentStyle: Sendable, Equatable {
     public var red: Double
     public var green: Double
     public var blue: Double
+    /// Companion animal — fixed identity cue, mirrors `pet` in
+    /// hub/agent_identity.py. Never varies with runtime state.
+    public var pet: String
+    /// SF Symbol standing in for `pet` (nearest match; SF Symbols has no
+    /// owl/raven/fox/wolf/beaver/dolphin glyph).
+    public var petSymbol: String
 
     public init(
         id: String,
@@ -28,7 +34,9 @@ public struct AgentStyle: Sendable, Equatable {
         emoji: String,
         red: Double,
         green: Double,
-        blue: Double
+        blue: Double,
+        pet: String = "creature",
+        petSymbol: String = "pawprint.fill"
     ) {
         self.id = id
         self.displayName = displayName
@@ -38,6 +46,8 @@ public struct AgentStyle: Sendable, Equatable {
         self.red = red
         self.green = green
         self.blue = blue
+        self.pet = pet
+        self.petSymbol = petSymbol
     }
 
     #if canImport(SwiftUI)
@@ -58,40 +68,52 @@ public enum AgentStyleCatalog {
     public static let all: [AgentStyle] = [
         .init(id: "science", displayName: "Claude Science", shortName: "Sci",
               systemImage: "flask.fill", emoji: "🔬",
-              red: 1.00, green: 0.72, blue: 0.10),
+              red: 1.00, green: 0.72, blue: 0.10,
+              pet: "owl", petSymbol: "bird.fill"),
         .init(id: "grok_build", displayName: "Grok Build", shortName: "Grok",
               systemImage: "sparkles", emoji: "🟣",
-              red: 0.68, green: 0.28, blue: 0.98),
+              red: 0.68, green: 0.28, blue: 0.98,
+              pet: "raven", petSymbol: "bird"),
         .init(id: "claude_code", displayName: "Claude Code", shortName: "CC",
               systemImage: "bubble.left.and.bubble.right.fill", emoji: "🟠",
-              red: 1.00, green: 0.50, blue: 0.08),
+              red: 1.00, green: 0.50, blue: 0.08,
+              pet: "fox", petSymbol: "hare.fill"),
         .init(id: "chatgpt", displayName: "ChatGPT", shortName: "GPT",
               systemImage: "text.bubble.fill", emoji: "🟢",
-              red: 0.10, green: 0.72, blue: 0.55),
+              red: 0.10, green: 0.72, blue: 0.55,
+              pet: "parrot", petSymbol: "bird.circle"),
         .init(id: "codex", displayName: "Codex", shortName: "Codex",
               systemImage: "chevron.left.forwardslash.chevron.right", emoji: "🔵",
-              red: 0.30, green: 0.55, blue: 1.00),
+              red: 0.30, green: 0.55, blue: 1.00,
+              pet: "dolphin", petSymbol: "fish.fill"),
         .init(id: "cowork", displayName: "Cowork", shortName: "CWork",
               systemImage: "person.2.fill", emoji: "🟢",
-              red: 0.20, green: 0.85, blue: 0.45),
+              red: 0.20, green: 0.85, blue: 0.45,
+              pet: "beaver", petSymbol: "pawprint.fill"),
         .init(id: "dispatch", displayName: "Dispatch", shortName: "Disp",
               systemImage: "paperplane.fill", emoji: "🟤",
-              red: 0.72, green: 0.50, blue: 0.28),
+              red: 0.72, green: 0.50, blue: 0.28,
+              pet: "wolf", petSymbol: "dog.fill"),
         .init(id: "terminal", displayName: "Terminal", shortName: "Term",
               systemImage: "terminal.fill", emoji: "⬛",
-              red: 0.55, green: 0.60, blue: 0.65),
+              red: 0.55, green: 0.60, blue: 0.65,
+              pet: "tortoise", petSymbol: "tortoise.fill"),
         .init(id: "browser", displayName: "Browser", shortName: "Web",
               systemImage: "globe", emoji: "🌐",
-              red: 0.35, green: 0.55, blue: 0.95),
+              red: 0.35, green: 0.55, blue: 0.95,
+              pet: "gecko", petSymbol: "lizard.fill"),
         .init(id: "cursor", displayName: "Cursor", shortName: "Cur",
               systemImage: "cursorarrow.rays", emoji: "⬛",
-              red: 0.40, green: 0.40, blue: 0.45),
+              red: 0.40, green: 0.40, blue: 0.45,
+              pet: "cat", petSymbol: "cat.fill"),
         .init(id: "vscode", displayName: "VS Code", shortName: "Code",
               systemImage: "chevron.left.forwardslash.chevron.right", emoji: "💙",
-              red: 0.20, green: 0.50, blue: 0.90),
+              red: 0.20, green: 0.50, blue: 0.90,
+              pet: "ladybug", petSymbol: "ladybug.fill"),
         .init(id: "dataset_runner", displayName: "DatasetRunner", shortName: "DR",
               systemImage: "tablecells", emoji: "📊",
-              red: 0.15, green: 0.70, blue: 0.80),
+              red: 0.15, green: 0.70, blue: 0.80,
+              pet: "ant", petSymbol: "ant.fill"),
     ]
 
     public static func style(for id: String) -> AgentStyle {

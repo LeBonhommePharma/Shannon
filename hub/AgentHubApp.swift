@@ -92,31 +92,42 @@ enum HubAdaptive {
     }
 }
 
+// Day palette is warm paper, never grey. Every day surface and grey keeps red
+// above blue so it reads as cream under daylight and under warm indoor light,
+// instead of going clinical. Day ladder, lightest to darkest:
+//
+//   background #FAF8F3   surface    #FFFFFF   sunken   #F6F2EA
+//   elevated   #F2EEE5   quaternary #DED6C8   tertiary #7D7365
+//   secondary  #6B6257   primary    #1C1917
+//
+// Hairlines and shadows are warm brown at low alpha (#7A5C3A / #5C482D) rather
+// than neutral black — a black hairline over cream desaturates the edge to grey,
+// which is what made the first light pass still feel grey.
 extension Color {
     // Surfaces
-    static let hubBackground      = HubAdaptive.color(day: 0xF5F6FA, night: 0x0D0D10)
+    static let hubBackground      = HubAdaptive.color(day: 0xFAF8F3, night: 0x0D0D10)
     static let hubSurface         = HubAdaptive.color(day: 0xFFFFFF, night: 0x18181C)
-    static let hubSurfaceElevated = HubAdaptive.color(day: 0xECEDF2, night: 0x222228)
-    static let hubSurfaceSunken   = HubAdaptive.color(day: 0xF2F3F8, night: 0x101014)
+    static let hubSurfaceElevated = HubAdaptive.color(day: 0xF2EEE5, night: 0x222228)
+    static let hubSurfaceSunken   = HubAdaptive.color(day: 0xF6F2EA, night: 0x101014)
     static let hubSurfaceHover    = HubAdaptive.color(
-        day: HubRGBA(hex: 0x000000, alpha: 0.04),
+        day: HubRGBA(hex: 0x7A5C3A, alpha: 0.07),
         night: HubRGBA(hex: 0xFFFFFF, alpha: 0.06)
     )
     static let hubSeparator = HubAdaptive.color(
-        day: HubRGBA(hex: 0x000000, alpha: 0.12),
+        day: HubRGBA(hex: 0x7A5C3A, alpha: 0.18),
         night: HubRGBA(hex: 0xFFFFFF, alpha: 0.10)
     )
     static let hubShadow = HubAdaptive.color(
-        day: HubRGBA(hex: 0x0F172A, alpha: 0.10),
+        day: HubRGBA(hex: 0x5C482D, alpha: 0.12),
         night: HubRGBA(hex: 0x000000, alpha: 0.28)
     )
 
-    // Text
-    static let hubPrimary    = HubAdaptive.color(day: 0x0F0F12, night: 0xF0F0F5)
-    static let hubSecondary  = HubAdaptive.color(day: 0x6B6E80, night: 0x8A8D9F)
-    static let hubTertiary   = HubAdaptive.color(day: 0x70738A, night: 0x6A6D80)
-    /// Non-textual grey: empty tracks, disabled glyphs, rules.
-    static let hubQuaternary = HubAdaptive.color(day: 0xC3C6D4, night: 0x3C3F4E)
+    // Text — contrast on white: 17.5:1 / 6.0:1 / 4.7:1
+    static let hubPrimary    = HubAdaptive.color(day: 0x1C1917, night: 0xF0F0F5)
+    static let hubSecondary  = HubAdaptive.color(day: 0x6B6257, night: 0x8A8D9F)
+    static let hubTertiary   = HubAdaptive.color(day: 0x7D7365, night: 0x6A6D80)
+    /// Non-textual warm grey: empty gauge tracks, disabled glyphs, rules.
+    static let hubQuaternary = HubAdaptive.color(day: 0xDED6C8, night: 0x3C3F4E)
 
     // Accent
     static let hubAccent       = HubAdaptive.color(day: 0x3A5CF5, night: 0x6B8FFF)
@@ -126,7 +137,7 @@ extension Color {
     static let hubSuccess = HubAdaptive.color(day: 0x1A7F4B, night: 0x34C77A)
     static let hubWarning = HubAdaptive.color(day: 0xC47A0A, night: 0xF5B934)
     static let hubError   = HubAdaptive.color(day: 0xC0392B, night: 0xFF6B6B)
-    static let hubNeutral = HubAdaptive.color(day: 0x8A8D9F, night: 0x5A5D6E)
+    static let hubNeutral = HubAdaptive.color(day: 0x857C6E, night: 0x5A5D6E)
 }
 
 // MARK: - Agent colour roles  (mirrors ShannonTheme AgentIdentityColor)
@@ -238,6 +249,46 @@ struct AgentIdentity: Identifiable, Equatable {
         case "codex", "chatgpt": return "GPT · OpenAI"
         case "browser":     return "web"
         default:            return "local"
+        }
+    }
+
+    /// Companion animal — a fixed identity cue, one per agent. Mirrors
+    /// `pet` in hub/agent_identity.py. Never varies with runtime state.
+    ///
+    /// Distinct from `PetState` / `PetManager` below, which use "pet" to mean
+    /// the agent's persistent memory directory under ~/.shannon/pets/.
+    var petName: String {
+        switch id {
+        case "science":        return "owl"
+        case "grok_build":     return "raven"
+        case "claude_code":    return "fox"
+        case "codex":          return "dolphin"
+        case "dispatch":       return "wolf"
+        case "cowork":         return "beaver"
+        case "chatgpt":        return "parrot"
+        case "dataset_runner": return "ant"
+        case "terminal":       return "tortoise"
+        case "browser":        return "gecko"
+        default:               return "creature"
+        }
+    }
+
+    /// SF Symbol standing in for `petName`. SF Symbols ships no owl/raven/fox/
+    /// wolf/beaver/dolphin glyph, so these are nearest matches chosen to stay
+    /// visually distinct from each other — the animal name carries the identity.
+    var petSymbol: String {
+        switch id {
+        case "science":        return "bird.fill"
+        case "grok_build":     return "bird"
+        case "claude_code":    return "hare.fill"
+        case "codex":          return "fish.fill"
+        case "dispatch":       return "dog.fill"
+        case "cowork":         return "pawprint.fill"
+        case "chatgpt":        return "bird.circle"
+        case "dataset_runner": return "ant.fill"
+        case "terminal":       return "tortoise.fill"
+        case "browser":        return "lizard.fill"
+        default:               return "pawprint.fill"
         }
     }
 
@@ -488,10 +539,10 @@ enum AgentStatus: String, Codable {
     var wash: Color {
         switch self {
         case .idle:    return .hubSurfaceElevated
-        case .active:  return HubAdaptive.color(day: 0xE3F5EA, night: 0x123322)
-        case .waiting: return HubAdaptive.color(day: 0xFBF0DA, night: 0x33270B)
+        case .active:  return HubAdaptive.color(day: 0xE6F4E4, night: 0x123322)
+        case .waiting: return HubAdaptive.color(day: 0xFBEFD6, night: 0x33270B)
         case .blocked: return HubAdaptive.color(day: 0xFCEADB, night: 0x37200D)
-        case .error:   return HubAdaptive.color(day: 0xFBE7E4, night: 0x371917)
+        case .error:   return HubAdaptive.color(day: 0xFAE6E0, night: 0x371917)
         }
     }
 
@@ -624,6 +675,21 @@ struct PendingGateAsk: Identifiable, Equatable {
     let agentId: String
     let prompt: String
     let status: String
+}
+
+/// One row of `agent_messages` — the gate's own message log.
+///
+/// Backs the per-agent detail view and the streaming indicator. Every field is
+/// read straight from the table the gate writes in `AuditDB.record_message`;
+/// nothing here is synthesised by the UI.
+struct AgentMessageRow: Identifiable, Equatable {
+    let id: Int64            // agent_messages.id
+    let agentId: String      // agent_messages.agent_id
+    let messageType: String  // agent_messages.message_type
+    let summary: String      // decoded from payload_json (text/message/summary/task)
+    let gateH: Double?       // agent_messages.gate_H — entropy the gate computed
+    let gateDecision: String // agent_messages.gate_decision (allowed / flagged / blocked)
+    let at: Date             // agent_messages.received_at_ns
 }
 
 // MARK: - Sound Controller  (AVFoundation 8-bit square wave synthesis — local only)
@@ -998,6 +1064,49 @@ final class GateSocketClient {
         ])
     }
 
+    /// Nudge one agent over the gate.
+    ///
+    /// Real delivery: `_dispatch` gates this like any other message and then
+    /// `_broadcast`s the envelope to every *other* connected agent, with
+    /// `payload.target_agent` naming the intended recipient. It reaches an agent
+    /// only if that agent currently holds a socket connection — which is exactly
+    /// what the UI claims, since the button is offered for agents the registry
+    /// shows as known and idle.
+    func sendPing(agentId: String) {
+        sendMessage([
+            "agent_id":     "local_test",
+            "task_id":      "hub_ui",
+            "message_type": "system_event",
+            "confidence":   1.0,
+            "shannon_H":    0.0,
+            "payload": [
+                "kind":         "ping",
+                "target_agent": agentId,
+                "source":       "hub_ui",
+                "text":         "hub ping",
+            ] as [String: Any],
+        ])
+    }
+
+    /// Free-text message aimed at one agent. Same delivery path as `sendPing`.
+    func sendAgentMessage(agentId: String, text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        sendMessage([
+            "agent_id":     "local_test",
+            "task_id":      "hub_ui",
+            "message_type": "system_event",
+            "confidence":   1.0,
+            "shannon_H":    0.0,
+            "payload": [
+                "kind":         "user_message",
+                "target_agent": agentId,
+                "source":       "hub_ui",
+                "text":         trimmed,
+            ] as [String: Any],
+        ])
+    }
+
     func sendApproval(agentId: String, interactionId: String, approved: Bool,
                       reply: String? = nil) {
         // HubAskPipeline builds the wire payload so interaction_id is the gate id.
@@ -1026,7 +1135,24 @@ final class AuditDBReader: ObservableObject {
     @Published var events:      [GateEvent]               = []
     /// Pending human asks from agent_interactions (gate interaction_id is authoritative).
     @Published var pendingAsks: [PendingGateAsk]         = []
+    /// Last ~12 gate messages per agent, newest first — source: agent_messages.
+    @Published var messages:    [String: [AgentMessageRow]] = [:]
+    /// Wall-clock of each agent's most recent gate message — source: agent_messages.
+    /// This is what distinguishes "streaming right now" from status == active,
+    /// which persists long after the agent stops emitting.
+    @Published var lastMessageAt: [String: Date]         = [:]
     @Published var isConnected  = false
+
+    /// An agent counts as *streaming* when the gate logged a message from it
+    /// within this window. Tuned to the 0.5 s poll: two empty polls and the
+    /// indicator drops.
+    static let streamingWindow: TimeInterval = 3.0
+
+    /// Agents that emitted a gate message inside `streamingWindow`.
+    var streamingAgents: Set<String> {
+        let cutoff = Date().addingTimeInterval(-Self.streamingWindow)
+        return Set(lastMessageAt.filter { $0.value > cutoff }.keys)
+    }
 
     private var db:    OpaquePointer?
     private var timer: Timer?
@@ -1058,11 +1184,14 @@ final class AuditDBReader: ObservableObject {
             let b = self.fetchBenchmarks(db)
             let e = self.fetchEvents(db)
             let p = self.fetchPendingAsks(db)
+            let (m, seen) = self.fetchMessages(db)
             DispatchQueue.main.async {
                 self.agents = a
                 self.benchmarks = b
                 self.events = e
                 self.pendingAsks = p
+                self.messages = m
+                self.lastMessageAt = seen
             }
         }
     }
@@ -1163,6 +1292,62 @@ final class AuditDBReader: ObservableObject {
         return result
     }
 
+    /// Recent gate messages grouped by agent.
+    ///
+    /// Source: `agent_messages`, written by `AuditDB.record_message` in
+    /// shannon_gate.py for every message that reaches the gate. Returns both the
+    /// grouped rows (detail view) and each agent's newest timestamp (streaming
+    /// indicator), so one query serves both.
+    private func fetchMessages(_ db: OpaquePointer)
+        -> ([String: [AgentMessageRow]], [String: Date]) {
+        let sql = """
+            SELECT id, agent_id, message_type, payload_json,
+                   gate_H, COALESCE(gate_decision, ''),
+                   CAST(received_at_ns / 1000000000.0 AS REAL) AS at
+            FROM agent_messages
+            ORDER BY id DESC LIMIT 240;
+            """
+        var stmt: OpaquePointer?
+        var grouped: [String: [AgentMessageRow]] = [:]
+        var newest: [String: Date] = [:]
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return (grouped, newest)
+        }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let agent = str(stmt, 1)
+            let at = Date(timeIntervalSince1970: dbl(stmt, 6))
+            let row = AgentMessageRow(
+                id: sqlite3_column_int64(stmt, 0),
+                agentId: agent,
+                messageType: str(stmt, 2),
+                summary: Self.summarise(payloadJSON: str(stmt, 3)),
+                gateH: sqlite3_column_type(stmt, 4) == SQLITE_NULL ? nil : dbl(stmt, 4),
+                gateDecision: str(stmt, 5),
+                at: at
+            )
+            // Rows arrive newest-first, so the first sighting is the newest.
+            if newest[agent] == nil { newest[agent] = at }
+            if grouped[agent, default: []].count < 12 {
+                grouped[agent, default: []].append(row)
+            }
+        }
+        return (grouped, newest)
+    }
+
+    /// Human-readable one-liner from a gate payload. Mirrors the key order in
+    /// `agent_identity.status_from_payload` so the detail view and the card
+    /// summary agree on what the message "said".
+    static func summarise(payloadJSON: String) -> String {
+        guard let data = payloadJSON.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return "" }
+        for key in ["text", "message", "summary", "task", "output", "label"] {
+            if let v = obj[key] as? String, !v.isEmpty { return String(v.prefix(240)) }
+        }
+        return ""
+    }
+
     // Write a delegation record directly to SQLite so the gate picks it up
     func insertDelegation(agentId: String, taskText: String) {
         guard let db else { return }
@@ -1196,6 +1381,17 @@ final class HubViewModel: ObservableObject {
     @Published var delegateText:   String                = ""
     @Published var showDelegateBar = false
     @Published var showSettings    = false
+    /// Agent whose message history is expanded in the Agents tab.
+    @Published var expandedAgentId: String?              = nil
+    /// Agent whose inline composer is open, plus its draft text.
+    @Published var composingAgentId: String?             = nil
+    @Published var composeText:    String                = ""
+    /// Transient per-agent confirmation ("sent", "pinged") shown on the card.
+    @Published var actionFeedback: [String: String]      = [:]
+    /// Suspends this hub's own sound and voice output. Does NOT pause the agents
+    /// — the gate has no such control — so the UI labels it "Mute alerts", not
+    /// "Pause all". Real local state: consulted before every sound/voice call.
+    @Published var alertsMuted     = false
 
     let db       = AuditDBReader()
     let sysmon   = SystemResourceMonitor()
@@ -1260,16 +1456,22 @@ final class HubViewModel: ObservableObject {
             case "pet_memory_access":
                 pets.signalMemoryAccess(for: evt.agentId)
             case "task_complete":
-                sound.play(event: "task_complete")
-                voice.taskComplete(agentId: evt.agentId, summary: evt.payload)
+                if !alertsMuted {
+                    sound.play(event: "task_complete")
+                    voice.taskComplete(agentId: evt.agentId, summary: evt.payload)
+                }
             case "approval_needed":
-                sound.play(event: "approval_needed")
-                voice.approvalNeeded(agentId: evt.agentId, prompt: evt.payload)
+                if !alertsMuted {
+                    sound.play(event: "approval_needed")
+                    voice.approvalNeeded(agentId: evt.agentId, prompt: evt.payload)
+                }
+                // The card itself is never suppressed — muting silences output,
+                // it does not hide a pending approval.
                 pushInteraction(for: evt)
             case "entropy_warn":
-                sound.play(event: "entropy_warn")
+                if !alertsMuted { sound.play(event: "entropy_warn") }
             case "blocked":
-                sound.play(event: "blocked")
+                if !alertsMuted { sound.play(event: "blocked") }
             default: break
             }
         }
@@ -1335,6 +1537,52 @@ final class HubViewModel: ObservableObject {
         interactions.removeAll { $0.id == id }
     }
 
+    /// Ping an agent over the gate socket. Real wire traffic — see
+    /// GateSocketClient.sendPing for the delivery guarantee.
+    func ping(_ agentId: String) {
+        GateSocketClient.shared.sendPing(agentId: agentId)
+        flash("pinged", for: agentId)
+    }
+
+    /// Send the inline composer's text to one agent, then close the composer.
+    func sendComposed(to agentId: String) {
+        let text = composeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        GateSocketClient.shared.sendAgentMessage(agentId: agentId, text: text)
+        // Persist alongside delegations so there is an on-disk record, matching
+        // what submitDelegation already does for the broadcast bar.
+        db.insertDelegation(agentId: agentId, taskText: text)
+        delegations.insert(
+            DelegationRecord(agentId: agentId, command: text, outcome: "sent", at: Date()),
+            at: 0
+        )
+        composeText = ""
+        composingAgentId = nil
+        flash("sent", for: agentId)
+    }
+
+    func toggleComposer(for agentId: String) {
+        if composingAgentId == agentId {
+            composingAgentId = nil
+        } else {
+            composingAgentId = agentId
+            composeText = ""
+        }
+    }
+
+    func toggleExpanded(_ agentId: String) {
+        expandedAgentId = expandedAgentId == agentId ? nil : agentId
+    }
+
+    /// Two-second confirmation chip on an agent card.
+    private func flash(_ label: String, for agentId: String) {
+        actionFeedback[agentId] = label
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self, self.actionFeedback[agentId] == label else { return }
+            self.actionFeedback[agentId] = nil
+        }
+    }
+
     func submitDelegation() {
         let text = delegateText.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
@@ -1363,6 +1611,19 @@ final class HubViewModel: ObservableObject {
 
 // MARK: - AgentDotView  (glow pulse, lock overlay, timeout arc, memory-access animation)
 
+/// One dot in the popup header strip.
+///
+/// Data sources — every element is backed, nothing is decorative:
+///   dot fill          → AgentIdentity brand colour; dimmed when agents.status
+///                       is idle, so identity survives but live work stands out
+///   status ring       → agents.status (absent while idle)
+///   outer glow pulse  → agents.status == active
+///   entropy arc       → agents.entropy_score / 12 bits, thresholded at
+///                       kH_threshold (3.5) and kH_block (5.0)
+///   timeout arc       → agent_interactions deadline for this agent's open ask
+///   lock badge        → cloud agent with no Keychain token stored
+///   cyan pulse dot    → a `pet_memory_access` row in agent_activity (2 s decay)
+///   amber corner dot  → pets/<id>/state.json resumable flag
 struct AgentDotView: View {
     let identity:     AgentIdentity
     let row:          AgentRow?
@@ -1475,10 +1736,18 @@ struct AgentDotView: View {
     }
 
     private var tooltipText: String {
-        var parts: [String] = [identity.shortName]
+        var parts: [String] = [identity.displayName]
         if let r = row {
             parts.append("Status: \(r.status.label)")
-            parts.append("Entropy: \(String(format: "%.2f", r.entropy)) bits")
+            let ent = r.entropy
+            let verdict = ent <= kH_threshold
+                ? "at/below collapse threshold \(String(format: "%.1f", kH_threshold))"
+                : (ent < kH_block
+                    ? "approaching block threshold \(String(format: "%.1f", kH_block))"
+                    : "healthy")
+            parts.append("Shannon entropy H=\(String(format: "%.2f", ent)) bits — \(verdict)")
+            let secs = max(0, Int(-r.lastSeen.timeIntervalSinceNow))
+            parts.append("Last gate message: \(secs)s ago")
             if !r.taskSummary.isEmpty { parts.append(r.taskSummary) }
         }
         if let b = bench {
@@ -2050,7 +2319,6 @@ struct SettingsView: View {
 struct HubPopoverView: View {
     @ObservedObject var vm: HubViewModel
     @State private var selectedTab = 0          // 0=agents 1=feed 2=resources
-    @State private var expandedAgentId: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -2058,7 +2326,7 @@ struct HubPopoverView: View {
             pillHeader
 
             // ── Inline agent detail (tap a dot to expand) ────────────
-            if let aid = expandedAgentId,
+            if let aid = vm.expandedAgentId,
                let identity = AgentIdentity.all.first(where: { $0.id == aid }) {
                 Divider().overlay(Color.hubSeparator)
                 AgentInlineDetail(
@@ -2068,7 +2336,7 @@ struct HubPopoverView: View {
                     pet:        vm.pets.states[aid] ?? PetState(),
                     onDelegate: {
                         vm.prefillDelegation(for: aid)
-                        expandedAgentId = nil
+                        vm.expandedAgentId = nil
                     }
                 )
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -2108,7 +2376,7 @@ struct HubPopoverView: View {
         // reduced a precision readout to a smear. The instrument gets its own
         // solid ground and no longer forces `.dark`.
         .background(Color.hubBackground)
-        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: expandedAgentId)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: vm.expandedAgentId)
     }
 
     // MARK: Pill header with agent dots
@@ -2129,12 +2397,12 @@ struct HubPopoverView: View {
                     .overlay(
                         Circle()
                             .stroke(a.palette.tint, lineWidth: 1.5)
-                            .opacity(expandedAgentId == a.id ? 1 : 0)
+                            .opacity(vm.expandedAgentId == a.id ? 1 : 0)
                             .padding(-3)
                     )
                     .onTapGesture {
                         withAnimation {
-                            expandedAgentId = expandedAgentId == a.id ? nil : a.id
+                            vm.toggleExpanded(a.id)
                         }
                     }
                 }
@@ -2142,6 +2410,7 @@ struct HubPopoverView: View {
             Spacer()
             // Worst-case entropy badge — shows min entropy across agents when
             // any agent falls below kH_block (deception risk zone).
+            // Source: min(agents.entropy_score).
             if let minEnt = vm.db.agents.values.map(\.entropy).min(), minEnt < kH_block {
                 Text("H=\(String(format:"%.1f",minEnt))")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -2149,14 +2418,44 @@ struct HubPopoverView: View {
                     .padding(.horizontal, 5).padding(.vertical, 2)
                     .background(minEnt <= kH_threshold ? AgentStatus.error.wash : AgentStatus.waiting.wash)
                     .cornerRadius(4)
+                    .help("Lowest entropy across all agents: H=\(String(format: "%.2f", minEnt)) bits. "
+                          + "Collapse threshold \(String(format: "%.1f", kH_threshold)), "
+                          + "block threshold \(String(format: "%.1f", kH_block)).")
             }
-            Button {
+
+            // Broadcast — opens the delegation bar with no agent selected, which
+            // sends to every connected agent via the gate's own broadcast path.
+            IconAction(
+                systemName: "megaphone",
+                tooltip: "Broadcast a command to all connected agents",
+                tint: .hubAccent,
+                isOn: vm.showDelegateBar && vm.selectedAgent == nil
+            ) {
+                vm.selectedAgent = nil
+                vm.showDelegateBar.toggle()
+            }
+
+            // Mute is deliberately *not* "Pause all": the gate exposes no way to
+            // suspend agents, so this only silences this hub's sound and voice.
+            IconAction(
+                systemName: vm.alertsMuted ? "bell.slash" : "bell",
+                tooltip: vm.alertsMuted
+                    ? "Alerts muted — click to unmute sound and voice"
+                    : "Mute this hub's sound and voice alerts (agents keep running)",
+                tint: vm.alertsMuted ? .hubWarning : .hubSecondary,
+                isOn: vm.alertsMuted
+            ) {
+                vm.alertsMuted.toggle()
+            }
+
+            IconAction(
+                systemName: "gear",
+                tooltip: "Voice, sound and credential settings",
+                tint: .hubSecondary,
+                isOn: vm.showSettings
+            ) {
                 vm.showSettings = true
-            } label: {
-                Image(systemName: "gear").font(.caption)
-                    .foregroundColor(.hubTertiary)
             }
-            .buttonStyle(.plain)
             .popover(isPresented: $vm.showSettings) {
                 SettingsView(voice: vm.voice).frame(width: 300, height: 420)
             }
@@ -2207,13 +2506,26 @@ struct HubPopoverView: View {
     // MARK: Agents tab
 
     private var agentsTab: some View {
-        ScrollView {
+        let streaming = vm.db.streamingAgents
+        return ScrollView {
             VStack(spacing: 8) {
                 ForEach(AgentIdentity.all) { a in
-                    AgentRowCard(identity: a, row: vm.db.agents[a.id],
-                                 bench: vm.db.benchmarks[a.id],
-                                 pet: vm.pets.states[a.id] ?? PetState(),
-                                 onDelegate: { vm.prefillDelegation(for: a.id) })
+                    AgentRowCard(
+                        identity:    a,
+                        row:         vm.db.agents[a.id],
+                        bench:       vm.db.benchmarks[a.id],
+                        pet:         vm.pets.states[a.id] ?? PetState(),
+                        isStreaming: streaming.contains(a.id),
+                        isExpanded:  vm.expandedAgentId == a.id,
+                        isComposing: vm.composingAgentId == a.id,
+                        feedback:    vm.actionFeedback[a.id],
+                        messages:    vm.db.messages[a.id] ?? [],
+                        composeText: $vm.composeText,
+                        onToggleExpand:  { vm.toggleExpanded(a.id) },
+                        onToggleCompose: { vm.toggleComposer(for: a.id) },
+                        onSend:          { vm.sendComposed(to: a.id) },
+                        onPing:          { vm.ping(a.id) }
+                    )
                 }
             }
             .padding(10)
@@ -2362,120 +2674,305 @@ private struct AgentInlineDetail: View {
 
 // MARK: - Agent Row Card
 
+/// One agent row in the Agents tab.
+///
+/// Data sources — every visual element maps to a real signal, no decoration:
+///   identity rail colour   → AgentIdentity brand colour (agent_identity.py)
+///   emoji glyph            → AgentIdentity.icon for this agent id
+///   entropy arc            → agents.entropy_score, thresholded at
+///                            kH_threshold (3.5, amber) / kH_block (5.0, red)
+///   H readout + word       → same entropy_score, labelled against the thresholds
+///   status badge           → agents.status (the gate's status string)
+///   relative timestamp     → agents.last_seen_ns, i.e. time since this agent's
+///                            last gate message
+///   streaming bars         → a row in agent_messages within the last 3 s; this
+///                            is strictly narrower than status == active
+///   progress bar / CF      → benchmark_state.completed and state_json
+///   pet line               → ~/.shannon/pets/<id>/state.json last_task
+///   message list           → agent_messages rows for this agent
+///
+/// The one exception is the companion glyph next to the model tag
+/// (AgentIdentity.petSymbol): it is fixed branding per agent and carries no
+/// runtime signal, so it must never be styled to look like status.
 private struct AgentRowCard: View {
-    let identity:   AgentIdentity
-    let row:        AgentRow?
-    let bench:      BenchmarkState?
-    let pet:        PetState
-    let onDelegate: () -> Void
+    let identity:    AgentIdentity
+    let row:         AgentRow?
+    let bench:       BenchmarkState?
+    let pet:         PetState
+    let isStreaming: Bool
+    let isExpanded:  Bool
+    let isComposing: Bool
+    let feedback:    String?
+    let messages:    [AgentMessageRow]
+    @Binding var composeText: String
+    let onToggleExpand:  () -> Void
+    let onToggleCompose: () -> Void
+    let onSend:          () -> Void
+    let onPing:          () -> Void
 
-    private var isLive: Bool {
-        let s = row?.status ?? .idle
-        return s == .active || s == .waiting
-    }
+    @State private var isHovering = false
+
+    private var status: AgentStatus { row?.status ?? .idle }
+    private var isLive: Bool { status == .active || status == .waiting }
+    /// Ping is only offered for agents the registry actually knows about —
+    /// pinging an agent with no gate record would be a button that does nothing.
+    private var canPing: Bool { row != nil && !isLive }
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Identity rail. Colour arrives as a solid 3 pt edge rather than a
-            // 12%-tinted border around the whole card — one saturated stripe per
-            // agent scans far faster down a column than eight tinted rectangles,
-            // and it keeps the card itself white.
-            Rectangle()
-                .fill(identity.palette.tint)
-                .frame(width: 3)
-                .opacity(isLive ? 1 : 0.45)
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                // Identity rail — one saturated stripe per agent scans faster
+                // down a column than eight tinted rectangles.
+                Rectangle()
+                    .fill(identity.palette.tint)
+                    .frame(width: 3)
+                    .opacity(isLive ? 1 : 0.45)
 
-            HStack(alignment: .top, spacing: 10) {
-                // Emoji icon + short name with the entropy arc as a halo.
-                VStack(spacing: 2) {
-                    ZStack {
-                        entropyArc
-                        Text(identity.icon).font(.title3)
-                    }
-                    Text(identity.shortName)
-                        .font(.system(size: 8.5, weight: .semibold))
-                        .foregroundColor(.hubSecondary)
-                }
-                .frame(width: 36)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(identity.displayName)
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundColor(identity.palette.ink)
-                        // Model family tag — mirrors agent_identity.py
-                        Text(identity.modelTag)
-                            .font(.system(size: 8, weight: .medium))
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(spacing: 2) {
+                        ZStack {
+                            entropyArc
+                            Text(identity.icon).font(.title3)
+                        }
+                        .help(entropyTooltip)
+                        Text(identity.shortName)
+                            .font(.system(size: 8.5, weight: .semibold))
                             .foregroundColor(.hubSecondary)
-                            .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(Color.hubSurfaceElevated)
-                            .cornerRadius(3)
-                        Spacer(minLength: 0)
-                        // Relative last-activity time — quiet metadata.
-                        if let r = row {
-                            Text(relativeTime(r.lastSeen))
+                    }
+                    .frame(width: 36)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        header
+                        if let r = row, !r.taskSummary.isEmpty {
+                            Text(r.taskSummary)
+                                .font(.system(size: 9.5))
+                                .foregroundColor(.hubSecondary)
+                                .lineLimit(2)
+                                .help("Latest task summary the gate recorded for this agent")
+                        }
+                        entropyReadout
+                        benchmarkRow
+                        if !pet.lastTask.isEmpty {
+                            Text("pet: \(pet.lastTask.prefix(50))")
                                 .font(.system(size: 8.5, design: .monospaced))
                                 .foregroundColor(.hubTertiary)
-                        }
-                        statusBadge
-                    }
-                    if let r = row, !r.taskSummary.isEmpty {
-                        Text(r.taskSummary)
-                            .font(.system(size: 9.5))
-                            .foregroundColor(.hubSecondary)
-                            .lineLimit(2)
-                    }
-                    // Entropy is the reason this app exists — it gets its own
-                    // labelled line instead of a tiny tag wedged in the header.
-                    entropyReadout
-
-                    if let b = bench, b.progress > 0 {
-                        HStack(spacing: 6) {
-                            ProgressView(value: Double(b.progress) / 100.0)
-                                .progressViewStyle(.linear)
-                                .tint(identity.palette.tint)
-                                .frame(width: 80)
-                            Text("\(b.progress)%")
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(.hubSecondary)
-                            if let cf = b.bestCF {
-                                Text("CF=\(String(format:"%.1f",cf))")
-                                    .font(.system(size: 9, design: .monospaced))
-                                    .foregroundColor(identity.palette.ink)
-                            }
+                                .help("Last task persisted to ~/.shannon/pets/\(identity.id)/state.json")
                         }
                     }
-                    // Pet status line
-                    if !pet.lastTask.isEmpty {
-                        Text("pet: \(pet.lastTask.prefix(50))")
-                            .font(.system(size: 8.5, design: .monospaced))
-                            .foregroundColor(.hubTertiary)
-                    }
-                }
 
-                Spacer(minLength: 0)
-
-                Button(action: onDelegate) {
-                    Image(systemName: "arrow.turn.down.right")
-                        .font(.caption)
-                        .foregroundColor(.hubSecondary)
+                    Spacer(minLength: 0)
+                    actionCluster
                 }
-                .buttonStyle(.plain)
-                .help("Delegate a task to \(identity.displayName)")
+                .padding(10)
             }
-            .padding(10)
+
+            if isComposing { composer }
+            if isExpanded { messageList }
         }
+        .background(isHovering ? Color.hubSurfaceHover : Color.clear)
         .background(Color.hubSurface)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.hubSeparator, lineWidth: 1)
+                .strokeBorder(isExpanded ? identity.palette.edge : Color.hubSeparator,
+                              lineWidth: isExpanded ? 1.5 : 1)
         )
-        .shadow(color: .hubShadow, radius: isLive ? 4 : 2, y: 1)
+        .shadow(color: .hubShadow, radius: isHovering ? 5 : (isLive ? 4 : 2), y: 1)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onToggleExpand)
+        .onHover { hovering in
+            isHovering = hovering
+            // Explicit affordance: the whole card is a disclosure control.
+            if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        .help(isExpanded ? "Click to collapse" : "Click to see recent gate messages")
+        .animation(.spring(response: 0.26, dampingFraction: 0.85), value: isExpanded)
+        .animation(.spring(response: 0.26, dampingFraction: 0.85), value: isComposing)
     }
 
-    /// Entropy state as a word plus the number. `H=2.4` alone requires the
-    /// reader to remember the thresholds; the label does not.
+    // MARK: Header line
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Text(identity.displayName)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundColor(identity.palette.ink)
+            Text(identity.modelTag)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundColor(.hubSecondary)
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(Color.hubSurfaceElevated)
+                .cornerRadius(3)
+                .help("Underlying model family")
+            // Companion glyph — fixed per agent, part of its visual identity.
+            Image(systemName: identity.petSymbol)
+                .font(.system(size: 9))
+                .foregroundColor(identity.palette.tint)
+                .help("\(identity.displayName)'s companion: the \(identity.petName)")
+            // Streaming bars: gate messages arriving right now.
+            if isStreaming {
+                StreamingBars(color: identity.palette.tint)
+                    .help("Streaming — this agent sent a gate message in the last 3 s")
+            }
+            Spacer(minLength: 0)
+            if let feedback {
+                Text(feedback)
+                    .font(.system(size: 8.5, weight: .semibold))
+                    .foregroundColor(.hubSuccess)
+                    .transition(.opacity)
+            }
+            if let r = row {
+                Text(relativeTime(r.lastSeen))
+                    .font(.system(size: 8.5, design: .monospaced))
+                    .foregroundColor(.hubTertiary)
+                    .help("Time since this agent's last gate message (agents.last_seen_ns)")
+            }
+            statusBadge
+        }
+    }
+
+    // MARK: Actions
+
+    private var actionCluster: some View {
+        VStack(spacing: 4) {
+            IconAction(
+                systemName: "bubble.left",
+                tooltip: "Send a message to \(identity.displayName) via the gate",
+                tint: identity.palette.ink,
+                isOn: isComposing,
+                action: onToggleCompose
+            )
+            if canPing {
+                IconAction(
+                    systemName: "bell",
+                    tooltip: "Ping \(identity.displayName) over the gate socket",
+                    tint: .hubSecondary,
+                    isOn: false,
+                    action: onPing
+                )
+            }
+        }
+        // Actions stay visible while the card is hovered or already engaged, so
+        // they never become a hidden feature.
+        .opacity(isHovering || isComposing ? 1 : 0.45)
+    }
+
+    private var composer: some View {
+        HStack(spacing: 6) {
+            TextField("Message \(identity.displayName)…", text: $composeText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(Color.hubSurface)
+                .cornerRadius(6)
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(identity.palette.edge, lineWidth: 1))
+                .onSubmit(onSend)
+            Button(action: onSend) {
+                Text("Send")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(
+                        composeText.trimmingCharacters(in: .whitespaces).isEmpty
+                            ? Color.hubQuaternary : identity.palette.ink
+                    )
+                    .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .disabled(composeText.trimmingCharacters(in: .whitespaces).isEmpty)
+            .help("Deliver this text to \(identity.displayName) through the gate")
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
+        // Swallow the tap so typing in the composer does not collapse the card.
+        .onTapGesture {}
+    }
+
+    // MARK: Expanded message history
+
+    private var messageList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().overlay(Color.hubSeparator)
+            if messages.isEmpty {
+                Text("No gate messages recorded for this agent yet.")
+                    .font(.system(size: 9.5))
+                    .foregroundColor(.hubTertiary)
+                    .padding(10)
+            } else {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(messages) { m in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text(m.messageType)
+                                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                                .foregroundColor(identity.palette.ink)
+                                .frame(width: 84, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 1) {
+                                if !m.summary.isEmpty {
+                                    Text(m.summary)
+                                        .font(.system(size: 9.5))
+                                        .foregroundColor(.hubPrimary)
+                                        .lineLimit(3)
+                                }
+                                HStack(spacing: 6) {
+                                    if let h = m.gateH {
+                                        Text("H \(String(format: "%.2f", h))")
+                                            .font(.system(size: 8, design: .monospaced))
+                                            .foregroundColor(
+                                                h <= kH_threshold ? .hubError
+                                                    : (h < kH_block ? .hubWarning : .hubTertiary)
+                                            )
+                                            .help("Entropy the gate computed for this message")
+                                    }
+                                    if !m.gateDecision.isEmpty {
+                                        Text(m.gateDecision)
+                                            .font(.system(size: 8, weight: .medium))
+                                            .foregroundColor(
+                                                m.gateDecision == "allowed" ? .hubSecondary : .hubWarning
+                                            )
+                                            .help("Gate verdict for this message")
+                                    }
+                                    Spacer(minLength: 0)
+                                    Text(relativeTime(m.at))
+                                        .font(.system(size: 8, design: .monospaced))
+                                        .foregroundColor(.hubTertiary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(10)
+            }
+        }
+        .background(Color.hubSurfaceSunken)
+    }
+
+    // MARK: Sub-elements
+
+    @ViewBuilder
+    private var benchmarkRow: some View {
+        if let b = bench, b.progress > 0 {
+            HStack(spacing: 6) {
+                ProgressView(value: Double(b.progress) / 100.0)
+                    .progressViewStyle(.linear)
+                    .tint(identity.palette.tint)
+                    .frame(width: 80)
+                Text("\(b.progress)%")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.hubSecondary)
+                if let cf = b.bestCF {
+                    Text("CF=\(String(format:"%.1f",cf))")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(identity.palette.ink)
+                        .help("Best complementarity function score so far")
+                }
+            }
+            .help("Benchmark progress — benchmark_state.completed")
+        }
+    }
+
+    /// Entropy state as a word plus the number, so reading it does not require
+    /// memorising the thresholds. Source: agents.entropy_score.
     @ViewBuilder
     private var entropyReadout: some View {
         if let ent = row?.entropy {
@@ -2497,11 +2994,26 @@ private struct AgentRowCard: View {
                     )
                     .cornerRadius(3)
             }
+            .help(entropyTooltip)
         }
     }
 
-    /// Half-circle entropy gauge displayed as a halo behind the agent emoji.
-    /// Arc fills left→right proportional to entropy / kH_block.
+    private var entropyTooltip: String {
+        guard let ent = row?.entropy else {
+            return "No entropy recorded for this agent yet"
+        }
+        let verdict: String
+        if ent <= kH_threshold {
+            verdict = "at or below the collapse threshold \(String(format: "%.1f", kH_threshold))"
+        } else if ent < kH_block {
+            verdict = "approaching the block threshold \(String(format: "%.1f", kH_block))"
+        } else {
+            verdict = "above the block threshold \(String(format: "%.1f", kH_block)) — healthy"
+        }
+        return "Shannon entropy H=\(String(format: "%.2f", ent)) bits — \(verdict)"
+    }
+
+    /// Half-circle entropy gauge behind the agent emoji.
     private var entropyArc: some View {
         let ent  = row?.entropy ?? 0
         let frac = CGFloat(min(ent / kH_block, 1.0))
@@ -2509,14 +3021,13 @@ private struct AgentRowCard: View {
                         : ent >= kH_threshold   ? .hubWarning
                         : identity.palette.tint
         return ZStack {
-            // Background track — full top semicircle
             Circle()
                 .trim(from: 0.5, to: 1.0)
                 .stroke(Color.hubQuaternary, lineWidth: 2.5)
-            // Filled portion — expands from left as entropy rises
             Circle()
                 .trim(from: 0.5, to: 0.5 + frac * 0.5)
                 .stroke(fill, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .animation(.easeInOut(duration: 0.5), value: frac)
         }
         .frame(width: 28, height: 28)
     }
@@ -2532,7 +3043,7 @@ private struct AgentRowCard: View {
     }
 
     private var statusBadge: some View {
-        let s = row?.status ?? .idle
+        let s = status
         return Text(s.label)
             .font(.system(size: 8.5, weight: .semibold))
             .foregroundColor(s.color)
@@ -2540,6 +3051,63 @@ private struct AgentRowCard: View {
             .background(s.wash)
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(s.color.opacity(0.30), lineWidth: 0.5))
             .cornerRadius(4)
+            .help("Gate status for this agent (agents.status)")
+    }
+}
+
+/// Small square icon button with a hover state and a real cursor affordance.
+private struct IconAction: View {
+    let systemName: String
+    let tooltip:    String
+    let tint:       Color
+    let isOn:       Bool
+    let action:     () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(isOn ? .white : tint)
+                .frame(width: 22, height: 20)
+                .background(isOn ? tint : (hovering ? Color.hubSurfaceElevated : .clear))
+                .cornerRadius(5)
+                .overlay(RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(isOn ? .clear : Color.hubSeparator, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+        .onHover { h in
+            hovering = h
+            if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+}
+
+/// Three bars that animate only while gate messages are actually arriving.
+/// Driven by TimelineView so it costs nothing when not rendered.
+private struct StreamingBars: View {
+    let color: Color
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1.0 / 20.0)) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .center, spacing: 1.5) {
+                ForEach(0..<3, id: \.self) { i in
+                    Capsule()
+                        .fill(color)
+                        .frame(width: 2, height: barHeight(i: i, t: t))
+                }
+            }
+            .frame(height: 10)
+        }
+    }
+
+    private func barHeight(i: Int, t: Double) -> CGFloat {
+        let phases: [Double] = [0.0, 1.1, 2.2]
+        let amp = (sin(t * 3.0 + phases[i]) + 1.0) * 0.5
+        return CGFloat(3 + amp * 7)
     }
 }
 
@@ -2578,15 +3146,31 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         }
     }
 
+    /// Agents considered "live": seen by the gate within this window.
+    /// Beyond it an agent row is stale and must not be reported as healthy.
+    private static let livenessWindow: TimeInterval = 120
+
     /// One coloured dot → instant system health read.
-    /// Red → blocked/error  |  Orange → activity  |  Green → all idle  |  dim → no data
+    ///
+    /// Data sources: `agents.status` (liveness) and `agents.last_seen_ns`
+    /// (recency). Both matter — a row stuck at status "active" whose last_seen
+    /// is an hour old is a dead agent, not a working one, and used to render
+    /// the same orange as a genuinely busy fleet.
+    ///
+    ///   red   → any agent blocked or errored
+    ///   orange→ any agent active/waiting *and* seen within livenessWindow
+    ///   green → agents known and recent, none busy
+    ///   dim   → no rows at all, or every row is stale
     private func healthColor() -> NSColor {
         let rows = AgentIdentity.all.compactMap { vm.db.agents[$0.id] }
         if rows.isEmpty { return NSColor.secondaryLabelColor }
-        if rows.contains(where: { $0.status == .blocked || $0.status == .error }) {
+        let cutoff = Date().addingTimeInterval(-Self.livenessWindow)
+        let fresh = rows.filter { $0.lastSeen > cutoff }
+        if fresh.isEmpty { return NSColor.secondaryLabelColor }
+        if fresh.contains(where: { $0.status == .blocked || $0.status == .error }) {
             return NSColor.systemRed
         }
-        if rows.contains(where: { $0.status == .active || $0.status == .waiting }) {
+        if fresh.contains(where: { $0.status == .active || $0.status == .waiting }) {
             return NSColor.systemOrange
         }
         return NSColor.systemGreen
@@ -2603,12 +3187,13 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
                 .font: NSFont.systemFont(ofSize: 13, weight: .medium)
             ]
         )
-        // ∿ wave appears only when work is in-flight
-        let hasActivity = AgentIdentity.all.contains {
-            let s = vm.db.agents[$0.id]?.status ?? .idle
-            return s == .active || s == .waiting
-        }
-        if hasActivity {
+        // ∿ wave means *streaming right now*, not merely "status == active".
+        // Source: a row in agent_messages within AuditDBReader.streamingWindow
+        // (3 s). status == active persists long after an agent stops emitting,
+        // so keying the wave off it left the menu bar animating over a fleet
+        // that had gone quiet.
+        let isStreaming = !vm.db.streamingAgents.isEmpty
+        if isStreaming {
             attr.append(NSAttributedString(
                 string: " ∿",
                 attributes: [
@@ -2618,6 +3203,29 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             ))
         }
         btn.attributedTitle = attr
+        btn.toolTip = menuBarTooltip()
+    }
+
+    /// Spells out what the dot and wave currently mean, from the same rows that
+    /// drew them.
+    private func menuBarTooltip() -> String {
+        let rows = AgentIdentity.all.compactMap { id -> (String, AgentRow)? in
+            vm.db.agents[id.id].map { (id.shortName, $0) }
+        }
+        guard !rows.isEmpty else { return "Shannon — no agents registered yet" }
+        let cutoff = Date().addingTimeInterval(-Self.livenessWindow)
+        let fresh = rows.filter { $0.1.lastSeen > cutoff }
+        if fresh.isEmpty {
+            return "Shannon — \(rows.count) agent(s) known, none seen in the last 2 min"
+        }
+        let streaming = vm.db.streamingAgents
+        var lines = ["Shannon — \(fresh.count) agent(s) active in the last 2 min"]
+        for (name, row) in fresh.sorted(by: { $0.1.lastSeen > $1.1.lastSeen }).prefix(6) {
+            let secs = max(0, Int(-row.lastSeen.timeIntervalSinceNow))
+            let mark = streaming.contains(row.agentId) ? " ∿" : ""
+            lines.append("  \(name): \(row.status.label) · H \(String(format: "%.1f", row.entropy)) · \(secs)s ago\(mark)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     @objc private func togglePopover(_ sender: Any?) {

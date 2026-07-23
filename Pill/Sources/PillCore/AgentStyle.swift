@@ -1,4 +1,5 @@
 import Foundation
+import ShannonTheme
 #if canImport(SwiftUI)
 import SwiftUI
 #endif
@@ -40,8 +41,15 @@ public struct AgentStyle: Sendable, Equatable {
     }
 
     #if canImport(SwiftUI)
+    /// Raw brand colour. Correct for dots and arcs; too light for text in
+    /// daylight — prefer `palette.ink` for anything with letterforms.
     public var color: Color {
         Color(red: red, green: green, blue: blue)
+    }
+
+    /// Scheme-aware ink / tint / wash / edge roles for this agent.
+    public var palette: AgentPalette {
+        AgentColor.palette(red: red, green: green, blue: blue)
     }
     #endif
 }

@@ -30,6 +30,161 @@ private let kH_threshold:  Double = 3.5   // bits — entropy warning
 private let kH_block:      Double = 5.0   // bits — hard block
 private let kD_threshold:  Double = 1.8   // bits — disagreement flag
 
+// MARK: - Hub palette  (mirrors Packages/ShannonTheme SemanticColors)
+//
+// The hub ships as a single standalone Swift file, so it cannot import
+// ShannonTheme. These tokens are a hand-mirror of that package — same names,
+// same values — so the popup and the notch pill stay one visual language. When
+// a token changes there, change it here.
+//
+// Everything resolves per appearance. The hub used to be pinned to dark with
+// `.preferredColorScheme(.dark)` and a stack of `Color.white.opacity(…)` values,
+// which is exactly what made it unreadable on a bright desk.
+
+/// A literal sRGB colour with straight alpha.
+struct HubRGBA {
+    let red: Double, green: Double, blue: Double, alpha: Double
+
+    init(red: Double, green: Double, blue: Double, alpha: Double = 1) {
+        self.red = red; self.green = green; self.blue = blue; self.alpha = alpha
+    }
+
+    init(hex: UInt32, alpha: Double = 1) {
+        self.init(red: Double((hex >> 16) & 0xFF) / 255,
+                  green: Double((hex >> 8) & 0xFF) / 255,
+                  blue: Double(hex & 0xFF) / 255,
+                  alpha: alpha)
+    }
+
+    var nsColor: NSColor {
+        NSColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
+    }
+
+    func withAlpha(_ a: Double) -> HubRGBA {
+        HubRGBA(red: red, green: green, blue: blue, alpha: a)
+    }
+
+    func scaled(by k: Double) -> HubRGBA {
+        HubRGBA(red: red * k, green: green * k, blue: blue * k, alpha: alpha)
+    }
+
+    func blendedTowardWhite(_ t: Double) -> HubRGBA {
+        HubRGBA(red: red + (1 - red) * t,
+                green: green + (1 - green) * t,
+                blue: blue + (1 - blue) * t,
+                alpha: alpha)
+    }
+}
+
+enum HubAdaptive {
+    /// Builds a Color that follows the live system appearance, including inside
+    /// an NSPopover, which is why this is an NSColor provider and not a
+    /// `@Environment(\.colorScheme)` branch.
+    static func color(day: HubRGBA, night: HubRGBA) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? night.nsColor : day.nsColor
+        })
+    }
+
+    static func color(day: UInt32, night: UInt32) -> Color {
+        color(day: HubRGBA(hex: day), night: HubRGBA(hex: night))
+    }
+}
+
+extension Color {
+    // Surfaces
+    static let hubBackground      = HubAdaptive.color(day: 0xF5F6FA, night: 0x0D0D10)
+    static let hubSurface         = HubAdaptive.color(day: 0xFFFFFF, night: 0x18181C)
+    static let hubSurfaceElevated = HubAdaptive.color(day: 0xECEDF2, night: 0x222228)
+    static let hubSurfaceSunken   = HubAdaptive.color(day: 0xF2F3F8, night: 0x101014)
+    static let hubSurfaceHover    = HubAdaptive.color(
+        day: HubRGBA(hex: 0x000000, alpha: 0.04),
+        night: HubRGBA(hex: 0xFFFFFF, alpha: 0.06)
+    )
+    static let hubSeparator = HubAdaptive.color(
+        day: HubRGBA(hex: 0x000000, alpha: 0.12),
+        night: HubRGBA(hex: 0xFFFFFF, alpha: 0.10)
+    )
+    static let hubShadow = HubAdaptive.color(
+        day: HubRGBA(hex: 0x0F172A, alpha: 0.10),
+        night: HubRGBA(hex: 0x000000, alpha: 0.28)
+    )
+
+    // Text
+    static let hubPrimary    = HubAdaptive.color(day: 0x0F0F12, night: 0xF0F0F5)
+    static let hubSecondary  = HubAdaptive.color(day: 0x6B6E80, night: 0x8A8D9F)
+    static let hubTertiary   = HubAdaptive.color(day: 0x70738A, night: 0x6A6D80)
+    /// Non-textual grey: empty tracks, disabled glyphs, rules.
+    static let hubQuaternary = HubAdaptive.color(day: 0xC3C6D4, night: 0x3C3F4E)
+
+    // Accent
+    static let hubAccent       = HubAdaptive.color(day: 0x3A5CF5, night: 0x6B8FFF)
+    static let hubAccentSubtle = HubAdaptive.color(day: 0xEEF1FE, night: 0x1A2140)
+
+    // States
+    static let hubSuccess = HubAdaptive.color(day: 0x1A7F4B, night: 0x34C77A)
+    static let hubWarning = HubAdaptive.color(day: 0xC47A0A, night: 0xF5B934)
+    static let hubError   = HubAdaptive.color(day: 0xC0392B, night: 0xFF6B6B)
+    static let hubNeutral = HubAdaptive.color(day: 0x8A8D9F, night: 0x5A5D6E)
+}
+
+// MARK: - Agent colour roles  (mirrors ShannonTheme AgentIdentityColor)
+
+/// The four daylight-corrected roles derived from one agent brand colour.
+/// `ink` is the only one safe for text — see the package for the full rationale.
+struct HubAgentPalette {
+    let ink: Color, tint: Color, wash: Color, edge: Color
+}
+
+enum HubAgentColor {
+    static let dayInkMaxLuminance: Double = 0.183
+    static let nightInkMinLuminance: Double = 0.223
+
+    static func luminance(_ c: HubRGBA) -> Double {
+        func linear(_ v: Double) -> Double {
+            v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(c.red) + 0.7152 * linear(c.green) + 0.0722 * linear(c.blue)
+    }
+
+    static func darkened(_ c: HubRGBA, toAtMost target: Double) -> HubRGBA {
+        guard luminance(c) > target else { return c }
+        var lo = 0.0, hi = 1.0
+        for _ in 0 ..< 18 {
+            let mid = (lo + hi) / 2
+            if luminance(c.scaled(by: mid)) > target { hi = mid } else { lo = mid }
+        }
+        return c.scaled(by: lo)
+    }
+
+    static func brightened(_ c: HubRGBA, toAtLeast target: Double) -> HubRGBA {
+        guard luminance(c) < target else { return c }
+        var lo = 0.0, hi = 1.0
+        for _ in 0 ..< 18 {
+            let mid = (lo + hi) / 2
+            if luminance(c.blendedTowardWhite(mid)) < target { lo = mid } else { hi = mid }
+        }
+        return c.blendedTowardWhite(hi)
+    }
+
+    static func palette(red: Double, green: Double, blue: Double) -> HubAgentPalette {
+        let base = HubRGBA(red: red, green: green, blue: blue)
+        let dayInk = darkened(base, toAtMost: dayInkMaxLuminance)
+        let nightInk = brightened(base, toAtLeast: nightInkMinLuminance)
+        let dayTint = darkened(base, toAtMost: 0.42)
+        let nightTint = brightened(base, toAtLeast: 0.20)
+        return HubAgentPalette(
+            ink: HubAdaptive.color(day: dayInk, night: nightInk),
+            tint: HubAdaptive.color(day: dayTint, night: nightTint),
+            wash: HubAdaptive.color(day: dayTint.withAlpha(0.10),
+                                    night: nightTint.withAlpha(0.16)),
+            edge: HubAdaptive.color(day: dayTint.withAlpha(0.28),
+                                    night: nightTint.withAlpha(0.34))
+        )
+    }
+}
+
 // MARK: - AgentIdentity  (central registry — replaces all switch statements)
 
 enum AuthKind { case local, cloud }
@@ -37,10 +192,25 @@ enum AuthKind { case local, cloud }
 struct AgentIdentity: Identifiable, Equatable {
     let id:        String
     let icon:      String
-    let color:     Color
+    /// Raw brand components, mirroring `agent_identity.py` `color_rgb`.
+    /// Stored rather than a finished `Color` so the daylight roles below can be
+    /// derived from them.
+    let red:       Double
+    let green:     Double
+    let blue:      Double
     let shortKey:  String    // single-char @-shortcut
     let shortName: String
     let authKind:  AuthKind
+
+    /// Contrast-corrected roles. Use `ink` for text, `tint` for dots and arcs,
+    /// `wash` for chip fills, `edge` for hairlines.
+    var palette: HubAgentPalette {
+        HubAgentColor.palette(red: red, green: green, blue: blue)
+    }
+
+    /// Brand hue for non-text marks. Text must use `palette.ink` instead —
+    /// several brand colours sit near 2:1 against a white card.
+    var color: Color { palette.tint }
 
     /// Full human label — mirrors hub/agent_identity.py display_name.
     var displayName: String {
@@ -97,34 +267,35 @@ struct AgentIdentity: Identifiable, Equatable {
     // Directive F — corrected icons
     static let all: [AgentIdentity] = [
         AgentIdentity(id: "claude_code", icon: "🟠",
-                      color: Color(red: 1.00, green: 0.50, blue: 0.08),
+                      red: 1.00, green: 0.50, blue: 0.08,
                       shortKey: "c", shortName: "CC",    authKind: .local),
         AgentIdentity(id: "cowork",      icon: "🟢",
-                      color: Color(red: 0.20, green: 0.85, blue: 0.45),
+                      red: 0.20, green: 0.85, blue: 0.45,
                       shortKey: "w", shortName: "CWork", authKind: .local),
         AgentIdentity(id: "dispatch",    icon: "🟤",
-                      color: Color(red: 0.72, green: 0.50, blue: 0.28),
+                      red: 0.72, green: 0.50, blue: 0.28,
                       shortKey: "d", shortName: "Disp",  authKind: .local),
         AgentIdentity(id: "science",     icon: "🔬",
-                      color: Color(red: 1.00, green: 0.72, blue: 0.10),
+                      red: 1.00, green: 0.72, blue: 0.10,
                       shortKey: "s", shortName: "Sci",   authKind: .local),
         AgentIdentity(id: "grok_build",  icon: "🟣",
-                      color: Color(red: 0.68, green: 0.28, blue: 0.98),
+                      red: 0.68, green: 0.28, blue: 0.98,
                       shortKey: "g", shortName: "Grok",  authKind: .cloud),
         AgentIdentity(id: "codex",       icon: "🔵",
-                      color: Color(red: 0.30, green: 0.55, blue: 1.00),
+                      red: 0.30, green: 0.55, blue: 1.00,
                       shortKey: "x", shortName: "Codex", authKind: .cloud),
         AgentIdentity(id: "chatgpt",     icon: "🟢",
-                      color: Color(red: 0.10, green: 0.72, blue: 0.55),
+                      red: 0.10, green: 0.72, blue: 0.55,
                       shortKey: "p", shortName: "GPT",   authKind: .cloud),
         AgentIdentity(id: "browser",     icon: "🌐",
-                      color: Color(red: 0.35, green: 0.55, blue: 0.95),
+                      red: 0.35, green: 0.55, blue: 0.95,
                       shortKey: "b", shortName: "Web",   authKind: .local),
     ]
 
     static func find(_ id: String) -> AgentIdentity? { all.first { $0.id == id } }
     static subscript(_ id: String) -> AgentIdentity {
-        find(id) ?? AgentIdentity(id: id, icon: "⚙️", color: .gray,
+        find(id) ?? AgentIdentity(id: id, icon: "⚙️",
+                                   red: 0.55, green: 0.55, blue: 0.58,
                                    shortKey: "?", shortName: id, authKind: .local)
     }
 }
@@ -296,15 +467,43 @@ enum KeychainHelper {
 
 enum AgentStatus: String, Codable {
     case idle, active, waiting, blocked, error
-    /// Calibrated palette — avoids raw system `.green` / `.red` which look toy-like
-    /// against the dark #0D0D0D hub background.
+
+    /// Status colour for text and badge labels.
+    ///
+    /// The previous values were tuned for a #0D0D0D slab — a 0.85-green and a
+    /// 0.80-amber, both of which drop to roughly 2:1 on a white card and turn
+    /// a status badge into a smudge. These resolve per scheme and clear 4.5:1
+    /// on either surface.
     var color: Color {
         switch self {
-        case .idle:    return Color(white: 0.35)
-        case .active:  return Color(red: 0.20, green: 0.85, blue: 0.45)   // Shannon green
-        case .waiting: return Color(red: 1.00, green: 0.80, blue: 0.20)   // amber
-        case .blocked: return Color(red: 1.00, green: 0.50, blue: 0.08)   // orange
-        case .error:   return Color(red: 1.00, green: 0.28, blue: 0.22)   // saturated red
+        case .idle:    return .hubNeutral
+        case .active:  return .hubSuccess
+        case .waiting: return .hubWarning
+        case .blocked: return HubAdaptive.color(day: 0xB4530A, night: 0xFF9F45)
+        case .error:   return .hubError
+        }
+    }
+
+    /// Tinted background behind a status badge.
+    var wash: Color {
+        switch self {
+        case .idle:    return .hubSurfaceElevated
+        case .active:  return HubAdaptive.color(day: 0xE3F5EA, night: 0x123322)
+        case .waiting: return HubAdaptive.color(day: 0xFBF0DA, night: 0x33270B)
+        case .blocked: return HubAdaptive.color(day: 0xFCEADB, night: 0x37200D)
+        case .error:   return HubAdaptive.color(day: 0xFBE7E4, night: 0x371917)
+        }
+    }
+
+    /// Short human label. `waiting` reads as "needs you" so the one status that
+    /// actually demands attention says so in words, not just hue.
+    var label: String {
+        switch self {
+        case .idle:    return "idle"
+        case .active:  return "active"
+        case .waiting: return "needs you"
+        case .blocked: return "blocked"
+        case .error:   return "error"
         }
     }
 }
@@ -678,16 +877,16 @@ struct DiffLine: Identifiable {
 
     var fg: Color {
         switch kind {
-        case .header:  return Color(red: 0.4, green: 0.8, blue: 1.0)
-        case .added:   return Color(red: 0.4, green: 0.9, blue: 0.4)
-        case .removed: return Color(red: 1.0, green: 0.4, blue: 0.4)
-        case .context: return Color(white: 0.75)
+        case .header:  return HubAdaptive.color(day: 0x1F5FA8, night: 0x66C7FF)
+        case .added:   return HubAdaptive.color(day: 0x14663A, night: 0x66E08C)
+        case .removed: return HubAdaptive.color(day: 0x9E2B21, night: 0xFF7A7A)
+        case .context: return .hubSecondary
         }
     }
     var bg: Color {
         switch kind {
-        case .added:   return Color(red: 0.0,  green: 0.18, blue: 0.0)
-        case .removed: return Color(red: 0.22, green: 0.0,  blue: 0.0)
+        case .added:   return HubAdaptive.color(day: 0xE4F6EA, night: 0x0C2A16)
+        case .removed: return HubAdaptive.color(day: 0xFBE6E3, night: 0x2E110F)
         default:       return .clear
         }
     }
@@ -1192,9 +1391,9 @@ struct AgentDotView: View {
             //        orange when approaching kH_block, red at/below kH_threshold.
             if let ent = row?.entropy {
                 let frac = max(0, min(ent / 12.0, 1.0))
-                let arcColor: Color = ent <= kH_threshold ? .red
-                                    : ent < kH_block      ? .orange
-                                    :                        identity.color
+                let arcColor: Color = ent <= kH_threshold ? .hubError
+                                    : ent < kH_block      ? .hubWarning
+                                    :                        identity.palette.tint
                 Circle()
                     .trim(from: 0, to: frac)
                     .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -1204,10 +1403,18 @@ struct AgentDotView: View {
                     .animation(.easeInOut(duration: 0.6), value: frac)
             }
 
-            // Core dot — 14×14
+            // Core dot — 14×14. The fill is the *agent*, the ring is its
+            // *status*. Colouring the fill by status (the old behaviour) made
+            // all eight dots identical whenever the fleet was idle, which is
+            // precisely when you most need to see who is who.
             Circle()
                 .fill(dotColor)
                 .frame(width: 14, height: 14)
+                .overlay(
+                    Circle().strokeBorder(statusRing, lineWidth: 2)
+                )
+                // Keeps a light-coloured dot from dissolving into a white popup.
+                .overlay(Circle().strokeBorder(Color.hubSeparator, lineWidth: 0.5))
                 .overlay(
                     // Timeout countdown arc
                     Group {
@@ -1215,7 +1422,7 @@ struct AgentDotView: View {
                             let remaining = max(0, deadline.timeIntervalSinceNow) / 30.0
                             Circle()
                                 .trim(from: 0, to: CGFloat(1.0 - remaining))
-                                .stroke(Color.yellow, lineWidth: 1.5)
+                                .stroke(Color.hubWarning, lineWidth: 1.5)
                                 .rotationEffect(.degrees(-90))
                         }
                     }
@@ -1225,14 +1432,14 @@ struct AgentDotView: View {
             if identity.authKind == .cloud && !KeychainHelper.hasToken(for: identity.id) {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 6, weight: .bold))
-                    .foregroundColor(.red)
+                    .foregroundColor(.hubError)
                     .offset(x: 7, y: -7)
             }
 
             // Memory-access pulsing dot (directive Pet)
             if isMemAccess {
                 Circle()
-                    .fill(Color.cyan.opacity(memPulse ? 0.9 : 0.3))
+                    .fill(Color.hubAccent.opacity(memPulse ? 0.9 : 0.35))
                     .frame(width: 4, height: 4)
                     .offset(x: 7, y: 7)
                     .animation(.easeInOut(duration: 0.4).repeatForever(autoreverses: true),
@@ -1242,7 +1449,7 @@ struct AgentDotView: View {
             // Mid-task resume indicator
             if isPetResumable {
                 Circle()
-                    .fill(Color.orange.opacity(0.85))
+                    .fill(Color.hubWarning)
                     .frame(width: 4, height: 4)
                     .offset(x: -7, y: 7)
             }
@@ -1253,15 +1460,24 @@ struct AgentDotView: View {
         .help(tooltipText)
     }
 
+    /// Agent identity — dimmed while idle so live work stands out.
     private var dotColor: Color {
-        guard let row else { return .gray.opacity(0.4) }
+        guard let row else { return .hubQuaternary }
+        return row.status == .idle
+            ? identity.palette.tint.opacity(0.40)
+            : identity.palette.tint
+    }
+
+    /// Status ring around the identity dot; absent when nothing is happening.
+    private var statusRing: Color {
+        guard let row, row.status != .idle else { return .clear }
         return row.status.color
     }
 
     private var tooltipText: String {
         var parts: [String] = [identity.shortName]
         if let r = row {
-            parts.append("Status: \(r.status.rawValue)")
+            parts.append("Status: \(r.status.label)")
             parts.append("Entropy: \(String(format: "%.2f", r.entropy)) bits")
             if !r.taskSummary.isEmpty { parts.append(r.taskSummary) }
         }
@@ -1295,7 +1511,7 @@ struct DiffReviewView: View {
             .padding(8)
         }
         .frame(maxHeight: 240)
-        .background(Color.black.opacity(0.5))
+        .background(Color.hubSurfaceSunken)
         .cornerRadius(8)
         .font(.system(.caption, design: .monospaced))
     }
@@ -1312,12 +1528,12 @@ struct DiffReviewView: View {
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
                 .background(line.bg)
-                .background(isHunkHeader && isExpanded ? Color.white.opacity(0.06) : .clear)
+                .background(isHunkHeader && isExpanded ? Color.hubSurfaceHover : .clear)
 
             // Expanded context hint
             if isHunkHeader && isExpanded {
                 Text("◀ full context expanded")
-                    .foregroundColor(.cyan.opacity(0.6))
+                    .foregroundColor(.hubAccent)
                     .font(.system(size: 9))
                     .padding(.leading, 8)
             }
@@ -1360,30 +1576,30 @@ struct PlanReviewView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(identity.shortName)
                         .font(.system(.headline, design: .rounded))
-                        .foregroundColor(identity.color)
+                        .foregroundColor(identity.palette.ink)
                     Text("needs your input")
                         .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.45))
+                        .foregroundColor(.hubTertiary)
                 }
                 Spacer()
                 // Timeout arc
                 ZStack {
-                    Circle().stroke(Color.white.opacity(0.15), lineWidth: 2)
+                    Circle().stroke(Color.hubQuaternary, lineWidth: 2)
                     Circle()
                         .trim(from: 0, to: CGFloat(1.0 - (timeLeft / 30.0)))
-                        .stroke(Color.yellow, lineWidth: 2)
+                        .stroke(Color.hubWarning, lineWidth: 2)
                         .rotationEffect(.degrees(-90))
                 }
                 .frame(width: 20, height: 20)
                 Text("\(Int(timeLeft))s")
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.yellow)
+                    .foregroundColor(.hubWarning)
             }
 
             // Prompt — the agent's question
             Text(interaction.prompt)
                 .font(.system(.body, design: .default))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.hubPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
             // Agent content — what the agent actually produced (scrollable)
@@ -1391,15 +1607,15 @@ struct PlanReviewView: View {
                 ScrollView(.vertical, showsIndicators: true) {
                     Text(interaction.content)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(.hubSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
                 }
                 .frame(maxHeight: 120)
-                .background(Color.black.opacity(0.25))
+                .background(Color.hubSurfaceSunken)
                 .cornerRadius(8)
                 .overlay(RoundedRectangle(cornerRadius: 8)
-                    .stroke(identity.color.opacity(0.15)))
+                    .strokeBorder(identity.palette.edge, lineWidth: 1))
             }
 
             // Diff view (if present)
@@ -1414,14 +1630,16 @@ struct PlanReviewView: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 11))
                         .padding(.horizontal, 8).padding(.vertical, 5)
-                        .background(Color.white.opacity(0.06))
+                        .background(Color.hubSurface)
                         .cornerRadius(6)
+                        .overlay(RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.hubSeparator, lineWidth: 1))
                         .onSubmit { submitReply(approved: true) }
                     if !replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button { submitReply(approved: true) } label: {
                             Image(systemName: "arrow.up.circle.fill")
                                 .font(.system(size: 16))
-                                .foregroundColor(identity.color)
+                                .foregroundColor(identity.palette.ink)
                         }
                         .buttonStyle(.plain)
                         .help("Send reply and approve")
@@ -1433,24 +1651,25 @@ struct PlanReviewView: View {
             HStack(spacing: 8) {
                 switch interaction.kind {
                 case .yesNo:
-                    PlanButton(label: "Approve", key: "⌘Y", accent: .green) { submitOrApprove() }
-                    PlanButton(label: "Deny",    key: "⌘N", accent: .red)   { onDeny() }
+                    PlanButton(label: "Approve", key: "⌘Y", accent: .hubSuccess) { submitOrApprove() }
+                    PlanButton(label: "Deny",    key: "⌘N", accent: .hubError)   { onDeny() }
                 case .choice(let opts):
                     FlowLayout(spacing: 6) {
                         ForEach(Array(opts.enumerated()), id: \.offset) { i, opt in
-                            PlanButton(label: "\(i+1). \(opt)", key: "⌘\(i+1)", accent: .blue) {
+                            PlanButton(label: "\(i+1). \(opt)", key: "⌘\(i+1)", accent: .hubAccent) {
                                 onChoice(i)
                             }
                         }
                     }
                 case .info:
-                    PlanButton(label: "OK", key: "⌘Y", accent: .gray) { onApprove() }
+                    PlanButton(label: "OK", key: "⌘Y", accent: .hubNeutral) { onApprove() }
                 }
             }
         }
         .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.08)))
+        .background(Color.hubSurface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(identity.palette.edge, lineWidth: 1))
+        .shadow(color: .hubShadow, radius: 6, y: 2)
         .onReceive(timer) { _ in
             if timeLeft > 0 { timeLeft -= 0.5 }
         }
@@ -1484,12 +1703,13 @@ private struct PlanButton: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Text(label)
-                Text(key).foregroundColor(accent.opacity(0.7)).font(.caption)
+                Text(key).foregroundColor(.white.opacity(0.75)).font(.caption)
             }
-            .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(isHovering ? accent.opacity(0.35) : accent.opacity(0.18))
-            .foregroundColor(accent)
+            .padding(.horizontal, 11).padding(.vertical, 6)
+            .background(isHovering ? accent : accent.opacity(0.88))
+            .foregroundColor(.white)
             .cornerRadius(7)
+            .shadow(color: accent.opacity(isHovering ? 0.35 : 0.20), radius: 3, y: 1)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
@@ -1523,17 +1743,17 @@ private struct ToolEventRow: View {
                     .foregroundColor(kindColor)
                 Text(evt.label)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.8))
+                    .foregroundColor(.hubSecondary)
                     .lineLimit(1)
                 Spacer()
                 Text(timeAgo(evt.timestamp))
                     .font(.system(size: 9))
-                    .foregroundColor(.white.opacity(0.35))
+                    .foregroundColor(.hubTertiary)
             }
             if expanded && !evt.detail.isEmpty {
                 Text(evt.detail)
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(.hubSecondary)
                     .padding(.leading, 22)
             }
         }
@@ -1543,13 +1763,13 @@ private struct ToolEventRow: View {
 
     private var kindColor: Color {
         switch evt.kind {
-        case .dock:  return Color(red: 0.4, green: 0.9, blue: 1.0)
-        case .build: return Color(red: 0.4, green: 1.0, blue: 0.4)
-        case .bash:  return Color(red: 1.0, green: 0.85, blue: 0.3)
-        case .edit:  return Color(red: 0.9, green: 0.5, blue: 1.0)
-        case .read:  return Color(white: 0.65)
-        case .write: return Color(red: 1.0, green: 0.6, blue: 0.2)
-        case .net:   return Color(red: 0.3, green: 0.7, blue: 1.0)
+        case .dock:  return HubAdaptive.color(day: 0x0E6E8C, night: 0x66E0FF)
+        case .build: return HubAdaptive.color(day: 0x14663A, night: 0x66E08C)
+        case .bash:  return HubAdaptive.color(day: 0x8A6708, night: 0xFFD966)
+        case .edit:  return HubAdaptive.color(day: 0x7A2E9E, night: 0xE29CFF)
+        case .read:  return .hubSecondary
+        case .write: return HubAdaptive.color(day: 0x9C4A06, night: 0xFFAA5C)
+        case .net:   return HubAdaptive.color(day: 0x1F5FA8, night: 0x7FC1FF)
         }
     }
 
@@ -1570,20 +1790,20 @@ struct ResourceBarSection: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 ResourceBar(label: "CPU", value: m.cpuPercent / 100,
-                            warn: 0.75, critical: 0.95, color: .cyan)
+                            warn: 0.75, critical: 0.95, color: .hubAccent)
                 ResourceBar(label: "GPU", value: m.gpuPercent / 100,
-                            warn: 0.80, critical: 0.95, color: Color(red: 0.7, green: 0.4, blue: 1.0))
+                            warn: 0.80, critical: 0.95, color: HubAdaptive.color(day: 0x7A2E9E, night: 0xB07CFF))
             }
             HStack(spacing: 12) {
                 ResourceBar(label: "RAM",
                             value: m.ramTotalGB > 0 ? m.ramUsedGB / m.ramTotalGB : 0,
                             warn: 0.75, critical: 0.90,
-                            color: Color(red: 0.3, green: 0.85, blue: 0.5),
+                            color: Color.hubSuccess,
                             detail: "\(String(format:"%.1f",m.ramUsedGB))/\(String(format:"%.0f",m.ramTotalGB))G")
                 ResourceBar(label: "SSD",
                             value: m.ssdTotalGB > 0 ? m.ssdUsedGB / m.ssdTotalGB : 0,
                             warn: 0.85, critical: 0.95,
-                            color: Color(red: 1.0, green: 0.72, blue: 0.1),
+                            color: HubAdaptive.color(day: 0x8A6708, night: 0xFFC44D),
                             detail: "\(String(format:"%.0f",m.ssdUsedGB))/\(String(format:"%.0f",m.ssdTotalGB))G")
             }
             if m.batteryPct >= 0 {
@@ -1595,7 +1815,7 @@ struct ResourceBarSection: View {
                     Text(thermalLabel(m.thermalState))
                 }
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(m.thermalState >= 3 ? .red : .orange)
+                .foregroundColor(m.thermalState >= 3 ? .hubError : .hubWarning)
             }
         }
     }
@@ -1615,8 +1835,8 @@ private struct ResourceBar: View {
     @State private var pulse = false
 
     private var barColor: Color {
-        if value >= critical { return .red }
-        if value >= warn     { return .orange }
+        if value >= critical { return .hubError }
+        if value >= warn     { return .hubWarning }
         return color
     }
 
@@ -1624,7 +1844,7 @@ private struct ResourceBar: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(label).font(.system(size: 9, weight: .medium))
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(.hubSecondary)
                 Spacer()
                 Text(detail.isEmpty ? "\(Int(value * 100))%" : detail)
                     .font(.system(size: 9, design: .monospaced))
@@ -1633,7 +1853,7 @@ private struct ResourceBar: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(Color.hubQuaternary)
                     RoundedRectangle(cornerRadius: 2)
                         .fill(barColor.opacity(pulse ? 0.55 : 1.0))
                         .frame(width: geo.size.width * min(max(value, 0), 1))
@@ -1663,7 +1883,7 @@ private struct BatteryRow: View {
             if m.batteryWatts > 0.1 {
                 Text("\(String(format:"%.1f",m.batteryWatts))W")
                     .font(.system(size: 9))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.hubTertiary)
             }
         }
     }
@@ -1676,10 +1896,10 @@ private struct BatteryRow: View {
         return "battery.0"
     }
     private var batteryColor: Color {
-        if m.isCharging { return .green }
-        if m.batteryPct < 15 { return .red }
-        if m.batteryPct < 30 { return .orange }
-        return .white.opacity(0.7)
+        if m.isCharging { return .hubSuccess }
+        if m.batteryPct < 15 { return .hubError }
+        if m.batteryPct < 30 { return .hubWarning }
+        return .hubSecondary
     }
 }
 
@@ -1706,8 +1926,8 @@ struct DelegationBarView: View {
                                 Text("@\(a.shortKey)").font(.system(size: 10, weight: .semibold, design: .monospaced))
                             }
                             .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(a.color.opacity(0.18))
-                            .foregroundColor(a.color)
+                            .background(a.palette.wash)
+                            .foregroundColor(a.palette.ink)
                             .cornerRadius(6)
                         }
                         .buttonStyle(.plain)
@@ -1719,12 +1939,12 @@ struct DelegationBarView: View {
             // Text field
             HStack(spacing: 6) {
                 Image(systemName: "arrow.turn.down.right")
-                    .foregroundColor(.white.opacity(0.35))
+                    .foregroundColor(.hubTertiary)
                     .font(.caption)
                 TextField("@agent command  ·  ⌘A=broadcast", text: $vm.delegateText)
                     .textFieldStyle(.plain)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(.white)
+                    .foregroundColor(.hubPrimary)
                     .focused($focused)
                     .onSubmit { vm.submitDelegation() }
                     .onChange(of: vm.delegateText) { text in
@@ -1733,12 +1953,19 @@ struct DelegationBarView: View {
                 Button("Send", action: vm.submitDelegation)
                     .buttonStyle(.plain)
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(
+                        vm.delegateText.trimmingCharacters(in: .whitespaces).isEmpty
+                            ? .hubTertiary : .hubAccent
+                    )
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(Color.white.opacity(0.05))
+            .background(Color.hubSurface)
             .cornerRadius(8)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(focused ? Color.hubAccent : Color.hubSeparator,
+                                  lineWidth: focused ? 1.5 : 1)
+            )
 
             // Recent delegations
             if !vm.delegations.isEmpty {
@@ -1748,12 +1975,12 @@ struct DelegationBarView: View {
                             Text(AgentIdentity[rec.agentId].icon).font(.caption)
                             Text(rec.command.prefix(48))
                                 .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.45))
+                                .foregroundColor(.hubSecondary)
                                 .lineLimit(1)
                             Spacer()
                             Text(rec.outcome)
                                 .font(.system(size: 9))
-                                .foregroundColor(rec.outcome == "approved" ? .green : .white.opacity(0.3))
+                                .foregroundColor(rec.outcome == "approved" ? Color.hubSuccess : Color.hubTertiary)
                         }
                     }
                 }
@@ -1774,12 +2001,12 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Voice Callouts")
                     .font(.system(.headline, design: .rounded))
-                    .foregroundColor(.white)
+                    .foregroundColor(.hubPrimary)
                 ForEach(AgentIdentity.all) { a in
                     VStack(alignment: .leading, spacing: 4) {
                         Text("\(a.icon) \(a.shortName)")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(a.color)
+                            .foregroundColor(a.palette.ink)
                         ForEach(["task_complete", "approval_needed", "resource_alert"], id: \.self) { evt in
                             let key = "\(a.id).\(evt)"
                             Toggle(evt.replacingOccurrences(of: "_", with: " "),
@@ -1795,18 +2022,18 @@ struct SettingsView: View {
                     .padding(.leading, 8)
                 }
 
-                Divider().opacity(0.3)
+                Divider().overlay(Color.hubSeparator)
                 Text("Cloud Credentials (Keychain)")
                     .font(.system(.headline, design: .rounded))
-                    .foregroundColor(.white)
+                    .foregroundColor(.hubPrimary)
                 ForEach(AgentIdentity.all.filter { $0.authKind == .cloud }) { a in
                     HStack {
                         Text("\(a.icon) \(a.shortName)")
                         Spacer()
                         if KeychainHelper.hasToken(for: a.id) {
-                            Text("🔑 Stored").foregroundColor(.green).font(.caption)
+                            Text("🔑 Stored").foregroundColor(.hubSuccess).font(.caption)
                         } else {
-                            Text("⚠️ Missing").foregroundColor(.orange).font(.caption)
+                            Text("⚠️ Missing").foregroundColor(.hubWarning).font(.caption)
                         }
                     }
                     .font(.system(size: 11))
@@ -1814,7 +2041,7 @@ struct SettingsView: View {
             }
             .padding(12)
         }
-        .preferredColorScheme(.dark)
+        .background(Color.hubBackground)
     }
 }
 
@@ -1833,7 +2060,7 @@ struct HubPopoverView: View {
             // ── Inline agent detail (tap a dot to expand) ────────────
             if let aid = expandedAgentId,
                let identity = AgentIdentity.all.first(where: { $0.id == aid }) {
-                Divider().opacity(0.15)
+                Divider().overlay(Color.hubSeparator)
                 AgentInlineDetail(
                     identity:   identity,
                     row:        vm.db.agents[aid],
@@ -1847,7 +2074,7 @@ struct HubPopoverView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            Divider().opacity(0.2)
+            Divider().overlay(Color.hubSeparator)
 
             // ── Tab selector ─────────────────────────────────────────
             tabPicker
@@ -1865,19 +2092,22 @@ struct HubPopoverView: View {
 
             // ── Pending interactions ─────────────────────────────────
             if !vm.interactions.isEmpty {
-                Divider().opacity(0.2)
+                Divider().overlay(Color.hubSeparator)
                 interactionsPanel
             }
 
             // ── Persistent delegation bar ────────────────────────────
-            Divider().opacity(0.2)
+            Divider().overlay(Color.hubSeparator)
             DelegationBarView(vm: vm)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
         }
         .frame(width: 420)
-        .background(.ultraThinMaterial)
-        .preferredColorScheme(.dark)
+        // Opaque, not `.ultraThinMaterial`. Blur was letting whatever window sat
+        // behind the popup bleed through the agent cards; in daylight that
+        // reduced a precision readout to a smear. The instrument gets its own
+        // solid ground and no longer forces `.dark`.
+        .background(Color.hubBackground)
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: expandedAgentId)
     }
 
@@ -1898,7 +2128,7 @@ struct HubPopoverView: View {
                     // Selection ring — appears when this dot is expanded
                     .overlay(
                         Circle()
-                            .stroke(a.color, lineWidth: 1.5)
+                            .stroke(a.palette.tint, lineWidth: 1.5)
                             .opacity(expandedAgentId == a.id ? 1 : 0)
                             .padding(-3)
                     )
@@ -1915,16 +2145,16 @@ struct HubPopoverView: View {
             if let minEnt = vm.db.agents.values.map(\.entropy).min(), minEnt < kH_block {
                 Text("H=\(String(format:"%.1f",minEnt))")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(minEnt <= kH_threshold ? .red : .orange)
+                    .foregroundColor(minEnt <= kH_threshold ? .hubError : .hubWarning)
                     .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background((minEnt <= kH_threshold ? Color.red : .orange).opacity(0.15))
+                    .background(minEnt <= kH_threshold ? AgentStatus.error.wash : AgentStatus.waiting.wash)
                     .cornerRadius(4)
             }
             Button {
                 vm.showSettings = true
             } label: {
                 Image(systemName: "gear").font(.caption)
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.hubTertiary)
             }
             .buttonStyle(.plain)
             .popover(isPresented: $vm.showSettings) {
@@ -1937,24 +2167,41 @@ struct HubPopoverView: View {
 
     // MARK: Tab picker (3 tabs — Delegate moved to persistent bar)
 
+    /// Segmented control on a recessed track. The selected tab is a raised white
+    /// chip with an accent underline — on a light ground, "selected" has to be
+    /// carried by elevation and a hard accent mark, since a subtle fill tint
+    /// reads as nothing at all in bright light.
     private var tabPicker: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             ForEach([("Agents","person.3"), ("Feed","bolt"),
                      ("Resources","cpu")].enumerated().map { $0 }, id: \.offset) { i, tab in
+                let selected = selectedTab == i
                 Button {
                     withAnimation(.spring(response: 0.25)) { selectedTab = i }
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: tab.1).font(.system(size: 10))
-                        Text(tab.0).font(.system(size: 10, weight: selectedTab == i ? .semibold : .regular))
+                    VStack(spacing: 3) {
+                        HStack(spacing: 4) {
+                            Image(systemName: tab.1).font(.system(size: 10, weight: .medium))
+                            Text(tab.0)
+                                .font(.system(size: 10.5, weight: selected ? .semibold : .medium))
+                        }
+                        Capsule()
+                            .fill(selected ? Color.hubAccent : .clear)
+                            .frame(height: 2)
+                            .padding(.horizontal, 10)
                     }
-                    .padding(.vertical, 6).frame(maxWidth: .infinity)
-                    .background(selectedTab == i ? Color.white.opacity(0.08) : .clear)
-                    .foregroundColor(selectedTab == i ? .white : .white.opacity(0.45))
+                    .padding(.top, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(selected ? Color.hubSurface : .clear)
+                    .foregroundColor(selected ? .hubPrimary : .hubSecondary)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.hubSurfaceSunken)
     }
 
     // MARK: Agents tab
@@ -2024,11 +2271,11 @@ private struct AgentInlineDetail: View {
             ZStack {
                 let ent = row?.entropy ?? 0
                 let frac = max(0, min(ent / 12.0, 1.0))
-                let arcColor: Color = ent <= kH_threshold ? .red
-                                    : ent < kH_block      ? .orange
-                                    :                        identity.color
+                let arcColor: Color = ent <= kH_threshold ? .hubError
+                                    : ent < kH_block      ? .hubWarning
+                                    :                        identity.palette.tint
                 Circle()
-                    .stroke(Color.white.opacity(0.08), lineWidth: 2)
+                    .stroke(Color.hubQuaternary, lineWidth: 2)
                     .frame(width: 32, height: 32)
                 Circle()
                     .trim(from: 0, to: frac)
@@ -2037,7 +2284,7 @@ private struct AgentInlineDetail: View {
                     .frame(width: 32, height: 32)
                     .rotationEffect(.degrees(-90))
                 Text(String(format: "%.1f", ent))
-                    .font(.system(size: 7, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                     .foregroundColor(arcColor)
             }
             .frame(width: 32, height: 32)
@@ -2045,71 +2292,71 @@ private struct AgentInlineDetail: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text("\(identity.icon) \(identity.displayName)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(identity.color)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundColor(identity.palette.ink)
                     Text(identity.modelTag)
                         .font(.system(size: 8, weight: .medium))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(.hubTertiary)
                         .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(Color.white.opacity(0.06))
+                        .background(Color.hubSurfaceElevated)
                         .cornerRadius(3)
                     // Status badge
                     let s = row?.status ?? .idle
-                    Text(s.rawValue)
-                        .font(.system(size: 8, weight: .medium))
+                    Text(s.label)
+                        .font(.system(size: 8.5, weight: .semibold))
                         .foregroundColor(s.color)
                         .padding(.horizontal, 4).padding(.vertical, 2)
-                        .background(s.color.opacity(0.15))
+                        .background(s.wash)
                         .cornerRadius(3)
                     Spacer()
                 }
                 if let r = row, !r.taskSummary.isEmpty {
                     Text(r.taskSummary)
                         .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.6))
+                        .foregroundColor(.hubSecondary)
                         .lineLimit(2)
                 }
                 if let b = bench, b.progress > 0 {
                     HStack(spacing: 6) {
                         ProgressView(value: Double(b.progress) / 100.0)
                             .progressViewStyle(.linear)
-                            .tint(identity.color)
+                            .tint(identity.palette.tint)
                             .frame(width: 80)
                         Text("\(b.progress)%")
                             .font(.system(size: 8, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.5))
+                            .foregroundColor(.hubSecondary)
                         if let cf = b.bestCF {
                             Text("CF=\(String(format:"%.1f",cf))")
                                 .font(.system(size: 8, design: .monospaced))
-                                .foregroundColor(identity.color.opacity(0.7))
+                                .foregroundColor(identity.palette.ink)
                         }
                         if let rm = b.bestRMSD {
                             Text("RMSD=\(String(format:"%.2f",rm))Å")
                                 .font(.system(size: 8, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.45))
+                                .foregroundColor(.hubTertiary)
                         }
                     }
                 }
                 if !pet.lastTask.isEmpty {
                     Text("pet: \(pet.lastTask.prefix(60))")
                         .font(.system(size: 8, design: .monospaced))
-                        .foregroundColor(.cyan.opacity(0.5))
+                        .foregroundColor(.hubAccent)
                 }
             }
 
             Button(action: onDelegate) {
                 Label("Delegate", systemImage: "arrow.turn.down.right")
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(identity.color)
+                    .foregroundColor(identity.palette.ink)
                     .padding(.horizontal, 7).padding(.vertical, 4)
-                    .background(identity.color.opacity(0.12))
+                    .background(identity.palette.wash)
                     .cornerRadius(5)
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(identity.color.opacity(0.05))
+        .background(identity.palette.wash)
     }
 }
 
@@ -2122,91 +2369,135 @@ private struct AgentRowCard: View {
     let pet:        PetState
     let onDelegate: () -> Void
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            // Emoji icon + short name with a subtle entropy arc halo behind the icon.
-            VStack(spacing: 1) {
-                ZStack {
-                    entropyArc
-                    Text(identity.icon).font(.title3)
-                }
-                Text(identity.shortName)
-                    .font(.system(size: 8, weight: .medium))
-                    .foregroundColor(identity.color.opacity(0.8))
-            }
-            .frame(width: 36)
+    private var isLive: Bool {
+        let s = row?.status ?? .idle
+        return s == .active || s == .waiting
+    }
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(identity.displayName)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(identity.color)
-                    // Model family tag — mirrors agent_identity.py
-                    Text(identity.modelTag)
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundColor(.white.opacity(0.4))
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(Color.white.opacity(0.06))
-                        .cornerRadius(3)
-                    // Entropy mini-display — monospaced, always visible
-                    if let ent = row?.entropy {
-                        let c: Color = ent <= kH_threshold ? .red : ent < kH_block ? .orange : .white.opacity(0.35)
-                        Text("H=\(String(format:"%.1f",ent))")
-                            .font(.system(size: 8, weight: .medium, design: .monospaced))
-                            .foregroundColor(c)
+    var body: some View {
+        HStack(spacing: 0) {
+            // Identity rail. Colour arrives as a solid 3 pt edge rather than a
+            // 12%-tinted border around the whole card — one saturated stripe per
+            // agent scans far faster down a column than eight tinted rectangles,
+            // and it keeps the card itself white.
+            Rectangle()
+                .fill(identity.palette.tint)
+                .frame(width: 3)
+                .opacity(isLive ? 1 : 0.45)
+
+            HStack(alignment: .top, spacing: 10) {
+                // Emoji icon + short name with the entropy arc as a halo.
+                VStack(spacing: 2) {
+                    ZStack {
+                        entropyArc
+                        Text(identity.icon).font(.title3)
                     }
-                    Spacer()
-                    // Relative last-activity time — muted, secondary
-                    if let r = row {
-                        Text(relativeTime(r.lastSeen))
-                            .font(.system(size: 8))
-                            .foregroundColor(.white.opacity(0.28))
-                    }
-                    statusBadge
+                    Text(identity.shortName)
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundColor(.hubSecondary)
                 }
-                if let r = row, !r.taskSummary.isEmpty {
-                    Text(r.taskSummary)
-                        .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.55))
-                        .lineLimit(2)
-                }
-                if let b = bench, b.progress > 0 {
+                .frame(width: 36)
+
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        ProgressView(value: Double(b.progress) / 100.0)
-                            .progressViewStyle(.linear)
-                            .tint(identity.color)
-                            .frame(width: 80)
-                        Text("\(b.progress)%")
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.5))
-                        if let cf = b.bestCF {
-                            Text("CF=\(String(format:"%.1f",cf))")
+                        Text(identity.displayName)
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundColor(identity.palette.ink)
+                        // Model family tag — mirrors agent_identity.py
+                        Text(identity.modelTag)
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(.hubSecondary)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.hubSurfaceElevated)
+                            .cornerRadius(3)
+                        Spacer(minLength: 0)
+                        // Relative last-activity time — quiet metadata.
+                        if let r = row {
+                            Text(relativeTime(r.lastSeen))
+                                .font(.system(size: 8.5, design: .monospaced))
+                                .foregroundColor(.hubTertiary)
+                        }
+                        statusBadge
+                    }
+                    if let r = row, !r.taskSummary.isEmpty {
+                        Text(r.taskSummary)
+                            .font(.system(size: 9.5))
+                            .foregroundColor(.hubSecondary)
+                            .lineLimit(2)
+                    }
+                    // Entropy is the reason this app exists — it gets its own
+                    // labelled line instead of a tiny tag wedged in the header.
+                    entropyReadout
+
+                    if let b = bench, b.progress > 0 {
+                        HStack(spacing: 6) {
+                            ProgressView(value: Double(b.progress) / 100.0)
+                                .progressViewStyle(.linear)
+                                .tint(identity.palette.tint)
+                                .frame(width: 80)
+                            Text("\(b.progress)%")
                                 .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(identity.color.opacity(0.7))
+                                .foregroundColor(.hubSecondary)
+                            if let cf = b.bestCF {
+                                Text("CF=\(String(format:"%.1f",cf))")
+                                    .font(.system(size: 9, design: .monospaced))
+                                    .foregroundColor(identity.palette.ink)
+                            }
                         }
                     }
+                    // Pet status line
+                    if !pet.lastTask.isEmpty {
+                        Text("pet: \(pet.lastTask.prefix(50))")
+                            .font(.system(size: 8.5, design: .monospaced))
+                            .foregroundColor(.hubTertiary)
+                    }
                 }
-                // Pet status line
-                if !pet.lastTask.isEmpty {
-                    Text("pet: \(pet.lastTask.prefix(50))")
-                        .font(.system(size: 8, design: .monospaced))
-                        .foregroundColor(.cyan.opacity(0.5))
+
+                Spacer(minLength: 0)
+
+                Button(action: onDelegate) {
+                    Image(systemName: "arrow.turn.down.right")
+                        .font(.caption)
+                        .foregroundColor(.hubSecondary)
                 }
+                .buttonStyle(.plain)
+                .help("Delegate a task to \(identity.displayName)")
             }
-
-            Spacer()
-
-            Button(action: onDelegate) {
-                Image(systemName: "arrow.turn.down.right")
-                    .font(.caption)
-                    .foregroundColor(.white.opacity(0.3))
-            }
-            .buttonStyle(.plain)
+            .padding(10)
         }
-        .padding(8)
-        .background(Color.white.opacity(0.04))
-        .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(identity.color.opacity(0.12)))
+        .background(Color.hubSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.hubSeparator, lineWidth: 1)
+        )
+        .shadow(color: .hubShadow, radius: isLive ? 4 : 2, y: 1)
+    }
+
+    /// Entropy state as a word plus the number. `H=2.4` alone requires the
+    /// reader to remember the thresholds; the label does not.
+    @ViewBuilder
+    private var entropyReadout: some View {
+        if let ent = row?.entropy {
+            let collapsing = ent <= kH_threshold
+            let drifting   = ent < kH_block
+            let c: Color = collapsing ? .hubError : (drifting ? .hubWarning : .hubSecondary)
+            HStack(spacing: 5) {
+                Text("H \(String(format: "%.1f", ent))")
+                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                    .foregroundColor(c)
+                Text(collapsing ? "collapse" : (drifting ? "drifting" : "healthy"))
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundColor(c)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(
+                        (collapsing ? AgentStatus.error.wash
+                         : drifting ? AgentStatus.waiting.wash
+                         : Color.hubSurfaceElevated)
+                    )
+                    .cornerRadius(3)
+            }
+        }
     }
 
     /// Half-circle entropy gauge displayed as a halo behind the agent emoji.
@@ -2214,14 +2505,14 @@ private struct AgentRowCard: View {
     private var entropyArc: some View {
         let ent  = row?.entropy ?? 0
         let frac = CGFloat(min(ent / kH_block, 1.0))
-        let fill: Color = ent >= kH_block       ? .red
-                        : ent >= kH_threshold   ? .orange
-                        : identity.color.opacity(0.5)
+        let fill: Color = ent >= kH_block       ? .hubError
+                        : ent >= kH_threshold   ? .hubWarning
+                        : identity.palette.tint
         return ZStack {
             // Background track — full top semicircle
             Circle()
                 .trim(from: 0.5, to: 1.0)
-                .stroke(Color.white.opacity(0.07), lineWidth: 2.5)
+                .stroke(Color.hubQuaternary, lineWidth: 2.5)
             // Filled portion — expands from left as entropy rises
             Circle()
                 .trim(from: 0.5, to: 0.5 + frac * 0.5)
@@ -2242,11 +2533,12 @@ private struct AgentRowCard: View {
 
     private var statusBadge: some View {
         let s = row?.status ?? .idle
-        return Text(s.rawValue)
-            .font(.system(size: 8, weight: .medium))
+        return Text(s.label)
+            .font(.system(size: 8.5, weight: .semibold))
             .foregroundColor(s.color)
             .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(s.color.opacity(0.15))
+            .background(s.wash)
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(s.color.opacity(0.30), lineWidth: 0.5))
             .cornerRadius(4)
     }
 }

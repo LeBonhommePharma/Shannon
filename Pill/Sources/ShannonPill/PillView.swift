@@ -116,18 +116,21 @@ struct PillView: View {
             statusGlyph
                 .frame(width: 20, height: 18)
 
+            // The one line read from the corner of the eye. Proportional rather
+            // than monospaced (wider apertures, easier word-shape recognition)
+            // and a full semibold so it holds up against a bright desktop.
             Text(collapsedText)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.shannonPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             Spacer(minLength: 2)
 
-            // Entropy score: always present when > 0, muted so it's secondary.
+            // Entropy score: monospaced so the digits hold position as H drifts.
             if entropy.entropy > 0 {
                 Text("H\(String(format: "%.1f", entropy.entropy))")
-                    .font(.system(size: 9, weight: .regular, design: .monospaced))
+                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(Color.shannonTertiary)
             }
 
@@ -282,7 +285,7 @@ struct PillView: View {
 
     private var headerIconColor: Color {
         if entropy.collapsed { return .shannonWarning }
-        if let p = busy.first { return color(for: p) }
+        if let p = busy.first { return ink(for: p) }
         if bridge.connected { return .shannonSuccess }
         return .shannonAccent
     }
@@ -341,18 +344,19 @@ struct PillView: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text("\(style(for: a).emoji) \(style(for: a).displayName)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(color(for: a))
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(ink(for: a))
                     Text(a.status.label)
-                        .font(.system(size: 9, weight: .medium, design: .rounded))
-                        .foregroundStyle(color(for: a))
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(ink(for: a))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Capsule().fill(color(for: a).opacity(0.15)))
+                        .background(Capsule().fill(style(for: a).palette.wash))
+                        .overlay(Capsule().strokeBorder(style(for: a).palette.edge, lineWidth: 0.5))
                     Spacer(minLength: 0)
                     Text(a.relativeAge)
                         .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(Color.shannonTertiary)
+                        .foregroundStyle(Color.shannonSecondary)
                 }
                 if !a.lastTask.isEmpty {
                     Text(a.lastTask)
@@ -409,7 +413,7 @@ struct PillView: View {
                 .foregroundStyle(entropy.deltaH < -1 ? Color.shannonWarning : Color.shannonTertiary)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.shannonTertiary.opacity(0.35))
+                    Capsule().fill(Color.shannonQuaternary)
                     Capsule()
                         .fill(entropy.collapsed ? Color.shannonWarning
                               : (bridge.connected ? Color.shannonSuccess : Color.shannonAccent))
@@ -430,7 +434,7 @@ struct PillView: View {
         VStack(spacing: 6) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.shannonTertiary.opacity(0.5))
+                    Capsule().fill(Color.shannonQuaternary)
                     Capsule()
                         .fill(Color.shannonAccent)
                         .frame(width: geo.size.width * (nowPlaying.state.info?.progress ?? 0))
@@ -502,13 +506,24 @@ struct PillView: View {
         style(for: a).systemImage
     }
 
-    /// Brand color modulated by run status.
+    /// Brand tint for non-text marks — dots, icons, arcs — modulated by status.
+    /// Idle agents keep their hue but recede; they must not compete with the
+    /// agent that is actually working.
     private func color(for a: AgentActivitySnapshot) -> Color {
-        let brand = style(for: a).color
+        let brand = style(for: a).palette.tint
         switch a.status {
         case .active, .midTask: return brand
         case .blocked: return .shannonWarning
-        case .idle, .unknown: return brand.opacity(0.45)
+        case .idle, .unknown: return brand.opacity(0.55)
+        }
+    }
+
+    /// Contrast-corrected colour for agent *text*. Never the raw brand colour —
+    /// Science amber on a white pill is about 1.8:1 and disappears outdoors.
+    private func ink(for a: AgentActivitySnapshot) -> Color {
+        switch a.status {
+        case .blocked: return .shannonWarning
+        default: return style(for: a).palette.ink
         }
     }
 
@@ -600,7 +615,7 @@ struct BatteryRing: View {
 
     var body: some View {
         ZStack {
-            Circle().stroke(Color.shannonTertiary, lineWidth: 2)
+            Circle().stroke(Color.shannonQuaternary, lineWidth: 2)
             Circle()
                 .trim(from: 0, to: snapshot.fillFraction)
                 .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))

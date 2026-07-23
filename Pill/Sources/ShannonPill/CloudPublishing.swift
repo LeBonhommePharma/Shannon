@@ -23,11 +23,19 @@ final class CloudPublisher {
     private weak var nowPlaying: NowPlayingModel?
     private weak var battery: BatteryMonitor?
     private weak var bridge: ShannonBridge?
+    /// Source of the gate's pending approvals, mirrored to phone/watch/iPad and
+    /// the sink the returning answers are applied to.
+    private weak var activity: AgentActivityMonitor?
+
+    /// Confirmation ids currently mirrored to iCloud, so a resolved ask can be
+    /// retracted from every device rather than lingering.
+    private var publishedConfirmationIDs: Set<String> = []
 
     init(
         nowPlaying: NowPlayingModel?,
         battery: BatteryMonitor?,
         bridge: ShannonBridge?,
+        activity: AgentActivityMonitor? = nil,
         backend: ShannonSyncBackend? = nil,
         interval: TimeInterval = 10,
         deviceName: String = Host.current().localizedName ?? "Mac"
@@ -35,6 +43,7 @@ final class CloudPublisher {
         self.nowPlaying = nowPlaying
         self.battery = battery
         self.bridge = bridge
+        self.activity = activity
         self.interval = interval
         self.deviceName = deviceName
         self.publisher = ShannonPublisher(backend: backend ?? CloudPublisher.defaultBackend())
@@ -91,21 +100,76 @@ final class CloudPublisher {
         let media = nowPlayingSnapshot()
         let device = deviceSnapshot()
         let agent = agentSnapshot()
+        // The gate's open approvals, mirrored so phone/watch/iPad can answer.
+        // id == interaction_id so a returning ConfirmationResponse resolves the
+        // exact gate row; agentID carries what the socket write needs.
+        let asks = activity?.pendingAsks ?? []
+        let confirmations = asks.map { ask in
+            PendingConfirmation(
+                id: ask.interactionId,
+                question: ask.prompt,
+                agentID: ask.agentId
+            )
+        }
+        let liveIDs = Set(confirmations.map(\.id))
+        let staleIDs = publishedConfirmationIDs.subtracting(liveIDs)
+        publishedConfirmationIDs = liveIDs
 
         Task { [publisher] in
             do {
                 if let media { try await publisher.publish(nowPlaying: media) }
                 if let device { try await publisher.publish(device) }
                 if let agent { try await publisher.publish(agent) }
+
+                // Mirror open approvals, and retract the ones the gate cleared so
+                // a resolved card vanishes from every device.
+                for confirmation in confirmations {
+                    try await publisher.publish(confirmation)
+                }
+                for id in staleIDs {
+                    try await publisher.retract(
+                        PendingConfirmation(id: id, question: "")
+                    )
+                }
+
                 // Playback taps made on the phone or watch come back here.
                 let commands = try await publisher.consumeCommands()
+                // Answers to pending questions made off the desk come back here;
+                // forwarding them to the gate socket is the link that actually
+                // unblocks the waiting agent.
+                let answers = try await publisher.consumeConfirmationResponses()
                 await MainActor.run {
                     self.lastPublishedAt = Date()
                     for command in commands { self.execute(command) }
+                    for (response, confirmation) in answers {
+                        self.applyRemoteAnswer(response, confirmation)
+                    }
                 }
             } catch {
                 await MainActor.run { self.failureCount += 1 }
             }
+        }
+    }
+
+    /// Forward a phone/watch/iPad answer to the gate socket, then drop the local
+    /// ask so the pill stops pulsing without waiting for the next DB poll.
+    private func applyRemoteAnswer(
+        _ response: ConfirmationResponse,
+        _ confirmation: PendingConfirmation?
+    ) {
+        // agentID is required to resolve the gate row; without it the socket
+        // write can't be addressed, so we drop the answer rather than guess.
+        guard let agentID = confirmation?.agentID, !agentID.isEmpty else { return }
+        let interactionID = response.id
+        let approved = response.answer == .confirmed
+        publishedConfirmationIDs.remove(interactionID)
+        Task { [weak self] in
+            _ = try? await GateApprovalClient.resolveAsync(
+                interactionId: interactionID,
+                agentId: agentID,
+                approved: approved
+            )
+            await MainActor.run { self?.activity?.clearAsk(interactionID) }
         }
     }
 

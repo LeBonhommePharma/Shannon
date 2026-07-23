@@ -70,7 +70,12 @@ struct PillView: View {
                 if confirmation.isAwaitingConfirmation {
                     ConfirmationPromptView(confirmation: confirmation)
                 } else if let ask = pendingAsk {
-                    GateAskCard(ask: ask) { approved in
+                    GateAskCard(
+                        ask: ask,
+                        isResolving: activity.resolving.contains(ask.interactionId),
+                        errorText: activity.lastResolveError,
+                        gateAvailable: activity.gateAvailable
+                    ) { approved in
                         resolve(ask, approved: approved)
                     }
                 } else {
@@ -592,20 +597,17 @@ struct PillView: View {
 
     // MARK: Icons / colours — brand per agent (Science amber flask ≠ SuperGrok purple)
 
-    /// Send the approval over the gate socket, then drop the card. Failure is
-    /// surfaced by leaving the ask in place — the pulse keeps going, so a dead
-    /// gate never looks like a successful answer.
+    /// Send the approval over the gate socket, then drop the card. The socket
+    /// write runs off the main thread inside `activity.resolve`, which also owns
+    /// the in-flight (debounce) and error state, so a second tap can't fire a
+    /// duplicate resolution and a dead gate surfaces an inline error instead of
+    /// freezing the UI. The card only collapses on a clean success.
     private func resolve(_ ask: GateDBReader.PendingAsk, approved: Bool) {
-        do {
-            try GateApprovalClient.resolve(
-                interactionId: ask.interactionId,
-                agentId: ask.agentId,
-                approved: approved
-            )
-            activity.clearAsk(ask.interactionId)
-            isExpanded = false
-        } catch {
-            fputs("Shannon pill: approval failed — \(error)\n", stderr)
+        Task {
+            await activity.resolve(ask, approved: approved)
+            if activity.lastResolveError == nil {
+                isExpanded = false
+            }
         }
     }
 
@@ -797,6 +799,15 @@ private struct WaveformIdleView: View {
 /// clear the row for anything else.
 struct GateAskCard: View {
     let ask: GateDBReader.PendingAsk
+    /// True while this ask's approval is being written to the gate — buttons are
+    /// swapped for a spinner so a second tap can't fire a duplicate resolution.
+    var isResolving: Bool = false
+    /// Last resolve failure, shown inline so a dead gate is never mistaken for a
+    /// successful answer.
+    var errorText: String? = nil
+    /// Whether the gate socket is present. When false, the buttons would fail, so
+    /// we say so up front instead of letting the tap error out.
+    var gateAvailable: Bool = true
     let onAnswer: (Bool) -> Void
 
     private var style: AgentStyle { AgentStyleCatalog.style(for: ask.agentId) }
@@ -823,19 +834,42 @@ struct GateAskCard: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let errorText {
+                Text(errorText)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(Color.shannonError)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !gateAvailable {
+                Text("Hub offline — start the gate to approve from here")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(Color.shannonWarning)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Spacer(minLength: 0)
 
             HStack(spacing: 10) {
-                answerButton("Approve", systemImage: "checkmark", tint: .shannonSuccess) {
-                    onAnswer(true)
+                if isResolving {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Sending…")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.shannonSecondary)
+                    Spacer(minLength: 0)
+                } else {
+                    answerButton("Approve", systemImage: "checkmark", tint: .shannonSuccess) {
+                        onAnswer(true)
+                    }
+                    answerButton("Deny", systemImage: "xmark", tint: .shannonError) {
+                        onAnswer(false)
+                    }
+                    Spacer(minLength: 0)
+                    Text("right-click for more")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color.shannonTertiary)
                 }
-                answerButton("Deny", systemImage: "xmark", tint: .shannonError) {
-                    onAnswer(false)
-                }
-                Spacer(minLength: 0)
-                Text("right-click for more")
-                    .font(.system(size: 8))
-                    .foregroundStyle(Color.shannonTertiary)
             }
         }
         .padding(12)
@@ -852,10 +886,11 @@ struct GateAskCard: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
-            .background(Capsule().fill(tint))
+            .background(Capsule().fill(gateAvailable ? tint : tint.opacity(0.4)))
             .foregroundStyle(.white)
         }
         .buttonStyle(.plain)
+        .disabled(!gateAvailable)
         .help("\(title) this request — sends interaction_id \(ask.interactionId) to the gate")
         .onHover { h in
             if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }

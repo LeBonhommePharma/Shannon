@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         np.start(); bat.start(); br.start(); idlePub.start(); activityMon.start()
         bootstrapDefaultPets()
         sanitizePollutedTasks()
-        let cloudPub = CloudPublisher(nowPlaying: np, battery: bat, bridge: br)
+        let cloudPub = CloudPublisher(nowPlaying: np, battery: bat, bridge: br, activity: activityMon)
         cloudPub.start()
 
         nowPlaying = np; battery = bat; bridge = br; idle = idlePub

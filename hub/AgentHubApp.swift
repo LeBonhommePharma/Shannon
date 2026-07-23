@@ -261,13 +261,15 @@ enum KeychainHelper {
 
 enum AgentStatus: String, Codable {
     case idle, active, waiting, blocked, error
+    /// Calibrated palette — avoids raw system `.green` / `.red` which look toy-like
+    /// against the dark #0D0D0D hub background.
     var color: Color {
         switch self {
-        case .idle:    return .gray
-        case .active:  return .green
-        case .waiting: return .yellow
-        case .blocked: return .orange
-        case .error:   return .red
+        case .idle:    return Color(white: 0.35)
+        case .active:  return Color(red: 0.20, green: 0.85, blue: 0.45)   // Shannon green
+        case .waiting: return Color(red: 1.00, green: 0.80, blue: 0.20)   // amber
+        case .blocked: return Color(red: 1.00, green: 0.50, blue: 0.08)   // orange
+        case .error:   return Color(red: 1.00, green: 0.28, blue: 0.22)   // saturated red
         }
     }
 }

@@ -60,8 +60,12 @@ Shannon Pill probe — Version 27.0 (Build 26A5378n)
   bridge:      OK at /Users/you/.shannon/pill.sock — H 7.2 ▽0.6, backend demo
 ```
 
-Stop the app with `pkill -f ShannonPill` — with no dock icon there is nothing
-to quit from.
+Stop the app from the **menu-bar status item → Quit Shannon**, or:
+
+```bash
+./scripts/shannon stop
+# backup: pkill -x ShannonPill
+```
 
 ---
 

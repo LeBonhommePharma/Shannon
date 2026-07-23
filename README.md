@@ -401,14 +401,19 @@ live Unix-socket round trip.
 ## macOS Pill App (live activities)
 
 `Pill/` is a native Swift/SwiftUI agent app that puts Shannon in the notch. It
-runs as an `LSUIElement` — no dock icon, no menu bar item — and expands on
-hover. Collapsed, it shows media when something is playing and otherwise the
-live entropy readout: `H 8.4 ▽3.5`, amber when the detector reports a collapse.
+runs as an `LSUIElement` — **no dock icon**, but a **menu-bar status item is
+always present** (glyph + `○ ready` or the active agent name) so you can quit
+from that menu. The notch pill expands on hover/click. Collapsed, it shows live
+agent/pet activity when available; media only when something is playing and no
+agent is busy; otherwise an honest idle state. Entropy/collapse appears when the
+Python bridge is connected.
 
 ```bash
-cd Pill
-swift build && ./Scripts/make_app.sh
-open build/ShannonPill.app
+# Preferred (same as Quick Start):
+./scripts/shannon
+
+# Or from Pill/ after a local SwiftPM build:
+cd Pill && swift build && ./Scripts/make_app.sh && open build/ShannonPill.app
 ```
 
 | Live activity | Status |

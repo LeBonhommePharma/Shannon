@@ -108,6 +108,16 @@ TEST(SimdExpAvx512, FlushToZeroBelowUnderflow) {
     EXPECT_EQ(eval_avx512(-800.0), 0.0);
     EXPECT_EQ(eval_avx512(-1000.0), 0.0);
 }
+TEST(SimdExpAvx512, DeepNegativeSaturatesToZero) {
+    // Regression: before the kExpFlush saturation, the 2^n exponent-bit trick
+    // wrapped for x < ~-1418 and returned Inf / huge garbage (observed at
+    // x=-1420 and x=-2000 on AVX2). A masked-vocab logit spread can produce
+    // such shifts legitimately.
+    for (double x : {-709.0, -1418.0, -1420.0, -2000.0, -1e6, -1e300}) {
+        EXPECT_EQ(eval_avx512(x), 0.0) << "x=" << x;
+        EXPECT_FALSE(std::signbit(eval_avx512(x))) << "must be +0, x=" << x;
+    }
+}
 TEST(SimdExpAvx512, NoNaNAnywhereOnNegativeDomain) {
     for (double x = 0.0; x >= -1000.0; x -= 0.7) {
         const double v = eval_avx512(x);
@@ -137,6 +147,12 @@ TEST(SimdExpAvx2, FlushToZeroBelowUnderflow) {
     EXPECT_EQ(eval_avx2(-745.5), 0.0);
     EXPECT_EQ(eval_avx2(-800.0), 0.0);
     EXPECT_EQ(eval_avx2(-1000.0), 0.0);
+}
+TEST(SimdExpAvx2, DeepNegativeSaturatesToZero) {
+    for (double x : {-709.0, -1418.0, -1420.0, -2000.0, -1e6, -1e300}) {
+        EXPECT_EQ(eval_avx2(x), 0.0) << "x=" << x;
+        EXPECT_FALSE(std::signbit(eval_avx2(x))) << "must be +0, x=" << x;
+    }
 }
 TEST(SimdExpAvx2, NoNaNAnywhereOnNegativeDomain) {
     for (double x = 0.0; x >= -1000.0; x -= 0.7) {

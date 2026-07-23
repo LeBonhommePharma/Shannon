@@ -217,6 +217,17 @@ if(SHANNON_BUILD_TESTS)
     target_compile_definitions(shannon_v2_tests PRIVATE ${SHANNON_DEFS})
     target_include_directories(shannon_v2_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated/)
 
+    # NEON kernel tests — standalone (no gtest) so the same file cross-compiles
+    # for qemu-aarch64 via scripts/test_neon_qemu.sh on x86 CI hosts. On a
+    # native aarch64 build (Apple Silicon, Graviton) it registers with ctest.
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64|armv8")
+        add_executable(shannon_neon_kernel_tests tests/cpp/test_neon_kernels.cpp)
+        target_link_libraries(shannon_neon_kernel_tests PRIVATE shannon_v2)
+        target_compile_definitions(shannon_neon_kernel_tests PRIVATE ${SHANNON_DEFS})
+        target_include_directories(shannon_neon_kernel_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated/)
+        add_test(NAME NeonKernels COMMAND shannon_neon_kernel_tests)
+    endif()
+
     # SIMD exp accuracy tests — compiled with the widest available ISA flags so
     # the __AVX2__/__AVX512F__ code paths in simd_exp.hpp are actually exercised.
     add_executable(shannon_simd_exp_tests tests/cpp/test_simd_exp.cpp)

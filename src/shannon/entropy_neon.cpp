@@ -4,9 +4,13 @@
 // entry points so UnifiedDispatch can keep NEON as the default CPU backend
 // on Apple Silicon and other aarch64 hosts.
 //
-// Note: NEON has no double-precision exp/log intrinsics, so transcendental
-// calls remain scalar. Vectorization still pays off via load/store, fused
-// multiply-add of shifted*exp, and vmax reductions for log-sum-exp max.
+// The transcendentals are fully vectorized via shannon_exp_neon /
+// shannon_log2_neon (simd_exp.hpp / simd_log2.hpp) — the same range-reduced
+// polynomial kernels used by the AVX2/AVX-512 paths, ported to float64x2_t.
+// Earlier revisions stored each vector to the stack and called scalar
+// std::exp / std::log2 per lane, pinning throughput at scalar-libm speed.
+// Validated under qemu-aarch64 (scripts/test_neon_qemu.sh) and runnable
+// natively on Apple Silicon via the same harness.
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/entropy.hpp"
@@ -18,6 +22,9 @@
 
 #if defined(__ARM_NEON) || defined(__aarch64__)
 #include <arm_neon.h>
+
+#include "shannon/simd_exp.hpp"
+#include "shannon/simd_log2.hpp"
 
 namespace shannon::kernels {
 
@@ -56,12 +63,6 @@ namespace {
     return max_w;
 }
 
-// Load two scalar exp results into a float64x2_t without compound literals
-[[nodiscard]] inline float64x2_t load_exp_pair(double a, double b) noexcept {
-    alignas(16) double buf[2] = {a, b};
-    return vld1q_f64(buf);
-}
-
 }  // namespace
 
 double configurational_entropy_neon(const double* w, std::size_t n) noexcept {
@@ -76,17 +77,11 @@ double configurational_entropy_neon(const double* w, std::size_t n) noexcept {
     std::size_t i = 0;
     // 4-wide outer step: two NEON pairs per iteration (better pipeline use)
     for (; i + 3 < n; i += 4) {
-        float64x2_t vw0 = vld1q_f64(w + i);
-        float64x2_t vw1 = vld1q_f64(w + i + 2);
-        float64x2_t sh0 = vsubq_f64(vw0, v_max);
-        float64x2_t sh1 = vsubq_f64(vw1, v_max);
+        float64x2_t sh0 = vsubq_f64(vld1q_f64(w + i),     v_max);
+        float64x2_t sh1 = vsubq_f64(vld1q_f64(w + i + 2), v_max);
 
-        alignas(16) double sh0_arr[2], sh1_arr[2];
-        vst1q_f64(sh0_arr, sh0);
-        vst1q_f64(sh1_arr, sh1);
-
-        float64x2_t ev0 = load_exp_pair(std::exp(sh0_arr[0]), std::exp(sh0_arr[1]));
-        float64x2_t ev1 = load_exp_pair(std::exp(sh1_arr[0]), std::exp(sh1_arr[1]));
+        float64x2_t ev0 = simd::shannon_exp_neon(sh0);
+        float64x2_t ev1 = simd::shannon_exp_neon(sh1);
 
         acc_Z  = vaddq_f64(acc_Z, ev0);
         acc_Z  = vaddq_f64(acc_Z, ev1);
@@ -95,11 +90,8 @@ double configurational_entropy_neon(const double* w, std::size_t n) noexcept {
     }
 
     for (; i + 1 < n; i += 2) {
-        float64x2_t vw = vld1q_f64(w + i);
-        float64x2_t sh = vsubq_f64(vw, v_max);
-        alignas(16) double sh_arr[2];
-        vst1q_f64(sh_arr, sh);
-        float64x2_t ev = load_exp_pair(std::exp(sh_arr[0]), std::exp(sh_arr[1]));
+        float64x2_t sh = vsubq_f64(vld1q_f64(w + i), v_max);
+        float64x2_t ev = simd::shannon_exp_neon(sh);
         acc_Z  = vaddq_f64(acc_Z, ev);
         acc_ws = vfmaq_f64(acc_ws, sh, ev);
     }
@@ -121,30 +113,29 @@ double configurational_entropy_neon(const double* w, std::size_t n) noexcept {
 double entropy_from_probs_neon(const double* p, std::size_t n) noexcept {
     if (n <= 1) return 0.0;
 
+    const float64x2_t v_eps  = vdupq_n_f64(kEpsilon);
+    const float64x2_t v_zero = vdupq_n_f64(0.0);
     float64x2_t acc = vdupq_n_f64(0.0);
     std::size_t i = 0;
 
+    // contrib = -p * log2(p), masked to 0 where p <= kEpsilon
     for (; i + 3 < n; i += 4) {
-        alignas(16) double p0[2], p1[2];
-        vst1q_f64(p0, vld1q_f64(p + i));
-        vst1q_f64(p1, vld1q_f64(p + i + 2));
-        alignas(16) double c0[2], c1[2];
-        for (int k = 0; k < 2; ++k) {
-            c0[k] = (p0[k] > kEpsilon) ? -p0[k] * std::log2(p0[k]) : 0.0;
-            c1[k] = (p1[k] > kEpsilon) ? -p1[k] * std::log2(p1[k]) : 0.0;
-        }
-        acc = vaddq_f64(acc, vld1q_f64(c0));
-        acc = vaddq_f64(acc, vld1q_f64(c1));
+        float64x2_t p0 = vld1q_f64(p + i);
+        float64x2_t p1 = vld1q_f64(p + i + 2);
+
+        float64x2_t c0 = vnegq_f64(vmulq_f64(p0, simd::shannon_log2_neon(p0)));
+        float64x2_t c1 = vnegq_f64(vmulq_f64(p1, simd::shannon_log2_neon(p1)));
+
+        uint64x2_t m0 = vcgtq_f64(p0, v_eps);
+        uint64x2_t m1 = vcgtq_f64(p1, v_eps);
+        acc = vaddq_f64(acc, vbslq_f64(m0, c0, v_zero));
+        acc = vaddq_f64(acc, vbslq_f64(m1, c1, v_zero));
     }
 
     for (; i + 1 < n; i += 2) {
-        alignas(16) double p_arr[2];
-        vst1q_f64(p_arr, vld1q_f64(p + i));
-        alignas(16) double contrib[2];
-        for (int k = 0; k < 2; ++k) {
-            contrib[k] = (p_arr[k] > kEpsilon) ? -p_arr[k] * std::log2(p_arr[k]) : 0.0;
-        }
-        acc = vaddq_f64(acc, vld1q_f64(contrib));
+        float64x2_t vp = vld1q_f64(p + i);
+        float64x2_t c  = vnegq_f64(vmulq_f64(vp, simd::shannon_log2_neon(vp)));
+        acc = vaddq_f64(acc, vbslq_f64(vcgtq_f64(vp, v_eps), c, v_zero));
     }
 
     double h = hsum_f64x2(acc);
@@ -157,37 +148,34 @@ double entropy_from_probs_neon(const double* p, std::size_t n) noexcept {
 double entropy_from_logprobs_neon(const double* lp, std::size_t n) noexcept {
     if (n <= 1) return 0.0;
 
-    float64x2_t acc = vdupq_n_f64(0.0);
     const float64x2_t v_log2e = vdupq_n_f64(kLog2E);
+    const float64x2_t v_eps   = vdupq_n_f64(kEpsilon);
+    const float64x2_t v_zero  = vdupq_n_f64(0.0);
+    float64x2_t acc = vdupq_n_f64(0.0);
     std::size_t i = 0;
 
+    // contrib = -exp(lp) * lp * log2(e), masked to 0 where p <= kEpsilon
     for (; i + 3 < n; i += 4) {
-        alignas(16) double lp0[2], lp1[2];
-        vst1q_f64(lp0, vld1q_f64(lp + i));
-        vst1q_f64(lp1, vld1q_f64(lp + i + 2));
-        alignas(16) double c0[2], c1[2];
-        for (int k = 0; k < 2; ++k) {
-            const double p0 = std::exp(lp0[k]);
-            const double p1 = std::exp(lp1[k]);
-            c0[k] = (p0 > kEpsilon) ? -p0 * lp0[k] : 0.0;
-            c1[k] = (p1 > kEpsilon) ? -p1 * lp1[k] : 0.0;
-        }
-        // scale nats → bits with NEON multiply
-        float64x2_t vc0 = vmulq_f64(vld1q_f64(c0), v_log2e);
-        float64x2_t vc1 = vmulq_f64(vld1q_f64(c1), v_log2e);
-        acc = vaddq_f64(acc, vc0);
-        acc = vaddq_f64(acc, vc1);
+        float64x2_t lp0 = vld1q_f64(lp + i);
+        float64x2_t lp1 = vld1q_f64(lp + i + 2);
+
+        float64x2_t p0 = simd::shannon_exp_neon(lp0);
+        float64x2_t p1 = simd::shannon_exp_neon(lp1);
+
+        float64x2_t c0 = vnegq_f64(vmulq_f64(p0, lp0));
+        float64x2_t c1 = vnegq_f64(vmulq_f64(p1, lp1));
+
+        uint64x2_t m0 = vcgtq_f64(p0, v_eps);
+        uint64x2_t m1 = vcgtq_f64(p1, v_eps);
+        acc = vfmaq_f64(acc, vbslq_f64(m0, c0, v_zero), v_log2e);
+        acc = vfmaq_f64(acc, vbslq_f64(m1, c1, v_zero), v_log2e);
     }
 
     for (; i + 1 < n; i += 2) {
-        alignas(16) double lp_arr[2];
-        vst1q_f64(lp_arr, vld1q_f64(lp + i));
-        alignas(16) double contrib[2];
-        for (int k = 0; k < 2; ++k) {
-            const double p = std::exp(lp_arr[k]);
-            contrib[k] = (p > kEpsilon) ? -p * lp_arr[k] : 0.0;
-        }
-        acc = vaddq_f64(acc, vmulq_f64(vld1q_f64(contrib), v_log2e));
+        float64x2_t vlp = vld1q_f64(lp + i);
+        float64x2_t p   = simd::shannon_exp_neon(vlp);
+        float64x2_t c   = vnegq_f64(vmulq_f64(p, vlp));
+        acc = vfmaq_f64(acc, vbslq_f64(vcgtq_f64(p, v_eps), c, v_zero), v_log2e);
     }
 
     double h = hsum_f64x2(acc);

@@ -35,6 +35,10 @@
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
+#endif
+#if defined(__ARM_NEON) || defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 namespace shannon::kernels::simd {
 
@@ -56,8 +60,57 @@ inline constexpr double kL1 = 1.0 / 3.0;
 inline constexpr double kL0 = 1.0;
 }  // namespace detail
 
+// ─── NEON (float64x2_t) ───────────────────────────────────────────────────────
+// Same algorithm and constants as the x86 paths below; validated against
+// std::log2 under qemu-aarch64 (scripts/test_neon_qemu.sh).
+#if defined(__ARM_NEON) || defined(__aarch64__)
+
+[[nodiscard]] static inline float64x2_t shannon_log2_neon(float64x2_t x) noexcept {
+    using namespace detail;
+    int64x2_t xi = vreinterpretq_s64_f64(x);
+
+    // Mantissa m ∈ [1,2): clear exponent, force exponent of 1.0.
+    float64x2_t m = vreinterpretq_f64_s64(vorrq_s64(
+        vandq_s64(xi, vdupq_n_s64(kMantMask)),
+        vdupq_n_s64(kOneExp)));
+
+    // Unbiased exponent e as double via the int->double magic trick.
+    int64x2_t biased = vandq_s64(
+        vreinterpretq_s64_u64(vshrq_n_u64(vreinterpretq_u64_f64(x), 52)),
+        vdupq_n_s64(0x7FF));
+    float64x2_t e = vsubq_f64(
+        vreinterpretq_f64_s64(vorrq_s64(biased, vdupq_n_s64(kExpMagic))),
+        vdupq_n_f64(kExpBias));
+
+    // Reduce m into [√½, √2): if m > √2, halve m and bump e.
+    uint64x2_t gt = vcgtq_f64(m, vdupq_n_f64(kSqrt2));
+    m = vbslq_f64(gt, vmulq_f64(m, vdupq_n_f64(0.5)), m);
+    e = vbslq_f64(gt, vaddq_f64(e, vdupq_n_f64(1.0)), e);
+
+    // s = (m-1)/(m+1), atanh series in u = s².
+    float64x2_t one = vdupq_n_f64(1.0);
+    float64x2_t s = vdivq_f64(vsubq_f64(m, one), vaddq_f64(m, one));
+    float64x2_t u = vmulq_f64(s, s);
+
+    float64x2_t p = vdupq_n_f64(kL7);
+    p = vfmaq_f64(vdupq_n_f64(kL6), p, u);
+    p = vfmaq_f64(vdupq_n_f64(kL5), p, u);
+    p = vfmaq_f64(vdupq_n_f64(kL4), p, u);
+    p = vfmaq_f64(vdupq_n_f64(kL3), p, u);
+    p = vfmaq_f64(vdupq_n_f64(kL2), p, u);
+    p = vfmaq_f64(vdupq_n_f64(kL1), p, u);
+    p = vfmaq_f64(vdupq_n_f64(kL0), p, u);
+
+    // log2(m) = 2·log2(e)·s·p ; log2(x) = e + log2(m).
+    float64x2_t log2m = vmulq_f64(vmulq_f64(s, p),
+                                  vdupq_n_f64(2.0 * kLn2Recip));
+    return vaddq_f64(e, log2m);
+}
+
+#endif  // NEON
+
 // ─── AVX2 (__m256d) ───────────────────────────────────────────────────────────
-#if defined(__AVX2__)
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__)
 
 [[nodiscard]] static inline __m256d shannon_log2_avx2(__m256d x) noexcept {
     using namespace detail;
@@ -103,7 +156,7 @@ inline constexpr double kL0 = 1.0;
 #endif  // __AVX2__
 
 // ─── AVX-512 (__m512d) ─────────────────────────────────────────────────────────
-#if defined(__AVX512F__)
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX512F__)
 
 [[nodiscard]] static inline __m512d shannon_log2_avx512(__m512d x) noexcept {
     using namespace detail;
@@ -144,5 +197,3 @@ inline constexpr double kL0 = 1.0;
 #endif  // __AVX512F__
 
 }  // namespace shannon::kernels::simd
-
-#endif  // x86_64

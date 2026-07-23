@@ -14,9 +14,13 @@
 // result underflows *gradually* to a correct subnormal and then to +0.0 for
 // very negative x — never NaN or denormal garbage.
 //
-// Accuracy: max relative error vs std::exp < 1e-13 over the domain that matters
-// (inputs <= 0, i.e. after the log-sum-exp max-shift). exp(0) == 1.0 exactly.
-// Inputs below ~-745 flush to +0.0. Validated in tests/cpp/test_simd_exp.cpp.
+// Accuracy: max relative error vs std::exp < 1e-13 over [-708, 0], the domain
+// that matters (inputs <= 0 after the log-sum-exp max-shift; below -708 the
+// true value is subnormal/zero and contributes nothing to Z >= 1).
+// exp(0) == 1.0 exactly. Inputs below kExpFlush = -708 return exactly +0.0 —
+// saturated, never Inf/NaN/garbage even for arbitrarily negative x (see the
+// kExpFlush note). Validated in tests/cpp/test_simd_exp.cpp (x86) and
+// tests/cpp/test_neon_kernels.cpp under qemu-aarch64 (NEON).
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #pragma once
@@ -25,6 +29,10 @@
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
+#endif
+#if defined(__ARM_NEON) || defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 namespace shannon::kernels::simd {
 
@@ -48,10 +56,70 @@ inline constexpr double kT3  = 1.6666666666666666e-1;   // 1/3!
 inline constexpr double kT2  = 5.0e-1;                  // 1/2!
 inline constexpr double kT1  = 1.0;                     // 1/1!
 inline constexpr double kT0  = 1.0;                     // 1/0!
+// Flush threshold: below this, exp(x) < ~3.3e-308 (the smallest normal double
+// is ~2.2e-308) and the contribution to any log-sum-exp with a 0-shifted max
+// (Z >= 1) is far below one ulp — physically zero. Saturating here also keeps
+// the 2^n exponent-bit trick inside its valid range: without it, n1+1023
+// underflows the exponent field for x < ~-1418 and the kernel returns Inf or
+// huge garbage instead of 0 (observed at x=-1420 and x=-2000 on AVX2 — a
+// masked-vocab logit spread can legitimately produce such inputs).
+inline constexpr double kExpFlush = -708.0;
 }  // namespace detail
 
+// ─── NEON (float64x2_t) ───────────────────────────────────────────────────────
+// Same algorithm and constants as the x86 paths below; validated against
+// std::exp under qemu-aarch64 (scripts/test_neon_qemu.sh) — same harness a
+// native Apple Silicon build runs via ctest.
+#if defined(__ARM_NEON) || defined(__aarch64__)
+
+[[nodiscard]] static inline float64x2_t shannon_pow2_half_neon(float64x2_t k) noexcept {
+    // (k + kMagic) holds the integer k+1023 in its low mantissa bits;
+    // shifting left by 52 moves it into the IEEE-754 exponent field.
+    float64x2_t a = vaddq_f64(k, vdupq_n_f64(detail::kMagic));
+    int64x2_t   b = vshlq_n_s64(vreinterpretq_s64_f64(a), 52);
+    return vreinterpretq_f64_s64(b);
+}
+
+[[nodiscard]] static inline float64x2_t shannon_exp_neon(float64x2_t x) noexcept {
+    using namespace detail;
+    // n = round-to-nearest(x / ln2)   (vrndnq: round to nearest, ties to even)
+    float64x2_t n = vrndnq_f64(vmulq_f64(x, vdupq_n_f64(kLog2E)));
+    // r = x - n*ln2  (two-part subtraction; vfmsq(a,b,c) = a - b*c)
+    float64x2_t r = vfmsq_f64(x, n, vdupq_n_f64(kC1));
+    r = vfmsq_f64(r, n, vdupq_n_f64(kC2));
+
+    // exp(r) via degree-13 Horner Taylor (vfmaq(a,b,c) = a + b*c)
+    float64x2_t p = vdupq_n_f64(kT13);
+    p = vfmaq_f64(vdupq_n_f64(kT12), p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT11), p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT10), p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT9),  p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT8),  p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT7),  p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT6),  p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT5),  p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT4),  p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT3),  p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT2),  p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT1),  p, r);
+    p = vfmaq_f64(vdupq_n_f64(kT0),  p, r);
+
+    // 2^n via two half-scales
+    float64x2_t n1 = vrndmq_f64(vmulq_f64(n, vdupq_n_f64(0.5)));  // floor
+    float64x2_t n2 = vsubq_f64(n, n1);
+    float64x2_t scale = vmulq_f64(shannon_pow2_half_neon(n1),
+                                  shannon_pow2_half_neon(n2));
+    float64x2_t res = vmulq_f64(p, scale);
+
+    // Saturate: lanes with x < kExpFlush return exactly +0.0 (see detail note).
+    uint64x2_t keep = vcgeq_f64(x, vdupq_n_f64(kExpFlush));
+    return vreinterpretq_f64_u64(vandq_u64(keep, vreinterpretq_u64_f64(res)));
+}
+
+#endif  // NEON
+
 // ─── AVX2 (__m256d) ───────────────────────────────────────────────────────────
-#if defined(__AVX2__)
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__)
 
 // Build 2^k for an integer-valued double k in [-538, 0] by injecting k+1023
 // into the IEEE-754 exponent field via the "add 2^52" mantissa-alignment trick.
@@ -86,18 +154,22 @@ inline constexpr double kT0  = 1.0;                     // 1/0!
     p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(kT1));
     p = _mm256_fmadd_pd(p, r, _mm256_set1_pd(kT0));
 
-    // 2^n via two half-scales: gradual underflow to correct subnormal / +0.0
+    // 2^n via two half-scales
     __m256d n1 = _mm256_floor_pd(_mm256_mul_pd(n, _mm256_set1_pd(0.5)));
     __m256d n2 = _mm256_sub_pd(n, n1);
     __m256d scale = _mm256_mul_pd(shannon_pow2_half_avx2(n1),
                                   shannon_pow2_half_avx2(n2));
-    return _mm256_mul_pd(p, scale);
+    __m256d res = _mm256_mul_pd(p, scale);
+
+    // Saturate: lanes with x < kExpFlush return exactly +0.0 (see detail note).
+    return _mm256_and_pd(res,
+        _mm256_cmp_pd(x, _mm256_set1_pd(kExpFlush), _CMP_GE_OQ));
 }
 
 #endif  // __AVX2__
 
 // ─── AVX-512 (__m512d) ─────────────────────────────────────────────────────────
-#if defined(__AVX512F__)
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX512F__)
 
 [[nodiscard]] static inline __m512d shannon_pow2_half_avx512(__m512d k) noexcept {
     __m512d a = _mm512_add_pd(k, _mm512_set1_pd(detail::kMagic));
@@ -132,11 +204,13 @@ inline constexpr double kT0  = 1.0;                     // 1/0!
     __m512d n2 = _mm512_sub_pd(n, n1);
     __m512d scale = _mm512_mul_pd(shannon_pow2_half_avx512(n1),
                                   shannon_pow2_half_avx512(n2));
-    return _mm512_mul_pd(p, scale);
+    __m512d res = _mm512_mul_pd(p, scale);
+
+    // Saturate: lanes with x < kExpFlush return exactly +0.0 (see detail note).
+    __mmask8 keep = _mm512_cmp_pd_mask(x, _mm512_set1_pd(kExpFlush), _CMP_GE_OQ);
+    return _mm512_maskz_mov_pd(keep, res);
 }
 
 #endif  // __AVX512F__
 
 }  // namespace shannon::kernels::simd
-
-#endif  // x86_64

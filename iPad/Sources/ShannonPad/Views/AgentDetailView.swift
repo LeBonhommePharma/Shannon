@@ -82,7 +82,6 @@ struct AgentDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.shannonSuccess)
-                .keyboardShortcut(.return, modifiers: .command)
 
                 Button {
                     hub.answer(question, approved: false)
@@ -92,7 +91,6 @@ struct AgentDetailView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(.shannonError)
-                .keyboardShortcut(".", modifiers: .command)
             }
         }
         .shannonCard(isHighlighted: true)

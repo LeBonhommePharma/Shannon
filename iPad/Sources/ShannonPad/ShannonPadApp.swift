@@ -48,12 +48,15 @@ struct ShannonPadApp: App {
         }
 
         CommandMenu("Confirmation") {
-            Button("Confirm Pending") { hub.answerPendingConfirmation(approved: true) }
-                .keyboardShortcut(.return, modifiers: .command)
+            // ⌘A / ⌘D act on the oldest pending gate question — the one the
+            // floating gate card shows. Kept here as the single owner of these
+            // keys so no two visible buttons register the same shortcut.
+            Button("Approve Pending") { hub.answerPendingConfirmation(approved: true) }
+                .keyboardShortcut("a", modifiers: .command)
                 .disabled(hub.pendingConfirmations.isEmpty)
 
             Button("Deny Pending") { hub.answerPendingConfirmation(approved: false) }
-                .keyboardShortcut(".", modifiers: .command)
+                .keyboardShortcut("d", modifiers: .command)
                 .disabled(hub.pendingConfirmations.isEmpty)
 
             Divider()

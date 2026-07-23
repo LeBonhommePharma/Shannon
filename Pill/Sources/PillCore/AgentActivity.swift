@@ -352,6 +352,19 @@ public final class AgentActivityMonitor: ObservableObject {
     /// Source: agent_interactions rows with status = 'pending'.
     @Published public private(set) var pendingAsks: [GateDBReader.PendingAsk] = []
 
+    /// Whether the gate's Unix socket is present. Drives the pill's graceful
+    /// "hub offline" state instead of letting approvals fail invisibly.
+    @Published public private(set) var gateAvailable = false
+
+    /// Interaction ids whose approval is currently being written to the gate.
+    /// The banner shows a spinner for these instead of tappable buttons, so a
+    /// second tap can't fire a duplicate resolution.
+    @Published public private(set) var resolving: Set<String> = []
+
+    /// Last approval failure, surfaced inline in the banner. Cleared on the next
+    /// successful resolve or when the offending ask disappears.
+    @Published public private(set) var lastResolveError: String?
+
     /// Suspends polling. Real state: while true, `refresh` does no disk or
     /// SQLite work at all, so "Pause monitoring" in the pill's context menu
     /// genuinely stops this app reading. It does not pause the agents — the gate
@@ -381,17 +394,63 @@ public final class AgentActivityMonitor: ObservableObject {
         timer = nil
     }
 
+    /// Path to the gate socket. Injectable for tests; defaults to the live gate.
+    public var gateSocketPath: String = GateApprovalClient.defaultSocketPath
+
     public func refresh() {
         guard !isPaused else { return }
         summary = AgentActivityReader.load()
         pendingAsks = GateDBReader.readPendingAsks(
             path: PetBootstrap.shannonHome.appendingPathComponent("agent_hub.db").path
         )
+        gateAvailable = FileManager.default.fileExists(atPath: gateSocketPath)
+        // Drop stale in-flight/error state for asks the gate has since cleared.
+        let live = Set(pendingAsks.map(\.interactionId))
+        resolving.formIntersection(live)
     }
 
     /// Drop a resolved ask immediately so the pill stops pulsing before the next
     /// poll observes the gate's own update.
     public func clearAsk(_ interactionId: String) {
         pendingAsks.removeAll { $0.interactionId == interactionId }
+        resolving.remove(interactionId)
+    }
+
+    /// The whole approve/deny flow, owned in one place so the view never blocks.
+    ///
+    /// Runs the socket write off the main thread, and — crucially — always
+    /// reaches a terminal state the UI can see: on success the ask is cleared;
+    /// on any failure the ask stays put and `lastResolveError` is populated, so
+    /// the pill shows an actionable error instead of freezing on a dead socket.
+    public func resolve(_ ask: GateDBReader.PendingAsk, approved: Bool) async {
+        let iid = ask.interactionId
+        guard !resolving.contains(iid) else { return }
+        resolving.insert(iid)
+        lastResolveError = nil
+        defer { resolving.remove(iid) }
+
+        do {
+            try await GateApprovalClient.resolveAsync(
+                interactionId: iid,
+                agentId: ask.agentId,
+                approved: approved,
+                socketPath: gateSocketPath
+            )
+            clearAsk(iid)
+        } catch {
+            lastResolveError = Self.describe(error)
+        }
+    }
+
+    private static func describe(_ error: Error) -> String {
+        guard let e = error as? GateApprovalClient.ApprovalError else {
+            return "Couldn't reach the gate — \(error.localizedDescription)"
+        }
+        switch e {
+        case .socketUnavailable: return "Hub offline — start the gate, then retry"
+        case .connectFailed:     return "Gate refused the connection — retry"
+        case .writeFailed:       return "Write to gate failed — retry"
+        case .timedOut:          return "Gate not responding — retry"
+        }
     }
 }

@@ -27,6 +27,16 @@ enum HubSelection: Hashable {
     case docking(String)
 }
 
+/// One resolved gate question, kept after its card clears so the sidebar can
+/// show what was recently approved or denied.
+struct GateEvent: Identifiable, Equatable {
+    let id: String
+    let question: String
+    let agentName: String?
+    let approved: Bool
+    let answeredAt: Date
+}
+
 /// Everything the hub knows that CloudKit does not: selection, pins, drawn
 /// links, dismissed notifications, and the sampled history behind the charts.
 ///
@@ -55,7 +65,14 @@ final class AgentHubViewModel: ObservableObject {
     /// Best RMSD so far, keyed by benchmark id.
     @Published private(set) var rmsdHistory: [String: [MetricSample]] = [:]
 
+    /// Recently answered gate questions, newest first. The card clears the
+    /// moment it is answered, so without a durable trail an approve/deny leaves
+    /// no evidence it happened — this backs the sidebar's "Gate Activity"
+    /// section, the transparency half of the iPadOS redesign.
+    @Published private(set) var recentGateEvents: [GateEvent] = []
+
     static let historyLimit = 180
+    static let gateEventLimit = 12
 
     private var started = false
 
@@ -230,7 +247,7 @@ final class AgentHubViewModel: ObservableObject {
             post("Nothing is waiting on an answer.")
             return
         }
-        PadHaptics.notify(approved ? .success : .warning)
+        didAnswer(answered, approved: approved)
         post("\(approved ? "Confirmed" : "Denied") · \(answered.question)")
     }
 
@@ -240,6 +257,32 @@ final class AgentHubViewModel: ObservableObject {
         source: ConfirmationSource = .tap
     ) {
         store.answer(confirmation, approved ? .confirmed : .denied, source: source)
+        didAnswer(confirmation, approved: approved)
+    }
+
+    /// Shared tail for every answer path. `ShannonStore` is `@Observable` and
+    /// mutates its snapshot in place when an answer is sent, but this view model
+    /// is an `ObservableObject` bridged to SwiftUI only through
+    /// `objectWillChange`. The store's optimistic removal therefore never
+    /// reached the view: the card stayed on screen until the next 20 s poll,
+    /// which read as the app being "stuck" right after Approve/Deny. Recording
+    /// the gate event mutates a `@Published` property — which emits
+    /// `objectWillChange` — so the pending list, read live from the store, is
+    /// re-rendered immediately.
+    private func didAnswer(_ confirmation: PendingConfirmation, approved: Bool) {
+        let event = GateEvent(
+            id: confirmation.id,
+            question: confirmation.question,
+            agentName: agentName(for: confirmation),
+            approved: approved,
+            answeredAt: Date()
+        )
+        recentGateEvents.removeAll { $0.id == event.id }
+        recentGateEvents.insert(event, at: 0)
+        if recentGateEvents.count > Self.gateEventLimit {
+            recentGateEvents.removeLast(recentGateEvents.count - Self.gateEventLimit)
+        }
+        objectWillChange.send()
         PadHaptics.notify(approved ? .success : .warning)
     }
 

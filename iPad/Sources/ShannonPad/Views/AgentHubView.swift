@@ -31,7 +31,7 @@ struct AgentHubView: View {
             )
             .onPreferenceChange(HubWidthKey.self) { width = $0 }
             .overlay(alignment: .bottom) { voiceChip }
-            .overlay(alignment: .top) { statusBanner }
+            .overlay(alignment: .top) { topOverlays }
             .overlay { paletteOverlay }
             .sheet(item: $annotation) { target in
                 AnnotationOverlayView(
@@ -210,6 +210,16 @@ struct AgentHubView: View {
         }
     }
 
+    /// Gate card first, status banner beneath it. Both float over the hub's own
+    /// window — never a sheet — so a blocked agent never blocks another Stage
+    /// Manager window or the rest of this one.
+    private var topOverlays: some View {
+        VStack(spacing: ShannonSpacing.sm) {
+            GateCardView(hub: hub)
+            statusBanner
+        }
+    }
+
     @ViewBuilder
     private var statusBanner: some View {
         if let message = hub.statusMessage {
@@ -303,6 +313,10 @@ struct AgentSidebar: View {
                         }
                     }
                 }
+            }
+
+            if !isRail {
+                GateActivitySection(events: hub.recentGateEvents)
             }
         }
         .listStyle(.sidebar)

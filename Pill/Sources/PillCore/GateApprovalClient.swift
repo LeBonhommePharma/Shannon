@@ -28,10 +28,49 @@ public enum GateApprovalClient {
         case socketUnavailable
         case connectFailed(Int32)
         case writeFailed(Int32)
+        case timedOut
+    }
+
+    /// Hard ceiling on any single blocking socket call. The gate answers a local
+    /// Unix write in well under a millisecond; anything past this means the gate
+    /// is wedged or half-open, and we must fail loudly rather than freeze the UI.
+    public static let ioTimeout: TimeInterval = 2.0
+
+    /// Async, off-main resolution. The blocking BSD calls run on a background
+    /// executor so the SwiftUI button that triggers an approval never stalls the
+    /// main thread — the historical cause of the "stuck after approve/deny"
+    /// freeze. Throws the same `ApprovalError`s as `resolve`.
+    @discardableResult
+    public static func resolveAsync(
+        interactionId: String,
+        agentId: String,
+        approved: Bool,
+        socketPath: String = defaultSocketPath
+    ) async throws -> Bool {
+        try await withCheckedThrowingContinuation { continuation in
+            // Detached: nothing here touches actor-isolated state, and the point
+            // is precisely to leave the caller's actor (usually @MainActor).
+            Task.detached(priority: .userInitiated) {
+                do {
+                    let ok = try resolve(
+                        interactionId: interactionId,
+                        agentId: agentId,
+                        approved: approved,
+                        socketPath: socketPath
+                    )
+                    continuation.resume(returning: ok)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 
     /// Resolve one pending ask. `interactionId` MUST be the gate's own id from
     /// `agent_interactions` — a fresh UUID silently fails to match any row.
+    ///
+    /// Blocking. Prefer `resolveAsync` from UI code; this synchronous form exists
+    /// for tests and non-UI callers.
     @discardableResult
     public static func resolve(
         interactionId: String,
@@ -47,6 +86,14 @@ public enum GateApprovalClient {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw ApprovalError.connectFailed(errno) }
         defer { close(fd) }
+
+        // Bound every subsequent send/recv so a wedged gate cannot hang forever.
+        var tv = timeval(
+            tv_sec: Int(ioTimeout),
+            tv_usec: Int32((ioTimeout - Double(Int(ioTimeout))) * 1_000_000)
+        )
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
@@ -122,7 +169,15 @@ public enum GateApprovalClient {
             var sent = 0
             while sent < data.count {
                 let n = Darwin.send(fd, base + sent, data.count - sent, 0)
-                if n <= 0 { throw ApprovalError.writeFailed(errno) }
+                if n <= 0 {
+                    // SO_SNDTIMEO fired: the gate accepted the connection but is
+                    // not draining. Distinct from a hard write failure so the UI
+                    // can say "gate not responding" rather than "write error".
+                    if errno == EAGAIN || errno == EWOULDBLOCK {
+                        throw ApprovalError.timedOut
+                    }
+                    throw ApprovalError.writeFailed(errno)
+                }
                 sent += n
             }
         }

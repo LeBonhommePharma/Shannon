@@ -1,8 +1,19 @@
 import AppKit
+import SwiftUI
 import PillCore
 
+/// Menu-bar presence for Shannon.
+///
+/// Left-click opens a SwiftUI popover (agent summary, inline gate approval,
+/// recent activity, hub status). Right-click or ⌥-click opens the utility
+/// menu. The icon itself is a state machine:
+///
+///   idle          → template `waveform.path.ecg` (auto light/dark)
+///   agents active → template waveform + busy count
+///   gate pending  → amber `questionmark.bubble.fill`, pulsing
+///   collapse      → red `exclamationmark.triangle.fill`
 @MainActor
-final class MenuBarController {
+final class MenuBarController: NSObject {
     private var item: NSStatusItem?
     private let bridge: ShannonBridge
     private let idle: IdleTelemetryPublisher
@@ -10,6 +21,11 @@ final class MenuBarController {
     private let ingest: AgentIngestService
     private let activity: AgentActivityMonitor
     private var timer: Timer?
+    private var pulseTimer: Timer?
+    private var pulsePhase = false
+    private var popover: NSPopover?
+    /// Sticky success flash from ⌘D capture; suppresses normal refresh briefly.
+    private var flashUntil: Date?
 
     var onShowPill: (() -> Void)?
     var onReposition: (() -> Void)?
@@ -33,11 +49,12 @@ final class MenuBarController {
         let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         status.isVisible = true
         if let button = status.button {
-            button.image = Self.symbolImage("waveform.path.ecg")
-            button.imagePosition = .imageLeading
-            button.toolTip = "Shannon agents — ⌘D capture frontmost app"
+            button.target = self
+            button.action = #selector(statusItemClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.toolTip = "Shannon agents — click for status, right-click for menu, ⌘D captures the front app"
+            button.setAccessibilityLabel("Shannon agent hub")
         }
-        status.menu = buildMenu()
         item = status
         refresh()
 
@@ -49,95 +66,180 @@ final class MenuBarController {
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        timer?.invalidate(); timer = nil
+        stopPulse()
+        popover?.performClose(nil); popover = nil
         if let item { NSStatusBar.system.removeStatusItem(item) }
         item = nil
     }
 
     func flashSuccess(_ text: String) {
         guard let button = item?.button else { return }
+        button.image = Self.symbolImage("checkmark.circle.fill", template: false)
         button.title = " " + text
-        button.contentTintColor = NSColor.systemGreen
+        button.contentTintColor = .systemGreen
+        flashUntil = Date().addingTimeInterval(1.8)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
             self?.refresh()
         }
     }
 
+    // MARK: - Icon state machine
+
     private func refresh() {
         guard let button = item?.button else { return }
+        if let until = flashUntil, until > Date() { return }
+        flashUntil = nil
+
         let summary = activity.summary
         let entropy = bridge.status ?? idle.status
+        let pendingCount = activity.pendingAsks.count
 
-        if ingest.isHighlighting, let last = ingest.lastResult {
-            button.title = " +\(last.agent.id)"
-            button.contentTintColor = NSColor.systemGreen
-        } else if !summary.busy.isEmpty {
-            let head = summary.busy[0]
-            let style = AgentStyleCatalog.style(for: head.id)
-            let extra = summary.busy.count > 1 ? " +\(summary.busy.count - 1)" : ""
-            button.title = " \(style.emoji) \(style.shortName)\(extra)"
-            button.contentTintColor = NSColor(
-                calibratedRed: style.red, green: style.green, blue: style.blue, alpha: 1
-            )
-        } else if entropy.collapsed {
-            button.title = String(format: " H %.1f!", entropy.entropy)
-            button.contentTintColor = NSColor.systemOrange
-        } else if bridge.connected {
-            button.title = String(format: " ● H %.1f", entropy.entropy)
-            button.contentTintColor = NSColor.systemGreen
-        } else {
-            button.title = " ○ ready"
-            button.contentTintColor = nil
+        if pendingCount > 0 {
+            // Gate pending trumps everything — this is the state that needs LP.
+            button.image = Self.symbolImage("questionmark.bubble.fill", template: false)
+            button.title = pendingCount > 1 ? " \(pendingCount)" : ""
+            button.contentTintColor = .systemOrange
+            button.setAccessibilityLabel(
+                "Shannon: \(pendingCount) gate approval\(pendingCount > 1 ? "s" : "") pending")
+            startPulse()
+            return
         }
-        item?.menu = buildMenu()
+        stopPulse()
+
+        if entropy.collapsed {
+            button.image = Self.symbolImage("exclamationmark.triangle.fill", template: false)
+            button.title = String(format: " H %.1f", entropy.entropy)
+            button.contentTintColor = .systemRed
+            button.setAccessibilityLabel(
+                String(format: "Shannon: entropy collapse, H %.1f bits", entropy.entropy))
+        } else if !summary.busy.isEmpty {
+            // Template image: the system inverts it for dark mode / selection.
+            button.image = Self.symbolImage("waveform.path.ecg", template: true)
+            button.title = summary.busy.count > 1 ? " \(summary.busy.count)" : ""
+            button.contentTintColor = nil
+            let names = summary.busy.prefix(3).map(\.displayName).joined(separator: ", ")
+            button.setAccessibilityLabel("Shannon: \(summary.busy.count) agents active — \(names)")
+        } else {
+            button.image = Self.symbolImage("waveform.path.ecg", template: true)
+            button.title = ""
+            button.contentTintColor = nil
+            button.setAccessibilityLabel(
+                bridge.connected ? "Shannon: hub connected, idle" : "Shannon: idle")
+        }
     }
 
-    private func buildMenu() -> NSMenu {
+    /// Subtle attention pulse while a gate waits: the tint breathes between
+    /// full and dimmed amber. Runs only in the pending state — no idle CPU.
+    private func startPulse() {
+        guard pulseTimer == nil else { return }
+        let t = Timer(timeInterval: 0.6, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let button = self.item?.button else { return }
+                self.pulsePhase.toggle()
+                button.contentTintColor = self.pulsePhase
+                    ? NSColor.systemOrange.withAlphaComponent(0.45)
+                    : .systemOrange
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        pulseTimer = t
+    }
+
+    private func stopPulse() {
+        pulseTimer?.invalidate()
+        pulseTimer = nil
+        pulsePhase = false
+    }
+
+    // MARK: - Click routing
+
+    @objc private func statusItemClicked() {
+        let event = NSApp.currentEvent
+        let wantsMenu = event?.type == .rightMouseUp
+            || event?.modifierFlags.contains(.option) == true
+        if wantsMenu {
+            showContextMenu()
+        } else {
+            togglePopover()
+        }
+    }
+
+    // MARK: - Popover
+
+    private func togglePopover() {
+        if let popover, popover.isShown {
+            popover.performClose(nil)
+            return
+        }
+        guard let button = item?.button else { return }
+        let pop = NSPopover()
+        pop.behavior = .transient
+        pop.animates = true
+        pop.contentViewController = NSHostingController(
+            rootView: MenuBarPopoverView(
+                activity: activity,
+                bridge: bridge,
+                idle: idle,
+                battery: battery,
+                onShowAllGates: { [weak self] in
+                    self?.popover?.performClose(nil)
+                    self?.onShowPill?()
+                },
+                onOpenHubLog: { [weak self] in
+                    self?.popover?.performClose(nil)
+                    Self.openHubLog()
+                },
+                onOpenSettings: { [weak self] in
+                    self?.popover?.performClose(nil)
+                    Self.openSettings()
+                },
+                onQuit: { NSApp.terminate(nil) }
+            )
+        )
+        popover = pop
+        pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // Keyboard access: focus the popover so Tab walks its controls.
+        pop.contentViewController?.view.window?.makeKey()
+    }
+
+    // MARK: - Context menu (right-click / ⌥-click)
+
+    private func showContextMenu() {
+        guard let item else { return }
+        let menu = buildContextMenu()
+        // Attach transiently: assigning `menu` and clicking shows it at the
+        // status item; detach right after so left-click keeps the popover.
+        item.menu = menu
+        item.button?.performClick(nil)
+        item.menu = nil
+    }
+
+    private func buildContextMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        let summary = activity.summary
-        let entropy = bridge.status ?? idle.status
 
-        let header = NSMenuItem(
-            title: summary.busy.isEmpty
-                ? (bridge.connected ? "Bridge live · no busy agents" : "Ready · no busy agents")
-                : "\(summary.busyCount) agent(s) active",
-            action: nil, keyEquivalent: ""
+        let gates = NSMenuItem(title: "Show All Gates", action: #selector(showAllGates), keyEquivalent: "g")
+        gates.target = self
+        menu.addItem(gates)
+
+        let pause = NSMenuItem(
+            title: activity.isPaused ? "Resume Agents" : "Pause Agents",
+            action: #selector(togglePause), keyEquivalent: "p"
         )
-        header.isEnabled = false
-        menu.addItem(header)
+        pause.target = self
+        pause.toolTip = "Pause Shannon's monitoring of agent state (agents themselves keep running)"
+        menu.addItem(pause)
 
-        for agent in summary.busy.prefix(6) {
-            let style = AgentStyleCatalog.style(for: agent.id)
-            let task = AgentActivitySnapshot.shorten(agent.lastTask, max: 40)
-            let title = task.isEmpty
-                ? "  \(style.emoji) \(style.displayName) · \(agent.status.label)"
-                : "  \(style.emoji) \(style.displayName) · \(task)"
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        }
-
-        if bridge.connected || entropy.collapsed {
-            let h = NSMenuItem(
-                title: String(format: "H %.2f  ΔH %+.2f · %@", entropy.entropy, entropy.deltaH, entropy.backend),
-                action: nil, keyEquivalent: ""
-            )
-            h.isEnabled = false
-            menu.addItem(h)
-        }
+        let log = NSMenuItem(title: "Open Hub Log", action: #selector(openLog), keyEquivalent: "l")
+        log.target = self
+        menu.addItem(log)
 
         menu.addItem(.separator())
 
-        let add = NSMenuItem(
-            title: "Add Agent from Front App",
-            action: #selector(addAgent),
-            keyEquivalent: "d"
-        )
+        let add = NSMenuItem(title: "Add Agent from Front App", action: #selector(addAgent), keyEquivalent: "d")
         add.keyEquivalentModifierMask = [.command]
         add.target = self
-        add.toolTip = "Capture Terminal / Claude / ChatGPT / Codex / browser as an agent (⌘D)"
         menu.addItem(add)
 
         let show = NSMenuItem(title: "Show Notch Pill", action: #selector(showPill), keyEquivalent: "s")
@@ -155,14 +257,37 @@ final class MenuBarController {
         return menu
     }
 
+    @objc private func showAllGates() { onShowPill?() }
+    @objc private func togglePause() { activity.isPaused.toggle() }
+    @objc private func openLog() { Self.openHubLog() }
     @objc private func showPill() { onShowPill?() }
     @objc private func addAgent() { onAddAgent?() }
     @objc private func reposition() { onReposition?() }
     @objc private func quit() { NSApp.terminate(nil) }
 
-    private static func symbolImage(_ name: String) -> NSImage? {
+    // MARK: - Destinations
+
+    private static func openHubLog() {
+        let log = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/Shannon/pill.log")
+        if FileManager.default.fileExists(atPath: log.path) {
+            NSWorkspace.shared.open(log)
+        } else {
+            NSWorkspace.shared.open(log.deletingLastPathComponent())
+        }
+    }
+
+    /// Shannon's configuration lives on disk under ~/.shannon (pets, registry,
+    /// hub DB) — "Settings" opens that folder until a preferences window exists.
+    private static func openSettings() {
+        NSWorkspace.shared.open(PetBootstrap.shannonHome)
+    }
+
+    private static func symbolImage(_ name: String, template: Bool) -> NSImage? {
         let cfg = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
-        return NSImage(systemSymbolName: name, accessibilityDescription: "Shannon")?
+        let img = NSImage(systemSymbolName: name, accessibilityDescription: "Shannon")?
             .withSymbolConfiguration(cfg)
+        img?.isTemplate = template
+        return img
     }
 }

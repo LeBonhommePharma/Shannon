@@ -12,6 +12,7 @@ import Combine
 import Foundation
 import IOKit
 import IOKit.ps
+import Network
 import Security
 import SQLite3
 import SwiftUI
@@ -24,7 +25,7 @@ private let kShannonDir  = FileManager.default.homeDirectoryForCurrentUser
 private let kDBPath      = kShannonDir.appendingPathComponent("agent_hub.db")
 private let kPetsDir     = kShannonDir.appendingPathComponent("pets")
 private let kKeychainSvc = "Shannon.AgentHub"
-private let kPollInterval: Double = 2.0
+private let kPollInterval: Double = 0.5   // fast DB poll for near-instant status updates
 private let kH_threshold:  Double = 3.5   // bits — entropy warning
 private let kH_block:      Double = 5.0   // bits — hard block
 private let kD_threshold:  Double = 1.8   // bits — disagreement flag
@@ -320,7 +321,8 @@ struct DelegationRecord: Identifiable {
 struct GateEvent {
     var eventType: String
     var agentId:   String
-    var payload:   String
+    var payload:   String   // event_label from agent_activity
+    var output:    String   // event_output from agent_activity
     var at:        Date
 }
 
@@ -630,7 +632,90 @@ struct FlowLayout: Layout {
     }
 }
 
-// MARK: - AuditDB Reader  (SQLite WAL — polls agent_hub.db every 2s)
+// MARK: - Gate Socket Client  (Unix socket → shannon_gate.py, persistent, auto-reconnect)
+
+final class GateSocketClient {
+    static let shared = GateSocketClient()
+
+    private var connection: NWConnection?
+    private let queue = DispatchQueue(label: "shannon.gate.client", qos: .utility)
+    private var _connected = false
+    var isConnected: Bool { _connected }
+
+    private init() { reconnect() }
+
+    func reconnect() {
+        connection?.cancel()
+        _connected = false
+        let ep     = NWEndpoint.unix(path: kSocketPath)
+        let params = NWParameters.tcp
+        let conn   = NWConnection(to: ep, using: params)
+        conn.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                self?._connected = true
+                self?.register()
+            case .failed(_), .cancelled:
+                self?._connected = false
+                self?.queue.asyncAfter(deadline: .now() + 3.0) { self?.reconnect() }
+            default:
+                break
+            }
+        }
+        connection = conn
+        conn.start(queue: queue)
+    }
+
+    private func register() {
+        sendRaw(["agent_id": "local_test", "task_id": "hub_ui"])
+    }
+
+    // Thread-safe JSON send with automatic reconnect on failure
+    func sendMessage(_ dict: [String: Any]) {
+        queue.async { self.sendRaw(dict) }
+    }
+
+    private func sendRaw(_ dict: [String: Any]) {
+        guard var data = try? JSONSerialization.data(withJSONObject: dict) else { return }
+        data.append(0x0A) // \n delimiter the gate expects
+        connection?.send(content: data, completion: .contentProcessed({ [weak self] err in
+            if err != nil { self?._connected = false; self?.reconnect() }
+        }))
+    }
+
+    func sendDelegation(agentId: String?, command: String) {
+        sendMessage([
+            "agent_id":     "local_test",
+            "task_id":      "hub_ui",
+            "message_type": "system_event",
+            "confidence":   1.0,
+            "shannon_H":    0.0,
+            "payload": [
+                "command":      command,
+                "target_agent": agentId ?? "broadcast",
+                "source":       "hub_ui",
+            ] as [String: Any],
+        ])
+    }
+
+    func sendApproval(agentId: String, interactionId: String, approved: Bool) {
+        sendMessage([
+            "agent_id":     "local_test",
+            "task_id":      "hub_ui",
+            "message_type": "status",
+            "confidence":   1.0,
+            "shannon_H":    0.0,
+            "payload": [
+                "target_agent":    agentId,
+                "approved":        approved,
+                "interaction_id":  interactionId,
+                "source":          "hub_ui",
+            ] as [String: Any],
+        ])
+    }
+}
+
+// MARK: - AuditDB Reader  (SQLite WAL — polls agent_hub.db every 0.5 s)
 
 final class AuditDBReader: ObservableObject {
     @Published var agents:      [String: AgentRow]       = [:]
@@ -670,7 +755,13 @@ final class AuditDBReader: ObservableObject {
     }
 
     private func fetchAgents(_ db: OpaquePointer) -> [String: AgentRow] {
-        let sql = "SELECT agent_id,status,last_seen,entropy_score,task_summary,auth_method FROM agents;"
+        // last_seen_ns is stored as nanoseconds; convert to seconds for Date()
+        let sql = """
+            SELECT agent_id, status,
+                   CAST(last_seen_ns / 1000000000.0 AS REAL) AS last_seen,
+                   entropy_score, task_summary, auth_method
+            FROM agents;
+            """
         var stmt: OpaquePointer?; var result: [String: AgentRow] = [:]
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return result }
         defer { sqlite3_finalize(stmt) }
@@ -687,21 +778,26 @@ final class AuditDBReader: ObservableObject {
     }
 
     private func fetchBenchmarks(_ db: OpaquePointer) -> [String: BenchmarkState] {
-        let sql = "SELECT agent_id,progress,state_json FROM benchmark_state;"
+        // JOIN agents on task_id so the dict is keyed by agent_id (for vm.db.benchmarks[a.id])
+        let sql = """
+            SELECT COALESCE(a.agent_id, b.task_id), b.completed, b.state_json
+            FROM benchmark_state b
+            LEFT JOIN agents a ON a.task_id = b.task_id
+            ORDER BY b.updated_at DESC;
+            """
         var stmt: OpaquePointer?; var result: [String: BenchmarkState] = [:]
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return result }
         defer { sqlite3_finalize(stmt) }
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let aid = str(stmt, 0)
+            let key  = str(stmt, 0)
             let json = str(stmt, 2)
-            // Directive C: decode CF/RMSD from state_json — not direct columns
             var cf: Double?; var rmsd: Double?
             if let data = json.data(using: .utf8),
                let obj  = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 cf   = obj["cf"]   as? Double ?? obj["best_cf"]   as? Double
                 rmsd = obj["rmsd"] as? Double ?? obj["best_rmsd"] as? Double
             }
-            result[aid] = BenchmarkState(agentId: aid,
+            result[key] = BenchmarkState(agentId: key,
                 progress:  Int(sqlite3_column_int(stmt, 1)),
                 stateJSON: json, bestCF: cf, bestRMSD: rmsd)
         }
@@ -709,15 +805,38 @@ final class AuditDBReader: ObservableObject {
     }
 
     private func fetchEvents(_ db: OpaquePointer) -> [GateEvent] {
-        let sql = "SELECT event_type,agent_id,payload,timestamp FROM agent_activity ORDER BY rowid DESC LIMIT 60;"
+        // Fixed columns: event_label (not payload), event_at_ns→seconds (not timestamp)
+        let sql = """
+            SELECT event_type, agent_id,
+                   event_label,
+                   CAST(event_at_ns / 1000000000.0 AS REAL) AS at,
+                   COALESCE(event_output, '')
+            FROM agent_activity
+            ORDER BY rowid DESC LIMIT 60;
+            """
         var stmt: OpaquePointer?; var result: [GateEvent] = []
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return result }
         defer { sqlite3_finalize(stmt) }
         while sqlite3_step(stmt) == SQLITE_ROW {
-            result.append(GateEvent(eventType: str(stmt,0), agentId: str(stmt,1),
-                                    payload: str(stmt,2), at: Date(timeIntervalSince1970: dbl(stmt,3))))
+            result.append(GateEvent(eventType: str(stmt, 0), agentId: str(stmt, 1),
+                                    payload: str(stmt, 2), output: str(stmt, 4),
+                                    at: Date(timeIntervalSince1970: dbl(stmt, 3))))
         }
         return result
+    }
+
+    // Write a delegation record directly to SQLite so the gate picks it up
+    func insertDelegation(agentId: String, taskText: String) {
+        guard let db else { return }
+        let sql = "INSERT INTO delegations (agent_id, task_text, dispatched_at_ns) VALUES (?,?,?)"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        let ns = Int64(Date().timeIntervalSince1970 * 1_000_000_000)
+        sqlite3_bind_text(stmt, 1, agentId,  -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_text(stmt, 2, taskText, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        sqlite3_bind_int64(stmt, 3, ns)
+        sqlite3_step(stmt)
     }
 
     private func str(_ s: OpaquePointer?, _ col: Int32) -> String {
@@ -763,6 +882,20 @@ final class HubViewModel: ObservableObject {
     }
 
     private func processGateEvents(_ events: [GateEvent]) {
+        // Map DB events → ToolEvent objects for the Feed tab
+        let kindMap: [String: ToolEvent.EventKind] = [
+            "bash": .bash, "dock": .dock, "build": .build,
+            "edit": .edit, "read": .read, "write": .write,
+            "net": .net, "tool_call": .bash,
+        ]
+        toolEvents = events.map { evt in
+            ToolEvent(agentId: evt.agentId,
+                      kind:    kindMap[evt.eventType] ?? .bash,
+                      label:   evt.payload,
+                      detail:  evt.output)
+        }
+
+        // Sound / voice / interaction callouts (dedupe by only looking at fresh events)
         for evt in events.prefix(5) {
             switch evt.eventType {
             case "pet_memory_access":
@@ -798,16 +931,27 @@ final class HubViewModel: ObservableObject {
     }
 
     func resolveInteraction(_ id: UUID, approved: Bool) {
+        guard let ia = interactions.first(where: { $0.id == id }) else { return }
+        // Send approval/denial to the gate over the socket
+        GateSocketClient.shared.sendApproval(
+            agentId:       ia.agentId,
+            interactionId: id.uuidString,
+            approved:      approved
+        )
         interactions.removeAll { $0.id == id }
-        // Could write outcome back via socket here
     }
 
     func submitDelegation() {
-        guard !delegateText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        let text = delegateText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
         let target = selectedAgent ?? "broadcast"
-        let rec    = DelegationRecord(agentId: target, command: delegateText, outcome: "pending", at: Date())
+        // Persist to SQLite (gate picks this up on next poll / query)
+        db.insertDelegation(agentId: target, taskText: text)
+        // Also deliver in real-time via the socket
+        GateSocketClient.shared.sendDelegation(agentId: selectedAgent, command: text)
+        let rec = DelegationRecord(agentId: target, command: text, outcome: "pending", at: Date())
         delegations.insert(rec, at: 0)
-        delegateText  = ""
+        delegateText    = ""
         showDelegateBar = false
     }
 

@@ -267,6 +267,20 @@ class AuditDB:
                 PRAGMA journal_mode=WAL;
                 PRAGMA synchronous=NORMAL;
 
+                -- Live agent registry — polled by the Swift HUD every 0.5 s
+                CREATE TABLE IF NOT EXISTS agents (
+                    agent_id        TEXT PRIMARY KEY,
+                    status          TEXT NOT NULL DEFAULT 'idle',
+                    connected_at    INTEGER,
+                    last_seen_ns    INTEGER NOT NULL DEFAULT 0,
+                    disconnected_at INTEGER,
+                    task_id         TEXT DEFAULT '',
+                    message_count   INTEGER DEFAULT 0,
+                    entropy_score   REAL DEFAULT 0.0,
+                    task_summary    TEXT DEFAULT '',
+                    auth_method     TEXT DEFAULT 'socket_secret'
+                );
+
                 CREATE TABLE IF NOT EXISTS agent_messages (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     received_at_ns  INTEGER NOT NULL,
@@ -286,14 +300,17 @@ class AuditDB:
                 );
 
                 -- Generic benchmark/task progress table.
-                -- All domain-specific metrics (CF, RMSD, active_target, etc.)
-                -- go inside state_json so this table stays project-agnostic.
+                -- Column names match what update_benchmark_state() inserts.
                 CREATE TABLE IF NOT EXISTS benchmark_state (
-                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                    updated_at INTEGER NOT NULL,
-                    task_id    TEXT NOT NULL,
-                    progress   INTEGER DEFAULT 0,   -- items completed (generic counter)
-                    state_json TEXT NOT NULL        -- domain payload: {"cf": -187.3, ...}
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    updated_at    INTEGER NOT NULL,
+                    task_id       TEXT NOT NULL,
+                    completed     INTEGER DEFAULT 0,
+                    total         INTEGER DEFAULT 85,
+                    best_cf       REAL,
+                    best_rmsd     REAL,
+                    active_target TEXT,
+                    state_json    TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS agent_cf_reports (
@@ -311,6 +328,8 @@ class AuditDB:
                     ON agent_messages(agent_id, received_at_ns);
                 CREATE INDEX IF NOT EXISTS idx_msg_decision
                     ON agent_messages(gate_decision, received_at_ns);
+                CREATE INDEX IF NOT EXISTS idx_agents_status
+                    ON agents(status);
                 CREATE INDEX IF NOT EXISTS idx_bench_task
                     ON benchmark_state(task_id, updated_at);
 
@@ -344,6 +363,31 @@ class AuditDB:
                     outcome          TEXT DEFAULT 'pending'  -- 'pending'|'accepted'|'completed'|'rejected'
                 );
             """)
+            # Additive migration for existing databases
+            self._migrate_schema(conn)
+
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        """Rename/add columns in benchmark_state to match the current INSERT signature."""
+        bs_cols = {row[1] for row in conn.execute("PRAGMA table_info(benchmark_state)").fetchall()}
+        # Rename legacy 'progress' → 'completed'
+        if "progress" in bs_cols and "completed" not in bs_cols:
+            conn.execute("ALTER TABLE benchmark_state RENAME COLUMN progress TO completed")
+            bs_cols.discard("progress")
+            bs_cols.add("completed")
+        for col_name, col_def in [
+            ("completed",     "INTEGER DEFAULT 0"),
+            ("total",         "INTEGER DEFAULT 85"),
+            ("best_cf",       "REAL"),
+            ("best_rmsd",     "REAL"),
+            ("active_target", "TEXT"),
+        ]:
+            if col_name not in bs_cols:
+                try:
+                    conn.execute(
+                        f"ALTER TABLE benchmark_state ADD COLUMN {col_name} {col_def}"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # already present (race between processes)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path), timeout=10)
@@ -428,6 +472,67 @@ class AuditDB:
                     1 if success else 0,
                     json.dumps(details) if details else None,
                 ),
+            )
+
+    def upsert_agent(
+        self,
+        agent_id: str,
+        status: str,
+        connected_at_ns: int,
+        auth_method: str = "socket_secret",
+    ) -> None:
+        """INSERT or UPDATE the agents row when a socket connection is established."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO agents
+                    (agent_id, status, connected_at, last_seen_ns, auth_method,
+                     disconnected_at, message_count)
+                VALUES (?, ?, ?, ?, ?, NULL, 0)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    status          = excluded.status,
+                    connected_at    = excluded.connected_at,
+                    last_seen_ns    = excluded.last_seen_ns,
+                    auth_method     = excluded.auth_method,
+                    disconnected_at = NULL,
+                    message_count   = 0
+                """,
+                (agent_id, status, connected_at_ns, connected_at_ns, auth_method),
+            )
+
+    def update_agent_seen(
+        self,
+        agent_id: str,
+        last_seen_ns: int,
+        entropy_score: float,
+        task_id: str,
+    ) -> None:
+        """Increment message_count, refresh last_seen_ns and entropy after each message."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE agents SET
+                    last_seen_ns  = ?,
+                    entropy_score = ?,
+                    task_id       = ?,
+                    message_count = message_count + 1,
+                    status        = 'active'
+                WHERE agent_id = ?
+                """,
+                (last_seen_ns, entropy_score, task_id, agent_id),
+            )
+
+    def update_agent_disconnect(self, agent_id: str, disconnected_at_ns: int) -> None:
+        """Mark agent idle on socket disconnect."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE agents SET
+                    status          = 'idle',
+                    disconnected_at = ?
+                WHERE agent_id = ?
+                """,
+                (disconnected_at_ns, agent_id),
             )
 
     def log_activity_event(
@@ -750,6 +855,7 @@ class AgentHub:
                     logger.warning(f"Replacing existing connection for {agent_id}")
                 self._connections[agent_id] = conn
 
+            self.db.upsert_agent(agent_id, "active", conn.connected_at)
             logger.info(f"[+] {agent_id} connected ({peer})")
 
             # Welcome: send current benchmark state
@@ -794,6 +900,7 @@ class AgentHub:
             if agent_id:
                 async with self._lock:
                     self._connections.pop(agent_id, None)
+                self.db.update_agent_disconnect(agent_id, time.time_ns())
                 logger.info(f"[-] {agent_id} disconnected")
             try:
                 writer.close()
@@ -836,6 +943,11 @@ class AgentHub:
 
         # Run Shannon gate
         decision = self.gate.evaluate(msg)
+
+        # Refresh agent registry — last_seen, entropy, message count
+        self.db.update_agent_seen(
+            msg.agent_id, time.time_ns(), decision.computed_H, msg.task_id
+        )
 
         if decision.decision in ("flagged", "blocked"):
             log_fn = logger.warning if decision.decision == "blocked" else logger.info

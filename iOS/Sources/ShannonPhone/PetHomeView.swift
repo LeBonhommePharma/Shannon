@@ -54,7 +54,7 @@ struct PetHomeView: View {
         .scaleEffect(petScale)
         .onTapGesture {
             engine.handle(.tap)
-            Haptics.light()
+            Haptics.transition()
             bounceAvatar()
         }
         .onLongPressGesture(minimumDuration: 0.4) { showRename = true }

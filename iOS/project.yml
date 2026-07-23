@@ -48,6 +48,7 @@ targets:
     platform: iOS
     sources:
       - path: Sources/ShannonPhone
+      - path: Sources/Shared
       - path: Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
     dependencies:
@@ -100,6 +101,7 @@ targets:
     platform: iOS
     sources:
       - path: Sources/ShannonWidget
+      - path: Sources/Shared
       - path: Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
     dependencies:
@@ -133,6 +135,7 @@ targets:
     platform: watchOS
     sources:
       - path: ../watchOS/Sources/ShannonWatch
+      - path: ../watchOS/Sources/Shared          # shared between ShannonWatch and ShannonComplication
       - path: ../watchOS/Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
     dependencies:
@@ -171,6 +174,7 @@ targets:
     platform: watchOS
     sources:
       - path: ../watchOS/Sources/ShannonWatchComplication
+      - path: ../watchOS/Sources/Shared          # shared between ShannonWatch and ShannonComplication
       - path: ../watchOS/Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
     dependencies:

@@ -28,8 +28,12 @@ struct PetWatchView: View {
             petContent
         }
         .focusable()
-        .digitalCrownRotation($crownValue, sensitivity: .low,
-                               isContinuous: true, isHapticFeedbackEnabled: true)
+        .digitalCrownRotation($crownValue,
+                               from: -Double.infinity,
+                               through: Double.infinity,
+                               sensitivity: .low,
+                               isContinuous: true,
+                               isHapticFeedbackEnabled: true)
         .onChange(of: crownValue) { _, newVal in
             rotationDeg = newVal * 360
             let intVal = Int(newVal)

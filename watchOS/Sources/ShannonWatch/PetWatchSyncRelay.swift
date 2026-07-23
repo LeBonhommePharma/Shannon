@@ -60,7 +60,11 @@ private final class _Delegate: NSObject, WCSessionDelegate {
 }
 
 // MARK: - PetPhoneSyncRelay  (phone side — kept in the same file for discoverability)
+// Gated on #if os(iOS) because sessionDidBecomeInactive / sessionDidDeactivate
+// are iOS-only WCSessionDelegate methods; @available alone does not suppress
+// compilation on watchOS and the compiler rejects those overrides.
 
+#if os(iOS)
 @available(iOS 17.0, *)
 @MainActor
 public final class PetPhoneSyncRelay: NSObject {
@@ -113,3 +117,4 @@ private final class _PhoneDelegate: NSObject, WCSessionDelegate {
     func sessionDidBecomeInactive(_ session: WCSession) {}
     func sessionDidDeactivate(_ session: WCSession) { WCSession.default.activate() }
 }
+#endif // os(iOS)

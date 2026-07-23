@@ -128,6 +128,22 @@ LLM Stream (logits / probs / logprobs / JSONL / socket / shared memory)
 
 ---
 
+## Install via Homebrew
+
+```bash
+# Developer dependencies (sets up the full dev environment)
+brew bundle install
+
+# macOS Pill app (after a signed release is available)
+brew tap LeBonhommePharma/shannon
+brew install --cask shannon-pill
+
+# Library + Python package (native shannon-agent CLI)
+brew install LeBonhommePharma/shannon/shannon
+```
+
+---
+
 ## Installation
 
 ### Python (pip / PyPI)

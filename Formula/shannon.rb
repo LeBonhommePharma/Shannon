@@ -1,13 +1,15 @@
 class Shannon < Formula
   desc "Physics-grounded LLM safety: Shannon entropy collapse detection (shannon-agent)"
   homepage "https://github.com/LeBonhommePharma/Shannon"
-  # Head-only until the first GitHub release tag ships a stable tarball.
-  # After tagging vX.Y.Z, add:
-  #   url "https://github.com/LeBonhommePharma/Shannon/archive/refs/tags/vX.Y.Z.tar.gz"
-  #   sha256 "<tarball sha256>"
-  #   version "X.Y.Z"
-  head "https://github.com/LeBonhommePharma/Shannon.git", branch: "main"
   license "Apache-2.0"
+
+  # Stable installs require a tagged GitHub release (vX.Y.Z). Until then, use --HEAD.
+  # After tagging, uncomment and fill sha256 (see scripts/update_homebrew_artifacts.sh):
+  # url "https://github.com/LeBonhommePharma/Shannon/archive/refs/tags/v2.0.0.tar.gz"
+  # sha256 "REPLACE_WITH_TARBALL_SHA256"
+  # version "2.0.0"
+
+  head "https://github.com/LeBonhommePharma/Shannon.git", branch: "main"
 
   livecheck do
     url :homepage
@@ -19,12 +21,18 @@ class Shannon < Formula
 
   depends_on "cmake" => :build
   depends_on "ninja" => :build
-  depends_on "libomp" if OS.mac?
+  depends_on "libomp"
+
+  fails_with gcc: "10" # C++20 required (gcc ≥ 11 / AppleClang ≥ 13)
 
   def install
-    metal = build.with?("metal") ? "ON" : "OFF"
+    metal = if OS.mac? && build.with?("metal")
+      "ON"
+    else
+      "OFF"
+    end
 
-    args = std_cmake_args + %W[
+    args = %W[
       -GNinja
       -DCMAKE_BUILD_TYPE=Release
       -DSHANNON_BUILD_TESTS=OFF
@@ -34,10 +42,14 @@ class Shannon < Formula
       -DSHANNON_USE_CUDA=OFF
       -DSHANNON_USE_METAL=#{metal}
       -DSHANNON_USE_ROCM=OFF
+      -DSHANNON_USE_EIGEN=OFF
     ]
 
+    # Homebrew's AppleClang does not ship libomp; wire LLVM OpenMP explicitly.
     if OS.mac?
-      libomp = Formula["libomp"].opt_prefix
+      libomp = formula_opt_prefix("libomp")
+      ENV.append "CPPFLAGS", "-I#{libomp}/include"
+      ENV.append "LDFLAGS", "-L#{libomp}/lib -lomp"
       args += %W[
         -DOpenMP_C_FLAGS=-Xpreprocessor\ -fopenmp\ -I#{libomp}/include
         -DOpenMP_C_LIB_NAMES=omp
@@ -47,40 +59,40 @@ class Shannon < Formula
       ]
     end
 
-    system "cmake", "-S", ".", "-B", "build", *args
+    system "cmake", "-S", ".", "-B", "build", *std_cmake_args, *args
     system "cmake", "--build", "build", "--parallel"
     system "cmake", "--install", "build"
 
-    # Prefer explicit install of the agent if DESTDIR/prefix layout differs.
-    if (buildpath/"build/shannon-agent").exist? && !(bin/"shannon-agent").exist?
-      bin.install "build/shannon-agent"
-    end
+    # Hard fallback if install(TARGETS) did not place the binary (prefix layout quirks).
+    bin.install "build/shannon-agent" if (buildpath/"build/shannon-agent").exist? && !(bin/"shannon-agent").exist?
+
+    odie "shannon-agent was not installed into #{bin}" unless (bin/"shannon-agent").exist?
+
+    doc.install "README.md", "LICENSE", "CHANGELOG.md" if (buildpath/"README.md").exist?
   end
 
   def caveats
     <<~EOS
-      This formula installs the *native* shannon-agent CLI only.
+      This formula installs the native `shannon-agent` CLI only (C++ entropy referee).
 
-      It does *not* install the Python analysis package. Those are separate:
-        # After the first PyPI release:
-        pip install shannon-entropy
-        # Or from GitHub:
+      Python package (separate):
         pip install "git+https://github.com/LeBonhommePharma/Shannon.git"
-        # Then: shannon-monitor --help
+        # or after PyPI: pip install shannon-entropy
+        shannon-monitor --help
 
-      Install / reinstall path (Homebrew 6+ requires a real tap; raw URL installs
-      are rejected). The tap is this monorepo — keep the tap checkout on main:
+      macOS Pill app (separate cask):
+        brew trust --cask lebonhommepharma/shannon/shannon-pill
+        brew install --cask lebonhommepharma/shannon/shannon-pill
+
+      Install path (Homebrew 6+ requires a real tap; raw URL installs are rejected):
         brew tap lebonhommepharma/shannon https://github.com/LeBonhommePharma/Shannon
-        # Prefer formula-scoped trust when HOMEBREW_REQUIRE_TAP_TRUST is set
-        # (https://docs.brew.sh/Tap-Trust). Do not use HOMEBREW_NO_REQUIRE_TAP_TRUST.
         brew trust --formula lebonhommepharma/shannon/shannon
         brew install --HEAD lebonhommepharma/shannon/shannon
 
-      Default brew build uses CPU + OpenMP (no Metal/CUDA) and is the portable path.
-      Formula head tracks main only (never ephemeral fix/* branches).
+      Default build: CPU + OpenMP (portable). Formula head tracks main only.
 
       Metal GPU (macOS + Xcode Metal toolchain):
-        brew install --HEAD --build-from-source --with-metal lebonhommepharma/shannon/shannon
+        brew reinstall --build-from-source --HEAD --with-metal lebonhommepharma/shannon/shannon
 
       Example:
         cat token_stream.jsonl | shannon-agent --window 8 --threshold -3.2
@@ -90,9 +102,26 @@ class Shannon < Formula
 
   test do
     assert_path_exists bin/"shannon-agent"
-    # Help text is printed to stderr (CLI convention).
-    output = shell_output("#{bin}/shannon-agent --help 2>&1")
-    assert_match "shannon-agent", output
-    assert_match(/collapse/i, output)
+    assert_predicate bin/"shannon-agent", :executable?
+
+    # Help is written to stderr (CLI convention).
+    help = shell_output("#{bin}/shannon-agent --help 2>&1")
+    assert_match "shannon-agent", help
+    assert_match(/collapse/i, help)
+    assert_match(/threshold/i, help)
+
+    # Empty / high-entropy stream → no collapse (exit 0).
+    high = Array.new(8) { '{"logits":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}' }.join("\n") + "\n"
+    pipe_output("#{bin}/shannon-agent --quiet --handrail log --sustained log --window 4 --threshold -3.2", high, 0)
+
+    # Baseline high-entropy then peaked collapse → exit 1.
+    lines = []
+    6.times { lines << '{"logits":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}' }
+    6.times { lines << '{"logits":[0.0,-30.0,-30.0,-30.0,-30.0,-30.0,-30.0,-30.0]}' }
+    pipe_output(
+      "#{bin}/shannon-agent --quiet --handrail log --sustained log --window 4 --threshold -1.0",
+      "#{lines.join("\n")}\n",
+      1,
+    )
   end
 end

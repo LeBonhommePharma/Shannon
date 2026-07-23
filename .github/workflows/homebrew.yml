@@ -1,0 +1,149 @@
+name: Homebrew
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Formula/**"
+      - "Casks/**"
+      - "apps/**"
+      - "src/**"
+      - "CMakeLists.txt"
+      - "scripts/package_pill.sh"
+      - "scripts/update_homebrew_artifacts.sh"
+      - ".github/workflows/homebrew.yml"
+  pull_request:
+    paths:
+      - "Formula/**"
+      - "Casks/**"
+      - "apps/**"
+      - "src/**"
+      - "CMakeLists.txt"
+      - "scripts/package_pill.sh"
+      - "scripts/update_homebrew_artifacts.sh"
+      - ".github/workflows/homebrew.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: homebrew-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  formula-macos:
+    name: Formula style + HEAD install (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: brew install cmake ninja libomp
+
+      - name: brew style (formula + cask)
+        run: |
+          brew style "${GITHUB_WORKSPACE}/Formula/shannon.rb"
+          brew style "${GITHUB_WORKSPACE}/Casks/shannon-pill.rb"
+
+      - name: Point monorepo tap at this checkout
+        run: |
+          TAP="lebonhommepharma/shannon"
+          TAP_PATH="$(brew --repository)/Library/Taps/lebonhommepharma/homebrew-shannon"
+          mkdir -p "$(dirname "${TAP_PATH}")"
+          rm -rf "${TAP_PATH}"
+          # Homebrew monorepo tap layout: Formula/ and Casks/ at tap root.
+          ln -s "${GITHUB_WORKSPACE}" "${TAP_PATH}"
+          brew tap-info "${TAP}"
+
+      - name: Trust formula (Homebrew 6+)
+        run: |
+          brew trust --formula lebonhommepharma/shannon/shannon || true
+
+      - name: Install formula from HEAD
+        run: |
+          brew uninstall --force shannon || true
+          brew install --HEAD --build-from-source lebonhommepharma/shannon/shannon
+
+      - name: brew test
+        run: brew test lebonhommepharma/shannon/shannon
+
+      - name: Linkage check
+        run: |
+          brew linkage shannon
+          shannon-agent --help 2>&1 | head -5
+          # Functional collapse smoke (mirrors formula test); exit 1 = collapse.
+          set +e
+          python3 - <<'PY' | shannon-agent --quiet --handrail log --sustained log --window 4 --threshold -1.0
+          import json
+          n = 8
+          for _ in range(6):
+              print(json.dumps({"logits": [0.0] * n}))
+          for _ in range(6):
+              logits = [-30.0] * n
+              logits[0] = 0.0
+              print(json.dumps({"logits": logits}))
+          PY
+          ec=$?
+          set -e
+          test "${ec}" -eq 1
+
+  formula-linux:
+    name: Formula style + HEAD install (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Homebrew (Linux)
+        run: |
+          if ! command -v brew >/dev/null; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            echo "/home/linuxbrew/.linuxbrew/bin" >> "${GITHUB_PATH}"
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          fi
+          brew --version
+
+      - name: Install build deps
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" 2>/dev/null || true
+          brew install cmake ninja libomp
+
+      - name: brew style
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" 2>/dev/null || true
+          brew style "${GITHUB_WORKSPACE}/Formula/shannon.rb"
+
+      - name: Point monorepo tap at this checkout
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" 2>/dev/null || true
+          TAP_PATH="$(brew --repository)/Library/Taps/lebonhommepharma/homebrew-shannon"
+          mkdir -p "$(dirname "${TAP_PATH}")"
+          rm -rf "${TAP_PATH}"
+          ln -s "${GITHUB_WORKSPACE}" "${TAP_PATH}"
+
+      - name: Trust + install HEAD
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" 2>/dev/null || true
+          brew trust --formula lebonhommepharma/shannon/shannon || true
+          brew uninstall --force shannon || true
+          brew install --HEAD --build-from-source lebonhommepharma/shannon/shannon
+          brew test lebonhommepharma/shannon/shannon
+          shannon-agent --help 2>&1 | head -5
+
+  cask-static:
+    name: Cask static checks
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: brew style cask
+        run: brew style "${GITHUB_WORKSPACE}/Casks/shannon-pill.rb"
+
+      - name: Guard against zero placeholder sha in tagged releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          sha="$(ruby -e 'print File.read("Casks/shannon-pill.rb")[/sha256 "([0-9a-fA-F]{64})"/, 1]')"
+          if [[ "${sha}" == "0000000000000000000000000000000000000000000000000000000000000000" ]]; then
+            echo "error: Casks/shannon-pill.rb still has placeholder sha256 on a release tag" >&2
+            exit 1
+          fi

@@ -3,11 +3,14 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+
+permissions:
+  contents: write
 
 jobs:
-  build:
-    name: Build release artifacts (${{ matrix.name }})
+  build-agent:
+    name: Build shannon-agent (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -35,6 +38,17 @@ jobs:
 
       - name: Configure
         run: |
+          EXTRA=()
+          if [[ "$(uname -s)" == "Darwin" ]]; then
+            LIBOMP="$(brew --prefix libomp)"
+            EXTRA+=(
+              -DOpenMP_C_FLAGS="-Xpreprocessor -fopenmp -I${LIBOMP}/include"
+              -DOpenMP_CXX_FLAGS="-Xpreprocessor -fopenmp -I${LIBOMP}/include"
+              -DOpenMP_C_LIB_NAMES=omp
+              -DOpenMP_CXX_LIB_NAMES=omp
+              -DOpenMP_omp_LIBRARY="${LIBOMP}/lib/libomp.dylib"
+            )
+          fi
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DSHANNON_BUILD_TESTS=OFF \
@@ -42,21 +56,107 @@ jobs:
             -DSHANNON_BUILD_AGENT=ON \
             -DSHANNON_USE_OPENMP=ON \
             -DSHANNON_USE_CUDA=OFF \
-            -DSHANNON_USE_METAL=OFF
+            -DSHANNON_USE_METAL=OFF \
+            "${EXTRA[@]}"
 
       - name: Build
         run: cmake --build build --parallel
 
+      - name: Smoke-test agent
+        run: |
+          ./build/shannon-agent --help 2>&1 | head -5
+          set +e
+          python3 - <<'PY' | ./build/shannon-agent --quiet --handrail log --sustained log --window 4 --threshold -1.0
+          import json
+          n = 8
+          for _ in range(6):
+              print(json.dumps({"logits": [0.0] * n}))
+          for _ in range(6):
+              logits = [-30.0] * n
+              logits[0] = 0.0
+              print(json.dumps({"logits": logits}))
+          PY
+          ec=$?
+          set -e
+          test "${ec}" -eq 1
+
       - name: Package artifacts
         run: |
           mkdir -p dist
-          cp -f build/shannon-agent dist/ || true
-          cp -f LICENSE dist/ || true
-          cp -f README.md dist/ || true
-          tar -czf ${{ matrix.artifact_name }}.tar.gz dist
+          cp -f build/shannon-agent dist/
+          cp -f LICENSE README.md dist/
+          tar -czf ${{ matrix.artifact_name }}.tar.gz -C dist .
+          shasum -a 256 ${{ matrix.artifact_name }}.tar.gz | tee ${{ matrix.artifact_name }}.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}.tar.gz
+          path: |
+            ${{ matrix.artifact_name }}.tar.gz
+            ${{ matrix.artifact_name }}.sha256
+
+  build-macos-app:
+    name: Build Shannon.app DMG (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install tools
+        run: brew install xcodegen || true
+
+      - name: Package ZIP + DMG (ad-hoc signed)
+        env:
+          SHANNON_BUILD_METHOD: swiftpm
+        run: |
+          chmod +x scripts/package_pill.sh Pill/Scripts/make_app.sh
+          ./scripts/package_pill.sh "${{ steps.ver.outputs.version }}" --update-cask
+          ls -la dist/
+          shasum -a 256 "dist/Shannon-${{ steps.ver.outputs.version }}.zip" | tee dist/Shannon.zip.sha256
+          shasum -a 256 "dist/Shannon-${{ steps.ver.outputs.version }}.dmg" | tee dist/Shannon.dmg.sha256
+
+      - name: Upload macOS app artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shannon-macos-app
+          path: |
+            dist/Shannon-*.zip
+            dist/Shannon-*.dmg
+            dist/Shannon.zip.sha256
+            dist/Shannon.dmg.sha256
+            Casks/shannon-pill.rb
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-agent, build-macos-app]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for release notes)
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.dmg' -o -name '*.zip' -o -name '*.sha256' \) \
+            -exec cp -v {} release-assets/ \;
+          ls -la release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

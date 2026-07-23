@@ -2,6 +2,19 @@
 
 All notable changes to Shannon are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Homebrew (macOS production path)** — hardened monorepo tap installers:
+  - `Formula/shannon.rb`: correct component order, `libomp` OpenMP wiring, install hard-fail, functional JSONL collapse tests via `pipe_output`
+  - `Casks/shannon-pill.rb`: Ventura+, livecheck, correct bundle zap/uninstall, Gatekeeper caveats; cask asset is a **reproducible ZIP**
+  - `scripts/package_pill.sh`: SwiftPM/Xcode build, ad-hoc or Developer ID sign, optional notarization, `--install` / `--update-cask`
+  - `scripts/install_macos_app.sh`: local `/Applications` install without a GitHub release
+  - `scripts/update_homebrew_artifacts.sh`: post-tag formula/cask checksum helper
+  - CI: `.github/workflows/homebrew.yml` (style + HEAD install + test on macOS/Linux); release workflow publishes agent tarballs + app ZIP/DMG
+  - Pill packaging build fixes: `PillCore` depends on ShannonCore/Theme; `@Bindable` for `@Observable` PetStore
+
 ## [2.0.0] — 2026-07-16
 
 ### Added

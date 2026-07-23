@@ -23,12 +23,23 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 
+packages:
+  ShannonCore:
+    path: ../Packages/ShannonCore
+  ShannonTheme:
+    path: ../Packages/ShannonTheme
+
 targets:
   PillCore:
     type: framework
     platform: macOS
     sources:
       - path: Sources/PillCore
+    dependencies:
+      - package: ShannonCore
+        product: ShannonCore
+      - package: ShannonTheme
+        product: ShannonTheme
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lebonhommepharma.shannon.pill.core
@@ -41,6 +52,10 @@ targets:
     dependencies:
       - target: PillCore
         embed: true
+      - package: ShannonCore
+        product: ShannonCore
+      - package: ShannonTheme
+        product: ShannonTheme
     # Generated, not Resources/Info.plist — XcodeGen rewrites whatever file it
     # is pointed at, and the SwiftPM bundle needs those literal values intact.
     info:

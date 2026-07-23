@@ -13,7 +13,13 @@ let package = Package(
         .package(path: "../Packages/ShannonCore"),
     ],
     targets: [
-        .target(name: "PillCore"),
+        .target(
+            name: "PillCore",
+            dependencies: [
+                .product(name: "ShannonTheme", package: "ShannonTheme"),
+                .product(name: "ShannonCore", package: "ShannonCore"),
+            ]
+        ),
         .executableTarget(
             name: "ShannonPill",
             dependencies: [

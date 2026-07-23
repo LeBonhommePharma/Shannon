@@ -17,9 +17,17 @@ APP="${ROOT}/build/ShannonPill.app"
 cd "${ROOT}"
 
 if [[ "${CONFIG}" == "release" ]]; then
-    echo "==> Building universal release binary"
-    swift build -c release --arch arm64 --arch x86_64
-    BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/ShannonPill"
+    # Prefer single-arch release on Apple Silicon; universal when SHANNON_UNIVERSAL=1.
+    # Dual-arch SPM builds are fragile on newer Xcode betas and inflate CI time.
+    if [[ "${SHANNON_UNIVERSAL:-0}" == "1" ]]; then
+        echo "==> Building universal release binary (arm64 + x86_64)"
+        swift build -c release --arch arm64 --arch x86_64
+        BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/ShannonPill"
+    else
+        echo "==> Building release binary (native arch)"
+        swift build -c release
+        BIN="$(swift build -c release --show-bin-path)/ShannonPill"
+    fi
 else
     echo "==> Building debug binary"
     swift build

@@ -10,7 +10,8 @@ import ShannonTheme
 /// AirPods nod → happy bounce + 3 XP. Shake → sad shake + 1 XP.
 @available(macOS 14.0, *)
 public struct PetPillView: View {
-    @ObservedObject public var store: PetStore
+    // PetStore is @Observable (Observation), not ObservableObject.
+    @Bindable public var store: PetStore
     public var isExpanded: Bool
 
     @State private var breathe = false

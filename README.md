@@ -146,19 +146,46 @@ LLM Stream (logits / probs / logprobs / JSONL / socket / shared memory)
 
 ---
 
-## Install via Homebrew
+## Install via Homebrew (macOS)
+
+Shannon is distributed as a **monorepo Homebrew tap** (this repository).
+Homebrew 6+ requires tap trust for third-party formulae/casks.
 
 ```bash
-# Developer dependencies (sets up the full dev environment)
+# One-time: add the monorepo tap
+brew tap lebonhommepharma/shannon https://github.com/LeBonhommePharma/Shannon
+
+# Developer dependencies (clone + full native toolchain)
 brew bundle install
 
-# macOS Pill app (after a signed release is available)
-brew tap LeBonhommePharma/shannon
-brew install --cask shannon-pill
+# ── native CLI (shannon-agent) ──────────────────────────────────────────────
+brew trust --formula lebonhommepharma/shannon/shannon
+brew install --HEAD lebonhommepharma/shannon/shannon
+shannon-agent --help
 
-# Library + Python package (native shannon-agent CLI)
-brew install LeBonhommePharma/shannon/shannon
+# Optional Metal GPU path (needs Xcode Metal toolchain):
+#   brew reinstall --build-from-source --HEAD --with-metal lebonhommepharma/shannon/shannon
+
+# ── macOS Pill app (cask) ───────────────────────────────────────────────────
+# After a GitHub release that publishes Shannon-<ver>.dmg:
+brew trust --cask lebonhommepharma/shannon/shannon-pill
+brew install --cask lebonhommepharma/shannon/shannon-pill
+
+# Before the first signed release (local build + install to /Applications):
+./scripts/install_macos_app.sh
+# equivalent: ./scripts/package_pill.sh --install
 ```
+
+If Gatekeeper blocks an ad-hoc-signed build:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Shannon.app
+open /Applications/Shannon.app
+```
+
+Release maintainers: after tagging `vX.Y.Z`, update checksums with
+`./scripts/update_homebrew_artifacts.sh vX.Y.Z --apply` (or let
+`scripts/package_pill.sh --update-cask` + the release workflow handle the DMG).
 
 ---
 
@@ -187,19 +214,12 @@ shannon-monitor --help
 shannon-monitor info
 ```
 
-### macOS Homebrew (native `shannon-agent`)
+### macOS Homebrew details
 
-```bash
-# Homebrew 6+ tap trust (formula-scoped; required when HOMEBREW_REQUIRE_TAP_TRUST is set):
-brew tap lebonhommepharma/shannon https://github.com/LeBonhommePharma/Shannon
-brew trust --formula lebonhommepharma/shannon/shannon
-brew install --HEAD lebonhommepharma/shannon/shannon
-
-# Optional Metal GPU path (needs Xcode Metal toolchain):
-#   brew install --build-from-source --HEAD --with-metal lebonhommepharma/shannon/shannon
-```
-
-This installs the **native** `shannon-agent` binary only (not the Python package).
+| Package | Kind | What you get |
+|---------|------|----------------|
+| `lebonhommepharma/shannon/shannon` | Formula | `shannon-agent` (C++ CLI, OpenMP) |
+| `lebonhommepharma/shannon/shannon-pill` | Cask | `Shannon.app` (notch pill UI) |
 
 ```bash
 shannon-agent --help

@@ -4,6 +4,8 @@
 #include "shannon/stream_ingest.hpp"
 
 #include <algorithm>
+#include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -37,12 +39,18 @@ static std::vector<double> parse_json_array(std::string_view s) {
         }
         if (pos >= content.size()) break;
 
-        char* endptr = nullptr;
-        double val = std::strtod(content.data() + pos, &endptr);
-        if (endptr == content.data() + pos) break;
+        // std::from_chars is locale-independent: it always parses '.' as the
+        // decimal separator, so a comma-decimal locale (e.g. "3,14") can no
+        // longer silently mis-parse the array. (strtod honoured the C locale.)
+        double val = 0.0;
+        const char* first = content.data() + pos;
+        const char* last = content.data() + content.size();
+        auto [ptr, ec] = std::from_chars(first, last, val);
+        if (ptr == first) break;  // no number consumed
+        (void)ec;                 // out_of_range still advances ptr; keep the value
 
         result.push_back(val);
-        pos = static_cast<std::size_t>(endptr - content.data());
+        pos = static_cast<std::size_t>(ptr - content.data());
     }
 
     return result;
@@ -96,6 +104,19 @@ bool StdinIngester::parse_jsonl_line(std::string_view line, TokenData& out) {
 
     auto values = parse_json_array(field_view);
     if (values.empty()) return false;
+
+    // Reject tokens whose parsed array contains non-finite values (NaN/Inf).
+    // For a safety detector, H=0.0 is the collapse alarm, so feeding garbage
+    // through the kernels would either manufacture or mask that signal. Skip
+    // the token and warn once to stderr — never crash the agent loop.
+    if (std::any_of(values.begin(), values.end(),
+                    [](double v) { return !std::isfinite(v); })) {
+        std::fprintf(stderr,
+                     "[shannon] warning: token %zu field '%s' contains a "
+                     "non-finite value (NaN/Inf); skipping token\n",
+                     token_index_, field_.c_str());
+        return false;
+    }
 
     switch (format_) {
     case InputFormat::LOGITS:

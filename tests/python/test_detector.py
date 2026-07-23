@@ -197,3 +197,80 @@ class TestBackend:
     def test_backend_available(self):
         backend = get_backend()
         assert backend in ("cpp", "numba", "numpy")
+
+
+# ── Input policy: refuse garbage instead of silently returning H=0.0 ─────────
+#
+# For a safety library, H=0.0 is the *alarm* condition ("total collapse").
+# Empty or non-finite input must raise ValueError before any entropy is
+# computed, on BOTH the C++ fast path and the pure-Python fallback, so garbage
+# can neither manufacture nor mask the collapse signal.
+
+import pytest
+
+
+def _both_backends():
+    """Yield (label, detector-factory) for the cpp fast path and forced Python."""
+    factories = [("cpp", lambda: ShannonCollapseDetector(window_size=4))]
+
+    def _py():
+        det = ShannonCollapseDetector(window_size=4)
+        det._cpp_detector = None  # force the pure-Python entropy path
+        det._backend = "python"
+        return det
+
+    factories.append(("python", _py))
+    return factories
+
+
+class TestInputPolicy:
+    @pytest.mark.parametrize("label,make", _both_backends())
+    @pytest.mark.parametrize("method", ["add_logits", "add_probs", "add_logprobs"])
+    def test_empty_raises(self, label, make, method):
+        det = make()
+        with pytest.raises(ValueError, match="empty"):
+            getattr(det, method)(np.array([], dtype=np.float64))
+
+    @pytest.mark.parametrize("label,make", _both_backends())
+    @pytest.mark.parametrize("method", ["add_logits", "add_probs", "add_logprobs"])
+    def test_nan_raises(self, label, make, method):
+        det = make()
+        with pytest.raises(ValueError, match="NaN at index"):
+            getattr(det, method)(np.array([0.1, 0.2, np.nan, 0.4]))
+
+    @pytest.mark.parametrize("label,make", _both_backends())
+    @pytest.mark.parametrize("method", ["add_logits", "add_probs", "add_logprobs"])
+    def test_posinf_raises(self, label, make, method):
+        det = make()
+        with pytest.raises(ValueError, match=r"\+Inf at index"):
+            getattr(det, method)(np.array([0.1, np.inf, 0.3]))
+
+    @pytest.mark.parametrize("label,make", _both_backends())
+    @pytest.mark.parametrize("method", ["add_logits", "add_probs", "add_logprobs"])
+    def test_neginf_raises(self, label, make, method):
+        det = make()
+        with pytest.raises(ValueError, match=r"\-Inf at index"):
+            getattr(det, method)(np.array([0.1, -np.inf, 0.3]))
+
+    def test_error_message_reports_index(self):
+        det = ShannonCollapseDetector(window_size=4)
+        with pytest.raises(ValueError, match="index 2"):
+            det.add_logits(np.array([0.1, 0.2, np.nan, 0.4]))
+
+    @pytest.mark.parametrize("label,make", _both_backends())
+    def test_single_finite_element_ok(self, label, make):
+        # n == 1 must still work — the one-hot fallback in the streaming
+        # integrations relies on add_probs(np.array([1.0])).
+        det = make()
+        r = det.add_probs(np.array([1.0], dtype=np.float64))
+        assert r.entropy == 0.0  # single-element distribution has zero entropy
+        r2 = det.add_logits(np.array([3.0], dtype=np.float64))
+        assert r2 is not None
+
+    def test_cpp_core_empty_raises(self):
+        # Direct _core users are protected against the empty case too.
+        core = pytest.importorskip("shannon._core")
+        det = core.CollapseDetector(4, -3.2, 3.2, 16)
+        for method in ("add_logits", "add_probs", "add_logprobs"):
+            with pytest.raises(ValueError):
+                getattr(det, method)(np.array([], dtype=np.float64))

@@ -14,25 +14,7 @@
 namespace shannon::hw {
 
 struct HardwareCapabilities {
-    // ── GPU: CUDA ──
-    bool        has_cuda          = false;
-    int         cuda_device_count = 0;
-    std::string cuda_device_name;
-    std::string cuda_arch;
-    int         cuda_sm_major     = 0;
-    int         cuda_sm_minor     = 0;
-    std::size_t cuda_global_mem   = 0;
-
-    // ── GPU: ROCm/HIP (AMD) ──
-    bool        has_rocm          = false;
-    int         rocm_device_count = 0;
-    std::string rocm_device_name;
-    std::string rocm_arch;
-    std::size_t rocm_global_mem   = 0;
-
-    // ── GPU: Metal (Apple) ──
-    bool        has_metal         = false;
-    std::string metal_gpu_name;
+    // GPU backends (CUDA/ROCm/Metal) were removed — CPU-only streaming workload.
 
     // ── SIMD: x86-64 ──
     bool has_sse42      = false;

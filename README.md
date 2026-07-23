@@ -13,7 +13,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-70%20pass-brightgreen.svg)]()
 
-> 94% sensitivity on deceptive agent traces | <0.3% FP on normal generation | <1 us per token
+> 100% sensitivity / 1.0% FP on the bundled synthetic benchmark (δ=-3.2) | <1 µs/token on top-k API-streaming logprobs
 >
 > Directly ported from the configurational entropy engine in [FlexAIDdS](https://github.com/LeBonhommePharma/FlexAIDdS) — validated on 590 protein-drug complexes (r=0.93 ITC, 92% binding mode rescue).
 
@@ -73,7 +73,7 @@ LLM Stream (logits / probs / logprobs / JSONL / socket / shared memory)
 |  +------------------+  +-----------------+  +-----------------+   |
 |  | UnifiedDispatch  |  | CollapseDetector|  | HandrailEngine  |   |
 |  | (auto-selects    |  | (sliding window,|  | (escalation:    |   |
-|  |  best SIMD/GPU   |  |  stable 2-pass  |  |  alert/throttle/|   |
+|  |  best SIMD       |  |  stable 2-pass  |  |  alert/throttle/|   |
 |  |  backend)        |  |  variance,      |  |  kill/coredump/ |   |
 |  |                  |  |  z-score)       |  |  webhook)       |   |
 |  +-------+----------+  +--------+--------+  +--------+--------+   |
@@ -82,8 +82,8 @@ LLM Stream (logits / probs / logprobs / JSONL / socket / shared memory)
 |  | Entropy Kernels  |           |                     |           |
 |  | Scalar / OMP /   |-> entropy + delta -> collapsed?--+           |
 |  | SSE4.2 / AVX2 /  |           |                                 |
-|  | AVX-512 / NEON / |           v                                 |
-|  | CUDA / Metal     |     [log / alert / kill]                    |
+|  | AVX-512 / NEON   |           v                                 |
+|  |                  |     [log / alert / kill]                    |
 |  +------------------+                                           |
 +------------------------------------------------------------------+
 ```
@@ -92,11 +92,11 @@ LLM Stream (logits / probs / logprobs / JSONL / socket / shared memory)
 
 | Component | Header | Purpose |
 |-----------|--------|---------|
-| `UnifiedDispatch` | `unified_dispatch.hpp` | Auto-selects best compute backend (CUDA > Metal > AVX-512 > AVX2 > SSE4.2/NEON > OpenMP > Scalar) |
+| `UnifiedDispatch` | `unified_dispatch.hpp` | Auto-selects best compute backend (AVX-512 > AVX2 > SSE4.2/NEON > OpenMP > Scalar) |
 | `CollapseDetector` | `collapse_detector.hpp` | Sliding-window entropy tracker with numerically stable two-pass variance, z-score, and delta computation |
 | `HandrailEngine` | `handrail.hpp` | Configurable escalation engine: LOG_ONLY / ALERT / THROTTLE / KILL / COREDUMP / WEBHOOK |
 | `TerminalAgent` | `terminal_agent.hpp` | Full pipeline: stream ingestion + entropy + collapse detection + handrail actions |
-| `HardwareCapabilities` | `hardware_detect.hpp` | Runtime CPUID / XCR0 / CUDA / Metal probe with OSXSAVE validation |
+| `HardwareCapabilities` | `hardware_detect.hpp` | Runtime CPUID / XCR0 SIMD probe with OSXSAVE validation |
 | `TurboQuant` | `turbo_quant.hpp` | MSE-optimal Lloyd-Max quantization for bounded-entropy monitoring |
 
 ---
@@ -106,7 +106,7 @@ LLM Stream (logits / probs / logprobs / JSONL / socket / shared memory)
 ### Entropy Engine
 
 - **Log-sum-exp kernel** — numerically stable configurational entropy (ported from `FlexAIDdS/LIB/statmech.cpp`)
-- **6 SIMD backends** — Scalar, OpenMP, SSE4.2, AVX2, AVX-512, ARM NEON (plus CUDA/Metal GPU paths)
+- **6 CPU backends** — Scalar, OpenMP, SSE4.2, AVX2, AVX-512, ARM NEON (vectorized double-precision `exp`; no GPU — see note below)
 - **Kernel-aware dispatch** — SSE4.2/NEON used only for configurational entropy; probs/logprobs fall through to AVX2/OMP/Scalar
 - **Three input modes** — raw logits, probabilities, or log-probabilities
 - **`[[nodiscard]]` + `noexcept`** on all entropy kernel declarations
@@ -148,8 +148,7 @@ LLM Stream (logits / probs / logprobs / JSONL / socket / shared memory)
 
 - **OSXSAVE + XCR0 validation** — prevents SIGILL from using AVX2/AVX-512 when the OS hasn't enabled XSAVE
 - **Strict-aliasing-safe** — `memcpy`-based CPUID (no `reinterpret_cast` UB)
-- **CUDA / ROCm runtime probe** — `cudaGetDeviceCount` / `hipGetDeviceCount`
-- **Defensive Metal gating** — compile-time flag with documented runtime probe TODO
+- **CPU-only** — GPU backends (CUDA/Metal/ROCm) were removed; see [note on GPU](#note-gpu-backends-removed)
 
 ---
 
@@ -169,9 +168,6 @@ brew bundle install
 brew trust --formula lebonhommepharma/shannon/shannon
 brew install --HEAD lebonhommepharma/shannon/shannon
 shannon-agent --help
-
-# Optional Metal GPU path (needs Xcode Metal toolchain):
-#   brew reinstall --build-from-source --HEAD --with-metal lebonhommepharma/shannon/shannon
 
 # ── macOS app (same primary path as Quick Start) ────────────────────────────
 ./scripts/shannon                 # pets + app (+ optional gate/bridge)
@@ -246,10 +242,9 @@ cmake --install build --prefix /usr/local
 | `SHANNON_BUILD_PYTHON` | `ON` | Build pybind11 Python module |
 | `SHANNON_BUILD_AGENT` | `ON` | Build `shannon-agent` CLI binary |
 | `SHANNON_USE_OPENMP` | `ON` | Enable OpenMP acceleration |
-| `SHANNON_USE_CUDA` | `OFF` | Enable CUDA GPU kernels |
-| `SHANNON_USE_ROCM` | `OFF` | Enable ROCm/HIP GPU kernels |
-| `SHANNON_USE_METAL` | `OFF` | Enable Metal GPU kernels (macOS) |
 | `SHANNON_USE_EIGEN` | `OFF` | Enable Eigen vectorization |
+
+> <a name="note-gpu-backends-removed"></a>**Note — GPU backends removed.** Earlier revisions carried `SHANNON_USE_CUDA` / `SHANNON_USE_ROCM` / `SHANNON_USE_METAL` options. They were removed: the workload is per-token streaming entropy of a *single* distribution (vocab 2k–131k), which is latency- and PCIe-transfer-bound on a discrete GPU (host→device copy of up to ~1 MB plus launch/sync overhead *per token*), with no in-repo batched or on-device-resident use case to amortise it. After the AVX-512 `exp` vectorization the CPU path sustains ~220–320 M elem/s single-threaded and wins decisively across the realistic vocab range. Keeping untested GPU scaffolding cost more (build/CI complexity, a capability claim never validated on hardware) than it earned.
 
 ### Build targets
 
@@ -778,9 +773,8 @@ Shannon/
 |       |-- entropy_avx2.cpp      # AVX2 + FMA kernels (3 functions)
 |       |-- entropy_avx512.cpp    # AVX-512 kernels (3 functions)
 |       |-- entropy_neon.cpp      # ARM NEON kernel (configurational only)
-|       |-- entropy_gpu.cu        # CUDA kernel
-|       |-- entropy_metal.metal   # Metal GPU shader
-|       |-- hardware_detect.cpp   # Runtime CPUID/XCR0/CUDA/Metal probe
+|       |-- simd_exp.hpp          # Vectorized double-precision exp (AVX2/AVX-512)
+|       |-- hardware_detect.cpp   # Runtime CPUID/XCR0 SIMD probe
 |       |-- hardware_detect.hpp
 |       |-- unified_dispatch.cpp   # Backend selection + kernel dispatch
 |       |-- unified_dispatch.hpp
@@ -1059,18 +1053,30 @@ Full analysis with proofs and derivations: `src/shannon/THERMODYNAMIC_FOUNDATION
 
 ## Performance
 
-| Backend | 50k vocab latency | Overhead | Throughput |
-|---------|-------------------|----------|------------|
-| C++ AVX-512 | **<1 us** | <0.01% | >800k tok/s |
-| C++ AVX2 | **2.1 us** | <0.01% | >400k tok/s |
-| C++ OpenMP | ~4 us | <0.03% | >200k tok/s |
-| Numba JIT | 8.3 us | <0.05% | >100k tok/s |
-| Pure NumPy | 45 us | <0.3% | >20k tok/s |
+All numbers below were measured on **this repo's committed benchmark**
+(`examples/benchmark.py`, C++ `cpp` backend) on a **2-core cloud container with
+AVX-512, g++13 -O3**, single-threaded. They are not vendor claims — reproduce
+them with `python examples/benchmark.py`. Latency depends entirely on vocab
+size, so the two regimes are split:
 
-Expected results on frontier model logs:
-- **Sensitivity**: 94% (true positive rate for deceptive traces)
-- **False positive rate**: < 0.3% (on normal generation)
-- **Latency**: < 1 us per token (C++ backend)
+| Regime | What it is | Latency/token | Throughput |
+|--------|-----------|---------------|------------|
+| **API streaming (top-k logprobs)** | k≈20 alternatives from an OpenAI/Anthropic-style stream — the realistic online case | **~0.9 µs** (raw `_core` detector) | — |
+| **Full vocab, 50k** | dense 50 000-logit distribution | ~148 µs | ~337 M elem/s |
+| **Full vocab, 131k** | dense 131 072-logit distribution | ~411 µs | ~318 M elem/s |
+
+Single-threaded kernel throughput is **~320–340 M elem/s** on this box. The
+`<1 µs/token` figure applies **only** to the top-k API-streaming case; a full
+50k/131k-vocab pass is hundreds of µs and should be quoted as such.
+
+Detection quality from the committed synthetic benchmark:
+- **Sensitivity**: 100% (100/100 injected-collapse traces detected)
+- **False positive rate**: 1.0% (10/1000 normal traces)
+
+⚠️ These sensitivity/FP figures are **specific to the collapse threshold
+(δ = -3.2) and the synthetic trace generator in `examples/benchmark.py`** — they
+are not universal detection rates. Real-world numbers depend on your threshold,
+window size, and the actual token distributions you feed in.
 
 ---
 

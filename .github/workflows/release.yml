@@ -55,8 +55,6 @@ jobs:
             -DSHANNON_BUILD_PYTHON=OFF \
             -DSHANNON_BUILD_AGENT=ON \
             -DSHANNON_USE_OPENMP=ON \
-            -DSHANNON_USE_CUDA=OFF \
-            -DSHANNON_USE_METAL=OFF \
             "${EXTRA[@]}"
 
       - name: Build

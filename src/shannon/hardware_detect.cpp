@@ -51,15 +51,6 @@
 #  include <omp.h>
 #endif
 
-// ── CUDA (compile-time gated) ────────────────────────────────────────────────
-#ifdef SHANNON_USE_CUDA
-#  include <cuda_runtime.h>
-#endif
-
-#ifdef SHANNON_USE_ROCM
-#  include <hip/hip_runtime.h>
-#endif
-
 namespace shannon::hw {
 
 static void detect_x86_simd(HardwareCapabilities& hw) {
@@ -139,99 +130,9 @@ static void detect_eigen(HardwareCapabilities& hw) {
 #endif
 }
 
-static void detect_cuda(HardwareCapabilities& hw) {
-#ifdef SHANNON_USE_CUDA
-    int count = 0;
-    cudaError_t err = cudaGetDeviceCount(&count);
-    if (err != cudaSuccess || count <= 0) return;
-
-    hw.has_cuda = true;
-    hw.cuda_device_count = count;
-
-    cudaDeviceProp prop{};
-    if (cudaGetDeviceProperties(&prop, 0) == cudaSuccess) {
-        hw.cuda_device_name = prop.name;
-        hw.cuda_sm_major    = prop.major;
-        hw.cuda_sm_minor    = prop.minor;
-        hw.cuda_global_mem  = prop.totalGlobalMem;
-        hw.cuda_arch        = "sm_" + std::to_string(prop.major * 10 + prop.minor);
-    }
-#else
-    (void)hw;
-#endif
-}
-
-static void detect_metal(HardwareCapabilities& hw) {
-#ifdef SHANNON_USE_METAL
-    // TODO: Runtime Metal probe via MTLCreateSystemDefaultDevice() requires
-    // an Objective-C++ bridge (e.g. hardware_detect_metal.mm). Without it,
-    // we cannot confirm GPU availability at runtime — only at compile time.
-    // For now, claim Metal only if we're on Apple hardware with the build flag.
-    // This may falsely report Metal on headless/CI macOS without a GPU.
-#  if defined(__APPLE__) && defined(__aarch64__)
-    hw.has_metal = true;
-    hw.metal_gpu_name = "Apple GPU (Metal-capable)";
-#  elif defined(__APPLE__)
-    hw.has_metal = true;
-    hw.metal_gpu_name = "macOS GPU (Metal build-enabled, unprobed)";
-#  endif
-#else
-    (void)hw;
-#endif
-}
-
-static void detect_rocm(HardwareCapabilities& hw) {
-#ifdef SHANNON_USE_ROCM
-    int count = 0;
-    hipError_t err = hipGetDeviceCount(&count);
-    if (err != hipSuccess || count <= 0) return;
-
-    hw.has_rocm = true;
-    hw.rocm_device_count = count;
-
-    hipDeviceProp_t prop{};
-    if (hipGetDeviceProperties(&prop, 0) == hipSuccess) {
-        hw.rocm_device_name = prop.name;
-        hw.rocm_global_mem  = prop.totalGlobalMem;
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-        if (prop.gcnArchName[0] != '\0') {
-            hw.rocm_arch = prop.gcnArchName;
-        } else if (prop.gcnArch > 0) {
-            hw.rocm_arch = "gfx" + std::to_string(prop.gcnArch);
-        } else {
-            hw.rocm_arch = "gfx-unknown";
-        }
-#else
-        hw.rocm_arch = "hip-generic";
-#endif
-    }
-#else
-    (void)hw;
-#endif
-}
-
 std::string HardwareCapabilities::summary() const {
     std::ostringstream os;
     os << "[shannon::hw] Hardware Capabilities:\n";
-
-    if (has_cuda)
-        os << "[shannon::hw]   CUDA: " << cuda_device_name
-           << " (" << cuda_arch << ", "
-           << (cuda_global_mem >> 20) << " MB)\n";
-    else
-        os << "[shannon::hw]   CUDA: not available\n";
-
-    if (has_metal)
-        os << "[shannon::hw]   Metal: " << metal_gpu_name << "\n";
-    else
-        os << "[shannon::hw]   Metal: not available\n";
-
-    if (has_rocm)
-        os << "[shannon::hw]   ROCm: " << rocm_device_name
-           << " (" << rocm_arch << ", "
-           << (rocm_global_mem >> 20) << " MB)\n";
-    else
-        os << "[shannon::hw]   ROCm: not available\n";
 
     // Report all detected SIMD features (not else-if): multi-ISA builds matter.
     bool any_simd = false;
@@ -274,9 +175,6 @@ const HardwareCapabilities& detect_hardware() {
         detect_arm_neon(caps);
         detect_openmp(caps);
         detect_eigen(caps);
-        detect_cuda(caps);
-        detect_rocm(caps);
-        detect_metal(caps);
         return caps;
     }();
     return hw;

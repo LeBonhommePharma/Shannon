@@ -403,7 +403,6 @@ TEST(UnifiedDispatch, BackendNames) {
     EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AVX2), "AVX2");
     EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AVX512), "AVX512");
     EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::NEON), "NEON");
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::CUDA), "CUDA");
     EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AUTO), "AUTO");
 }
 
@@ -959,8 +958,8 @@ TEST(Handrail, WebhookNoUrlNoCrash) {
 
 TEST(Types, BackendEnum) {
     EXPECT_EQ(static_cast<int>(Backend::SCALAR), 0);
+    EXPECT_EQ(static_cast<int>(Backend::NEON), 5);
     EXPECT_EQ(static_cast<int>(Backend::AUTO), 255);
-    EXPECT_EQ(static_cast<int>(Backend::CUDA), 7);
 }
 
 TEST(Types, HandrailActions) {
@@ -1051,6 +1050,38 @@ TEST(StdinIngester, ParseValidAndInvalid) {
     EXPECT_FALSE(parser.parse_jsonl_line("{}", data));
     EXPECT_FALSE(parser.parse_jsonl_line(
         R"({"other_field": [1.0, 2.0]})", data));
+}
+
+TEST(StdinIngester, RejectsNonFiniteTokens) {
+    shannon::ingest::StdinIngester parser("logits", InputFormat::LOGITS);
+    shannon::ingest::TokenData data;
+
+    // NaN / Inf / -Inf anywhere in the array → token skipped (returns false),
+    // never fed to the kernels (H=0.0 would be a false collapse alarm).
+    EXPECT_FALSE(parser.parse_jsonl_line(
+        R"({"logits": [0.1, nan, 0.3]})", data));
+    EXPECT_FALSE(parser.parse_jsonl_line(
+        R"({"logits": [inf, 0.2, 0.3]})", data));
+    EXPECT_FALSE(parser.parse_jsonl_line(
+        R"({"logits": [0.1, 0.2, -inf]})", data));
+
+    // A clean line still parses after the rejected ones.
+    EXPECT_TRUE(parser.parse_jsonl_line(
+        R"({"logits": [1.0, 2.0, 3.0]})", data));
+    EXPECT_EQ(data.logits.size(), 3u);
+}
+
+TEST(StdinIngester, LocaleIndependentDecimalParsing) {
+    // from_chars always reads '.' as the decimal separator regardless of the
+    // C locale, so fractional values parse consistently.
+    shannon::ingest::StdinIngester parser("logits", InputFormat::LOGITS);
+    shannon::ingest::TokenData data;
+    ASSERT_TRUE(parser.parse_jsonl_line(
+        R"({"logits": [3.14, 2.71, 0.5]})", data));
+    ASSERT_EQ(data.logits.size(), 3u);
+    EXPECT_NEAR(data.logits[0], 3.14, 1e-12);
+    EXPECT_NEAR(data.logits[1], 2.71, 1e-12);
+    EXPECT_NEAR(data.logits[2], 0.5, 1e-12);
 }
 
 // ─── TurboQuant tests ───────────────────────────────────────────────────────

@@ -78,6 +78,38 @@ class CollapseResult:
 CollapseCallback = Callable[[CollapseResult], None]
 
 
+def _validate_finite_1d(arr: np.ndarray, method: str, kind: str) -> np.ndarray:
+    """Reject empty and non-finite input before any entropy computation.
+
+    For a safety library, H=0.0 is the *alarm* condition ("total collapse").
+    Silently returning H=0.0 on garbage input (NaN/Inf logit, empty array)
+    would manufacture the exact signal the tool exists to detect — or mask a
+    real one. So we refuse instead, with an actionable message, BEFORE
+    dispatching to either the C++ or the Python backend so both paths behave
+    identically. ``np.isfinite(...).all()`` is a fast, vectorized single pass.
+
+    A single finite element (n == 1) is valid — the one-hot fallback in the
+    streaming integrations relies on it — so the empty check is n == 0.
+    """
+    if arr.size == 0:
+        raise ValueError(
+            f"{method}: input is empty; refusing to compute entropy on a "
+            f"zero-length {kind} array (H=0.0 is the collapse alarm, not a "
+            f"valid answer for empty input)"
+        )
+    if not np.isfinite(arr).all():
+        bad = np.flatnonzero(~np.isfinite(arr))
+        idx = int(bad[0])
+        val = arr[idx]
+        kw = "NaN" if np.isnan(val) else ("+Inf" if val > 0 else "-Inf")
+        raise ValueError(
+            f"{method}: input contains {kw} at index {idx}; refusing to "
+            f"compute entropy on non-finite {kind} ({bad.size} non-finite "
+            f"element(s) total)"
+        )
+    return arr
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class CollapseEvent:
     """Fired when entropy collapse is detected (for streaming integrations)."""
@@ -294,7 +326,7 @@ class ShannonCollapseDetector:
 
         Returns CollapseResult with full event classification.
         """
-        arr = _ensure_float64_1d(logits)
+        arr = _validate_finite_1d(_ensure_float64_1d(logits), "add_logits", "logits")
         if self._cpp_detector is not None:
             r = self._cpp_detector.add_logits(arr)
             self._last_result = self._wrap_cpp_result(r)
@@ -314,7 +346,7 @@ class ShannonCollapseDetector:
 
     def add_probs(self, probs: ArrayLike) -> CollapseResult:
         """Feed a normalized probability distribution."""
-        arr = _ensure_float64_1d(probs)
+        arr = _validate_finite_1d(_ensure_float64_1d(probs), "add_probs", "probabilities")
         if self._cpp_detector is not None:
             r = self._cpp_detector.add_probs(arr)
             self._last_result = self._wrap_cpp_result(r)
@@ -324,7 +356,7 @@ class ShannonCollapseDetector:
 
     def add_logprobs(self, logprobs: ArrayLike) -> CollapseResult:
         """Feed log-probabilities (base e)."""
-        arr = _ensure_float64_1d(logprobs)
+        arr = _validate_finite_1d(_ensure_float64_1d(logprobs), "add_logprobs", "logprobs")
         if self._cpp_detector is not None:
             r = self._cpp_detector.add_logprobs(arr)
             self._last_result = self._wrap_cpp_result(r)

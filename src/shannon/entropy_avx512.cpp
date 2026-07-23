@@ -6,6 +6,8 @@
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/entropy.hpp"
 #include "shannon/config.hpp"
+#include "shannon/simd_exp.hpp"
+#include "shannon/simd_log2.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -48,13 +50,7 @@ double configurational_entropy_avx512(const double* w, std::size_t n) noexcept {
     for (; i + 7 < n; i += 8) {
         __m512d vw = _mm512_loadu_pd(w + i);
         __m512d sh = _mm512_sub_pd(vw, v_max);
-        alignas(64) double sh_arr[8];
-        _mm512_store_pd(sh_arr, sh);
-        __m512d ev = _mm512_set_pd(
-            std::exp(sh_arr[7]), std::exp(sh_arr[6]),
-            std::exp(sh_arr[5]), std::exp(sh_arr[4]),
-            std::exp(sh_arr[3]), std::exp(sh_arr[2]),
-            std::exp(sh_arr[1]), std::exp(sh_arr[0]));
+        __m512d ev = simd::shannon_exp_avx512(sh);
         acc_Z  = _mm512_add_pd(acc_Z, ev);
         acc_ws = _mm512_fmadd_pd(sh, ev, acc_ws);
     }
@@ -80,13 +76,12 @@ double entropy_from_probs_avx512(const double* p, std::size_t n) noexcept {
     std::size_t i = 0;
 
     for (; i + 7 < n; i += 8) {
-        alignas(64) double p_arr[8];
-        _mm512_store_pd(p_arr, _mm512_loadu_pd(p + i));
-        alignas(64) double contrib[8];
-        for (int k = 0; k < 8; ++k) {
-            contrib[k] = (p_arr[k] > kEpsilon) ? -p_arr[k] * std::log2(p_arr[k]) : 0.0;
-        }
-        acc = _mm512_add_pd(acc, _mm512_load_pd(contrib));
+        __m512d vp = _mm512_loadu_pd(p + i);
+        // contrib = -p * log2(p); zero where p <= kEpsilon (matches scalar).
+        __m512d contrib = _mm512_mul_pd(_mm512_sub_pd(_mm512_setzero_pd(), vp),
+                                        simd::shannon_log2_avx512(vp));
+        __mmask8 m = _mm512_cmp_pd_mask(vp, _mm512_set1_pd(kEpsilon), _CMP_GT_OQ);
+        acc = _mm512_add_pd(acc, _mm512_maskz_mov_pd(m, contrib));
     }
 
     double h = hsum512_pd(acc);
@@ -103,14 +98,13 @@ double entropy_from_logprobs_avx512(const double* lp, std::size_t n) noexcept {
     std::size_t i = 0;
 
     for (; i + 7 < n; i += 8) {
-        alignas(64) double lp_arr[8];
-        _mm512_store_pd(lp_arr, _mm512_loadu_pd(lp + i));
-        alignas(64) double contrib[8];
-        for (int k = 0; k < 8; ++k) {
-            double p = std::exp(lp_arr[k]);
-            contrib[k] = (p > kEpsilon) ? -p * lp_arr[k] * kLog2E : 0.0;
-        }
-        acc = _mm512_add_pd(acc, _mm512_load_pd(contrib));
+        __m512d vlp = _mm512_loadu_pd(lp + i);
+        __m512d p   = simd::shannon_exp_avx512(vlp);
+        // contrib = -p * lp * log2e  (>= 0 since lp <= 0); zero where p <= eps
+        __m512d contrib = _mm512_mul_pd(_mm512_mul_pd(p, vlp),
+                                        _mm512_set1_pd(-kLog2E));
+        __mmask8 m = _mm512_cmp_pd_mask(p, _mm512_set1_pd(kEpsilon), _CMP_GT_OQ);
+        acc = _mm512_add_pd(acc, _mm512_maskz_mov_pd(m, contrib));
     }
 
     double h = hsum512_pd(acc);

@@ -16,9 +16,6 @@ class Shannon < Formula
     regex(%r{href=.*?/tag/v?(\d+(?:\.\d+)+)["' >]}i)
   end
 
-  # Optional Metal GPU path (macOS only). Off by default — needs Xcode Metal toolchain.
-  option "with-metal", "Build with Metal GPU acceleration (macOS; needs Metal toolchain)"
-
   depends_on "cmake" => :build
   depends_on "ninja" => :build
   depends_on "libomp"
@@ -26,12 +23,7 @@ class Shannon < Formula
   fails_with gcc: "10" # C++20 required (gcc ≥ 11 / AppleClang ≥ 13)
 
   def install
-    metal = if OS.mac? && build.with?("metal")
-      "ON"
-    else
-      "OFF"
-    end
-
+    # GPU backends (CUDA/Metal/ROCm) were removed — Shannon is CPU-only.
     args = %W[
       -GNinja
       -DCMAKE_BUILD_TYPE=Release
@@ -39,9 +31,6 @@ class Shannon < Formula
       -DSHANNON_BUILD_PYTHON=OFF
       -DSHANNON_BUILD_AGENT=ON
       -DSHANNON_USE_OPENMP=ON
-      -DSHANNON_USE_CUDA=OFF
-      -DSHANNON_USE_METAL=#{metal}
-      -DSHANNON_USE_ROCM=OFF
       -DSHANNON_USE_EIGEN=OFF
     ]
 
@@ -90,9 +79,7 @@ class Shannon < Formula
         brew install --HEAD lebonhommepharma/shannon/shannon
 
       Default build: CPU + OpenMP (portable). Formula head tracks main only.
-
-      Metal GPU (macOS + Xcode Metal toolchain):
-        brew reinstall --build-from-source --HEAD --with-metal lebonhommepharma/shannon/shannon
+      Shannon is CPU-only; GPU backends were removed (see README).
 
       Example:
         cat token_stream.jsonl | shannon-agent --window 8 --threshold -3.2

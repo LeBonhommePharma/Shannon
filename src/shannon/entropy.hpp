@@ -35,14 +35,6 @@ namespace shannon::kernels {
 [[nodiscard]] double entropy_from_logprobs_neon(const double* lp, std::size_t n) noexcept;
 #endif
 
-#if defined(SHANNON_USE_CUDA)
-namespace cuda {
-// Host-side launcher (entropy_gpu.cu). Returns a negative value on any CUDA
-// error so the dispatcher can fall back to a CPU kernel (H >= 0 always).
-[[nodiscard]] double configurational_entropy_cuda(const double* w, std::size_t n);
-}  // namespace cuda
-#endif
-
 // ─── Shannon entropy from probabilities ───────────────────────────────────────
 
 [[nodiscard]] double entropy_from_probs_scalar(const double* p, std::size_t n) noexcept;

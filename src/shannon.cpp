@@ -208,17 +208,11 @@ HardwareInfo get_hardware_info() {
 #ifdef _OPENMP
     info.has_openmp = true;
 #endif
-#ifdef SHANNON_USE_CUDA
-    info.has_cuda = true;
-#endif
-#ifdef SHANNON_USE_METAL
-    info.has_metal = true;
-#endif
+    // GPU backends were removed; has_cuda/has_metal are retained as always-false
+    // fields for v1 API/ABI stability (Python bindings + CLI still read them).
 
     // Prefer widest available backend (mirrors UnifiedDispatch priority)
-    if (info.has_cuda)        info.active_backend = "cuda";
-    else if (info.has_metal)  info.active_backend = "metal";
-    else if (info.has_avx512) info.active_backend = "avx512";
+    if (info.has_avx512)      info.active_backend = "avx512";
     else if (info.has_avx2)   info.active_backend = "avx2";
     else if (info.has_neon)   info.active_backend = "neon";
     else if (info.has_openmp) info.active_backend = "openmp";

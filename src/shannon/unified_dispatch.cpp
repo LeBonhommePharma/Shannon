@@ -60,18 +60,12 @@ bool UnifiedDispatch::is_available(Backend b) const noexcept {
     case Backend::AVX2:   return hw_.has_avx2;
     case Backend::AVX512: return hw_.has_avx512;
     case Backend::NEON:   return hw_.has_neon;
-    case Backend::METAL:  return hw_.has_metal;
-    case Backend::CUDA:   return hw_.has_cuda;
-    case Backend::ROCM:   return hw_.has_rocm;
     case Backend::AUTO:   return true;
     }
     return false;
 }
 
 bool UnifiedDispatch::has_kernel(Backend b, KernelType kernel) const noexcept {
-    // GPU backends: only claim a kernel when the corresponding build flag is set.
-    // Without this, best_backend() would select CUDA/Metal/ROCm and fall through
-    // to scalar — wasting the CPU SIMD path (esp. NEON on Apple Silicon).
     switch (b) {
     case Backend::SCALAR:
         return true;
@@ -112,26 +106,6 @@ bool UnifiedDispatch::has_kernel(Backend b, KernelType kernel) const noexcept {
         (void)kernel;
         return false;
 #endif
-    case Backend::CUDA:
-#if defined(SHANNON_USE_CUDA)
-        // CUDA implements configurational entropy only (entropy_gpu.cu).
-        // Claiming other kernels would make best_backend() select CUDA and
-        // silently fall through to scalar.
-        return hw_.has_cuda && kernel == KernelType::CONFIGURATIONAL_ENTROPY;
-#else
-        return false;
-#endif
-    case Backend::METAL:
-        // entropy_metal.metal compiles to a .metallib, but no host-side
-        // loader is wired yet. Claiming a kernel here would beat NEON in
-        // best_backend() and then degrade to scalar — a net regression on
-        // Apple Silicon. Report none until the loader lands.
-        return false;
-    case Backend::ROCM:
-        // SHANNON_USE_ROCM defines the macro but compiles no HIP kernel
-        // (entropy_gpu.cu is only added under SHANNON_USE_CUDA). No kernel,
-        // no claim.
-        return false;
     case Backend::AUTO:
         return true;
     }
@@ -146,18 +120,16 @@ const char* UnifiedDispatch::backend_name(Backend b) noexcept {
     case Backend::AVX2:   return "AVX2";
     case Backend::AVX512: return "AVX512";
     case Backend::NEON:   return "NEON";
-    case Backend::METAL:  return "METAL";
-    case Backend::CUDA:   return "CUDA";
-    case Backend::ROCM:   return "ROCM";
     case Backend::AUTO:   return "AUTO";
     }
     return "UNKNOWN";
 }
 
 std::vector<Backend> UnifiedDispatch::available_backends() const {
+    ensure_detected();
     static constexpr Backend kAllBackends[] = {
         Backend::SCALAR, Backend::OPENMP, Backend::SSE42, Backend::AVX2,
-        Backend::AVX512, Backend::NEON, Backend::METAL, Backend::CUDA, Backend::ROCM
+        Backend::AVX512, Backend::NEON
     };
     std::vector<Backend> result;
     for (Backend b : kAllBackends) {
@@ -167,19 +139,19 @@ std::vector<Backend> UnifiedDispatch::available_backends() const {
 }
 
 std::string UnifiedDispatch::hardware_report() const {
+    ensure_detected();
     return hw_.summary();
 }
 
 Backend UnifiedDispatch::best_backend(KernelType kernel, std::size_t n) const {
+    // Without this, calling best_backend()/hardware_report() before the first
+    // compute_* reads a default-constructed (all-false) capability set and
+    // reports SCALAR on a machine with AVX-512.
+    ensure_detected();
     Backend ov = override_.load(std::memory_order_relaxed);
     if (ov != Backend::AUTO && is_available(ov) && has_kernel(ov, kernel)) {
         return ov;
     }
-
-    // GPU first — only when a real kernel exists (compile-time gated above)
-    if (has_kernel(Backend::CUDA, kernel))  return Backend::CUDA;
-    if (has_kernel(Backend::ROCM, kernel))  return Backend::ROCM;
-    if (has_kernel(Backend::METAL, kernel)) return Backend::METAL;
 
     // x86 wide SIMD
     if (has_kernel(Backend::AVX512, kernel)) return Backend::AVX512;
@@ -221,19 +193,6 @@ DispatchResult UnifiedDispatch::compute_configurational_entropy(
     // Track whether a real kernel ran; fallthrough must not leave a stale backend.
     bool ran = false;
     switch (result.used_backend) {
-    case Backend::CUDA:
-#if defined(SHANNON_USE_CUDA)
-        if (hw_.has_cuda) {
-            const double h = kernels::cuda::configurational_entropy_cuda(log_weights, n);
-            if (h >= 0.0) {  // negative = device error → fall back to CPU
-                out_entropy = h;
-                result.used_backend = Backend::CUDA;
-                ran = true;
-                break;
-            }
-        }
-#endif
-        [[fallthrough]];
     case Backend::AVX512:
 #if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
         out_entropy = kernels::configurational_entropy_avx512(log_weights, n);

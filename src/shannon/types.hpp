@@ -22,6 +22,9 @@ namespace shannon {
 
 // ─── Backend enumeration ─────────────────────────────────────────────────────
 
+// GPU backends (METAL/CUDA/ROCM) were removed: this is a CPU-only, per-token
+// single-distribution streaming workload. Enum values 0-5 and AUTO=255 are
+// kept stable so the pybind11 binding and any persisted telemetry stay valid.
 enum class Backend : uint8_t {
     SCALAR  = 0,
     OPENMP  = 1,
@@ -29,9 +32,6 @@ enum class Backend : uint8_t {
     AVX2    = 3,
     AVX512  = 4,
     NEON    = 5,
-    METAL   = 6,
-    CUDA    = 7,
-    ROCM    = 8,
     AUTO    = 255,
 };
 
@@ -159,9 +159,6 @@ struct DispatchTelemetry {
         case Backend::AVX2:   name = "AVX2";   break;
         case Backend::AVX512: name = "AVX512"; break;
         case Backend::NEON:   name = "NEON";   break;
-        case Backend::METAL:  name = "METAL";  break;
-        case Backend::CUDA:   name = "CUDA";   break;
-        case Backend::ROCM:   name = "ROCM";   break;
         case Backend::AUTO:   name = "AUTO";   break;
         }
         return std::string("DispatchTelemetry{backend=") + name

@@ -5,6 +5,8 @@
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/entropy.hpp"
 #include "shannon/config.hpp"
+#include "shannon/simd_exp.hpp"
+#include "shannon/simd_log2.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -41,11 +43,7 @@ double configurational_entropy_avx2(const double* w, std::size_t n) noexcept {
     for (; i + 3 < n; i += 4) {
         __m256d vw = _mm256_loadu_pd(w + i);
         __m256d sh = _mm256_sub_pd(vw, v_max);
-        alignas(32) double sh_arr[4];
-        _mm256_store_pd(sh_arr, sh);
-        __m256d ev = _mm256_set_pd(
-            std::exp(sh_arr[3]), std::exp(sh_arr[2]),
-            std::exp(sh_arr[1]), std::exp(sh_arr[0]));
+        __m256d ev = simd::shannon_exp_avx2(sh);
         acc_Z  = _mm256_add_pd(acc_Z, ev);
         acc_ws = _mm256_fmadd_pd(sh, ev, acc_ws);
     }
@@ -71,13 +69,12 @@ double entropy_from_probs_avx2(const double* p, std::size_t n) noexcept {
     std::size_t i = 0;
 
     for (; i + 3 < n; i += 4) {
-        alignas(32) double p_arr[4];
-        _mm256_store_pd(p_arr, _mm256_loadu_pd(p + i));
-        alignas(32) double log_arr[4];
-        for (int k = 0; k < 4; ++k) {
-            log_arr[k] = (p_arr[k] > kEpsilon) ? -p_arr[k] * std::log2(p_arr[k]) : 0.0;
-        }
-        acc = _mm256_add_pd(acc, _mm256_load_pd(log_arr));
+        __m256d vp = _mm256_loadu_pd(p + i);
+        // contrib = -p * log2(p); zero where p <= kEpsilon (matches scalar).
+        __m256d contrib = _mm256_mul_pd(_mm256_sub_pd(_mm256_setzero_pd(), vp),
+                                        simd::shannon_log2_avx2(vp));
+        __m256d m = _mm256_cmp_pd(vp, _mm256_set1_pd(kEpsilon), _CMP_GT_OQ);
+        acc = _mm256_add_pd(acc, _mm256_and_pd(m, contrib));
     }
 
     double h = hsum256_pd(acc);
@@ -94,14 +91,13 @@ double entropy_from_logprobs_avx2(const double* lp, std::size_t n) noexcept {
     std::size_t i = 0;
 
     for (; i + 3 < n; i += 4) {
-        alignas(32) double lp_arr[4];
-        _mm256_store_pd(lp_arr, _mm256_loadu_pd(lp + i));
-        alignas(32) double contrib[4];
-        for (int k = 0; k < 4; ++k) {
-            double p = std::exp(lp_arr[k]);
-            contrib[k] = (p > kEpsilon) ? -p * lp_arr[k] * kLog2E : 0.0;
-        }
-        acc = _mm256_add_pd(acc, _mm256_load_pd(contrib));
+        __m256d vlp = _mm256_loadu_pd(lp + i);
+        __m256d p   = simd::shannon_exp_avx2(vlp);
+        // contrib = -p * lp * log2e  (>= 0 since lp <= 0); zero where p <= eps
+        __m256d contrib = _mm256_mul_pd(_mm256_mul_pd(p, vlp),
+                                        _mm256_set1_pd(-kLog2E));
+        __m256d m = _mm256_cmp_pd(p, _mm256_set1_pd(kEpsilon), _CMP_GT_OQ);
+        acc = _mm256_add_pd(acc, _mm256_and_pd(m, contrib));
     }
 
     double h = hsum256_pd(acc);

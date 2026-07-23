@@ -413,27 +413,51 @@ PYBIND11_MODULE(_core, m) {
         .def("add_logits",
             [](shannon::CollapseDetector& self, py::array logits) {
                 auto vec = to_double_vec(logits);
+                if (vec.empty())
+                    throw py::value_error(
+                        "add_logits: input is empty; refusing to compute entropy "
+                        "on a zero-length logits array (H=0.0 is the collapse "
+                        "alarm, not a valid answer for empty input)");
                 py::gil_scoped_release release;
                 return self.add_logits(vec.data(), vec.size());
             },
             py::arg("logits"),
-            "Feed raw logits; returns CollapseResult")
+            "Feed raw logits; returns CollapseResult. Precondition: non-empty "
+            "and all-finite. The empty case is rejected here; finiteness is the "
+            "caller's responsibility on this direct _core path (the Python "
+            "ShannonCollapseDetector API validates np.isfinite before dispatch).")
         .def("add_probs",
             [](shannon::CollapseDetector& self, py::array probs) {
                 auto vec = to_double_vec(probs);
+                if (vec.empty())
+                    throw py::value_error(
+                        "add_probs: input is empty; refusing to compute entropy "
+                        "on a zero-length probabilities array (H=0.0 is the "
+                        "collapse alarm, not a valid answer for empty input)");
                 py::gil_scoped_release release;
                 return self.add_probs(vec.data(), vec.size());
             },
             py::arg("probs"),
-            "Feed a normalized probability distribution; returns CollapseResult")
+            "Feed a normalized probability distribution; returns CollapseResult. "
+            "Precondition: non-empty and all-finite. The empty case is rejected "
+            "here; finiteness is the caller's responsibility on this direct "
+            "_core path (the Python API validates np.isfinite before dispatch).")
         .def("add_logprobs",
             [](shannon::CollapseDetector& self, py::array logprobs) {
                 auto vec = to_double_vec(logprobs);
+                if (vec.empty())
+                    throw py::value_error(
+                        "add_logprobs: input is empty; refusing to compute "
+                        "entropy on a zero-length logprobs array (H=0.0 is the "
+                        "collapse alarm, not a valid answer for empty input)");
                 py::gil_scoped_release release;
                 return self.add_logprobs(vec.data(), vec.size());
             },
             py::arg("logprobs"),
-            "Feed log-probabilities (base e); returns CollapseResult")
+            "Feed log-probabilities (base e); returns CollapseResult. "
+            "Precondition: non-empty and all-finite. The empty case is rejected "
+            "here; finiteness is the caller's responsibility on this direct "
+            "_core path (the Python API validates np.isfinite before dispatch).")
         .def("push_entropy", &shannon::CollapseDetector::push_entropy,
              py::arg("entropy_bits"),
              "Feed a pre-computed entropy value; returns CollapseResult")

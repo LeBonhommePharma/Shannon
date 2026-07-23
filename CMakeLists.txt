@@ -11,10 +11,12 @@ option(SHANNON_BUILD_TESTS    "Build GoogleTest unit tests"     ON)
 option(SHANNON_BUILD_PYTHON   "Build pybind11 Python module"    ON)
 option(SHANNON_BUILD_AGENT    "Build shannon-agent CLI"         ON)
 option(SHANNON_USE_OPENMP     "Enable OpenMP acceleration"      ON)
-option(SHANNON_USE_CUDA       "Enable CUDA GPU kernels"         OFF)
-option(SHANNON_USE_ROCM       "Enable ROCm/HIP GPU kernels"     OFF)
-option(SHANNON_USE_METAL      "Enable Metal GPU kernels"        OFF)
 option(SHANNON_USE_EIGEN      "Enable Eigen vectorization"      OFF)
+# GPU backends (CUDA/Metal/ROCm) were removed in this release: the workload is
+# per-token streaming entropy of a single distribution, which is latency- and
+# transfer-bound on a discrete GPU (H2D of up to ~1 MB + launch overhead per
+# token) with no in-repo batched/on-device-resident use case to amortise it.
+# See the commit message for the full removal rationale.
 
 # ── Version from CMake ──────────────────────────────────────────────────────────
 configure_file(
@@ -44,22 +46,6 @@ set(SHANNON_SIMD_SOURCES)
 set(SHANNON_DEFS)
 if(SHANNON_USE_OPENMP)
     list(APPEND SHANNON_DEFS SHANNON_USE_OPENMP)
-endif()
-if(SHANNON_USE_CUDA)
-    list(APPEND SHANNON_DEFS SHANNON_USE_CUDA)
-    # CMake >= 3.18 (CMP0104) errors out if no CUDA architectures are set.
-    # "native" targets the GPU present at build time; override with
-    # -DCMAKE_CUDA_ARCHITECTURES=... for distribution builds.
-    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-        set(CMAKE_CUDA_ARCHITECTURES native)
-    endif()
-    enable_language(CUDA)
-endif()
-if(SHANNON_USE_ROCM)
-    list(APPEND SHANNON_DEFS SHANNON_USE_ROCM)
-endif()
-if(SHANNON_USE_METAL)
-    list(APPEND SHANNON_DEFS SHANNON_USE_METAL)
 endif()
 if(SHANNON_USE_EIGEN)
     list(APPEND SHANNON_DEFS SHANNON_USE_EIGEN)
@@ -161,30 +147,6 @@ if(SHANNON_USE_OPENMP)
     endif()
 endif()
 
-# ── CUDA GPU kernels ────────────────────────────────────────────────────────────
-
-if(SHANNON_USE_CUDA)
-    add_library(shannon_cuda STATIC src/shannon/entropy_gpu.cu)
-    target_include_directories(shannon_cuda PUBLIC src/)
-    target_compile_definitions(shannon_cuda PUBLIC SHANNON_USE_CUDA)
-    target_link_libraries(shannon_v2 PUBLIC shannon_cuda)
-endif()
-
-# ── Metal GPU kernels ───────────────────────────────────────────────────────────
-
-if(SHANNON_USE_METAL AND APPLE)
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/entropy_metal.metallib
-        COMMAND xcrun -sdk macosx metal -c ${CMAKE_CURRENT_SOURCE_DIR}/src/shannon/entropy_metal.metal
-                -o ${CMAKE_CURRENT_BINARY_DIR}/entropy_metal.air
-        COMMAND xcrun -sdk macosx metallib ${CMAKE_CURRENT_BINARY_DIR}/entropy_metal.air
-                -o ${CMAKE_CURRENT_BINARY_DIR}/entropy_metal.metallib
-        DEPENDS src/shannon/entropy_metal.metal
-        COMMENT "Compiling Metal shader"
-    )
-    add_custom_target(shannon_metal ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/entropy_metal.metallib)
-endif()
-
 # ── pybind11 Python module ──────────────────────────────────────────────────────
 
 if(SHANNON_BUILD_PYTHON)
@@ -255,7 +217,26 @@ if(SHANNON_BUILD_TESTS)
     target_compile_definitions(shannon_v2_tests PRIVATE ${SHANNON_DEFS})
     target_include_directories(shannon_v2_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated/)
 
+    # SIMD exp accuracy tests — compiled with the widest available ISA flags so
+    # the __AVX2__/__AVX512F__ code paths in simd_exp.hpp are actually exercised.
+    add_executable(shannon_simd_exp_tests tests/cpp/test_simd_exp.cpp)
+    target_link_libraries(shannon_simd_exp_tests PRIVATE shannon_v2 GTest::gtest_main)
+    target_compile_definitions(shannon_simd_exp_tests PRIVATE ${SHANNON_DEFS})
+    target_include_directories(shannon_simd_exp_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated/)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        set(SHANNON_SIMD_EXP_FLAGS "")
+        if(SHANNON_COMPILER_AVX2)
+            set(SHANNON_SIMD_EXP_FLAGS "${SHANNON_SIMD_EXP_FLAGS} -mavx2 -mfma")
+        endif()
+        if(SHANNON_COMPILER_AVX512)
+            set(SHANNON_SIMD_EXP_FLAGS "${SHANNON_SIMD_EXP_FLAGS} -mavx512f -mavx512dq -mavx512bw")
+        endif()
+        set_source_files_properties(tests/cpp/test_simd_exp.cpp
+            PROPERTIES COMPILE_FLAGS "${SHANNON_SIMD_EXP_FLAGS}")
+    endif()
+
     include(GoogleTest)
     gtest_discover_tests(shannon_tests)
     gtest_discover_tests(shannon_v2_tests)
+    gtest_discover_tests(shannon_simd_exp_tests)
 endif()

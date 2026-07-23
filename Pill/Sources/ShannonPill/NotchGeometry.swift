@@ -28,8 +28,9 @@ public struct NotchGeometry {
 
     /// Fallback height for displays without a physical notch.
     public static let syntheticNotchHeight: CGFloat = 32
-    /// Minimum synthetic notch width so a collapsed pill (240pt) still centres.
-    public static let syntheticNotchWidth: CGFloat = 240
+    /// Minimum synthetic notch width — must match PillMetrics.collapsedWidth (260pt)
+    /// so the collapsed pill centres within the synthetic notch on non-notched displays.
+    public static let syntheticNotchWidth: CGFloat = 260
 
     public init(screen: NSScreen) {
         self.screen = screen

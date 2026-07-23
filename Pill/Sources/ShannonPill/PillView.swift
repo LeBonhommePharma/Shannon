@@ -21,6 +21,9 @@ struct PillView: View {
     @ObservedObject var activity: AgentActivityMonitor
     @Binding var isExpanded: Bool
 
+    /// Drives the pulsing red border shown when entropy collapses (deception alert).
+    @State private var collapsePulse = false
+
     private var showExpanded: Bool { isExpanded || confirmation.isAwaitingConfirmation }
 
     private var entropy: ShannonStatus { bridge.status ?? idle.status }
@@ -59,10 +62,22 @@ struct PillView: View {
         .overlay(flashOverlay)
         .animation(.shannonFloat, value: showExpanded)
         .animation(.shannonSnap, value: summary.busyCount)
+        // Spring transition when the primary agent switches (e.g. Claude → Codex).
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: summary.primary?.displayName)
         .onHover { hovering in
             if hovering { isExpanded = true }
         }
         .onTapGesture { isExpanded.toggle() }
+        // Start / stop the entropy-collapse pulse border.
+        .onChange(of: entropy.collapsed) { collapsed in
+            if collapsed {
+                withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
+                    collapsePulse = true
+                }
+            } else {
+                withAnimation(.default) { collapsePulse = false }
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(collapsedText)
         .accessibilityHint("Click to expand agent status")
@@ -84,7 +99,7 @@ struct PillView: View {
                 .frame(width: 16, height: 16)
 
             Text(collapsedText)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color.shannonPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)

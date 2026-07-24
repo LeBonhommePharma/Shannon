@@ -32,8 +32,6 @@ _HAS_CORE = False
 
 try:
     from shannon._core import (
-        shannon_entropy,
-        shannon_entropy_from_logits,
         compute_entropy,
         compute_entropy_from_logits,
         EntropyResult,
@@ -44,16 +42,17 @@ try:
     )
     _HAS_CORE = True
 except ImportError:
-    from shannon._numba_fallback import (
-        shannon_entropy,
-        shannon_entropy_from_logits,
-        shannon_configurational_entropy,
-        shannon_entropy_from_logprobs,
-        get_backend,
-    )
+    pass
 
+# The entropy kernels are always exported from the dispatch layer, never bound
+# straight off shannon._core. The dispatch wrappers coerce array-likes (lists,
+# tuples) to float64 1-D arrays before calling into C++; the raw pybind11
+# signatures accept numpy.ndarray only, so re-exporting them directly would
+# make the public API reject plain lists whenever the C++ core is present.
 from shannon._numba_fallback import (
     _ensure_float64_1d,
+    shannon_entropy,
+    shannon_entropy_from_logits,
     shannon_configurational_entropy,
     shannon_entropy_from_logprobs,
     get_backend,

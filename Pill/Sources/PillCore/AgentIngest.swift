@@ -112,24 +112,62 @@ public enum AgentAppMapper {
     public static func map(
         bundleID: String?,
         appName: String?,
-        page: BrowserPageContext? = nil
+        page: BrowserPageContext? = nil,
+        terminal: TerminalAgentProbe.Context? = nil
     ) -> AgentKind {
         let bid = (bundleID ?? "").lowercased()
         let name = (appName ?? "").lowercased()
+        let isTerminalApp = TerminalAgentProbe.isTerminal(bundleID: bid, appName: appName)
+
+        // ── Terminal contents win over the terminal container ──────────────
+        // Exactly parallel to the browser path below: the emulator is the
+        // container, `terminal` says which agent is actually running in it.
+        // Without this every emulator collapses to id "terminal", so two CLI
+        // agents in two windows overwrite each other's pet.
+        if let terminal, !terminal.isEmpty {
+            return withCatalogStyle(
+                AgentKind(
+                    id: terminal.agentID,
+                    displayName: terminal.displayName,
+                    source: "terminal",
+                    bundleHint: bid.isEmpty ? nil : bid
+                ),
+                bundleHint: bid
+            )
+        }
+        // A terminal running only a shell keeps the generic identity, but the
+        // emulator name survives instead of being flattened to "Terminal".
+        if let terminal, isTerminalApp, !terminal.emulatorName.isEmpty {
+            return withCatalogStyle(
+                AgentKind(
+                    id: "terminal",
+                    displayName: terminal.emulatorName,
+                    source: "terminal",
+                    bundleHint: bid.isEmpty ? nil : bid
+                ),
+                bundleHint: bid
+            )
+        }
 
         // Browser tab wins over generic "browser" bundle mapping.
         // Science (amber flask) vs SuperGrok/Grok Build (purple sparkles) etc.
-        if let page, !page.isEmpty, let web = BrowserAgentDetector.detect(page: page) {
+        //
+        // Never for terminals: a Ghostty window titled "⠂ claude-notes" is a
+        // directory, not an agent, and `BrowserAgentDetector` matches on bare
+        // title substrings. The probe above is the only evidence that counts.
+        if !isTerminalApp, let page, !page.isEmpty,
+           let web = BrowserAgentDetector.detect(page: page) {
             return withCatalogStyle(web, bundleHint: bid.isEmpty ? (web.bundleHint ?? "") : bid)
         }
         // Even without URL, title-only page context can refine.
-        if let page, !page.title.isEmpty, let web = BrowserAgentDetector.detect(page: page) {
+        if !isTerminalApp, let page, !page.title.isEmpty,
+           let web = BrowserAgentDetector.detect(page: page) {
             return withCatalogStyle(web, bundleHint: bid)
         }
 
         // Explicit bundle rules (most specific first).
         let rules: [(String, AgentKind)] = [
-            // Terminals
+            // Terminals — reached only when the probe found no agent inside.
             ("com.apple.terminal", .init(id: "terminal", displayName: "Terminal", source: "terminal")),
             ("com.googlecode.iterm2", .init(id: "terminal", displayName: "iTerm", source: "terminal")),
             ("dev.warp.warp-stable", .init(id: "terminal", displayName: "Warp", source: "terminal")),
@@ -138,16 +176,38 @@ public enum AgentAppMapper {
             ("com.mitchellh.ghostty", .init(id: "terminal", displayName: "Ghostty", source: "terminal")),
             ("co.zeit.hyper", .init(id: "terminal", displayName: "Hyper", source: "terminal")),
             ("net.kovidgoyal.kitty", .init(id: "terminal", displayName: "Kitty", source: "terminal")),
+            ("io.alacritty", .init(id: "terminal", displayName: "Alacritty", source: "terminal")),
+            ("org.alacritty", .init(id: "terminal", displayName: "Alacritty", source: "terminal")),
             // Chat / agents — Claude Science (operon) BEFORE generic Claude desktop
             ("com.openai.chat", .init(id: "chatgpt", displayName: "ChatGPT", source: "chat")),
             ("com.openai.codex", .init(id: "codex", displayName: "Codex", source: "chat")),
             ("com.anthropic.operon", .init(id: "science", displayName: "Claude Science", source: "chat")),
             ("com.anthropic.claudescience", .init(id: "science", displayName: "Claude Science", source: "chat")),
             ("com.anthropic.claude-science", .init(id: "science", displayName: "Claude Science", source: "chat")),
+            // Dispatch BEFORE any generic Claude rule: its window/app name is
+            // "Claude Dispatch" in some builds, which the `name.contains("claude")`
+            // fallback below would otherwise swallow into claude_code.
+            ("com.anthropic.dispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
+            ("com.anthropic.claudedispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
+            ("com.anthropic.claude-dispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
+            ("com.anthropic.claude.dispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
+            // Claude Code — the native macOS app ships as com.anthropic.claude-code
+            // (/…/Application Support/Claude/claude-code/*/claude.app), which no
+            // rule matched: it only ever resolved via the appName fallback.
+            ("com.anthropic.claude-code", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            ("com.anthropic.claudecode", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            ("com.anthropic.claude-code-url-handler", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            // claude-devtools.app — measured on this machine, previously unmapped
+            // and therefore minted as its own bogus "claude_devtools" agent.
+            ("com.claudecode.context", .init(id: "claude_code", displayName: "Claude Code", source: "ide")),
             ("com.anthropic.claudefordesktop", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
             ("com.anthropic.claude", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            ("com.anthropic.cowork", .init(id: "cowork", displayName: "Cowork", source: "chat")),
             ("com.xai.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
             ("ai.x.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
+            ("com.x.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
+            ("ai.x.supergrok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
+            ("com.openai.chatgpt", .init(id: "chatgpt", displayName: "ChatGPT", source: "chat")),
             // IDEs
             ("com.todesktop.", .init(id: "cursor", displayName: "Cursor", source: "ide")), // prefix match below
             ("com.microsoft.vscode", .init(id: "vscode", displayName: "VS Code", source: "ide")),
@@ -175,6 +235,20 @@ public enum AgentAppMapper {
             }
         }
 
+        // Claude-adjacent utilities that are emphatically not agents. Without
+        // this "Usage for Claude.app" (com.ClaudeUsage) matches the
+        // name.contains("claude") fallback below and registers itself as Claude
+        // Code, stealing the capture from the real thing.
+        let notAnAgentBundles: Set<String> = [
+            "com.claudeusage",
+            "com.anthropic.claude-code-url-handler",
+        ]
+        if notAnAgentBundles.contains(bid)
+            || name.contains("usage for claude") || name.contains("claude usage") {
+            return AgentKind(id: "local_test", displayName: appName ?? "Local", source: "other",
+                             bundleHint: bid.isEmpty ? nil : bid)
+        }
+
         // Name fallbacks (unsigned / electron apps with shifting bundle ids).
         // Science BEFORE generic "claude" — app name is "Claude Science".
         if name.contains("claude science") || name == "claudescience"
@@ -182,6 +256,23 @@ public enum AgentAppMapper {
             || name.contains("operon") {
             return withCatalogStyle(
                 .init(id: "science", displayName: "Claude Science", source: "chat"),
+                bundleHint: bid
+            )
+        }
+        // Dispatch is not installed on every machine and its bundle id is not
+        // knowable ahead of time, so the app *name* is the durable hook — and it
+        // must beat `name.contains("claude")`, since the app presents itself as
+        // "Claude Dispatch" as well as plain "Dispatch".
+        if name == "dispatch" || name.contains("claude dispatch")
+            || name.contains("dispatch") && name.contains("claude") {
+            return withCatalogStyle(
+                .init(id: "dispatch", displayName: "Dispatch", source: "chat"),
+                bundleHint: bid
+            )
+        }
+        if name.contains("cowork") {
+            return withCatalogStyle(
+                .init(id: "cowork", displayName: "Cowork", source: "chat"),
                 bundleHint: bid
             )
         }
@@ -221,8 +312,11 @@ public enum AgentAppMapper {
                 bundleHint: bid
             )
         }
-        if name.contains("terminal") || name.contains("iterm") || name.contains("warp") || name.contains("ghostty") || name.contains("kitty") {
-            return .init(id: "terminal", displayName: appName ?? "Terminal", source: "terminal", bundleHint: bid)
+        if let emulator = TerminalAgentProbe.emulatorName(bundleID: bid, appName: appName) {
+            return withCatalogStyle(
+                .init(id: "terminal", displayName: emulator, source: "terminal"),
+                bundleHint: bid
+            )
         }
         if name.contains("safari") || name.contains("chrome") || name.contains("firefox") || name.contains("arc") || name.contains("brave") {
             return .init(id: "browser", displayName: appName ?? "Browser", source: "browser", bundleHint: bid)
@@ -246,16 +340,33 @@ public enum AgentAppMapper {
         return AgentKind(id: fallbackID, displayName: label, source: "other", bundleHint: bid.isEmpty ? nil : bid)
     }
 
-    /// Prefer catalog displayName (icons/colours key off id; labels stay consistent).
-    private static func withCatalogStyle(_ kind: AgentKind, bundleHint: String) -> AgentKind {
+    /// Ids whose catalog entry is a placeholder for a *container*, not for an
+    /// agent. "Terminal" and "Browser" are shelves, so the caller's label
+    /// (Ghostty, Safari) is strictly more informative — the catalog is still
+    /// consulted, but only for the icon and colour, which key off `id`.
+    ///
+    /// This is what used to make lines like `("com.mitchellh.ghostty", … "Ghostty")`
+    /// dead code: every one of them was overwritten with the catalog's
+    /// "Terminal" on the way out, so all seven emulators rendered identically.
+    static let containerIDs: Set<String> = ["terminal", "browser"]
+
+    /// Prefer catalog displayName (icons/colours key off id; labels stay
+    /// consistent) — except for container ids, where a supplied label wins.
+    static func applyCatalogStyle(_ kind: AgentKind, bundleHint: String = "") -> AgentKind {
         let style = AgentStyleCatalog.style(for: kind.id)
         let known = AgentStyleCatalog.all.contains(where: { $0.id == kind.id })
+        let supplied = kind.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keepSupplied = !supplied.isEmpty && containerIDs.contains(kind.id)
         return AgentKind(
             id: kind.id,
-            displayName: known ? style.displayName : kind.displayName,
+            displayName: keepSupplied ? supplied : (known ? style.displayName : kind.displayName),
             source: kind.source,
             bundleHint: bundleHint.isEmpty ? kind.bundleHint : bundleHint
         )
+    }
+
+    private static func withCatalogStyle(_ kind: AgentKind, bundleHint: String) -> AgentKind {
+        applyCatalogStyle(kind, bundleHint: bundleHint)
     }
 
     /// Optional clipboard override — **only** when the user is intentional.
@@ -487,26 +598,28 @@ public final class AgentIngestService: ObservableObject {
             let t = BrowserPageProbe.probe(bundleID: bid, appName: name)
             return t.isEmpty ? nil : t
         }()
+        // Terminal twin of the browser probe: which agent CLI is running *inside*
+        // Ghostty/iTerm/Warp. nil for non-terminals; a Context with an empty
+        // agentID for a terminal that is only running a shell.
+        let terminal: TerminalAgentProbe.Context? =
+            TerminalAgentProbe.probe(bundleID: bid, appName: name)
         #else
         let bid: String? = nil
         let name: String? = nil
         let page: BrowserPageContext? = nil
+        let terminal: TerminalAgentProbe.Context? = nil
         #endif
 
         let clip = clipboardText ?? Self.readClipboard()
         let (clipAgent, clipTask) = AgentAppMapper.parseClipboard(clip)
 
-        var kind = AgentAppMapper.map(bundleID: bid, appName: name, page: page)
-        // Prefer catalog display names / colors for known ids.
-        let style = AgentStyleCatalog.style(for: kind.id)
-        if AgentStyleCatalog.all.contains(where: { $0.id == kind.id }) {
-            kind = AgentKind(
-                id: kind.id,
-                displayName: style.displayName,
-                source: kind.source,
-                bundleHint: kind.bundleHint
-            )
-        }
+        var kind = AgentAppMapper.map(
+            bundleID: bid, appName: name, page: page, terminal: terminal
+        )
+        // Prefer catalog display names / colors for known ids — but not for the
+        // container ids, or this re-flattens "Ghostty" back to "Terminal" after
+        // map() has already made the right call.
+        kind = AgentAppMapper.applyCatalogStyle(kind)
         if let force = forceAgentID, !force.isEmpty {
             let forced = AgentStyleCatalog.style(for: AgentKind.sanitizeID(force))
             kind = AgentKind(
@@ -536,6 +649,13 @@ public final class AgentIngestService: ObservableObject {
             ?? taskFromTitle
             ?? "Working in \(name ?? kind.displayName)"
         let sourceApp = {
+            // Terminals first: the evidence that matters is the process found
+            // inside, not the window title of the emulator hosting it.
+            if let terminal, !terminal.isEmpty {
+                let host = terminal.emulatorName.isEmpty
+                    ? (name ?? "Terminal") : terminal.emulatorName
+                return "\(host) · \(terminal.executable) (pid \(terminal.pid))"
+            }
             if let page, !page.url.isEmpty { return "\(name ?? "Browser") · \(page.url)" }
             if !pageTitle.isEmpty { return "\(name ?? "App") · \(pageTitle)" }
             return name ?? bid ?? "unknown"
@@ -587,83 +707,119 @@ public final class AgentIngestService: ObservableObject {
         #endif
     }
 
-    /// Best-effort: if hub gate is listening on /tmp/shannon.sock, send a status.
-    /// Never throws; never blocks more than ~200ms.
-    private static func notifyGateBestEffort(agentID: String, task: String) -> Bool {
-        let path = ProcessInfo.processInfo.environment["SHANNON_GATE_SOCKET"]
-            ?? "/tmp/shannon.sock"
-        // Use a short-lived Python-less raw Unix socket via Foundation is painful;
-        // try connecting with Darwin sockets inline.
+    /// Tell the gate about the capture over HTTP `POST /message`.
+    ///
+    /// Deliberately *not* the Unix-socket session. ⌘D is an OBSERVATION — "the
+    /// user was looking at this app" — not a claim that an agent is connected and
+    /// doing work. The socket path registers, which calls `upsert_agent` and
+    /// writes connected_at, and then hangs up a millisecond later, writing
+    /// disconnected_at. The row that comes back therefore reads
+    /// "offline · last seen 0m" the instant the agent is captured, which is worse
+    /// than saying nothing: `bootstrapPet` writes status "observed" and the
+    /// companion moods gate `.alert` behind `AgentPresence.canBeBusy` precisely so
+    /// that nothing claims liveness it cannot back up. A synthetic
+    /// connect/disconnect pair undercuts all of it.
+    ///
+    /// `POST /message` runs the same gate evaluation and audit log but never
+    /// touches the `agents` table (hub/shannon_gate.py calls `upsert_agent` only
+    /// from the socket registration path), so the UI keeps the honest
+    /// observation label. If the hub wants ⌘D-captured agents to be genuinely
+    /// live it has to hold a connection open and keep `heartbeat_ns` beating,
+    /// which is a daemon's job, not a keystroke's.
+    ///
+    /// Never throws; loopback-only, so a refused connection fails instantly and
+    /// a wedged listener is bounded by the 200 ms receive timeout.
+    static func notifyGateBestEffort(agentID: String, task: String) -> Bool {
         #if canImport(Darwin)
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let env = ProcessInfo.processInfo.environment
+        let host = env["SHANNON_HTTP_HOST"] ?? "127.0.0.1"
+        let port = UInt16(env["SHANNON_HTTP_PORT"] ?? "") ?? 8765
+
+        let body: [String: Any] = [
+            "agent_id": agentID,
+            "task_id": "ingest",
+            "message_type": "status",
+            "payload": ["text": task, "event": "ingest", "source": "cmd_d"],
+        ]
+        guard let payload = try? JSONSerialization.data(withJSONObject: body) else {
+            return false
+        }
+
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
         defer { close(fd) }
 
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        let pathBytes = path.utf8CString
-        guard pathBytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { return false }
-        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-            pathBytes.withUnsafeBufferPointer { src in
-                strncpy(UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self),
-                        src.baseAddress!, pathBytes.count)
-            }
-        }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        let converted = host.withCString { inet_addr($0) }
+        guard converted != INADDR_NONE else { return false }
+        addr.sin_addr.s_addr = converted
+
         var tv = timeval(tv_sec: 0, tv_usec: 200_000)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout.size(ofValue: tv)))
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout.size(ofValue: tv)))
 
         let rc = withUnsafePointer(to: &addr) { p in
             p.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                connect(fd, sa, socklen_t(MemoryLayout<sockaddr_un>.size))
+                connect(fd, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
         guard rc == 0 else { return false }
 
-        // Gate protocol: the FIRST line is the registration frame and is keyed
-        // on "agent_id" (hub/shannon_gate.py reads reg.get("agent_id")); only
-        // then are message frames accepted.
-        //
-        // This previously sent a single status frame keyed "from", so the gate
-        // read an empty agent id, answered {"error": "unknown_agent:"} and
-        // dropped the connection — for every agent, not just unknown ones. It
-        // never reached upsert_agent, which is what writes the row the Pill
-        // later reads back, so agents added this way silently never appeared.
-        let registration: [String: Any] = [
-            "agent_id": agentID,
-            "task_id": "ingest",
-        ]
-        let status: [String: Any] = [
-            "agent_id": agentID,
-            "message_type": "status",
-            "payload": ["text": task, "event": "ingest"],
-            "task_id": "ingest",
-        ]
-        guard let regData = try? JSONSerialization.data(withJSONObject: registration),
-              let statusData = try? JSONSerialization.data(withJSONObject: status),
-              let regLine = String(data: regData, encoding: .utf8),
-              let statusLine = String(data: statusData, encoding: .utf8) else { return false }
-        let bytes = Array("\(regLine)\n\(statusLine)\n".utf8)
-        let sent = bytes.withUnsafeBufferPointer { buf in
-            send(fd, buf.baseAddress, buf.count, 0)
-        }
-        guard sent > 0 else { return false }
+        let head = """
+        POST /message HTTP/1.1\r
+        Host: \(host):\(port)\r
+        Content-Type: application/json\r
+        Content-Length: \(payload.count)\r
+        Connection: close\r
+        \r
 
-        // Writing bytes only proves the socket accepted them, not that the gate
-        // accepted us — reporting success on `sent > 0` is what made a rejected
-        // registration look healthy. The gate answers a good registration with
-        // {"type": "welcome", …} and a bad one with {"error": …}, so wait for
-        // the verdict. The socket already carries a 200 ms SO_RCVTIMEO, so a
-        // silent or wedged gate fails closed rather than hanging the caller.
-        var reply = [UInt8](repeating: 0, count: 1024)
+        """
+        var request = Array(head.utf8)
+        request.append(contentsOf: payload)
+        var offset = 0
+        while offset < request.count {
+            let sent = request[offset...].withUnsafeBufferPointer { buf in
+                send(fd, buf.baseAddress, buf.count, 0)
+            }
+            guard sent > 0 else { return false }
+            offset += sent
+        }
+
+        // The gate answers 200 with {"decision": …} and 403 with
+        // {"error": "unknown_agent:…"} for an id outside VALID_AGENTS. Writing
+        // bytes proves nothing, so wait for the verdict.
+        var reply = [UInt8](repeating: 0, count: 2048)
         let received = recv(fd, &reply, reply.count, 0)
         guard received > 0,
-              let verdict = String(bytes: reply[0..<received], encoding: .utf8) else {
+              let text = String(bytes: reply[0..<received], encoding: .utf8) else {
             return false
         }
-        return verdict.contains("welcome") && !verdict.contains("\"error\"")
+        return gateAccepted(httpResponse: text)
         #else
         return false
         #endif
+    }
+
+    /// Did the gate take the message? Pure, so the verdict is unit-tested
+    /// without a live daemon.
+    ///
+    /// 200 with a `decision` is a yes — including `"decision": "blocked"`, which
+    /// means the gate received and judged the message, exactly what we asked it
+    /// to do. 403 `unknown_agent` is the interesting no: it means the id is
+    /// outside `VALID_AGENTS`, which `hub/agent_identity.py` owns.
+    nonisolated static func gateAccepted(httpResponse: String) -> Bool {
+        guard let statusLine = httpResponse.split(
+            separator: "\r\n", maxSplits: 1, omittingEmptySubsequences: false
+        ).first else { return false }
+        let fields = statusLine.split(separator: " ")
+        guard fields.count >= 2, let code = Int(fields[1]) else { return false }
+        guard (200..<300).contains(code) else { return false }
+        // A 200 whose body still carries an "error" key is a refusal.
+        guard let bodyStart = httpResponse.range(of: "\r\n\r\n") else { return true }
+        let body = httpResponse[bodyStart.upperBound...]
+        return !body.contains("\"error\"")
     }
 }

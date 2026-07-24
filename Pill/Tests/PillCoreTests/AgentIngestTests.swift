@@ -18,6 +18,140 @@ final class AgentIngestTests: XCTestCase {
         XCTAssertEqual(i.id, "terminal")
     }
 
+    // MARK: - Terminal contents (⌘D on a terminal must name the agent inside)
+
+    func testTerminalContextResolvesToTheAgentRunningInside() {
+        // Ghostty hosting `claude`: the capture must be Claude Code, not the
+        // container. Previously every emulator collapsed to id "terminal", so
+        // two CLI agents in two windows overwrote each other's pet.
+        let inside = TerminalAgentProbe.Context(
+            agentID: "claude_code", displayName: "Claude Code",
+            executable: "claude", pid: 44534, emulatorName: "Ghostty"
+        )
+        let k = AgentAppMapper.map(
+            bundleID: "com.mitchellh.ghostty", appName: "Ghostty", terminal: inside
+        )
+        XCTAssertEqual(k.id, "claude_code")
+        XCTAssertEqual(k.displayName, "Claude Code")
+        XCTAssertEqual(k.source, "terminal")
+        XCTAssertEqual(k.bundleHint, "com.mitchellh.ghostty")
+        XCTAssertEqual(AgentStyleCatalog.style(for: k.id).emoji, "🟠")
+    }
+
+    func testTwoTerminalsWithDifferentAgentsDoNotCollide() {
+        let ghosttyGrok = AgentAppMapper.map(
+            bundleID: "com.mitchellh.ghostty", appName: "Ghostty",
+            terminal: .init(agentID: "grok_build", displayName: "Grok Build",
+                            executable: "grok", pid: 12182, emulatorName: "Ghostty")
+        )
+        let itermCodex = AgentAppMapper.map(
+            bundleID: "com.googlecode.iterm2", appName: "iTerm2",
+            terminal: .init(agentID: "codex", displayName: "Codex",
+                            executable: "codex", pid: 777, emulatorName: "iTerm")
+        )
+        XCTAssertEqual(ghosttyGrok.id, "grok_build")
+        XCTAssertEqual(itermCodex.id, "codex")
+        XCTAssertNotEqual(ghosttyGrok.id, itermCodex.id)
+    }
+
+    func testTerminalWithoutAnAgentKeepsTheEmulatorName() {
+        // The regression this fixes: lines like ("com.mitchellh.ghostty", …
+        // "Ghostty") were dead code because withCatalogStyle overwrote the label
+        // with the catalog's generic "Terminal".
+        let shellOnly = TerminalAgentProbe.Context(emulatorName: "Ghostty")
+        let k = AgentAppMapper.map(
+            bundleID: "com.mitchellh.ghostty", appName: "Ghostty", terminal: shellOnly
+        )
+        XCTAssertEqual(k.id, "terminal", "id must stay in the gate's allowlist")
+        XCTAssertEqual(k.displayName, "Ghostty", "the emulator label must survive")
+        // Icon + colour still come from the catalog, which keys off id.
+        XCTAssertEqual(AgentStyleCatalog.style(for: k.id).systemImage, "terminal.fill")
+    }
+
+    func testTerminalNamesSurviveWithoutAProbe() {
+        for (bid, label) in [
+            ("com.mitchellh.ghostty", "Ghostty"),
+            ("com.googlecode.iterm2", "iTerm"),
+            ("dev.warp.warp-stable", "Warp"),
+            ("net.kovidgoyal.kitty", "Kitty"),
+            ("com.github.wez.wezterm", "WezTerm"),
+        ] {
+            let k = AgentAppMapper.map(bundleID: bid, appName: nil)
+            XCTAssertEqual(k.id, "terminal", bid)
+            XCTAssertEqual(k.displayName, label, bid)
+        }
+    }
+
+    func testTerminalWindowTitleNeverLeaksIntoBrowserDetection() {
+        // A Ghostty window sitting in ~/Projects/claude-notes used to be matched
+        // by BrowserAgentDetector's bare title.contains("claude") and registered
+        // as Claude Code. Only the process probe is evidence for a terminal.
+        let k = AgentAppMapper.map(
+            bundleID: "com.mitchellh.ghostty", appName: "Ghostty",
+            page: BrowserPageContext(title: "~/Projects/claude-notes", url: ""),
+            terminal: .init(emulatorName: "Ghostty")
+        )
+        XCTAssertEqual(k.id, "terminal")
+        XCTAssertNotEqual(k.id, "claude_code")
+    }
+
+    // MARK: - GUI bundle ids measured on this machine
+
+    func testMapNativeClaudeCodeAndDevtoolsBundles() {
+        // /…/Application Support/Claude/claude-code/*/claude.app
+        XCTAssertEqual(
+            AgentAppMapper.map(bundleID: "com.anthropic.claude-code", appName: nil).id,
+            "claude_code"
+        )
+        // /Applications/claude-devtools.app — previously unmapped, so it minted
+        // a bogus "claude_devtools" agent of its own.
+        let devtools = AgentAppMapper.map(
+            bundleID: "com.claudecode.context", appName: "claude-devtools"
+        )
+        XCTAssertEqual(devtools.id, "claude_code")
+        XCTAssertEqual(devtools.displayName, "Claude Code")
+    }
+
+    func testMapDispatchByNameAndBundle() {
+        // Dispatch ships with an unknown-to-us bundle id on some machines, so
+        // the app name is the durable hook — and it must beat the generic
+        // name.contains("claude") fallback.
+        XCTAssertEqual(AgentAppMapper.map(bundleID: "", appName: "Dispatch").id, "dispatch")
+        let claudeDispatch = AgentAppMapper.map(
+            bundleID: "com.example.unknown", appName: "Claude Dispatch"
+        )
+        XCTAssertEqual(claudeDispatch.id, "dispatch")
+        XCTAssertNotEqual(claudeDispatch.id, "claude_code")
+        XCTAssertEqual(
+            AgentAppMapper.map(bundleID: "com.anthropic.dispatch", appName: nil).id,
+            "dispatch"
+        )
+        XCTAssertEqual(AgentStyleCatalog.style(for: "dispatch").systemImage, "paperplane.fill")
+    }
+
+    func testClaudeAdjacentUtilitiesAreNotAgents() {
+        // "Usage for Claude.app" (com.ClaudeUsage) is a menu-bar meter. It used
+        // to satisfy name.contains("claude") and steal the Claude Code identity.
+        let usage = AgentAppMapper.map(bundleID: "com.ClaudeUsage", appName: "Usage for Claude")
+        XCTAssertNotEqual(usage.id, "claude_code")
+        XCTAssertEqual(usage.id, "local_test")
+    }
+
+    func testAllMappedIDsAreAcceptedByTheGate() {
+        // hub/shannon_gate.py derives VALID_AGENTS from agent_identity.IDENTITIES;
+        // an id outside that set registers and is rejected.
+        let gateValid: Set<String> = [
+            "science", "grok_build", "claude_code", "codex", "dispatch", "cowork",
+            "chatgpt", "dataset_runner", "local_test", "terminal", "browser",
+        ]
+        for rule in TerminalAgentProbe.rules {
+            XCTAssertTrue(
+                gateValid.contains(rule.agentID),
+                "TerminalAgentProbe emits \(rule.agentID), which the gate would reject"
+            )
+        }
+    }
+
     func testMapChatAgents() {
         XCTAssertEqual(AgentAppMapper.map(bundleID: "com.openai.chat", appName: "ChatGPT").id, "chatgpt")
         XCTAssertEqual(AgentAppMapper.map(bundleID: "com.anthropic.claudefordesktop", appName: "Claude").id, "claude_code")

@@ -86,6 +86,14 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
     public var historyCount: Int
     /// Quality of the evidence behind `status`. See `AgentPresence`.
     public var presence: AgentPresence
+    /// When the gate last *proved* this agent's connection was open, if it
+    /// could. `nil` means "no such evidence" (a pet/registry observation, or a
+    /// hub DB written before `heartbeat_ns` existed) — not "stale".
+    ///
+    /// This is deliberately separate from `updatedAt`: an agent that is
+    /// connected and silent must keep an honest "last seen 20m" while still
+    /// being reported live.
+    public var heartbeatAt: Date?
 
     public init(
         id: String,
@@ -96,7 +104,8 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
         updatedAt: Date,
         resumable: Bool,
         historyCount: Int,
-        presence: AgentPresence = .observed
+        presence: AgentPresence = .observed,
+        heartbeatAt: Date? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -107,6 +116,7 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
         self.resumable = resumable
         self.historyCount = historyCount
         self.presence = presence
+        self.heartbeatAt = heartbeatAt
     }
 
     /// Short line for the collapsed pill.
@@ -118,7 +128,15 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
         return "\(displayName) · \(task)"
     }
 
+    /// Age of `updatedAt` **as of now**. Deliberately computed on every access
+    /// rather than baked into a stored string at snapshot time: the view reads
+    /// it while drawing, so a row whose data has not changed still ages
+    /// correctly on screen — provided something re-renders it. That "something"
+    /// is `AgentActivityMonitor.apply`, which republishes when this string
+    /// would change. See `renderSignature(at:)`.
     public var relativeAge: String { Self.age(since: updatedAt) }
+
+    public func relativeAge(at now: Date) -> String { Self.age(since: updatedAt, now: now) }
 
     public static func age(since date: Date, now: Date = Date()) -> String {
         guard date > .distantPast else { return "never" }
@@ -136,15 +154,23 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
     ///   live + quiet    → "idle"
     ///   gate, hung up   → "offline · last seen 2d"
     ///   ⌘D observation  → "seen 13m ago"
-    public var statusLine: String {
+    public var statusLine: String { statusLine(at: Date()) }
+
+    public func statusLine(at now: Date) -> String {
         switch presence {
         case .live:
             return status.label
         case .offline:
-            return "offline · last seen \(relativeAge)"
+            return "offline · last seen \(relativeAge(at: now))"
         case .observed:
-            return "seen \(relativeAge) ago"
+            return "seen \(relativeAge(at: now)) ago"
         }
+    }
+
+    /// Everything a row renders that can change without the underlying data
+    /// changing. Used to decide whether a re-render is actually needed.
+    public func renderSignature(at now: Date) -> String {
+        "\(id)|\(displayName)|\(lastTask)|\(statusLine(at: now))|\(relativeAge(at: now))"
     }
 
     public static func shorten(_ text: String, max: Int) -> String {
@@ -228,6 +254,17 @@ public struct AgentActivitySummary: Sendable, Equatable {
 
     public var busyCount: Int { busy.count }
 
+    /// What the agent board would draw right now, as one string.
+    ///
+    /// The rows themselves are static data; the *ages* in them are a function
+    /// of wall-clock time. Comparing this — rather than the rows alone — is how
+    /// the monitor knows a re-render is due even though nothing in the hub
+    /// changed, which is what stops "last seen 7m" from sitting there while
+    /// eleven minutes go by.
+    public func renderSignature(at now: Date) -> String {
+        agents.map { $0.renderSignature(at: now) }.joined(separator: "\n")
+    }
+
     /// Agents currently connected to the hub, working or not.
     public var connected: [AgentActivitySnapshot] {
         agents.filter { $0.presence == .live }.sorted { $0.updatedAt > $1.updatedAt }
@@ -265,6 +302,19 @@ public enum AgentActivityReader {
         PetBootstrap.shannonHome.appendingPathComponent("agent_hub.db")
     }
 
+    /// How long a "working" claim survives silence. Matches the gate's own
+    /// `IDLE_AFTER_S`, which demotes a quiet connected agent to `idle` in the
+    /// DB — this is the local backstop for the window before that write lands.
+    ///
+    /// It used to be 45 minutes, which was moot (presence aged out at 5) and
+    /// wrong on its own terms: nobody wants to read "working" about an agent
+    /// that has been silent since lunch.
+    public static let defaultStaleAfter: TimeInterval = 5 * 60
+
+    /// Tolerance for the gate's proof-of-connection. The gate beats every 15 s
+    /// (`HEARTBEAT_INTERVAL_S`), so this allows three misses.
+    public static let defaultHeartbeatWindow: TimeInterval = 60
+
     /// Build the agent list the UI renders.
     ///
     /// Accuracy contract (this is the whole point of the type):
@@ -284,15 +334,21 @@ public enum AgentActivityReader {
     ///   - runningBundleIDs: bundle ids of currently running apps. When
     ///     supplied, an observed pet whose app has quit is reported `.offline`
     ///     instead of lingering as "seen". Pass `nil` to skip the check (tests).
-    ///   - liveWindow: how long after `last_seen` a connected agent still counts
-    ///     as `.live` for presence purposes.
+    ///   - staleAfter: how long after `last_seen` a *busy* claim stops being
+    ///     believed. Nothing has spoken for this long, so "working" is a guess.
+    ///   - liveWindow: fallback only — how long after `last_seen` a connected
+    ///     agent still counts as `.live` when the hub gives us no heartbeat.
+    ///   - heartbeatWindow: how stale the gate's proof-of-connection may get
+    ///     before the agent is reported offline. The gate stamps it every 15 s,
+    ///     so this tolerates three missed beats.
     public static func load(
         petsRoot: URL = PetBootstrap.petsRoot,
         registryURL: URL = PetBootstrap.registryURL,
         gateDB: URL? = defaultGateDB,
         now: Date = Date(),
-        staleAfter: TimeInterval = 45 * 60,
+        staleAfter: TimeInterval = defaultStaleAfter,
         liveWindow: TimeInterval = 5 * 60,
+        heartbeatWindow: TimeInterval = defaultHeartbeatWindow,
         runningBundleIDs: Set<String>? = nil,
         gateRows: [AgentActivitySnapshot]? = nil
     ) -> AgentActivitySummary {
@@ -396,6 +452,7 @@ public enum AgentActivityReader {
                     now: now,
                     staleAfter: staleAfter,
                     liveWindow: liveWindow,
+                    heartbeatWindow: heartbeatWindow,
                     fallbackName: {
                         displayName(
                             for: row.id,
@@ -422,6 +479,7 @@ public enum AgentActivityReader {
         now: Date,
         staleAfter: TimeInterval,
         liveWindow: TimeInterval,
+        heartbeatWindow: TimeInterval,
         fallbackName: () -> String,
         fallbackSource: () -> String
     ) -> AgentActivitySnapshot {
@@ -429,7 +487,19 @@ public enum AgentActivityReader {
         // `.observed` from the gate means a legacy schema with no
         // `disconnected_at` — unproven, so it may not be reported busy either.
         var presence = row.presence
-        if presence == .live, age > liveWindow { presence = .offline }
+        if presence == .live {
+            if let beat = row.heartbeatAt {
+                // The gate stamps this while the connection is open, so silence
+                // is not evidence of death: an agent that has said nothing for
+                // an hour is still live if the hub saw it 5 s ago. Only a stale
+                // beat — hub killed, machine slept — means offline.
+                if now.timeIntervalSince(beat) > heartbeatWindow { presence = .offline }
+            } else if age > liveWindow {
+                // No heartbeat evidence at all (pre-migration hub DB): the best
+                // available signal is still the age of the last message.
+                presence = .offline
+            }
+        }
 
         var status = row.status
         if status.isBusy, presence != .live || age > staleAfter { status = .idle }
@@ -443,7 +513,8 @@ public enum AgentActivityReader {
             updatedAt: row.updatedAt,
             resumable: status.isBusy || (existing?.resumable ?? false),
             historyCount: max(existing?.historyCount ?? 0, row.historyCount),
-            presence: presence
+            presence: presence,
+            heartbeatAt: row.heartbeatAt
         )
     }
 
@@ -472,8 +543,9 @@ public enum AgentActivityReader {
         base: [AgentActivitySnapshot],
         gate: [AgentActivitySnapshot],
         now: Date = Date(),
-        staleAfter: TimeInterval = 45 * 60,
-        liveWindow: TimeInterval = 5 * 60
+        staleAfter: TimeInterval = defaultStaleAfter,
+        liveWindow: TimeInterval = 5 * 60,
+        heartbeatWindow: TimeInterval = defaultHeartbeatWindow
     ) -> AgentActivitySummary {
         var byID: [String: AgentActivitySnapshot] = [:]
         for a in base {
@@ -492,6 +564,7 @@ public enum AgentActivityReader {
                 now: now,
                 staleAfter: staleAfter,
                 liveWindow: liveWindow,
+                heartbeatWindow: heartbeatWindow,
                 fallbackName: { row.displayName },
                 fallbackSource: { row.source }
             )
@@ -527,6 +600,16 @@ public enum AgentActivityReader {
             self.activity = activity
             self.gateDBAvailable = gateDBAvailable
         }
+
+        /// Everything on screen whose text depends on the clock: agent rows,
+        /// "waiting 3m" on an open approval, "5m ago" in the activity feed.
+        /// The monitor republishes exactly when this changes.
+        public func renderSignature(at now: Date) -> String {
+            var parts = [summary.renderSignature(at: now)]
+            parts += pendingAsks.map { "\($0.interactionId)|\($0.waitingFor(at: now))" }
+            parts += activity.map { "\($0.id)|\($0.relativeAge(at: now))" }
+            return parts.joined(separator: "\n")
+        }
     }
 
     public static func loadFull(
@@ -534,8 +617,9 @@ public enum AgentActivityReader {
         registryURL: URL = PetBootstrap.registryURL,
         gateDB: URL? = defaultGateDB,
         now: Date = Date(),
-        staleAfter: TimeInterval = 45 * 60,
+        staleAfter: TimeInterval = defaultStaleAfter,
         liveWindow: TimeInterval = 5 * 60,
+        heartbeatWindow: TimeInterval = defaultHeartbeatWindow,
         runningBundleIDs: Set<String>? = nil
     ) -> FullSnapshot {
         let gate = gateDB.map { GateDBReader.readSnapshot(path: $0.path, now: now) }
@@ -546,6 +630,7 @@ public enum AgentActivityReader {
             now: now,
             staleAfter: staleAfter,
             liveWindow: liveWindow,
+            heartbeatWindow: heartbeatWindow,
             runningBundleIDs: runningBundleIDs,
             gateRows: gate?.agents
         )
@@ -656,6 +741,12 @@ public final class AgentActivityMonitor: ObservableObject {
     /// Path to the gate socket. Injectable for tests; defaults to the live gate.
     public var gateSocketPath: String = GateApprovalClient.defaultSocketPath
 
+    /// Rendered form of the last published snapshot, so `apply` can tell "the
+    /// screen is still correct" from "the data is unchanged but the clock has
+    /// moved on". Ages are drawn from `Date()` at render time, so the latter
+    /// still needs a publish or the row silently freezes.
+    private var lastRenderSignature = ""
+
     /// Poll disk + hub DB off the main thread and publish only what changed.
     ///
     /// Previously this ran a pets directory scan, a dozen JSON parses and three
@@ -680,7 +771,22 @@ public final class AgentActivityMonitor: ObservableObject {
 
     private func apply(_ full: AgentActivityReader.FullSnapshot, socketUp: Bool) {
         refreshing = false
-        if summary != full.summary { summary = full.summary }
+        // Two reasons to republish: the data changed, or enough time passed
+        // that a rendered age changed ("6m" → "7m"). Comparing whole summaries
+        // would technically catch both — `scannedAt` differs on every poll —
+        // but only by never skipping anything, which is how the pill ended up
+        // re-rendering 40×/min over identical data. Comparing the *rendered*
+        // form skips the no-op polls and still keeps the clock running.
+        //
+        // Publishing `summary` is what re-renders the views, so the signature
+        // deliberately covers the ask and activity ages too: they live on the
+        // same object and would otherwise freeze whenever the agent rows
+        // happened to be quiet.
+        let signature = full.renderSignature(at: full.summary.scannedAt)
+        if summary.agents != full.summary.agents || signature != lastRenderSignature {
+            summary = full.summary
+            lastRenderSignature = signature
+        }
         if pendingAsks != full.pendingAsks { pendingAsks = full.pendingAsks }
         if staleAsks != full.staleAsks { staleAsks = full.staleAsks }
         if recentActivity != full.activity { recentActivity = full.activity }

@@ -182,6 +182,8 @@ final class AgentActivityTests: XCTestCase {
     }
 
     /// A connected agent that has gone quiet past `staleAfter` stops counting.
+    /// With no heartbeat evidence, ageing `last_seen` is all we have, so it is
+    /// also reported offline.
     func testGateAgentGoesIdleWhenQuiet() {
         let gate = AgentActivitySnapshot(
             id: "science", displayName: "Science", status: .active,
@@ -192,6 +194,92 @@ final class AgentActivityTests: XCTestCase {
         let s = AgentActivityReader.merge(base: [], gate: [gate])
         XCTAssertEqual(s.busyCount, 0)
         XCTAssertEqual(s.agents.first?.presence, .offline)
+    }
+
+    /// Same row, but the hub says the connection was open a moment ago. Silence
+    /// is then just silence: idle, still live, and honest about how long it has
+    /// been. Reporting this agent "offline" was the status bug.
+    func testQuietButHeartbeatingAgentStaysLive() {
+        let gate = AgentActivitySnapshot(
+            id: "science", displayName: "Science", status: .active,
+            lastTask: "docking", source: "gate",
+            updatedAt: Date().addingTimeInterval(-3 * 3600),
+            resumable: true, historyCount: 2, presence: .live,
+            heartbeatAt: Date().addingTimeInterval(-5)
+        )
+        let s = AgentActivityReader.merge(base: [], gate: [gate])
+        let a = s.agents.first
+        XCTAssertEqual(a?.presence, .live)
+        XCTAssertEqual(a?.status, .idle, "quiet for 3h is not 'working'")
+        XCTAssertEqual(a?.statusLine, "idle")
+        XCTAssertEqual(a?.relativeAge, "3h")
+        XCTAssertEqual(s.busyCount, 0)
+        XCTAssertEqual(s.connected.count, 1)
+    }
+
+    /// A live agent that spoke seconds ago is busy; one that has been silent
+    /// past `defaultStaleAfter` is not, heartbeat or no heartbeat.
+    func testBusyClaimDecaysAtDefaultStaleAfter() {
+        func agent(quietFor: TimeInterval) -> AgentActivitySummary {
+            AgentActivityReader.merge(base: [], gate: [
+                AgentActivitySnapshot(
+                    id: "science", displayName: "Science", status: .active,
+                    lastTask: "docking", source: "gate",
+                    updatedAt: Date().addingTimeInterval(-quietFor),
+                    resumable: true, historyCount: 1, presence: .live,
+                    heartbeatAt: Date()
+                )
+            ])
+        }
+        XCTAssertEqual(agent(quietFor: 10).busyCount, 1)
+        XCTAssertEqual(agent(quietFor: AgentActivityReader.defaultStaleAfter + 30).busyCount, 0)
+        XCTAssertLessThanOrEqual(
+            AgentActivityReader.defaultStaleAfter, 10 * 60,
+            "a 'working' claim must not outlive the user's patience"
+        )
+    }
+
+    /// The row text is a function of the clock, so the same unchanged snapshot
+    /// must render differently a minute later. This is what the monitor diffs
+    /// to decide whether a re-render is due — if it compared the rows alone,
+    /// "last seen 7m" would sit there for ever.
+    func testRenderSignatureFollowsTheClock() {
+        let now = Date()
+        let a = AgentActivitySnapshot(
+            id: "terminal", displayName: "Terminal", status: .idle,
+            lastTask: "Working in Ghostty", source: "terminal",
+            updatedAt: now.addingTimeInterval(-6 * 60), resumable: false,
+            historyCount: 0, presence: .observed
+        )
+        let summary = AgentActivitySummary(agents: [a], scannedAt: now)
+        XCTAssertEqual(a.statusLine(at: now), "seen 6m ago")
+        XCTAssertEqual(a.statusLine(at: now.addingTimeInterval(60)), "seen 7m ago")
+        // Same minute → nothing to redraw.
+        XCTAssertEqual(
+            summary.renderSignature(at: now),
+            summary.renderSignature(at: now.addingTimeInterval(5))
+        )
+        // Next minute → redraw.
+        XCTAssertNotEqual(
+            summary.renderSignature(at: now),
+            summary.renderSignature(at: now.addingTimeInterval(60))
+        )
+    }
+
+    /// Ages come from each agent's own `updatedAt`, never from a shared scan
+    /// timestamp — three rows seen minutes apart must not all read alike.
+    func testAgesAreIndependentPerAgent() {
+        let now = Date()
+        func row(_ id: String, ago: TimeInterval) -> AgentActivitySnapshot {
+            AgentActivitySnapshot(
+                id: id, displayName: id, status: .idle, lastTask: "", source: "gate",
+                updatedAt: now.addingTimeInterval(-ago), resumable: false,
+                historyCount: 0, presence: .observed
+            )
+        }
+        let rows = [row("science", ago: 30), row("claude_code", ago: 8 * 60),
+                    row("terminal", ago: 2 * 3600)]
+        XCTAssertEqual(rows.map { $0.relativeAge(at: now) }, ["30s", "8m", "2h"])
     }
 
     func testStatusLineNeverInventsWork() {

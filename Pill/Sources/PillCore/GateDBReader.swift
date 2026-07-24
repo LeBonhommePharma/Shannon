@@ -111,9 +111,32 @@ public enum GateDBReader {
         // rendered as current. The gate NULLs the column on reconnect, so a
         // non-NULL value newer than `last_seen_ns` means "definitely gone".
         //
+        // `heartbeat` is when the gate last *proved* the connection was open.
+        // Without it, "connected but quiet" and "gate was killed with the row
+        // still open" look identical on disk, and the only way to tell them
+        // apart was to age out `last_seen_ns` — which reported a perfectly
+        // healthy agent as offline the moment it stopped talking for a few
+        // minutes. The gate now stamps it every 15 s; see `heartbeat_agents`.
+        //
         // `message_count` on the row is unreliable (the gate only bumps it on
         // some paths — grok_build showed 1 against 5 real rows), so the real
         // count from `agent_messages` wins when it is higher.
+        let sqlBeat = """
+            SELECT a.agent_id, a.status,
+                   CAST(a.last_seen_ns / 1000000000.0 AS REAL) AS last_seen,
+                   COALESCE(a.entropy_score, 0),
+                   COALESCE(a.task_summary, ''),
+                   MAX(COALESCE(a.message_count, 0),
+                       (SELECT COUNT(*) FROM agent_messages m WHERE m.agent_id = a.agent_id)),
+                   CASE WHEN a.disconnected_at IS NULL
+                          OR a.disconnected_at < a.last_seen_ns THEN 1 ELSE 0 END AS connected,
+                   CAST(COALESCE(a.heartbeat_ns, 0) / 1000000000.0 AS REAL) AS heartbeat
+            FROM agents a;
+            """
+        if let rows = query(db, sqlBeat) { return rows }
+
+        // Same schema without `heartbeat_ns` (gate not yet restarted on the
+        // migration). Liveness then falls back to ageing `last_seen_ns`.
         let sqlNS = """
             SELECT a.agent_id, a.status,
                    CAST(a.last_seen_ns / 1000000000.0 AS REAL) AS last_seen,
@@ -161,6 +184,9 @@ public enum GateDBReader {
             let presence: AgentPresence = connectedFlag == 1
                 ? .live
                 : (connectedFlag == 0 ? .offline : .observed)
+            // Absent column (older schema) or 0 → no heartbeat evidence at all,
+            // which the merge layer must handle differently from a *stale* one.
+            let beat = sqlite3_column_count(stmt) > 7 ? sqlite3_column_double(stmt, 7) : 0
 
             let cleanTask = AgentActivitySnapshot.looksLikeSecretOrJunk(task)
                 ? ""
@@ -177,7 +203,8 @@ public enum GateDBReader {
                 updatedAt: lastSeen > 0 ? Date(timeIntervalSince1970: lastSeen) : .distantPast,
                 resumable: status.isBusy,
                 historyCount: msgCount,
-                presence: presence
+                presence: presence,
+                heartbeatAt: beat > 0 ? Date(timeIntervalSince1970: beat) : nil
             ))
         }
         return out
@@ -217,8 +244,14 @@ public enum GateDBReader {
             self.isOrphaned = isOrphaned
         }
 
-        /// "12s" / "4m" / "2d" since the agent asked.
-        public var waitingFor: String { AgentActivitySnapshot.age(since: createdAt) }
+        /// "12s" / "4m" / "2d" since the agent asked. Computed at read time, so
+        /// it stays correct as long as something re-renders — see
+        /// `AgentActivityReader.FullSnapshot.renderSignature(at:)`.
+        public var waitingFor: String { waitingFor(at: Date()) }
+
+        public func waitingFor(at now: Date) -> String {
+            AgentActivitySnapshot.age(since: createdAt, now: now)
+        }
     }
 
     /// Read open approvals a human can still act on, newest first.
@@ -304,7 +337,11 @@ public enum GateDBReader {
             self.output = output
         }
 
-        public var relativeAge: String { AgentActivitySnapshot.age(since: at) }
+        public var relativeAge: String { relativeAge(at: Date()) }
+
+        public func relativeAge(at now: Date) -> String {
+            AgentActivitySnapshot.age(since: at, now: now)
+        }
 
         /// One-line summary safe to drop straight into the UI.
         public var line: String {

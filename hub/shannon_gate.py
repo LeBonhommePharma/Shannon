@@ -93,6 +93,24 @@ H_TEMPORAL_SPIKE: float = 2.0   # flag when agent's behavioral entropy exceeds t
 TEMPORAL_WINDOW: int = 20        # rolling message-type history per agent
 CF_DISAGREE_PCT: float = 0.05   # 5% CF disagreement triggers D flag
 
+# ── Liveness ──────────────────────────────────────────────────────────────────
+# `last_seen_ns` only moves when an agent *speaks*, so a connected agent that
+# has nothing to say is indistinguishable, on disk, from one whose gate was
+# SIGKILLed with the connection still open (the `finally` that writes
+# `disconnected_at` never runs). Readers used to guess from the age of
+# `last_seen_ns`, which meant a perfectly healthy, quiet agent was reported
+# "offline" after a few minutes.
+#
+# `heartbeat_ns` removes the guess: this daemon stamps it for every open
+# connection on a fixed interval, so "connection is open" is an observed fact
+# with a known freshness, while `last_seen_ns` keeps its real meaning of "last
+# activity". A stale heartbeat means the daemon is gone, full stop.
+HEARTBEAT_INTERVAL_S: float = 15.0
+# A connected agent that has not sent anything for this long is no longer
+# "active": it is connected and idle. The gate writes that down itself instead
+# of leaving every UI to age the row on its own.
+IDLE_AFTER_S: float = 300.0
+
 # Valid agent identifiers — derived from the single source of truth in
 # agent_identity.IDENTITIES, which agent_protocol.py:80 already validates
 # against.
@@ -287,7 +305,11 @@ class AuditDB:
                     message_count   INTEGER DEFAULT 0,
                     entropy_score   REAL DEFAULT 0.0,
                     task_summary    TEXT DEFAULT '',
-                    auth_method     TEXT DEFAULT 'socket_secret'
+                    auth_method     TEXT DEFAULT 'socket_secret',
+                    -- Last time this daemon *proved* the connection was open.
+                    -- Refreshed every HEARTBEAT_INTERVAL_S while connected; see
+                    -- the module header note on liveness.
+                    heartbeat_ns    INTEGER
                 );
 
                 CREATE TABLE IF NOT EXISTS agent_messages (
@@ -376,7 +398,14 @@ class AuditDB:
             self._migrate_schema(conn)
 
     def _migrate_schema(self, conn: sqlite3.Connection) -> None:
-        """Rename/add columns in benchmark_state to match the current INSERT signature."""
+        """Add columns missing from databases created by an older gate."""
+        agent_cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+        if "heartbeat_ns" not in agent_cols:
+            try:
+                conn.execute("ALTER TABLE agents ADD COLUMN heartbeat_ns INTEGER")
+            except sqlite3.OperationalError:
+                pass  # already present (race between processes)
+
         bs_cols = {row[1] for row in conn.execute("PRAGMA table_info(benchmark_state)").fetchall()}
         # Rename legacy 'progress' → 'completed'
         if "progress" in bs_cols and "completed" not in bs_cols:
@@ -496,14 +525,15 @@ class AuditDB:
                 """
                 INSERT INTO agents
                     (agent_id, status, connected_at, last_seen_ns, auth_method,
-                     disconnected_at, message_count)
-                VALUES (?, ?, ?, ?, ?, NULL, 0)
+                     disconnected_at, message_count, heartbeat_ns)
+                VALUES (?, ?, ?, ?, ?, NULL, 0, ?)
                 ON CONFLICT(agent_id) DO UPDATE SET
                     status          = excluded.status,
                     connected_at    = excluded.connected_at,
                     last_seen_ns    = excluded.last_seen_ns,
                     auth_method     = excluded.auth_method,
                     disconnected_at = NULL,
+                    heartbeat_ns    = excluded.heartbeat_ns,
                     -- message_count is deliberately NOT reset here. It is a
                     -- lifetime total for the agent, and agent_messages rows are
                     -- never deleted, so zeroing it on every reconnect made the
@@ -512,7 +542,8 @@ class AuditDB:
                     -- agent_messages held 12. Only the initial INSERT seeds 0.
                     message_count   = agents.message_count
                 """,
-                (agent_id, status, connected_at_ns, connected_at_ns, auth_method),
+                (agent_id, status, connected_at_ns, connected_at_ns, auth_method,
+                 connected_at_ns),
             )
 
     def update_agent_seen(
@@ -531,6 +562,7 @@ class AuditDB:
                 """
                 UPDATE agents SET
                     last_seen_ns  = ?,
+                    heartbeat_ns  = ?,
                     entropy_score = ?,
                     task_id       = ?,
                     message_count = message_count + 1,
@@ -542,6 +574,7 @@ class AuditDB:
                 WHERE agent_id = ?
                 """,
                 (
+                    last_seen_ns,
                     last_seen_ns,
                     entropy_score,
                     task_id,
@@ -669,11 +702,69 @@ class AuditDB:
                 """
                 UPDATE agents SET
                     status          = 'idle',
-                    disconnected_at = ?
+                    disconnected_at = ?,
+                    heartbeat_ns    = ?
                 WHERE agent_id = ?
                 """,
-                (disconnected_at_ns, agent_id),
+                (disconnected_at_ns, disconnected_at_ns, agent_id),
             )
+
+    def heartbeat_agents(
+        self,
+        agent_ids: list[str],
+        now_ns: int,
+        idle_after_ns: int,
+    ) -> None:
+        """Stamp liveness for the currently open connections.
+
+        Two writes, both cheap and both about telling the truth:
+
+        * `heartbeat_ns` — proof the connection was open at `now_ns`. Readers
+          use its freshness (not the age of `last_seen_ns`) to decide whether an
+          agent is still there, so a quiet agent stays live and a dead daemon's
+          rows go offline on their own.
+        * `status` — an agent that has not spoken in `idle_after_ns` is demoted
+          from active/working to idle here, at the source, so every consumer
+          agrees instead of each inventing its own staleness rule.
+        """
+        if not agent_ids:
+            return
+        marks = ",".join("?" * len(agent_ids))
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE agents SET heartbeat_ns = ? WHERE agent_id IN ({marks})",
+                (now_ns, *agent_ids),
+            )
+            conn.execute(
+                f"""
+                UPDATE agents SET status = 'idle'
+                WHERE agent_id IN ({marks})
+                  AND status NOT IN ('idle', 'blocked')
+                  AND last_seen_ns < ?
+                """,
+                (*agent_ids, now_ns - idle_after_ns),
+            )
+
+    def mark_all_disconnected(self, now_ns: int) -> int:
+        """Close out rows left 'connected' by a previous run. Returns the count.
+
+        A gate that is killed (or crashes) never runs the `finally` that stamps
+        `disconnected_at`, so its rows claim an open connection forever. At
+        startup nothing is connected yet by definition, so any such row is a
+        leftover and is closed here — otherwise the pill shows agents as live
+        that have not existed since the last reboot.
+        """
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                UPDATE agents SET
+                    status          = 'idle',
+                    disconnected_at = ?
+                WHERE disconnected_at IS NULL
+                """,
+                (now_ns,),
+            )
+            return cur.rowcount or 0
 
     def log_activity_event(
         self,
@@ -1424,10 +1515,39 @@ class AgentHub:
 
     # ── Main run loop ─────────────────────────────────────────────────────────
 
+    async def _heartbeat_loop(self) -> None:
+        """Stamp `heartbeat_ns` for open connections until shutdown.
+
+        This is what lets a reader tell "connected and quiet" from "gate died
+        with the row still open" — see `AuditDB.heartbeat_agents`.
+        """
+        assert self._shutdown is not None
+        while not self._shutdown.is_set():
+            try:
+                async with self._lock:
+                    ids = list(self._connections.keys())
+                self.db.heartbeat_agents(
+                    ids, time.time_ns(), int(IDLE_AFTER_S * 1e9)
+                )
+            except Exception as exc:            # never let liveness kill the hub
+                logger.debug(f"heartbeat failed: {exc}")
+            try:
+                await asyncio.wait_for(
+                    self._shutdown.wait(), timeout=HEARTBEAT_INTERVAL_S
+                )
+            except asyncio.TimeoutError:
+                continue
+
     async def run(self) -> None:
         # Bind asyncio primitives to the running loop (fixes "attached to a different loop").
         self._lock = asyncio.Lock()
         self._shutdown = asyncio.Event()
+
+        # Nothing is connected yet, so any row that still claims to be is a
+        # leftover from a run that did not shut down cleanly.
+        stale = self.db.mark_all_disconnected(time.time_ns())
+        if stale:
+            logger.info(f"Closed {stale} stale agent row(s) from a previous run")
 
         # Clean up stale socket
         if os.path.exists(SOCKET_PATH):
@@ -1455,13 +1575,20 @@ class AgentHub:
         )
         logger.info(f"Audit DB: {DB_PATH}")
 
+        heartbeat = asyncio.create_task(self._heartbeat_loop())
+
         async with unix_server:
             await self._shutdown.wait()
 
         logger.info("Shutting down…")
+        heartbeat.cancel()
         async with self._lock:
             for c in self._connections.values():
                 c.close()
+        # Closing the writers does not guarantee each handler's `finally` runs
+        # before the process exits, so state the truth once, here: after this
+        # daemon stops, nothing is connected to it.
+        self.db.mark_all_disconnected(time.time_ns())
 
         if os.path.exists(SOCKET_PATH):
             os.unlink(SOCKET_PATH)

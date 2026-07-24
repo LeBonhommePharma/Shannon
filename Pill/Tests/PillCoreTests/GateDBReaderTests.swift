@@ -90,6 +90,68 @@ final class GateDBReaderTests: XCTestCase {
         XCTAssertTrue(rows[0].status.isBusy)
     }
 
+    /// A DB written by a gate that predates `heartbeat_ns` must still read —
+    /// the reader falls back to the older SELECT and reports "no evidence"
+    /// rather than a stale beat.
+    func testSchemaWithoutHeartbeatReadsWithNoBeat() throws {
+        try exec("""
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at)
+        VALUES ('science', 'active', \(ns(5)), NULL);
+        """)
+        let rows = GateDBReader.readAgents(path: dbPath)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertNil(rows[0].heartbeatAt)
+        XCTAssertEqual(rows[0].presence, .live)
+    }
+
+    /// With the column present, the beat is what proves the connection is open.
+    /// `last_seen_ns` stays what it always was: when the agent last *spoke*.
+    func testHeartbeatIsReadAndKeepsQuietAgentLive() throws {
+        try exec("ALTER TABLE agents ADD COLUMN heartbeat_ns INTEGER;")
+        try exec("""
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at, heartbeat_ns, task_summary)
+        VALUES ('science', 'active', \(ns(3 * 3600)), NULL, \(ns(4)), 'docking 1SG0');
+        """)
+        let rows = GateDBReader.readAgents(path: dbPath)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertNotNil(rows[0].heartbeatAt)
+        XCTAssertEqual(
+            rows[0].updatedAt.timeIntervalSinceNow, -3 * 3600, accuracy: 5,
+            "last_seen must keep meaning last activity, not last heartbeat"
+        )
+
+        let full = AgentActivityReader.loadFull(
+            petsRoot: dir.appendingPathComponent("pets", isDirectory: true),
+            registryURL: dir.appendingPathComponent("agents.json"),
+            gateDB: URL(fileURLWithPath: dbPath)
+        )
+        let a = try XCTUnwrap(full.summary.agents.first)
+        XCTAssertEqual(a.presence, .live, "connected and quiet is not offline")
+        XCTAssertEqual(a.status, .idle, "…but it is not working either")
+        XCTAssertEqual(a.statusLine, "idle")
+        XCTAssertEqual(a.relativeAge, "3h")
+    }
+
+    /// The case the heartbeat exists for: the gate was killed, so its `finally`
+    /// never stamped `disconnected_at` and the row still claims a connection.
+    /// A stale beat settles it — offline, even though the agent spoke recently.
+    func testStaleHeartbeatIsOfflineDespiteOpenRow() throws {
+        try exec("ALTER TABLE agents ADD COLUMN heartbeat_ns INTEGER;")
+        try exec("""
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at, heartbeat_ns)
+        VALUES ('science', 'active', \(ns(20)), NULL, \(ns(600)));
+        """)
+        let full = AgentActivityReader.loadFull(
+            petsRoot: dir.appendingPathComponent("pets", isDirectory: true),
+            registryURL: dir.appendingPathComponent("agents.json"),
+            gateDB: URL(fileURLWithPath: dbPath)
+        )
+        let a = try XCTUnwrap(full.summary.agents.first)
+        XCTAssertEqual(a.presence, .offline)
+        XCTAssertEqual(a.status, .idle)
+        XCTAssertEqual(full.summary.busyCount, 0)
+    }
+
     /// The gate under-counts `message_count`; the real rows win.
     func testMessageCountUsesRealRowsWhenHigher() throws {
         try exec("""

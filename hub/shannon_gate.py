@@ -93,17 +93,22 @@ H_TEMPORAL_SPIKE: float = 2.0   # flag when agent's behavioral entropy exceeds t
 TEMPORAL_WINDOW: int = 20        # rolling message-type history per agent
 CF_DISAGREE_PCT: float = 0.05   # 5% CF disagreement triggers D flag
 
-# Valid agent identifiers
-VALID_AGENTS: frozenset[str] = frozenset({
-    "codex",
-    "cowork",
-    "dispatch",
-    "science",
-    "grok_build",
-    "claude_code",      # local coding agent — C++ compilation, git, shell tasks
-    "dataset_runner",   # local DatasetRunner bridge
-    "local_test",       # development / integration testing
-})
+# Valid agent identifiers — derived from the single source of truth in
+# agent_identity.IDENTITIES, which agent_protocol.py:80 already validates
+# against.
+#
+# This was previously a hand-maintained duplicate that had drifted: it omitted
+# "terminal", "browser" and "chatgpt". Because AgentIngest maps every terminal
+# emulator (Ghostty, iTerm, Warp, Kitty…) to the id "terminal", the client
+# library accepted the registration while the gate rejected it at _register,
+# so no agents row was ever written and the Pill had nothing to show. Deriving
+# both sides from one set is what keeps them from drifting again.
+try:
+    from agent_identity import IDENTITIES as _IDENTITIES
+except ImportError:  # package-relative when imported as hub.shannon_gate
+    from hub.agent_identity import IDENTITIES as _IDENTITIES  # type: ignore
+
+VALID_AGENTS: frozenset[str] = frozenset(_IDENTITIES.keys())
 
 VALID_MESSAGE_TYPES: frozenset[str] = frozenset({
     "result",

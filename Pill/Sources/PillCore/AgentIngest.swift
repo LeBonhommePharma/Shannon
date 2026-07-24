@@ -600,21 +600,48 @@ public final class AgentIngestService: ObservableObject {
         }
         guard rc == 0 else { return false }
 
-        // Minimal frame: register-ish status JSON (gate may ignore unknown fields).
-        let payload: [String: Any] = [
-            "from": agentID,
+        // Gate protocol: the FIRST line is the registration frame and is keyed
+        // on "agent_id" (hub/shannon_gate.py reads reg.get("agent_id")); only
+        // then are message frames accepted.
+        //
+        // This previously sent a single status frame keyed "from", so the gate
+        // read an empty agent id, answered {"error": "unknown_agent:"} and
+        // dropped the connection — for every agent, not just unknown ones. It
+        // never reached upsert_agent, which is what writes the row the Pill
+        // later reads back, so agents added this way silently never appeared.
+        let registration: [String: Any] = [
+            "agent_id": agentID,
+            "task_id": "ingest",
+        ]
+        let status: [String: Any] = [
+            "agent_id": agentID,
             "message_type": "status",
             "payload": ["text": task, "event": "ingest"],
             "task_id": "ingest",
         ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              var line = String(data: data, encoding: .utf8) else { return false }
-        line.append("\n")
-        let bytes = Array(line.utf8)
+        guard let regData = try? JSONSerialization.data(withJSONObject: registration),
+              let statusData = try? JSONSerialization.data(withJSONObject: status),
+              let regLine = String(data: regData, encoding: .utf8),
+              let statusLine = String(data: statusData, encoding: .utf8) else { return false }
+        let bytes = Array("\(regLine)\n\(statusLine)\n".utf8)
         let sent = bytes.withUnsafeBufferPointer { buf in
             send(fd, buf.baseAddress, buf.count, 0)
         }
-        return sent > 0
+        guard sent > 0 else { return false }
+
+        // Writing bytes only proves the socket accepted them, not that the gate
+        // accepted us — reporting success on `sent > 0` is what made a rejected
+        // registration look healthy. The gate answers a good registration with
+        // {"type": "welcome", …} and a bad one with {"error": …}, so wait for
+        // the verdict. The socket already carries a 200 ms SO_RCVTIMEO, so a
+        // silent or wedged gate fails closed rather than hanging the caller.
+        var reply = [UInt8](repeating: 0, count: 1024)
+        let received = recv(fd, &reply, reply.count, 0)
+        guard received > 0,
+              let verdict = String(bytes: reply[0..<received], encoding: .utf8) else {
+            return false
+        }
+        return verdict.contains("welcome") && !verdict.contains("\"error\"")
         #else
         return false
         #endif

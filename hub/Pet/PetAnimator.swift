@@ -22,6 +22,8 @@ struct PetFrame {
     var eyeOpen: Double = 1
     /// Vertical offset, negative is up. Drives the happy bounce.
     var yOffset: Double = 0
+    /// Horizontal drift in design units. A slow idle sway, per-kind personality.
+    var sway: Double = 0
     /// Forward lean, 0…1. Shears the body toward the viewer's right.
     var lean: Double = 0
     /// How far the head hangs, in design units. Sleepy only.
@@ -67,20 +69,28 @@ final class PetAnimator: ObservableObject {
     func frame(kind: PetKind, state: PetAnimationState, now: Date) -> PetFrame {
         // A single monotonic seconds value shared by every pet on the card.
         let t = now.timeIntervalSinceReferenceDate
+        let p = kind.personality
         var f = PetFrame()
 
         switch state {
         case .idle:
-            // 2 s breathing cycle, 0.95 → 1.0.
-            f.breath  = 0.975 + 0.025 * sin(2 * .pi * t / 2.0)
+            // Breathing at the kind's own tempo and phase, so a card of pets
+            // no longer rises and falls as one body.
+            let bt = t / p.breathPeriod + p.breathPhase
+            f.breath  = 0.975 + 0.025 * sin(2 * .pi * bt)
             f.eyeOpen = 1
-            // A slow blink every ~5 s keeps the eyes from looking painted on.
-            f.eyeOpen *= Self.blink(phase: t.truncatingRemainder(dividingBy: 5.0))
+            // Blink on the kind's own cadence, optionally a nervous double.
+            f.eyeOpen *= Self.blink(t: t, period: p.blinkPeriod,
+                                    phase: p.breathPhase, double: p.doubleBlink)
+            // A slow lateral sway, roughly half the breathing rate and offset
+            // from it, so idle reads as alive rather than mechanically pulsing.
+            f.sway = p.swayAmp * sin(2 * .pi * (t / (p.breathPeriod * 2.3)
+                                                 + p.breathPhase))
 
         case .alert:
             // Tighter, shallower breath — attention, not exertion.
-            f.breath  = 0.99 + 0.01 * sin(2 * .pi * t / 0.8)
-            f.eyeOpen = 1.3
+            f.breath  = 0.99 + 0.01 * sin(2 * .pi * t / max(0.4, p.breathPeriod * 0.35))
+            f.eyeOpen = p.alertEyeWiden
             f.lean    = 1
             f.yOffset = -0.5
 
@@ -103,24 +113,38 @@ final class PetAnimator: ObservableObject {
             f.spin    = Self.gearSpin(state: state, t: t)
             f.sparkle = state == .happy ? Self.sparkleEnvelope(
                 elapsed: happyStart.map { now.timeIntervalSince($0) } ?? 0) : 0
-            // A gear has no lungs and no eyelids.
+            // A gear has no lungs, no eyelids, and no reason to sway.
             f.breath    = state == .happy ? f.breath : 1
             f.eyeOpen   = 1
             f.headDroop = 0
             f.lean      = 0
+            f.sway      = 0
         }
         return f
     }
 
     // MARK: Curves
 
-    /// Eyelid multiplier for a blink: 1 for most of the cycle, dipping to 0.1
-    /// across a 160 ms window.
-    private static func blink(phase: Double) -> Double {
-        let start = 4.6, width = 0.16
-        guard phase >= start, phase <= start + width else { return 1 }
-        let u = (phase - start) / width           // 0…1 through the blink
-        return 0.1 + 0.9 * abs(cos(.pi * u))      // shut and reopen
+    /// Eyelid multiplier for a blink on a per-kind cadence: 1 for most of the
+    /// cycle, dipping to 0.1 across a 160 ms window once every `period` seconds.
+    /// When `double` is set a second blink follows ~220 ms later — a nervous or
+    /// busy tic rather than a single calm blink.
+    private static func blink(t: Double, period: Double,
+                              phase: Double, double: Bool) -> Double {
+        let width = 0.16
+        // Offset the blink within the cycle by the kind's phase so pets do not
+        // all shut their eyes on the same frame.
+        let local = (t / period + phase).truncatingRemainder(dividingBy: 1) * period
+        func dip(at start: Double) -> Double {
+            guard local >= start, local <= start + width else { return 1 }
+            let u = (local - start) / width       // 0…1 through the blink
+            return 0.1 + 0.9 * abs(cos(.pi * u))  // shut and reopen
+        }
+        // Blink near the end of the cycle. The second lid drop of a double
+        // blink sits just after the first.
+        let first = dip(at: period - 0.5)
+        guard double else { return first }
+        return min(first, dip(at: period - 0.5 + width + 0.06))
     }
 
     /// Gear rotation in radians at time `t`.

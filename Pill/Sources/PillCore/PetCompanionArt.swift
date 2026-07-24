@@ -1,63 +1,37 @@
-// PetRenderer.swift — draws a companion pet with SwiftUI Canvas + Path.
+// PetCompanionArt.swift — draws a companion with SwiftUI Canvas + Path.
 //
-// No image assets, no UIKit/AppKit drawing. Every character is authored in a
-// 32×32 design space with the origin at the top-left, then scaled to whatever
-// the view is actually given, so the same paths serve a 32pt card badge and a
-// blown-up QA preview.
+// Ported from hub/Pet/PetRenderer.swift (commit 1f7e2a1), which only ever
+// reached the standalone hub app. The drawings are unchanged; what is new is
+// the `sway` and `lean` plumbing recovered from stash@{0}, and the flinch that
+// the `wary` mood needs.
+//
+// No image assets, no AppKit drawing. Every character is authored in a 32×32
+// design space with the origin at the top-left, then scaled to whatever the
+// view is given, so the same paths serve a 22pt board badge and a blown-up QA
+// preview.
 //
 // Aesthetic rules the drawings hold to:
-//   • Recognisable from the silhouette alone at 32pt — no interior detail that
-//     survives only at 4×.
-//   • 2–3 fills per pet plus an ink, budgeted in PetKind.palette.
-//   • 1.5pt equivalent outline (scaled with the view).
+//   • Recognisable from the silhouette alone at 22–32pt — no interior detail
+//     that survives only at 4×.
+//   • 2–3 fills per pet plus an ink, budgeted in `CompanionKind.palette`.
+//   • 1.5pt equivalent outline, scaled with the view.
 //   • Eyes carry the expression; the body is secondary and mostly just breathes.
 
+#if canImport(SwiftUI)
 import SwiftUI
+import ShannonTheme
 
-// MARK: - View
+public enum CompanionArt {
 
-struct PetRenderer: View {
-    let pet: PetKind
-    let state: PetAnimationState
-    /// The owning agent's brand tint. Used for the ground shadow and the gear's
-    /// sparkles, so the pet stays tied to its agent without repainting the
-    /// character's own identity.
-    let agentColor: Color
+    /// Design-space edge length. Every coordinate below is in these units.
+    public static let design: CGFloat = 32
 
-    @StateObject private var animator = PetAnimator()
-
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            Canvas { ctx, size in
-                let frame = animator.frame(kind: pet, state: state, now: timeline.date)
-                PetArt.draw(pet: pet,
-                            frame: frame,
-                            palette: pet.palette,
-                            agentColor: agentColor,
-                            in: &ctx,
-                            size: size)
-            }
-        }
-        .frame(width: 32, height: 32)
-        .onAppear { animator.update(for: state) }
-        .onChange(of: state) { newState in animator.update(for: newState) }
-        .accessibilityLabel(Text("\(pet.accessibilityNoun), \(state.rawValue)"))
-    }
-}
-
-// MARK: - Drawing
-
-enum PetArt {
-
-    /// Design-space edge length. All coordinates below are in these units.
-    static let design: CGFloat = 32
-
-    static func draw(pet: PetKind,
-                     frame f: PetFrame,
-                     palette pal: PetPalette,
-                     agentColor: Color,
-                     in ctx: inout GraphicsContext,
-                     size: CGSize) {
+    public static func draw(kind: CompanionKind,
+                            frame f: CompanionFrame,
+                            palette pal: CompanionPalette,
+                            agentColor: Color,
+                            in ctx: inout GraphicsContext,
+                            size: CGSize) {
 
         let s  = min(size.width, size.height) / design
         let lw = 1.5 * s
@@ -68,14 +42,14 @@ enum PetArt {
         ctx.fill(Path(ellipseIn: Rct(16 - shadowW / 2, 27.6, shadowW, 2.6, s)),
                  with: .color(agentColor.opacity(0.16)))
 
-        // Body transform: breathe about the feet, bounce, sway, lean forward.
+        // Body transform: breathe about the feet, bounce, sway, lean.
         ctx.translateBy(x: 16 * s, y: 28 * s)
         ctx.scaleBy(x: CGFloat(f.breath), y: CGFloat(f.breath))
         ctx.translateBy(x: CGFloat(f.sway) * s, y: CGFloat(f.yOffset) * s)
         if f.lean != 0 { ctx.rotate(by: .degrees(f.lean * 5)) }
         ctx.translateBy(x: -16 * s, y: -28 * s)
 
-        switch pet {
+        switch kind {
         case .owl:     owl(&ctx, s, lw, f, pal)
         case .raven:   raven(&ctx, s, lw, f, pal)
         case .fox:     fox(&ctx, s, lw, f, pal)
@@ -89,7 +63,7 @@ enum PetArt {
     // MARK: Owl — ear tufts, huge amber eyes, cream breast
 
     private static func owl(_ ctx: inout GraphicsContext, _ s: CGFloat, _ lw: CGFloat,
-                            _ f: PetFrame, _ pal: PetPalette) {
+                            _ f: CompanionFrame, _ pal: CompanionPalette) {
         let d = f.headDroop
 
         // Ear tufts, behind the head.
@@ -109,11 +83,9 @@ enum PetArt {
         ctx.fill(body, with: .color(pal.primary))
         ctx.stroke(body, with: .color(pal.ink), lineWidth: lw)
 
-        // Breast.
         ctx.fill(Path(ellipseIn: Rct(11.0, 16.0, 10.0, 12.0, s)),
                  with: .color(pal.secondary))
 
-        // Feet.
         let feet = Path { p in
             p.move(to: P(12.6, 28.4, s)); p.addLine(to: P(12.6, 30.0, s))
             p.move(to: P(19.4, 28.4, s)); p.addLine(to: P(19.4, 30.0, s))
@@ -136,7 +108,7 @@ enum PetArt {
     // MARK: Raven — wedge beak, folded wing, violet sheen
 
     private static func raven(_ ctx: inout GraphicsContext, _ s: CGFloat, _ lw: CGFloat,
-                              _ f: PetFrame, _ pal: PetPalette) {
+                              _ f: CompanionFrame, _ pal: CompanionPalette) {
         let d = f.headDroop
 
         let body = Path { p in
@@ -165,7 +137,6 @@ enum PetArt {
         }
         ctx.fill(wing, with: .color(pal.secondary))
 
-        // Beak.
         let beak = Path { p in
             p.move(to: P(19.6, 11.2 + d, s)); p.addLine(to: P(29.0, 13.0 + d, s))
             p.addLine(to: P(19.6, 15.0 + d, s)); p.closeSubpath()
@@ -173,7 +144,6 @@ enum PetArt {
         ctx.fill(beak, with: .color(pal.secondary))
         ctx.stroke(beak, with: .color(pal.ink), lineWidth: lw * 0.8)
 
-        // Legs.
         let legs = Path { p in
             p.move(to: P(14.0, 26.0, s)); p.addLine(to: P(13.4, 30.0, s))
             p.move(to: P(19.0, 26.4, s)); p.addLine(to: P(19.6, 30.0, s))
@@ -188,12 +158,12 @@ enum PetArt {
     // MARK: Fox — pointed ears, cream-tipped tail, sharp muzzle
 
     private static func fox(_ ctx: inout GraphicsContext, _ s: CGFloat, _ lw: CGFloat,
-                            _ f: PetFrame, _ pal: PetPalette) {
+                            _ f: CompanionFrame, _ pal: CompanionPalette) {
         let d = f.headDroop
 
         // Brush tail sweeping up the left side, drawn first so it sits behind
         // the body. It has to stay fat all the way to the tip — a thin crescent
-        // collapses into a stray mark at 32pt.
+        // collapses into a stray mark at this size.
         let tailTip = (x: 5.2, y: 11.0)
         let tail = Path { p in
             p.move(to: P(13.5, 25.0, s))
@@ -211,12 +181,10 @@ enum PetArt {
         ctx.fill(tip, with: .color(pal.secondary))
         ctx.stroke(tip, with: .color(pal.ink), lineWidth: lw)
 
-        // Body.
         let body = Path(ellipseIn: Rct(9.5, 15.0, 15.0, 14.5, s))
         ctx.fill(body, with: .color(pal.primary))
         ctx.stroke(body, with: .color(pal.ink), lineWidth: lw)
 
-        // Ears.
         let ears = Path { p in
             p.move(to: P(11.2, 9.0 + d, s));  p.addLine(to: P(9.4, 1.6 + d, s))
             p.addLine(to: P(16.0, 6.0 + d, s)); p.closeSubpath()
@@ -226,12 +194,10 @@ enum PetArt {
         ctx.fill(ears, with: .color(pal.primary))
         ctx.stroke(ears, with: .color(pal.ink), lineWidth: lw)
 
-        // Head.
         let head = Path(ellipseIn: Rct(10.0, 6.0 + d, 13.0, 11.5, s))
         ctx.fill(head, with: .color(pal.primary))
         ctx.stroke(head, with: .color(pal.ink), lineWidth: lw)
 
-        // Muzzle wedge.
         let muzzle = Path { p in
             p.move(to: P(13.0, 13.6 + d, s)); p.addLine(to: P(16.5, 20.2 + d, s))
             p.addLine(to: P(20.0, 13.6 + d, s)); p.closeSubpath()
@@ -249,9 +215,9 @@ enum PetArt {
     // MARK: Dolphin — dorsal fin, fluke, permanent smile
 
     private static func dolphin(_ ctx: inout GraphicsContext, _ s: CGFloat, _ lw: CGFloat,
-                                _ f: PetFrame, _ pal: PetPalette) {
-        // Fluke — two broad lobes spread roughly horizontally. A single
-        // upright lobe is a shark tail, which is most of why this read wrong.
+                                _ f: CompanionFrame, _ pal: CompanionPalette) {
+        // Fluke — two broad lobes spread roughly horizontally. A single upright
+        // lobe is a shark tail, which is most of why this read wrong.
         let fluke = Path { p in
             p.move(to: P(7.0, 20.4, s))
             p.addCurve(to: P(0.6, 15.4, s),
@@ -297,7 +263,6 @@ enum PetArt {
         ctx.fill(body, with: .color(pal.primary))
         ctx.stroke(body, with: .color(pal.ink), lineWidth: lw)
 
-        // Pale underside.
         let belly = Path { p in
             p.move(to: P(9.0, 22.0, s))
             p.addCurve(to: P(25.0, 13.6, s),
@@ -322,7 +287,7 @@ enum PetArt {
     // MARK: Wolf — cool grey-blue, long muzzle, amber almond eyes
 
     private static func wolf(_ ctx: inout GraphicsContext, _ s: CGFloat, _ lw: CGFloat,
-                             _ f: PetFrame, _ pal: PetPalette) {
+                             _ f: CompanionFrame, _ pal: CompanionPalette) {
         let d = f.headDroop
 
         // Upright, not swept back: ears whose inner vertex reaches the midline
@@ -355,7 +320,6 @@ enum PetArt {
         ctx.fill(head, with: .color(pal.primary))
         ctx.stroke(head, with: .color(pal.ink), lineWidth: lw)
 
-        // Muzzle.
         ctx.fill(Path(ellipseIn: Rct(11.6, 17.0 + d, 8.8, 8.6, s)),
                  with: .color(pal.secondary))
 
@@ -377,7 +341,7 @@ enum PetArt {
     // MARK: Beaver — buck teeth, cross-hatched paddle tail
 
     private static func beaver(_ ctx: inout GraphicsContext, _ s: CGFloat, _ lw: CGFloat,
-                               _ f: PetFrame, _ pal: PetPalette) {
+                               _ f: CompanionFrame, _ pal: CompanionPalette) {
         let d = f.headDroop
 
         // Paddle tail, behind and to the left.
@@ -391,14 +355,13 @@ enum PetArt {
         }
         // A darker brown, not ink-over-brown: translucent ink desaturates to
         // grey here, and the palette has no grey in it.
-        ctx.fill(tail, with: .color(Color(hex: 0x5E3A17)))
+        ctx.fill(tail, with: .color(companionHex(0x5E3A17)))
         ctx.stroke(tail, with: .color(pal.ink), lineWidth: lw)
         ctx.stroke(Path { p in
             p.move(to: P(4.4, 22.4, s)); p.addLine(to: P(5.8, 28.2, s))
             p.move(to: P(7.8, 21.2, s)); p.addLine(to: P(8.8, 27.8, s))
         }, with: .color(pal.secondary.opacity(0.45)), lineWidth: lw * 0.6)
 
-        // Body.
         let body = Path(ellipseIn: Rct(8.5, 13.0, 16.0, 16.5, s))
         ctx.fill(body, with: .color(pal.primary))
         ctx.stroke(body, with: .color(pal.ink), lineWidth: lw)
@@ -409,19 +372,16 @@ enum PetArt {
         ctx.fill(plank, with: .color(pal.accent))
         ctx.stroke(plank, with: .color(pal.ink), lineWidth: lw * 0.7)
 
-        // Ears.
         for x in [11.8, 21.2] {
             let ear = Path(ellipseIn: Rct(x - 1.7, 5.4 + d, 3.4, 3.4, s))
             ctx.fill(ear, with: .color(pal.primary))
             ctx.stroke(ear, with: .color(pal.ink), lineWidth: lw * 0.8)
         }
 
-        // Head.
         let head = Path(ellipseIn: Rct(10.2, 5.0 + d, 12.6, 11.6, s))
         ctx.fill(head, with: .color(pal.primary))
         ctx.stroke(head, with: .color(pal.ink), lineWidth: lw)
 
-        // Snout.
         ctx.fill(Path(ellipseIn: Rct(12.9, 11.0 + d, 7.4, 5.6, s)),
                  with: .color(pal.secondary))
         ctx.fill(Path(ellipseIn: Rct(15.2, 11.6 + d, 2.8, 2.2, s)),
@@ -446,8 +406,8 @@ enum PetArt {
     // MARK: Gear — the literal ⚙️, but it turns
 
     private static func gear(_ ctx: inout GraphicsContext, _ s: CGFloat, _ lw: CGFloat,
-                             _ f: PetFrame, _ pal: PetPalette, _ agentColor: Color) {
-        // Sparkles are pinned to the card, not to the spinning gear.
+                             _ f: CompanionFrame, _ pal: CompanionPalette, _ agentColor: Color) {
+        // Sparkles are pinned to the board, not to the spinning gear.
         if f.sparkle > 0.01 {
             let burst = Path { p in
                 for i in 0 ..< 5 {
@@ -467,7 +427,7 @@ enum PetArt {
         ctx.translateBy(x: 16 * s, y: 16 * s)
         ctx.rotate(by: .radians(f.spin))
 
-        // Eight teeth, plus a punched-out hub via the even-odd rule so the card
+        // Eight teeth, plus a punched-out hub via the even-odd rule so the board
         // shows through rather than a fake background fill.
         let rOuter = 13.6, rInner = 9.4, step = 2 * Double.pi / 8
         let teeth = Path { p in
@@ -507,7 +467,7 @@ enum PetArt {
     // MARK: Eyes
 
     /// The expressive element. `open` is the lid aperture: 0 shut, 1 resting,
-    /// up to ~1.3 in alert.
+    /// up to ~1.6 in alert or wary.
     private static func eye(_ ctx: inout GraphicsContext,
                             at c: CGPoint,
                             r: CGFloat,
@@ -516,10 +476,10 @@ enum PetArt {
                             ink: Color,
                             lw: CGFloat,
                             almond: Bool = false) {
-        let o     = max(0, open)
-        let grow  = o > 1 ? 1 + 0.12 * (o - 1) : 1
-        let rx    = r * CGFloat(grow) * (almond ? 1.25 : 1)
-        let ry    = r * CGFloat(grow) * CGFloat(min(o, 1)) * (almond ? 0.80 : 1)
+        let o    = max(0, open)
+        let grow = o > 1 ? 1 + 0.12 * (o - 1) : 1
+        let rx   = r * CGFloat(grow) * (almond ? 1.25 : 1)
+        let ry   = r * CGFloat(grow) * CGFloat(min(o, 1)) * (almond ? 0.80 : 1)
 
         // Drowsy or shut. A squashed ellipse plus a lid line collapses into a
         // dark bar at this size; a single downward arc reads unmistakably as a
@@ -550,7 +510,6 @@ enum PetArt {
         ctx.fill(Path(ellipseIn: CGRect(x: c.x - rx * 0.34 - hr, y: c.y - ry * 0.42 - hr,
                                         width: hr * 2, height: hr * 2)),
                  with: .color(.white.opacity(0.92)))
-
     }
 
     // MARK: Design-space helpers
@@ -584,3 +543,5 @@ enum PetArt {
                width: CGFloat(w) * s, height: CGFloat(h) * s)
     }
 }
+
+#endif

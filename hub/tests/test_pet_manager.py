@@ -76,6 +76,135 @@ class TestDivergenceCheck:
         assert manager.check_divergence("science", -3.2) is None
 
 
+class TestMood:
+    """Coarse mood derivation. The honesty tests at the bottom are the point."""
+
+    def test_idle_recently_seen_is_resting(self, manager):
+        state = manager.read_state("science")
+        state.updated_at = 1000.0
+        assert pm.derive_mood(state, [], now=1010.0) == "resting"
+
+    def test_idle_stale_is_sleeping(self, manager):
+        state = manager.read_state("science")
+        state.updated_at = 1000.0
+        far = 1000.0 + pm.MOOD_SLEEP_AFTER + 10
+        assert pm.derive_mood(state, [], now=far) == "sleeping"
+
+    def test_never_touched_pet_is_resting_not_sleeping(self, manager):
+        # A freshly-created pet has updated_at == 0.0; it must not read as
+        # having slept since the epoch.
+        state = manager.read_state("science")
+        assert state.updated_at == 0.0
+        assert pm.derive_mood(state, [], now=1_000_000.0) == "resting"
+
+    def test_active_is_focused(self, manager):
+        state = manager.read_state("science")
+        state.status = "active"
+        state.updated_at = 1000.0
+        assert pm.derive_mood(state, [], now=1005.0) == "focused"
+
+    def test_mid_task_is_grinding(self, manager):
+        state = manager.read_state("science")
+        state.status = "mid_task"
+        state.updated_at = 1000.0
+        assert pm.derive_mood(state, [], now=1005.0) == "grinding"
+
+    def test_recent_success_is_celebrating(self, manager):
+        state = manager.read_state("science")
+        recent = [{"event": "turn_end", "outcome": "completed", "ts": 1000.0}]
+        assert pm.derive_mood(state, recent, now=1005.0) == "celebrating"
+
+    def test_stale_success_is_not_celebrating(self, manager):
+        state = manager.read_state("science")
+        state.updated_at = 1000.0
+        recent = [{"event": "turn_end", "outcome": "completed", "ts": 1000.0}]
+        far = 1000.0 + pm.CELEBRATE_WINDOW + 30
+        assert pm.derive_mood(state, recent, now=far) == "resting"
+
+    def test_failed_outcome_does_not_celebrate(self, manager):
+        state = manager.read_state("science")
+        state.updated_at = 1000.0
+        recent = [{"event": "turn_end", "outcome": "failed: clash", "ts": 1000.0}]
+        assert pm.derive_mood(state, recent, now=1005.0) == "resting"
+
+    def test_celebrating_outranks_active_status(self, manager):
+        state = manager.read_state("science")
+        state.status = "active"
+        state.updated_at = 1000.0
+        recent = [{"event": "turn_end", "outcome": "success", "ts": 1000.0}]
+        assert pm.derive_mood(state, recent, now=1002.0) == "celebrating"
+
+    def test_manager_mood_end_to_end(self, manager):
+        state = manager.read_state("science")
+        state.status = "mid_task"
+        manager.write_state("science", state)
+        assert manager.mood("science") == "grinding"
+
+
+class TestMoodHonesty:
+    """No pet record may launder a ⌘D observation into a claim of work.
+
+    `~/.shannon/pets/*/state.json` is written from whichever macOS app was
+    frontmost. The gate (agent_hub.db) is the only authority on liveness.
+    """
+
+    def test_observed_record_never_claims_work(self, manager):
+        state = manager.read_state("science")
+        state.source = "observed"
+        state.updated_at = 1000.0
+        for status in ("active", "mid_task", "idle", "observed"):
+            state.status = status
+            mood = pm.derive_mood(state, [], now=1005.0)
+            assert mood not in pm.MOOD_CLAIMS_WORK, f"{status} -> {mood}"
+            assert mood == "watching"
+
+    def test_observed_status_alone_is_enough_to_mark_an_observation(self, manager):
+        # Records written by AgentIngest.PetBootstrap set both fields; older
+        # ones may set only `status`.
+        state = manager.read_state("science")
+        state.status = "observed"
+        state.updated_at = 1000.0
+        assert pm.derive_mood(state, [], now=1005.0) == "watching"
+
+    def test_stale_observation_sleeps(self, manager):
+        state = manager.read_state("science")
+        state.source, state.status = "observed", "observed"
+        state.updated_at = 1000.0
+        far = 1000.0 + pm.MOOD_SLEEP_AFTER + 1
+        assert pm.derive_mood(state, [], now=far) == "sleeping"
+
+    def test_legacy_stale_active_record_does_not_claim_work(self, manager):
+        # The exact shape sitting in ~/.shannon/pets today: ⌘D wrote
+        # "status": "active" two days ago and nothing ever cleared it.
+        state = manager.read_state("science")
+        state.status = "active"          # no `source` — predates the fix
+        state.updated_at = 1000.0
+        mood = pm.derive_mood(state, [], now=1000.0 + 2 * 86_400)
+        assert mood == "sleeping"
+        assert mood not in pm.MOOD_CLAIMS_WORK
+
+    def test_active_claim_expires_after_the_live_window(self, manager):
+        state = manager.read_state("science")
+        state.status = "active"
+        state.updated_at = 1000.0
+        assert pm.derive_mood(state, [], now=1000.0 + pm.LIVE_WINDOW - 1) == "focused"
+        assert pm.derive_mood(state, [], now=1000.0 + pm.LIVE_WINDOW + 1) == "resting"
+
+    def test_no_input_makes_an_observation_focused(self, manager):
+        """Exhaustive: nothing an observation can carry may claim work."""
+        for status in ("active", "mid_task", "idle", "blocked", "observed", ""):
+            for age in (0.0, 10.0, 89.0, 200.0, 100_000.0):
+                for recent in ([], [{"event": "turn_end", "outcome": "failed",
+                                     "ts": 1000.0}]):
+                    state = pm.PetState(status=status, source="observed",
+                                        updated_at=1000.0)
+                    mood = pm.derive_mood(state, recent, now=1000.0 + age)
+                    assert mood not in pm.MOOD_CLAIMS_WORK, (status, age, mood)
+
+    def test_only_two_moods_claim_work(self):
+        assert pm.MOOD_CLAIMS_WORK == {"focused", "grinding"}
+
+
 class TestTurnHelpers:
     def test_on_agent_turn_start_and_end(self, manager, monkeypatch):
         monkeypatch.setattr(pm, "_default_manager", manager)

@@ -22,6 +22,16 @@ enum PetAnimationState: String, CaseIterable, Hashable {
     /// underlying state.
     static let happyDuration: TimeInterval = 0.4
 
+    /// A one-word label suitable for display in the HUD header.
+    var moodLabel: String {
+        switch self {
+        case .idle:   return "resting"
+        case .alert:  return "focused"
+        case .happy:  return "celebrating"
+        case .sleepy: return "sleeping"
+        }
+    }
+
     /// Derives the mood from the signals an agent card already has.
     ///
     /// - Parameters:

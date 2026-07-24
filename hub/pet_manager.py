@@ -21,6 +21,7 @@ Used by
 Standalone CLI
 --------------
   python pet_manager.py status [agent_id]
+  python pet_manager.py mood <agent_id>
   python pet_manager.py set-task <agent_id> "<task summary>"
   python pet_manager.py mark-idle <agent_id>
   python pet_manager.py log-history <agent_id> '<json line>'
@@ -53,17 +54,61 @@ ALL_AGENTS = [
     "grok_build", "codex", "dataset_runner",
 ]
 
+# ── Mood derivation ───────────────────────────────────────────────────────────
+#
+# The durable counterpart to the Swift HUD's frame-level mood
+# (PillCore.CompanionMood): a coarse label computed from what actually persisted
+# to disk.
+#
+#   celebrating  → a recent turn ended well                    (Swift .happy)
+#   focused      → agent is provably active on a turn right now (Swift .alert)
+#   grinding     → agent is provably mid-task, a long resumable run
+#   watching     → this record is a ⌘D *observation* of a frontmost app
+#   resting      → idle, but seen recently                      (Swift .idle)
+#   sleeping     → idle and untouched for a while               (Swift .sleepy)
+#
+# THE HONESTY RULE. `~/.shannon/pets/{agent}/state.json` is not telemetry. ⌘D
+# writes it from whichever macOS app happened to be frontmost, and nothing ever
+# writes the status back down — there are records on this machine still claiming
+# `"status": "active"` from two days ago. `AgentIngest.PetBootstrap` now writes
+# `"status": "observed", "source": "observed"` for exactly that reason.
+#
+# So only `focused` and `grinding` — the two labels in MOOD_CLAIMS_WORK — assert
+# that work is happening, and both require the record to be (a) not an
+# observation and (b) fresher than LIVE_WINDOW. Everything older degrades to
+# `sleeping`, which is what the pre-fix records on disk correctly resolve to.
+# The gate (agent_hub.db) remains the only authority on liveness; this function
+# never upgrades a pet record into a liveness claim.
+
+CELEBRATE_WINDOW: float = 60.0    # seconds a good finish still reads as a win
+LIVE_WINDOW:      float = 90.0    # a status claim older than this is not current
+MOOD_SLEEP_AFTER: float = 300.0   # seconds idle before a pet is "sleeping"
+
+#: The only moods that assert the agent is doing work. Mirrors
+#: `CompanionMood.claimsWork` on the Swift side.
+MOOD_CLAIMS_WORK = frozenset({"focused", "grinding"})
+
+#: Values of `state.source` / `state.status` that mark a record as a ⌘D capture
+#: rather than agent telemetry.
+OBSERVED_MARKERS = frozenset({"observed", "cmd_d"})
+
+_SUCCESS_WORDS = ("success", "complete", "pass", "record", "solved")
+
+
 # ── Pet state dataclass ───────────────────────────────────────────────────────
 
 @dataclass
 class PetState:
-    status:        str            = "idle"         # "active" | "idle" | "mid_task"
+    status:        str            = "idle"         # "active" | "idle" | "mid_task" | "observed"
     last_task:     str            = ""
     last_cf_delta: Optional[float] = None
     memory_size:   int            = 0
     history_count: int            = 0
     updated_at:    float          = 0.0            # unix timestamp
     resumable:     bool           = False
+    # Provenance. "observed" means a ⌘D capture of a frontmost app; anything
+    # else is treated as agent-written. Absent on records predating the fix.
+    source:        str            = ""
 
     def to_json(self) -> str:
         d = asdict(self)
@@ -76,6 +121,54 @@ class PetState:
             return cls(**{k: v for k, v in raw.items() if k in cls.__dataclass_fields__})
         except Exception:
             return cls()
+
+    @property
+    def is_observation(self) -> bool:
+        """True when this record is a ⌘D capture, not agent telemetry."""
+        return (str(self.source).lower() in OBSERVED_MARKERS
+                or str(self.status).lower() in OBSERVED_MARKERS)
+
+
+def derive_mood(state: PetState, recent: list[dict],
+                now: Optional[float] = None) -> str:
+    """Map persisted state + recent history to a coarse mood label.
+
+    Deterministic and side-effect free, so the hub, the CLI and the tests all
+    agree on it. `recent` is expected newest-last, as `recent_history` returns.
+
+    See the honesty rule above: no combination of inputs may return a mood in
+    MOOD_CLAIMS_WORK for an observation-sourced or stale record.
+    """
+    now = time.time() if now is None else now
+    # A never-touched pet has updated_at == 0.0; it has not slept since the
+    # epoch, it simply has no history at all.
+    seen_at  = state.updated_at or now
+    idle_for = max(0.0, now - seen_at)
+    stale    = idle_for > MOOD_SLEEP_AFTER
+    current  = idle_for <= LIVE_WINDOW
+
+    # A fresh, good finish outranks liveness: the pet just did well, so it
+    # celebrates even as its status settles back to idle.
+    for rec in reversed(recent):
+        if rec.get("event") == "turn_end":
+            outcome = str(rec.get("outcome", "")).lower()
+            ts = float(rec.get("ts", 0.0) or 0.0)
+            if (now - ts) <= CELEBRATE_WINDOW and any(
+                    w in outcome for w in _SUCCESS_WORDS):
+                return "celebrating"
+            break  # only the most recent turn_end is relevant
+
+    # An observation can say "I saw this app", never "this agent is working".
+    if state.is_observation:
+        return "sleeping" if stale else "watching"
+
+    if current:
+        if state.status == "active":
+            return "focused"
+        if state.status == "mid_task":
+            return "grinding"
+
+    return "sleeping" if stale else "resting"
 
 
 # ── PetManager ────────────────────────────────────────────────────────────────
@@ -123,6 +216,11 @@ class PetManager:
     def read_state(self, agent_id: str) -> PetState:
         path = self.pets_dir / agent_id / "state.json"
         return PetState.from_file(path)
+
+    def mood(self, agent_id: str, now: Optional[float] = None) -> str:
+        """Coarse mood label for this agent's pet — see ``derive_mood``."""
+        return derive_mood(self.read_state(agent_id),
+                           self.recent_history(agent_id, n=6), now)
 
     def write_state(self, agent_id: str, state: PetState) -> None:
         state.updated_at = time.time()
@@ -288,6 +386,9 @@ def _cli_main() -> None:
     s = sub.add_parser("status", help="Show pet status for an agent")
     s.add_argument("agent_id", choices=ALL_AGENTS)
 
+    md = sub.add_parser("mood", help="Print the pet's coarse mood label")
+    md.add_argument("agent_id", choices=ALL_AGENTS)
+
     st = sub.add_parser("set-task", help="Mark agent as active with a task")
     st.add_argument("agent_id", choices=ALL_AGENTS)
     st.add_argument("task")
@@ -312,8 +413,12 @@ def _cli_main() -> None:
     if args.cmd == "list":
         for aid in ALL_AGENTS:
             s = pm.read_state(aid)
-            print(f"  {aid:16}  {s.status:10}  resumable={s.resumable}  "
+            print(f"  {aid:16}  {s.status:10}  {pm.mood(aid):12}  "
+                  f"resumable={s.resumable}  "
                   f"mem={s.memory_size}B  hist={s.history_count}")
+
+    elif args.cmd == "mood":
+        print(pm.mood(args.agent_id))
 
     elif args.cmd == "status":
         s = pm.read_state(args.agent_id)

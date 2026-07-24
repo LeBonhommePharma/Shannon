@@ -80,6 +80,66 @@ extension PetKind {
     }
 }
 
+// MARK: - Personality
+
+/// Per-kind timing so a card full of pets does not breathe and blink in
+/// lockstep. Every value here is a resting-behaviour parameter only — it never
+/// changes what a pet *is*, just the rhythm it idles at. Consumed analytically
+/// by `PetAnimator`, so it costs no timers and stays phase-locked to the shared
+/// clock.
+struct PetPersonality {
+    /// Seconds per idle breathing cycle. Small animals breathe faster.
+    let breathPeriod:  Double
+    /// 0…1 offset into the breath cycle, so two pets of different kinds are
+    /// caught mid-breath at different moments.
+    let breathPhase:   Double
+    /// Seconds between blinks.
+    let blinkPeriod:   Double
+    /// A second blink close behind the first — reads as a nervous or busy tic.
+    let doubleBlink:   Bool
+    /// Design-space horizontal drift while idle. 0 = dead still.
+    let swayAmp:       Double
+    /// Eyelid aperture in `alert`. Higher = a wider, more startled stare.
+    let alertEyeWiden: Double
+}
+
+extension PetKind {
+    /// Hand-tuned so each animal reads as itself at rest: the owl is near
+    /// motionless and slow to blink, the raven is twitchy, the beaver fidgets.
+    var personality: PetPersonality {
+        switch self {
+        case .owl:     // still, deliberate, a rare wide blink
+            return PetPersonality(breathPeriod: 2.6, breathPhase: 0.00,
+                                  blinkPeriod: 6.4, doubleBlink: false,
+                                  swayAmp: 0.10, alertEyeWiden: 1.45)
+        case .raven:   // quick, nervous, double-blinks
+            return PetPersonality(breathPeriod: 1.7, breathPhase: 0.15,
+                                  blinkPeriod: 3.8, doubleBlink: true,
+                                  swayAmp: 0.32, alertEyeWiden: 1.30)
+        case .fox:     // light and alert on its feet
+            return PetPersonality(breathPeriod: 1.9, breathPhase: 0.35,
+                                  blinkPeriod: 4.2, doubleBlink: false,
+                                  swayAmp: 0.30, alertEyeWiden: 1.35)
+        case .dolphin: // smooth, bobbing, slow single eye
+            return PetPersonality(breathPeriod: 2.2, breathPhase: 0.55,
+                                  blinkPeriod: 5.6, doubleBlink: false,
+                                  swayAmp: 0.42, alertEyeWiden: 1.25)
+        case .wolf:    // composed, steady, a hard alert stare
+            return PetPersonality(breathPeriod: 2.4, breathPhase: 0.70,
+                                  blinkPeriod: 5.8, doubleBlink: false,
+                                  swayAmp: 0.14, alertEyeWiden: 1.45)
+        case .beaver:  // busy worker, fidgets, blinks in pairs
+            return PetPersonality(breathPeriod: 2.0, breathPhase: 0.85,
+                                  blinkPeriod: 4.0, doubleBlink: true,
+                                  swayAmp: 0.36, alertEyeWiden: 1.20)
+        case .gear:    // machinery — the animator ignores lungs and lids
+            return PetPersonality(breathPeriod: 2.0, breathPhase: 0.00,
+                                  blinkPeriod: 5.0, doubleBlink: false,
+                                  swayAmp: 0.0, alertEyeWiden: 1.0)
+        }
+    }
+}
+
 // MARK: - Hex helper
 
 extension Color {

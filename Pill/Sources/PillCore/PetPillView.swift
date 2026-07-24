@@ -1,148 +1,291 @@
+// PetPillView.swift — companion surfaces for the Shannon pill.
+//
+// WHAT THIS FILE USED TO BE, AND WHY IT CHANGED
+//
+// It held a single `PetPillView` bound to `ShannonCore.PetStore.shared` — one
+// global pet for the whole machine, with a species, an XP bar and a level. Its
+// mood came from `PetStore.computeMood(entropy:errorRate:idleSeconds:)`, which
+// no call site ever invoked, so `pet.mood` sat on its hardcoded `.calm` default
+// forever. The view itself was never instantiated anywhere in the app. It was a
+// pet that had no agent, no mood and no viewer.
+//
+// It is now a *per-agent* companion, drawn with the artwork from
+// `hub/Pet/PetRenderer.swift` and moved by the per-kind personality recovered
+// from `stash@{0}`. Mood comes from `CompanionMood.resolve`, which can only
+// reach `alert` on live gate telemetry.
+//
+// PLACEMENT RULE. Everything here is sized and toned for the EXPANDED board and
+// the pet surfaces. Nothing in this file belongs in the collapsed pill: the
+// collapsed pill was deliberately made recessive and translucent when idle, and
+// a companion must not be the thing that undoes that. `CompanionBoardView`
+// renders nothing at all when there is nothing worth showing.
+
+#if canImport(SwiftUI)
 import SwiftUI
-import ShannonCore
 import ShannonTheme
 
-// MARK: - PetPillView
+// MARK: - CompanionView
 
-/// Embeds the pet avatar in the left slot of the macOS notch pill.
-/// Compact: 28×28 pt with a static mood ring.
-/// Expanded: 44×44 pt with a breathing animation loop.
-/// AirPods nod → happy bounce + 3 XP. Shake → sad shake + 1 XP.
+/// The drawn creature, and nothing else — no ring, no label, no chrome.
+///
+/// Motion is analytic (see `CompanionMotion`), so this view holds no `@State`
+/// and never restarts its cycle. Every companion on screen reads the same
+/// clock and therefore stays phase-locked.
 @available(macOS 14.0, *)
-public struct PetPillView: View {
-    // PetStore is @Observable (Observation), not ObservableObject.
-    @Bindable public var store: PetStore
-    public var isExpanded: Bool
+public struct CompanionView: View {
+    public let kind: CompanionKind
+    public let mood: CompanionMood
+    public let agentColor: Color
+    public let size: CGFloat
+    /// Instant the approval landed, for the one-shot `happy` bounce.
+    public let happyStart: Date?
 
-    @State private var breathe = false
-    @State private var bounceScale: CGFloat = 1
+    public init(kind: CompanionKind,
+                mood: CompanionMood,
+                agentColor: Color,
+                size: CGFloat = 26,
+                happyStart: Date? = nil) {
+        self.kind = kind
+        self.mood = mood
+        self.agentColor = agentColor
+        self.size = size
+        self.happyStart = happyStart
+    }
 
-    private var avatarSize: CGFloat { isExpanded ? 44 : 28 }
+    public var body: some View {
+        Group {
+            // A companion with nothing to report costs a redraw every 500 ms
+            // instead of one every frame. Idle is the overwhelmingly common
+            // case, and the pill has no business burning a display link on a
+            // breathing owl.
+            if mood == .idle || mood == .sleepy {
+                TimelineView(.periodic(from: .now, by: 0.5)) { tl in canvas(at: tl.date) }
+            } else {
+                TimelineView(.animation) { tl in canvas(at: tl.date) }
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)   // the owning row carries the label
+    }
 
-    public init(store: PetStore, isExpanded: Bool) {
-        self.store = store
-        self.isExpanded = isExpanded
+    private func canvas(at date: Date) -> some View {
+        Canvas { ctx, sz in
+            let frame = CompanionMotion.frame(
+                kind: kind,
+                mood: mood,
+                t: date.timeIntervalSinceReferenceDate,
+                happyElapsed: happyStart.map { date.timeIntervalSince($0) } ?? 0
+            )
+            CompanionArt.draw(kind: kind,
+                              frame: frame,
+                              palette: kind.palette,
+                              agentColor: agentColor,
+                              in: &ctx,
+                              size: sz)
+        }
+    }
+}
+
+// MARK: - CompanionGlyph
+
+/// A companion, or the agent's SF Symbol when that pet has no artwork.
+///
+/// The fallback is deliberate and inherited from the original design: a missing
+/// drawing must never silently render as the wrong animal. Parrot, tortoise,
+/// gecko, cat and ladybug agents therefore keep their symbol until someone
+/// draws them.
+@available(macOS 14.0, *)
+public struct CompanionGlyph: View {
+    public let state: CompanionState
+    public let size: CGFloat
+
+    public init(state: CompanionState, size: CGFloat = 26) {
+        self.state = state
+        self.size = size
+    }
+
+    private var style: AgentStyle { AgentStyleCatalog.style(for: state.agent.id) }
+
+    public var body: some View {
+        if let kind = state.kind {
+            CompanionView(kind: kind,
+                          mood: state.mood,
+                          agentColor: style.color,
+                          size: size,
+                          happyStart: happyStart)
+        } else {
+            Image(systemName: state.symbolFallback)
+                .font(.system(size: size * 0.62, weight: .medium))
+                .foregroundStyle(style.palette.ink)
+                .frame(width: size, height: size)
+                .opacity(state.mood == .sleepy ? 0.45 : 0.9)
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// Reconstruct the approval instant the mood was resolved against.
+    private var happyStart: Date? {
+        state.happyElapsed.map { Date().addingTimeInterval(-$0) }
+    }
+}
+
+// MARK: - CompanionBadge
+
+/// Companion inside a mood ring. The ring is the *only* thing that changes with
+/// mood at a glance, and it is nearly invisible when the agent is idle.
+@available(macOS 14.0, *)
+public struct CompanionBadge: View {
+    public let state: CompanionState
+    public let size: CGFloat
+
+    public init(state: CompanionState, size: CGFloat = 26) {
+        self.state = state
+        self.size = size
     }
 
     public var body: some View {
         ZStack {
             Circle()
-                .strokeBorder(moodColor.opacity(0.7), lineWidth: isExpanded ? 2 : 1)
-            PetAvatarCanvasMac(params: PetAvatarDescriptor.params(for: store.pet.avatarSeed),
-                               mood: store.pet.mood,
-                               size: avatarSize)
+                .strokeBorder(state.mood.ringColor.opacity(state.mood.ringOpacity),
+                              lineWidth: state.mood == .wary ? 1.6 : 1)
+            CompanionGlyph(state: state, size: size * 0.86)
         }
-        .frame(width: avatarSize, height: avatarSize)
-        .scaleEffect(breathe ? 1.04 : 0.97)
-        .scaleEffect(bounceScale)
-        .animation(
-            isExpanded
-                ? .easeInOut(duration: 1.5).repeatForever(autoreverses: true)
-                : .default,
-            value: breathe
-        )
-        .onAppear    { breathe = isExpanded }
-        .onChange(of: isExpanded) { _, v in breathe = v }
-        .help("Pet: \(store.pet.name) · \(store.pet.mood.label)")
-    }
-
-    // MARK: Mood colour
-
-    public var moodColor: Color {
-        switch store.pet.mood.colorRole {
-        case .blue:   return .shannonAccent
-        case .teal:   return Color(hue: 0.5, saturation: 0.7, brightness: 0.8)
-        case .amber:  return .shannonWarning
-        case .red:    return .shannonError
-        case .gray:   return .shannonNeutral
-        case .purple: return Color(hue: 0.78, saturation: 0.6, brightness: 0.8)
-        }
-    }
-
-    // MARK: AirPods gesture callbacks (called from HeadGestureDetector)
-
-    /// Called when the user nods while AirPods are active.
-    public func handleNod(engine: PetInteractionEngine) {
-        engine.handle(.nodConfirm)
-        withAnimation(.spring(response: 0.2, dampingFraction: 0.4)) { bounceScale = 1.25 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            withAnimation(.spring()) { bounceScale = 1 }
-        }
-    }
-
-    /// Called when the user shakes while AirPods are active.
-    public func handleShake(engine: PetInteractionEngine) {
-        engine.handle(.shakeDeny)
-        let original = bounceScale
-        for i in 0..<4 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.07) {
-                withAnimation(.linear(duration: 0.06)) { bounceScale = i % 2 == 0 ? 0.85 : 1.05 }
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { bounceScale = original }
-    }
-}
-
-// MARK: - PetAvatarCanvasMac
-
-/// macOS-specific procedural avatar canvas (mirrors iOS PetAvatarCanvas
-/// without depending on the iOS Shared source group).
-@available(macOS 14.0, *)
-struct PetAvatarCanvasMac: View {
-    let params: PetAvatarShapeParams
-    let mood: PetMood
-    let size: CGFloat
-
-    private var overlay: PetMoodOverlay { PetMoodOverlay.from(mood: mood) }
-
-    var body: some View {
-        Canvas { ctx, sz in
-            let cx = sz.width / 2, cy = sz.height / 2, r = min(cx, cy) * 0.85
-            ctx.fill(bodyPath(cx: cx, cy: cy, r: r),
-                     with: .color(Color(hue: params.hue, saturation: params.saturation, brightness: 0.8)))
-            if overlay.eyesClosed {
-                drawClosedEyes(ctx: ctx, cx: cx, cy: cy, r: r)
-            } else {
-                drawEyes(ctx: ctx, cx: cx, cy: cy, r: r)
-            }
-        }
-        .scaleEffect(overlay.avatarScale)
         .frame(width: size, height: size)
     }
+}
 
-    private func bodyPath(cx: CGFloat, cy: CGFloat, r: CGFloat) -> Path {
-        switch params.bodyShape {
-        case 1:
-            return Path(roundedRect: CGRect(x: cx-r*0.8, y: cy-r*0.8,
-                                            width: r*1.6, height: r*1.6),
-                        cornerRadius: r * 0.3)
-        case 2:
-            var p = Path()
-            p.move(to: CGPoint(x: cx, y: cy - r)); p.addLine(to: CGPoint(x: cx + r, y: cy))
-            p.addLine(to: CGPoint(x: cx, y: cy + r)); p.addLine(to: CGPoint(x: cx - r, y: cy))
-            p.closeSubpath(); return p
-        default:
-            return Path(ellipseIn: CGRect(x: cx-r, y: cy-r, width: r*2, height: r*2))
+// MARK: - CompanionRow
+
+/// One agent on the expanded board: companion, name, and the honest status.
+///
+/// The mood word and the status line always appear together. The companion
+/// restates the agent's state more softly; it is never the only place that
+/// state appears, and it never says something `statusLine` does not support.
+@available(macOS 14.0, *)
+public struct CompanionRow: View {
+    public let state: CompanionState
+
+    public init(state: CompanionState) { self.state = state }
+
+    private var style: AgentStyle { AgentStyleCatalog.style(for: state.agent.id) }
+
+    public var body: some View {
+        HStack(spacing: 8) {
+            CompanionBadge(state: state, size: 26)
+
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    Text(state.agent.displayName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(style.palette.ink)
+                        .lineLimit(1)
+
+                    // Tenure, shown only once the pet has actually earned it.
+                    if state.bond > .fresh {
+                        Text(state.bond.label)
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(style.palette.wash))
+                    }
+                }
+
+                // The evidence, verbatim, never the pet's opinion of it.
+                Text(state.agent.statusLine)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+
+            Text(state.mood.label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(state.mood == .idle || state.mood == .sleepy
+                                 ? AnyShapeStyle(.tertiary)
+                                 : AnyShapeStyle(state.mood.ringColor))
+                .lineLimit(1)
         }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(state.accessibilityLine))
+    }
+}
+
+// MARK: - CompanionBoardView
+
+/// The companion roster for the EXPANDED board.
+///
+/// Renders nothing when there are no agents, so dropping it into the board
+/// costs zero pixels on a quiet machine.
+@available(macOS 14.0, *)
+public struct CompanionBoardView: View {
+    public let states: [CompanionState]
+    public let maxRows: Int
+
+    public init(states: [CompanionState], maxRows: Int = 6) {
+        self.states = states
+        self.maxRows = maxRows
     }
 
-    private func drawEyes(ctx: GraphicsContext, cx: CGFloat, cy: CGFloat, r: CGFloat) {
-        let ey = cy + CGFloat(overlay.eyeVerticalOffset) * r - r * 0.1
-        let er = r * 0.16, pr = er * CGFloat(params.pupilScale * overlay.pupilScale)
-        let pupil = Color(hue: params.accentHue, saturation: 0.9, brightness: 0.2)
-        for ex in [cx - r*0.28, cx + r*0.28] {
-            ctx.fill(Path(ellipseIn: CGRect(x: ex-er, y: ey-er, width: er*2, height: er*2)), with: .color(.white))
-            ctx.fill(Path(ellipseIn: CGRect(x: ex-pr, y: ey-pr, width: pr*2, height: pr*2)), with: .color(pupil))
-        }
+    /// Convenience: build straight from an activity summary.
+    public init(summary: AgentActivitySummary,
+                now: Date = Date(),
+                approvals: [String: Date] = [:],
+                entropyDelta: Double? = nil,
+                maxRows: Int = 6) {
+        self.states = CompanionRoster.build(from: summary,
+                                            now: now,
+                                            approvals: approvals,
+                                            entropyDelta: entropyDelta)
+        self.maxRows = maxRows
     }
 
-    private func drawClosedEyes(ctx: GraphicsContext, cx: CGFloat, cy: CGFloat, r: CGFloat) {
-        let ey = cy - r * 0.1
-        let lc = Color(hue: params.hue, saturation: 0.6, brightness: 0.4)
-        for ex in [cx - r*0.28, cx + r*0.28] {
-            var p = Path(); p.move(to: CGPoint(x: ex - r*0.12, y: ey))
-            p.addLine(to: CGPoint(x: ex + r*0.12, y: ey))
-            ctx.stroke(p, with: .color(lc), lineWidth: r * 0.06)
+    public var body: some View {
+        if states.isEmpty {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(states.prefix(maxRows)) { state in
+                    CompanionRow(state: state)
+                }
+                if states.count > maxRows {
+                    Text("+\(states.count - maxRows) more")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 34)
+                }
+            }
         }
     }
 }
+
+// MARK: - Previews
+
+@available(macOS 14.0, *)
+#Preview("Companion gallery") {
+    let now = Date()
+    return VStack(alignment: .leading, spacing: 10) {
+        ForEach(CompanionKind.allCases, id: \.self) { kind in
+            HStack(spacing: 10) {
+                Text(kind.rawValue)
+                    .font(.system(size: 10, design: .monospaced))
+                    .frame(width: 60, alignment: .leading)
+                ForEach(CompanionMood.allCases, id: \.self) { mood in
+                    VStack(spacing: 2) {
+                        CompanionView(kind: kind, mood: mood,
+                                      agentColor: .orange, size: 40,
+                                      happyStart: mood == .happy ? now : nil)
+                        Text(mood.label)
+                            .font(.system(size: 7))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+    .padding(16)
+}
+
+#endif

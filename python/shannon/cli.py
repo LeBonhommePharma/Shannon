@@ -239,6 +239,16 @@ def cmd_info(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    # shannon-monitor is a live monitor, and its output is normally piped
+    # (`producer | shannon-monitor stdin`). Python block-buffers stdout when it
+    # is not a TTY, so every per-token line — including the collapse alert —
+    # would be withheld until the producer closes the stream, which defeats the
+    # point of real-time detection. Line buffering emits each verdict as it is
+    # computed. Guarded because stdout is not always a reconfigurable
+    # TextIOWrapper (e.g. under pytest capture).
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+
     parser = argparse.ArgumentParser(
         prog="shannon-monitor",
         description="Real-time Shannon entropy collapse detection for LLM streams",
@@ -259,8 +269,8 @@ def main() -> None:
     openai_parser.add_argument("--model", default="gpt-4", help="Model name")
     openai_parser.add_argument("prompt", nargs="+", help="Prompt text")
 
-    # info subcommand
-    info_parser = subparsers.add_parser(
+    # info subcommand (takes no flags — nothing to configure on the parser)
+    subparsers.add_parser(
         "info",
         help="Print hardware acceleration and backend info",
     )

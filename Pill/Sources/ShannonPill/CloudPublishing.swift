@@ -31,6 +31,18 @@ final class CloudPublisher {
     /// retracted from every device rather than lingering.
     private var publishedConfirmationIDs: Set<String> = []
 
+    /// First time each still-open ask was published, kept so a given ask is
+    /// mirrored with a STABLE `createdAt` across passes.
+    ///
+    /// `PendingConfirmation.createdAt` defaults to `Date()`, and it, `expiresAt`
+    /// and `updatedAt` are all part of `cloudFields`. Rebuilding the value from
+    /// scratch each pass therefore produced a different record every tick, which
+    /// defeated ShannonPublisher's unchanged-record suppression — the same open
+    /// ask was republished every `interval` seconds and re-notified on every
+    /// device, forever. It also pushed `expiresAt` out by the full 15-minute
+    /// lifetime on each pass, so an unanswered ask could never age out.
+    private var confirmationFirstSeen: [String: Date] = [:]
+
     init(
         nowPlaying: NowPlayingModel?,
         battery: BatteryMonitor?,
@@ -104,16 +116,25 @@ final class CloudPublisher {
         // id == interaction_id so a returning ConfirmationResponse resolves the
         // exact gate row; agentID carries what the socket write needs.
         let asks = activity?.pendingAsks ?? []
-        let confirmations = asks.map { ask in
-            PendingConfirmation(
+        let now = Date()
+        let confirmations = asks.map { ask -> PendingConfirmation in
+            // Reuse the first-seen timestamp so an unchanged ask serialises to
+            // an identical record and the publisher can suppress it.
+            let firstSeen = confirmationFirstSeen[ask.interactionId] ?? now
+            confirmationFirstSeen[ask.interactionId] = firstSeen
+            return PendingConfirmation(
                 id: ask.interactionId,
                 question: ask.prompt,
-                agentID: ask.agentId
+                agentID: ask.agentId,
+                createdAt: firstSeen
             )
         }
         let liveIDs = Set(confirmations.map(\.id))
         let staleIDs = publishedConfirmationIDs.subtracting(liveIDs)
         publishedConfirmationIDs = liveIDs
+        // Drop bookkeeping for asks the gate has cleared, so this cannot grow
+        // without bound and a re-used interaction id starts fresh.
+        confirmationFirstSeen = confirmationFirstSeen.filter { liveIDs.contains($0.key) }
 
         Task { [publisher] in
             do {

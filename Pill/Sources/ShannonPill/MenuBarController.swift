@@ -26,6 +26,10 @@ final class MenuBarController: NSObject {
     private var popover: NSPopover?
     /// Sticky success flash from ⌘D capture; suppresses normal refresh briefly.
     private var flashUntil: Date?
+    /// Last rendered icon state. The timer fires every second; redrawing an
+    /// NSStatusItem that has not changed is pure waste (and makes the tint
+    /// flicker under the pulse animation).
+    private var lastRendered: String?
 
     var onShowPill: (() -> Void)?
     var onReposition: (() -> Void)?
@@ -79,6 +83,7 @@ final class MenuBarController: NSObject {
         button.title = " " + text
         button.contentTintColor = .systemGreen
         flashUntil = Date().addingTimeInterval(1.8)
+        lastRendered = nil   // force a real redraw once the flash expires
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
             self?.refresh()
         }
@@ -93,7 +98,22 @@ final class MenuBarController: NSObject {
 
         let summary = activity.summary
         let entropy = bridge.status ?? idle.status
+        // Only asks somebody is actually waiting on. `activity.staleAsks` holds
+        // rows whose agent disconnected after asking — pulsing amber forever for
+        // an approval nobody will ever read is the definition of a false alarm.
         let pendingCount = activity.pendingAsks.count
+
+        // Cheap signature of everything the icon depends on; bail when unchanged.
+        let signature = [
+            "p\(pendingCount)",
+            entropy.collapsed ? String(format: "c%.1f", entropy.entropy) : "-",
+            "b\(summary.busyCount)",
+            summary.busy.first?.displayName ?? "",
+            "l\(summary.connected.count)",
+            bridge.connected ? "1" : "0",
+        ].joined(separator: "|")
+        guard signature != lastRendered else { return }
+        lastRendered = signature
 
         if pendingCount > 0 {
             // Gate pending trumps everything — this is the state that needs LP.
@@ -121,11 +141,21 @@ final class MenuBarController: NSObject {
             let names = summary.busy.prefix(3).map(\.displayName).joined(separator: ", ")
             button.setAccessibilityLabel("Shannon: \(summary.busy.count) agents active — \(names)")
         } else {
+            // Nothing is provably working. Say which flavour of quiet this is
+            // rather than implying the hub is watching something.
             button.image = Self.symbolImage("waveform.path.ecg", template: true)
             button.title = ""
             button.contentTintColor = nil
-            button.setAccessibilityLabel(
-                bridge.connected ? "Shannon: hub connected, idle" : "Shannon: idle")
+            let connected = summary.connected.count
+            let label: String
+            if connected > 0 {
+                label = "Shannon: \(connected) agent\(connected > 1 ? "s" : "") connected, idle"
+            } else if bridge.connected {
+                label = "Shannon: hub connected, no agents"
+            } else {
+                label = "Shannon: no agents connected"
+            }
+            button.setAccessibilityLabel(label)
         }
     }
 

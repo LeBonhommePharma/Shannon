@@ -304,6 +304,69 @@ final class AgentIngestTests: XCTestCase {
         XCTAssertEqual(k.id, "claude_code")
     }
 
+    // MARK: - Gate notification (observation, not a connection)
+
+    func testGateVerdictParsing() {
+        let ok = """
+        HTTP/1.1 200 OK\r
+        Content-Type: application/json\r
+        \r
+        {"decision": "allowed", "gate_H": 0.0}
+        """
+        XCTAssertTrue(AgentIngestService.gateAccepted(httpResponse: ok))
+
+        // "blocked" still means the gate received and judged the message.
+        let blocked = """
+        HTTP/1.1 200 OK\r
+        \r
+        {"decision": "blocked", "reasons": ["H"]}
+        """
+        XCTAssertTrue(AgentIngestService.gateAccepted(httpResponse: blocked))
+
+        // An id outside hub/agent_identity.py IDENTITIES.
+        let refused = """
+        HTTP/1.1 403 Forbidden\r
+        \r
+        {"error": "unknown_agent:claude_devtools"}
+        """
+        XCTAssertFalse(AgentIngestService.gateAccepted(httpResponse: refused))
+
+        let malformed = """
+        HTTP/1.1 200 OK\r
+        \r
+        {"error": "invalid_json"}
+        """
+        XCTAssertFalse(AgentIngestService.gateAccepted(httpResponse: malformed))
+
+        XCTAssertFalse(AgentIngestService.gateAccepted(httpResponse: ""))
+        XCTAssertFalse(AgentIngestService.gateAccepted(httpResponse: "garbage"))
+    }
+
+    /// End-to-end against the running gate. Opt-in via SHANNON_LIVE_GATE=1
+    /// because it posts a real message to the hub's audit log; the assertion
+    /// that matters is made by the caller, who diffs the `agents` table around
+    /// it and must see no new connect/disconnect pair.
+    @MainActor
+    func testLiveGatePostIsAnObservationNotAConnection() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["SHANNON_LIVE_GATE"] == "1",
+            "set SHANNON_LIVE_GATE=1 to exercise the running gate"
+        )
+        let ok = AgentIngestService.notifyGateBestEffort(
+            agentID: "claude_code", task: "ingest probe verification"
+        )
+        print("LIVE GATE accepted=\(ok)")
+        XCTAssertTrue(ok, "gate must accept a POST /message observation")
+
+        // An id outside hub/agent_identity.py IDENTITIES must be refused, not
+        // silently reported as healthy.
+        let bogus = AgentIngestService.notifyGateBestEffort(
+            agentID: "claude_devtools", task: "should be refused"
+        )
+        print("LIVE GATE bogus accepted=\(bogus)")
+        XCTAssertFalse(bogus, "unknown agent ids must fail closed")
+    }
+
     func testClipboardAgentOverride() {
         let (id, task) = AgentAppMapper.parseClipboard("agent: science fix CF.com floor")
         XCTAssertEqual(id, "science")

@@ -28,11 +28,12 @@ public enum ShannonRadius {
 
 /// Hairline and glow metrics for the pill chrome.
 public enum ShannonStroke {
-    /// Border width at rest and when active. Deliberately sub-pixel on Retina —
-    /// the pill edge should read as a seam, not a drawn outline.
-    public static let hairline: CGFloat = 0.5
-    /// Blur radius of the active-state accent glow.
-    public static let glowRadius: CGFloat = 8
+    /// Border width at rest. 1.5 pt on the dark-mode pill so the capsule is
+    /// crisply visible against any wallpaper without looking heavy.
+    public static let hairline: CGFloat = 1.5
+    /// Blur radius of the active-state accent glow. Increased for dark mode —
+    /// the electric-blue glow should feel like a bioluminescent ring.
+    public static let glowRadius: CGFloat = 12
     /// Opacity of the active-state accent glow.
-    public static let glowOpacity: Double = 0.4
+    public static let glowOpacity: Double = 0.55
 }

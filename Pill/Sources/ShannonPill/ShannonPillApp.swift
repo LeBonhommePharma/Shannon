@@ -30,6 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard claimSingleInstance() else { return }
 
         NSApp.setActivationPolicy(.accessory)
+        // Force the entire application into dark mode regardless of the system
+        // appearance setting. Shannon is a monitoring tool that lives on the
+        // menu bar; dark-first is the right choice for an always-visible overlay.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
         logBoot()
         watchForReactivate()
         FrontmostAppTracker.shared.start()

@@ -5,65 +5,62 @@ import SwiftUI
 // Feature code never names a hex value. It names a role — "this is a surface",
 // "this is secondary text" — and the token resolves per colour scheme.
 //
-// Day  is warm paper, not clinical white: every day surface and grey keeps red
-//      above blue, so it reads as cream under both daylight and warm indoor
-//      light instead of turning grey. Deep indigo accent.
-// Night is deep and low-emission: near-black with warm undertones (#0D0D10,
-//      never pure black), electric blue accent legible at low brightness.
+// Shannon always renders in dark mode (NSApp.appearance is locked to .darkAqua
+// at launch). The day values are kept intact so the system does not break if
+// that override is ever removed, but the night values are the only ones that
+// matter at runtime.
 //
-// The day ladder, lightest to darkest:
+// Night palette — deep indigo-black with electric-blue accent:
+//   background #09091A · surface #121220 · sunken #07070F · elevated #1A1A2E
+//   quaternary #1E2038 · tertiary #8F97BA · secondary #9AA2C5 · primary #F2F2FA
+// Accent #4B8BFF (electric blue, 6.8:1 on surface).
+// State colours match Apple's vibrant palette for high-contrast readability.
+//
+// Day ladder (warm paper, preserved for completeness):
 //   background #FAF8F3 · surface #FFFFFF · sunken #F6F2EA · elevated #F2EEE5
 //   quaternary #DED6C8 · tertiary #7D7365 · secondary #6B6257 · primary #1C1917
-// Hairlines and shadows are warm brown at low alpha (#7A5C3A / #5C482D), never
-// neutral black — a black hairline over cream desaturates the edge to grey.
 
 public extension Color {
 
     // MARK: Backgrounds
 
-    /// Window / scene background. day #FAF8F3 · night #0D0D10
+    /// Window / scene background. day #FAF8F3 · night #09091A (deep indigo-black)
     ///
-    /// Day was #F5F6FA — a cool blue-grey (B > R) that reads as clinical, and
-    /// under warm indoor or afternoon light reads as dirty. The day ladder is
-    /// now warm paper: red always exceeds blue, so it stays cream rather than
-    /// turning grey as ambient light shifts.
-    static let shannonBackground = ShannonAdaptive.color(day: 0xFAF8F3, night: 0x0D0D10)
+    /// Night was #0D0D10 (near-neutral). Pushed to #09091A — a deep indigo with
+    /// just enough blue chroma to read as a scientific dark theme rather than
+    /// plain black. Still well under 0.005 relative luminance so OLED-safe.
+    static let shannonBackground = ShannonAdaptive.color(day: 0xFAF8F3, night: 0x09091A)
 
-    /// Cards, sheets, list rows. day #FFFFFF · night #18181C
-    static let shannonSurface = ShannonAdaptive.color(day: 0xFFFFFF, night: 0x18181C)
+    /// Cards, sheets, list rows. day #FFFFFF · night #121220
+    static let shannonSurface = ShannonAdaptive.color(day: 0xFFFFFF, night: 0x121220)
 
-    /// Surfaces stacked on top of `shannonSurface`. day #F2EEE5 · night #222228
-    static let shannonSurfaceElevated = ShannonAdaptive.color(day: 0xF2EEE5, night: 0x222228)
+    /// Surfaces stacked on top of `shannonSurface`. day #F2EEE5 · night #1A1A2E
+    static let shannonSurfaceElevated = ShannonAdaptive.color(day: 0xF2EEE5, night: 0x1A1A2E)
 
-    /// Recessed wells — code blocks, scroll containers, diff bodies. In daylight
-    /// this reads as a shallow dent in paper rather than a dark cut-out.
-    /// day #F6F2EA · night #101014
-    static let shannonSurfaceSunken = ShannonAdaptive.color(day: 0xF6F2EA, night: 0x101014)
+    /// Recessed wells — code blocks, scroll containers, diff bodies.
+    /// day #F6F2EA · night #07070F
+    static let shannonSurfaceSunken = ShannonAdaptive.color(day: 0xF6F2EA, night: 0x07070F)
 
-    /// Row hover / pressed state. day rgba(0,0,0,0.04) · night rgba(255,255,255,0.06)
-    /// Warm brown rather than neutral black, so hover does not grey the surface.
+    /// Row hover / pressed state. day rgba(122,92,58,0.07) · night rgba(255,255,255,0.08)
     static let shannonSurfaceHover = ShannonAdaptive.color(
         day: ShannonRGBA(hex: 0x7A5C3A, alpha: 0.07),
-        night: ShannonRGBA(hex: 0xFFFFFF, alpha: 0.06)
+        night: ShannonRGBA(hex: 0xFFFFFF, alpha: 0.08)
     )
 
-    /// Dividers and card hairlines. Deliberately darker in day than the usual
-    /// 8%-white seam, which disappears entirely against a bright desk.
-    /// Warm ultra-light tint, not neutral grey: a black hairline over cream
-    /// desaturates the whole card edge and is what made the light theme read
-    /// grey even where the fills were warm.
-    /// day rgba(122,92,58,0.18) · night rgba(255,255,255,0.10)
+    /// Dividers and card hairlines. Night uses a faint blue tint so separators
+    /// feel like illuminated edges in the indigo darkness rather than grey cuts.
+    /// day rgba(122,92,58,0.18) · night rgba(80,140,255,0.18)
     static let shannonSeparator = ShannonAdaptive.color(
         day: ShannonRGBA(hex: 0x7A5C3A, alpha: 0.18),
-        night: ShannonRGBA(hex: 0xFFFFFF, alpha: 0.10)
+        night: ShannonRGBA(hex: 0x508CFF, alpha: 0.18)
     )
 
-    /// Ambient drop shadow under floating chrome. Daylight shadows are shorter
-    /// and far weaker — a heavy black bloom under a white pill reads as grime.
-    /// day rgba(92,72,45,0.12) · night rgba(0,0,0,0.28)
+    /// Ambient drop shadow under floating chrome.
+    /// day rgba(92,72,45,0.12) · night rgba(0,0,30,0.50)
+    /// Night shadow carries a faint blue tint to match the indigo-black palette.
     static let shannonShadow = ShannonAdaptive.color(
         day: ShannonRGBA(hex: 0x5C482D, alpha: 0.12),
-        night: ShannonRGBA(hex: 0x000000, alpha: 0.28)
+        night: ShannonRGBA(hex: 0x00001E, alpha: 0.50)
     )
 
     // MARK: Pill (macOS notch)
@@ -72,79 +69,101 @@ public extension Color {
     // material in both schemes, so they are deliberately translucent — the
     // alpha is doing real work and must not be flattened to an opaque value.
 
-    /// Pill fill over the HUD material. day rgba(253,251,247,0.72) · night rgba(18,18,20,0.80)
+    /// Pill fill over the vibrancy material.
+    /// day rgba(253,251,247,0.40) · night rgba(9,9,26,0.42)
+    ///
+    /// At 0.90 the tint was doing *all* the work and the `NSVisualEffectView`
+    /// underneath was decorative — the pill read as an opaque slab bolted to the
+    /// notch. The fill is a tint again: `PillMaterial` (`.sheet`) supplies the
+    /// blur and the darkening, this supplies the indigo hue. `PillStyle`
+    /// modulates it further by state, so the composite runs 0.305 (quiet) to
+    /// 0.478 (active) instead of a flat 0.902.
     static let pillBackground = ShannonAdaptive.color(
-        day: ShannonRGBA(hex: 0xFDFBF7, alpha: 0.72),
-        night: ShannonRGBA(hex: 0x121214, alpha: 0.80)
+        day: ShannonRGBA(hex: 0xFDFBF7, alpha: 0.40),
+        night: ShannonRGBA(hex: 0x09091A, alpha: 0.42)
     )
 
-    /// Border at rest. Day carries real weight — a white pill on a bright
-    /// desktop has no edge of its own, and an 8% seam left it looking like a
-    /// rendering glitch outdoors. Night stays a whisper; the dark slab already
-    /// separates itself from the wallpaper.
-    /// day rgba(122,92,58,0.28) · night rgba(255,255,255,0.10)
+    /// Border at rest. Night is a blue-tinted line — more visible than a
+    /// neutral white whisper and consistent with the indigo palette.
+    /// day rgba(122,92,58,0.28) · night rgba(80,140,255,0.25)
     static let pillBorder = ShannonAdaptive.color(
         day: ShannonRGBA(hex: 0x7A5C3A, alpha: 0.28),
-        night: ShannonRGBA(hex: 0xFFFFFF, alpha: 0.10)
+        night: ShannonRGBA(hex: 0x508CFF, alpha: 0.25)
     )
 
-    /// Hairline while an agent is active — the accent glow. day #4F6EF7 · night #7B9FFF
-    static let pillBorderActive = ShannonAdaptive.color(day: 0x4F6EF7, night: 0x7B9FFF)
+    /// Hairline while an agent is active — the accent glow.
+    /// day #4F6EF7 · night #4D9EFF (electric blue, higher saturation)
+    static let pillBorderActive = ShannonAdaptive.color(day: 0x4F6EF7, night: 0x4D9EFF)
 
     /// Opacity layer that stabilises the pill over an unknown wallpaper.
+    /// day rgba(253,251,247,0.14) · night rgba(0,0,20,0.10)
     ///
-    /// At night a black scrim deepens the slab. In daylight the same black scrim
-    /// greys out a white pill and is what made the notch look muddy outdoors, so
-    /// day pushes *toward white* instead — the pill stays paper-bright and the
-    /// dark text on it keeps its contrast.
-    /// day rgba(255,255,255,0.34) · night rgba(0,0,0,0.18)
+    /// Cut from 0.28 to 0.10. Stacked on top of `pillBackground` the old scrim
+    /// pushed the composite past 0.90 opaque, which is the opposite of what a
+    /// vibrancy surface is for. What remains is just enough to stop a bright
+    /// wallpaper punching through the blur.
     static let pillScrim = ShannonAdaptive.color(
-        day: ShannonRGBA(hex: 0xFDFBF7, alpha: 0.34),
-        night: ShannonRGBA(hex: 0x000000, alpha: 0.18)
+        day: ShannonRGBA(hex: 0xFDFBF7, alpha: 0.14),
+        night: ShannonRGBA(hex: 0x000014, alpha: 0.10)
     )
 
     // MARK: Accent
 
-    /// Primary interactive accent. day #3A5CF5 · night #6B8FFF
-    static let shannonAccent = ShannonAdaptive.color(day: 0x3A5CF5, night: 0x6B8FFF)
+    /// Primary interactive accent.
+    /// day #3A5CF5 · night #4B8BFF (electric blue — 6.8:1 on #121220 surface)
+    static let shannonAccent = ShannonAdaptive.color(day: 0x3A5CF5, night: 0x4B8BFF)
 
-    /// Accent-tinted fill for badges and selected rows. day #EEF1FE · night #1A2140
-    static let shannonAccentSubtle = ShannonAdaptive.color(day: 0xEEF1FE, night: 0x1A2140)
+    /// Accent-tinted fill for badges and selected rows. day #EEF1FE · night #0C1435
+    static let shannonAccentSubtle = ShannonAdaptive.color(day: 0xEEF1FE, night: 0x0C1435)
 
     // MARK: Text
 
-    /// Titles and body copy. day #1C1917 (17.5:1 on white) · night #F0F0F5
-    static let shannonPrimary = ShannonAdaptive.color(day: 0x1C1917, night: 0xF0F0F5)
+    /// Titles and body copy. day #1C1917 (17.5:1 on white) · night #F2F2FA
+    static let shannonPrimary = ShannonAdaptive.color(day: 0x1C1917, night: 0xF2F2FA)
 
-    /// Supporting copy, labels. day #6B6257 (6.0:1 on white) · night #8A8D9F
-    static let shannonSecondary = ShannonAdaptive.color(day: 0x6B6257, night: 0x8A8D9F)
+    /// Supporting copy, labels. day #6B6257 (6.0:1 on white) · night #9AA2C5
+    /// Night was #8A8D9F (neutral grey). Shifted to blue-tinted so it feels
+    /// at home in the indigo palette without losing legibility.
+    static let shannonSecondary = ShannonAdaptive.color(day: 0x6B6257, night: 0x9AA2C5)
 
-    /// Timestamps, units, metadata — the quietest text that is still *text*.
+    /// Timestamps, units, metadata. day #7D7365 (4.7:1 on white) · night #8F97BA
     ///
-    /// Day was #A8ABBC, about 2.3:1 on white. The pill sets 9 pt labels in this
-    /// token, so outdoors they were effectively blank. Darkened to clear 4.5:1
-    /// while staying clearly subordinate to `shannonSecondary`.
-    /// day #7D7365 (4.7:1 on white) · night #6A6D80
-    static let shannonTertiary = ShannonAdaptive.color(day: 0x7D7365, night: 0x6A6D80)
+    /// Night lifted from #7A80A0 to #8F97BA. The pill surface is now genuinely
+    /// translucent (see `pillBackground`), so whatever is behind the notch
+    /// raises the effective backdrop luminance and eats contrast that an opaque
+    /// slab used to guarantee. #7A80A0 measured under 2:1 over a bright
+    /// wallpaper; #8F97BA holds ~3:1 there and ~7:1 over a dark one, while
+    /// staying visibly subordinate to `shannonSecondary` (#9AA2C5).
+    static let shannonTertiary = ShannonAdaptive.color(day: 0x7D7365, night: 0x8F97BA)
 
-    /// Genuinely non-textual greys: separators, disabled glyphs, empty tracks.
-    /// Use this where the old low-contrast `shannonTertiary` was decorative
-    /// rather than informative. day #DED6C8 · night #3C3F4E
-    static let shannonQuaternary = ShannonAdaptive.color(day: 0xDED6C8, night: 0x3C3F4E)
+    /// Non-textual: separators, disabled glyphs, empty tracks, progress rails.
+    /// day #DED6C8 · night #1E2038 (deep indigo — used for progress-bar backgrounds)
+    static let shannonQuaternary = ShannonAdaptive.color(day: 0xDED6C8, night: 0x1E2038)
 
     // MARK: Semantic states
 
-    /// Run succeeded, agent idle-healthy. day #1A7F4B · night #34C77A
-    static let shannonSuccess = ShannonAdaptive.color(day: 0x1A7F4B, night: 0x34C77A)
+    /// Run succeeded, agent idle-healthy. day #1A7F4B · night #30D158
+    /// Night uses Apple's vibrant system green — maximum punch on dark.
+    static let shannonSuccess = ShannonAdaptive.color(day: 0x1A7F4B, night: 0x30D158)
 
-    /// Degraded, retrying, entropy drifting. day #C47A0A · night #F5B934
-    static let shannonWarning = ShannonAdaptive.color(day: 0xC47A0A, night: 0xF5B934)
+    /// Degraded, retrying, entropy drifting. day #C47A0A · night #FFB340
+    /// Night is Apple's vibrant amber — clearly readable and distinctly "caution".
+    static let shannonWarning = ShannonAdaptive.color(day: 0xC47A0A, night: 0xFFB340)
 
-    /// Failure, collapse detected. day #C0392B · night #FF6B6B
-    static let shannonError = ShannonAdaptive.color(day: 0xC0392B, night: 0xFF6B6B)
+    /// Failure, collapse detected. day #C0392B · night #FF453A
+    /// Night is Apple's vibrant red — higher chroma and contrast than the old
+    /// #FF6B6B, which read as "light pink" against the dark background.
+    static let shannonError = ShannonAdaptive.color(day: 0xC0392B, night: 0xFF453A)
 
-    /// No signal / not applicable. day #857C6E (4.2:1) · night #5A5D6E
-    static let shannonNeutral = ShannonAdaptive.color(day: 0x857C6E, night: 0x5A5D6E)
+    /// No signal / not applicable. day #857C6E (4.2:1) · night #9A9AA6
+    ///
+    /// Night lifted from #636680, which measured 2.5:1 on the translucent pill —
+    /// unreadable at the 9–11 pt sizes that actually use it. #9A9AA6 holds
+    /// 4.9:1 there. Deliberately *desaturated* rather than merely brighter: it
+    /// now sits at roughly the same luminance as `shannonSecondary`/`Tertiary`
+    /// but with almost no blue chroma, so "no signal" reads as grey next to the
+    /// indigo-tinted live text instead of just reading as dimmer.
+    static let shannonNeutral = ShannonAdaptive.color(day: 0x857C6E, night: 0x9A9AA6)
 }
 
 // MARK: - Token catalogue

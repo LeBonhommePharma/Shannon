@@ -2,10 +2,35 @@ import SwiftUI
 import PillCore
 import ShannonTheme
 
+extension ShannonStatus {
+    /// Backends that FABRICATE their numbers rather than measuring anything.
+    ///
+    /// - `demo`  — `python -m shannon.pill_bridge --demo`. `_DemoDetector`
+    ///   (python/shannon/pill_bridge.py:219) returns `8.0 + 2.0*sin(n/12)`, and
+    ///   `--demo` is the only standalone mode the bridge supports (:250).
+    /// - `idle`  — `IdleTelemetry`, the local placeholder sine used when no
+    ///   bridge is connected at all.
+    /// - `unknown` — the bridge's fallback when a detector exposes no `backend`
+    ///   attribute (:91). Provenance cannot be established, so it is not
+    ///   trusted. A deception monitor must fail closed.
+    static let syntheticBackends: Set<String> = ["demo", "idle", "unknown", ""]
+
+    /// True when this reading is a placeholder, not a measurement.
+    var isSynthetic: Bool {
+        Self.syntheticBackends.contains(
+            backend.trimmingCharacters(in: .whitespaces).lowercased()
+        )
+    }
+}
+
 /// Sizes for the two pill states.
 public enum PillMetrics {
     public static let collapsedHeight: CGFloat = 34    // +2 for better text breathing room
     public static let collapsedWidth: CGFloat = 270    // +10 to fit the larger H= readout
+    /// Footprint when there is genuinely nothing to report: glyph + entropy +
+    /// battery, no filler copy. The pill should occupy the notch in proportion
+    /// to what it has to say, and when it has nothing it says nothing.
+    public static let idleWidth: CGFloat = 132
     public static let expandedWidth: CGFloat = 400
     public static let expandedHeight: CGFloat = 220    // +24 for the boxed entropy strip
     public static let corner: CGFloat = 16
@@ -72,6 +97,29 @@ struct PillView: View {
         showExpanded ? ShannonRadius.xl : ShannonRadius.lg
     }
 
+    /// Does the pill have anything worth occupying screen real estate for?
+    ///
+    /// Anything a human would want to act on or be told about counts: a busy
+    /// agent, a gate waiting on an answer, an entropy collapse, a fresh capture,
+    /// or media transport controls the user can actually press.
+    private var hasSomethingToSay: Bool {
+        !busy.isEmpty
+            || hasPendingAsk
+            || collapseAlarm
+            || confirmation.isAwaitingConfirmation
+            || ingest.isHighlighting
+            || showMedia
+    }
+
+    /// Collapsed, silent, and nothing has happened for a while — present the
+    /// smallest and most transparent form the pill has. It stays fully
+    /// interactive: hovering or clicking still opens the full board.
+    private var isRecessive: Bool { !showExpanded && !hasSomethingToSay && isQuiet }
+
+    private var collapsedWidth: CGFloat {
+        isRecessive ? PillMetrics.idleWidth : PillMetrics.collapsedWidth
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             if showExpanded {
@@ -94,12 +142,16 @@ struct PillView: View {
             }
         }
         .frame(
-            width: showExpanded ? PillMetrics.expandedWidth : PillMetrics.collapsedWidth,
+            width: showExpanded ? PillMetrics.expandedWidth : collapsedWidth,
             height: showExpanded ? PillMetrics.expandedHeight : PillMetrics.collapsedHeight
         )
-        .shannonPill(isActive: agentActive, cornerRadius: corner)
+        .shannonPill(isActive: agentActive, isQuiet: isRecessive, cornerRadius: corner)
         .overlay(flashOverlay)
+        // Only the pill capsule takes hits. The transparent surround around it
+        // must stay click-through — see PillHost in PillWindowController.
+        .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
         .animation(.shannonFloat, value: showExpanded)
+        .animation(.shannonFloat, value: isRecessive)
         .animation(.shannonSnap, value: summary.busyCount)
         // Spring transition when the primary agent switches (e.g. Claude → Codex).
         .animation(.spring(response: 0.3, dampingFraction: 0.75), value: summary.primary?.displayName)
@@ -134,7 +186,7 @@ struct PillView: View {
             }
         }
         // Start / stop the entropy-collapse pulse border.
-        .onChange(of: entropy.collapsed) { collapsed in
+        .onChange(of: collapseAlarm) { collapsed in
             if collapsed {
                 withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
                     collapsePulse = true
@@ -172,9 +224,9 @@ struct PillView: View {
             RoundedRectangle(cornerRadius: corner, style: .continuous)
                 .stroke(
                     Color.shannonError,
-                    lineWidth: (entropy.collapsed && collapsePulse) ? 2.0 : 0.5
+                    lineWidth: (collapseAlarm && collapsePulse) ? 2.0 : 0.5
                 )
-                .opacity(entropy.collapsed ? (collapsePulse ? 0.90 : 0.22) : 0)
+                .opacity(collapseAlarm ? (collapsePulse ? 0.90 : 0.22) : 0)
                 .allowsHitTesting(false)
         }
     }
@@ -190,25 +242,20 @@ struct PillView: View {
             // The one line read from the corner of the eye. Proportional rather
             // than monospaced (wider apertures, easier word-shape recognition)
             // and a full semibold so it holds up against a bright desktop.
-            Text(collapsedText)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.shannonPrimary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            //
+            // Suppressed entirely when recessive: "Shannon · ready" is filler,
+            // and filler is exactly what makes an always-on overlay invasive.
+            if !isRecessive {
+                Text(collapsedText)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.shannonPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
 
             Spacer(minLength: 2)
 
-            // Entropy score. 11 pt so the H= value is readable at arm's length.
-            // Turns amber when approaching collapse, red when collapsed.
-            if entropy.entropy > 0 {
-                Text("H\(String(format: "%.1f", entropy.entropy))")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(
-                        entropy.collapsed ? Color.shannonError
-                        : (entropy.entropy < 5.0 ? Color.shannonWarning : Color.shannonSecondary)
-                    )
-                    .help(entropyTooltip)
-            }
+            entropyReadout
 
             if summary.busyCount > 1 {
                 Text("\(summary.busyCount)")
@@ -228,7 +275,7 @@ struct PillView: View {
                     .help("An agent is waiting for your approval — click to answer")
             }
 
-            if entropy.collapsed {
+            if collapseAlarm {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.shannonWarning)
@@ -253,7 +300,7 @@ struct PillView: View {
             // Single active agent: prominent emoji communicates identity at a glance.
             Text(style(for: p).emoji)
                 .font(.system(size: 15))
-                .help("\(style(for: p).displayName) · \(p.status.label) · \(style(for: p).pet)")
+                .help("\(style(for: p).displayName) · \(p.statusLine) · \(style(for: p).pet)")
         } else if busy.count > 1 {
             // One dot per agent in its own brand colour, ordered by last-seen so
             // the most recently active sits leftmost. Dots stay bare colour — at
@@ -298,9 +345,81 @@ struct PillView: View {
         }
     }
 
-    /// Spells out the entropy reading against the gate's own thresholds.
+    /// True when the number on screen came from a real detector rather than the
+    /// local placeholder waveform.
+    ///
+    /// `entropy` falls back to `idle.status` whenever the bridge socket is
+    /// absent (see the `entropy` property). That fallback is a synthetic sine —
+    /// `IdleTelemetry` — with `backend == "idle"`, and it is *always* in the
+    /// healthy band and *never* reports `collapsed`. Rendering it identically to
+    /// a measured value would mean a dead detector looks exactly like a
+    /// perfectly healthy one, which is the worst possible failure mode for a
+    /// deception monitor. Everything downstream of this flag exists to keep the
+    /// two visually distinct.
+    /// Connectivity is NOT provenance. `bridge.connected` alone was the wrong
+    /// test: `python -m shannon.pill_bridge --demo` opens a real socket and
+    /// serves a real-looking payload whose numbers are `8.0 + 2.0*sin(n/12)`.
+    /// That flipped this flag true and rendered a sine wave with the full
+    /// measured styling — no `~`, live colour coding, and real collapse alarms.
+    private var isMeasured: Bool { bridge.connected && !entropy.isSynthetic }
+
+    /// A collapse we are willing to raise the deception alarm for.
+    ///
+    /// `entropy.collapsed` is whatever the producer asserts, and a synthetic
+    /// producer asserts it constantly: `_DemoDetector.is_collapsed` is
+    /// `delta_h < -1.8` over a ±2.0 sine, which is true for **28.8%** of ticks.
+    /// Left ungated, `--demo` pulses the red "Entropy collapse" border about a
+    /// third of the time it is running. Alarms are only as trustworthy as their
+    /// provenance, so the alarm paths key off this and never off
+    /// `entropy.collapsed` directly.
+    private var collapseAlarm: Bool { entropy.collapsed && isMeasured }
+
+    /// Entropy score, 11 pt so the H value is readable at arm's length.
+    ///
+    /// Digits interpolate via `.numericText()` rather than hard-swapping: the
+    /// producers publish at 1 Hz, so an un-animated label visibly jumps once a
+    /// second. The transition carries the eye across the gap.
+    @ViewBuilder
+    private var entropyReadout: some View {
+        if entropy.entropy > 0 {
+            Text(entropyBadge)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(entropyTint)
+                .contentTransition(.numericText())
+                .animation(.easeInOut(duration: 0.45), value: entropy.entropy)
+                .help(entropyTooltip)
+                .accessibilityLabel(entropyTooltip)
+        }
+    }
+
+    /// `~` marks a simulated value. Unmarked means measured.
+    private var entropyBadge: String {
+        let h = String(format: "%.1f", entropy.entropy)
+        return isMeasured ? "H\(h)" : "~H\(h)"
+    }
+
+    /// Simulated readings render in `shannonNeutral` — the token whose whole
+    /// job is "no signal / not applicable" — so a placeholder can never be
+    /// mistaken for a healthy measurement at a glance.
+    private var entropyTint: Color {
+        guard isMeasured else { return .shannonNeutral }
+        if entropy.collapsed { return .shannonError }
+        return entropy.entropy < 5.0 ? .shannonWarning : .shannonSecondary
+    }
+
+    /// Spells out the entropy reading against the gate's own thresholds, and
+    /// says so in plain language when there is no detector behind the number.
     private var entropyTooltip: String {
         let h = entropy.entropy
+        guard isMeasured else {
+            return String(
+                format: "H \u{2248} %.2f bits \u{2014} SIMULATED, not a measurement. "
+                    + "No detector is connected (source: %@), so the pill is showing a local "
+                    + "placeholder waveform. Collapse detection is NOT running. "
+                    + "Start the Shannon bridge to monitor real token entropy.",
+                h, entropy.agent ?? entropy.backend
+            )
+        }
         let verdict = entropy.collapsed
             ? "collapse detected"
             : (h < 5.0 ? "approaching the block threshold 5.0" : "healthy")
@@ -311,7 +430,7 @@ struct PillView: View {
     }
 
     private var statusDotColor: Color {
-        if entropy.collapsed { return .shannonWarning }
+        if collapseAlarm { return .shannonWarning }
         if bridge.connected { return .shannonSuccess }
         if !busy.isEmpty { return .shannonAccent }
         return .shannonTertiary
@@ -391,21 +510,21 @@ struct PillView: View {
     }
 
     private var headerIcon: String {
-        if entropy.collapsed { return "exclamationmark.triangle.fill" }
+        if collapseAlarm { return "exclamationmark.triangle.fill" }
         if let p = busy.first { return iconName(for: p) }
         if showMedia { return "music.note" }
         return "waveform.path.ecg"
     }
 
     private var headerIconColor: Color {
-        if entropy.collapsed { return .shannonWarning }
+        if collapseAlarm { return .shannonWarning }
         if let p = busy.first { return ink(for: p) }
         if bridge.connected { return .shannonSuccess }
         return .shannonAccent
     }
 
     private var headerTitle: String {
-        if entropy.collapsed { return "Entropy collapse" }
+        if collapseAlarm { return "Entropy collapse" }
         if let p = busy.first {
             return busy.count == 1 ? p.displayName : "\(busy.count) agents active"
         }
@@ -414,14 +533,14 @@ struct PillView: View {
     }
 
     private var headerSubtitle: String {
-        if entropy.collapsed {
+        if collapseAlarm {
             return String(format: "H %.1f  ΔH %+.1f · %@", entropy.entropy, entropy.deltaH,
                           entropy.agent ?? entropy.backend)
         }
         if let p = busy.first {
             let task = AgentActivitySnapshot.shorten(p.lastTask, max: 52)
             if busy.count == 1 {
-                return task.isEmpty ? "\(p.status.label) · \(p.relativeAge)" : task
+                return task.isEmpty ? p.statusLine : task
             }
             return task.isEmpty
                 ? busy.map(\.displayName).prefix(3).joined(separator: " · ")
@@ -462,7 +581,7 @@ struct PillView: View {
                     Text("\(style(for: a).emoji) \(style(for: a).displayName)")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(ink(for: a))
-                    Text(a.status.label)
+                    Text(a.statusLine)
                         .font(.system(size: 9.5, weight: .semibold, design: .rounded))
                         .foregroundStyle(ink(for: a))
                         .padding(.horizontal, 6)
@@ -525,20 +644,27 @@ struct PillView: View {
         .overlay(Capsule().strokeBorder(Color.shannonAccent.opacity(0.35), lineWidth: 1))
     }
 
+    /// Same rule as `entropyTint`, but the strip's healthy state is green
+    /// rather than plain secondary text.
+    private var stripEntropyTint: Color {
+        guard isMeasured else { return .shannonNeutral }
+        if entropy.collapsed { return .shannonError }
+        return entropy.entropy < 5.0 ? .shannonWarning : .shannonSuccess
+    }
+
     private var entropyStrip: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
-                // H value — prominent, coloured by health
+                // H value — prominent, coloured by health (grey when simulated)
                 HStack(spacing: 3) {
-                    Text("H")
+                    Text(isMeasured ? "H" : "~H")
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Color.shannonTertiary)
                     Text(String(format: "%.2f", entropy.entropy))
                         .font(.system(size: 12.5, weight: .bold, design: .monospaced))
-                        .foregroundStyle(
-                            entropy.collapsed ? Color.shannonError
-                            : (entropy.entropy < 5.0 ? Color.shannonWarning : Color.shannonSuccess)
-                        )
+                        .foregroundStyle(stripEntropyTint)
+                        .contentTransition(.numericText())
+                        .animation(.easeInOut(duration: 0.45), value: entropy.entropy)
                 }
                 // ΔH value — coloured red when large negative delta (collapse risk)
                 HStack(spacing: 3) {
@@ -548,14 +674,20 @@ struct PillView: View {
                     Text(String(format: "%+.2f", entropy.deltaH))
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(
-                            entropy.deltaH < -1.5 ? Color.shannonError
-                            : (entropy.deltaH < -0.5 ? Color.shannonWarning : Color.shannonSecondary)
+                            !isMeasured ? Color.shannonNeutral
+                            : (entropy.deltaH < -1.5 ? Color.shannonError
+                               : (entropy.deltaH < -0.5 ? Color.shannonWarning : Color.shannonSecondary))
                         )
+                        .contentTransition(.numericText())
+                        .animation(.easeInOut(duration: 0.45), value: entropy.deltaH)
                 }
                 Spacer(minLength: 0)
-                Text(bridge.connected ? entropy.backend : "idle")
+                // "simulated", not "idle" — "idle" reads as "the detector is
+                // connected and quiet", which is the opposite of the truth.
+                Text(isMeasured ? entropy.backend : "simulated")
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(bridge.connected ? Color.shannonSecondary : Color.shannonTertiary)
+                    .foregroundStyle(isMeasured ? Color.shannonSecondary : Color.shannonNeutral)
+                    .help(entropyTooltip)
             }
             // Progress rail — taller and more visible than the old 5 pt bar
             GeometryReader { geo in
@@ -563,12 +695,11 @@ struct PillView: View {
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
                         .fill(Color.shannonQuaternary)
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(
-                            entropy.collapsed ? Color.shannonError
-                            : (entropy.entropy < 5.0 ? Color.shannonWarning
-                               : (bridge.connected ? Color.shannonSuccess : Color.shannonAccent))
-                        )
+                        .fill(stripEntropyTint)
+                        // Producers publish at 1 Hz; without this the rail
+                        // jumps in discrete hops once a second.
                         .frame(width: geo.size.width * CGFloat(min(max(entropy.entropy / 12.0, 0.04), 1)))
+                        .animation(.easeInOut(duration: 0.45), value: entropy.entropy)
                 }
             }
             .frame(height: 7)
@@ -825,12 +956,28 @@ struct BatteryRing: View {
 
 /// Five-bar animated waveform shown in the collapsed pill when no agent is active.
 /// Each bar oscillates at a slightly different frequency to mimic an ECG-style signal.
-/// Uses TimelineView for smooth, GPU-backed animation without a Timer.
+///
+/// Ticks at 12 Hz, not 30 Hz. A `TimelineView` re-evaluates this body — and
+/// therefore re-composites the entire enclosing pill, including its
+/// `NSVisualEffectView`, border overlay and both shadow passes — once per tick,
+/// forever, for as long as the app is idle. Measured with `sample(1)` on an
+/// otherwise-idle machine, the 30 Hz version held the process at 52–55% CPU
+/// with 1374 of ~3100 main-thread samples inside `CA::Transaction::flush()`.
+/// An always-on menu-bar agent burning half a core to draw five 2 pt capsules is
+/// the definition of invasive. At 12 Hz the motion is still smooth for bars that
+/// complete a cycle in ~1 s, and the compositing load drops by ~60%.
+///
+/// `.drawingGroup()` flattens the five capsules into one offscreen layer so each
+/// tick invalidates a single small texture rather than five sibling layers.
 private struct WaveformIdleView: View {
     let color: Color
 
+    /// Redraw interval. Keep this as low as the motion allows — every increase
+    /// is paid continuously, forever, by an app that is supposed to be idle.
+    private static let tickInterval: Double = 1.0 / 12.0
+
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { tl in
+        TimelineView(.periodic(from: .now, by: Self.tickInterval)) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
             HStack(alignment: .center, spacing: 1.5) {
                 ForEach(0..<5, id: \.self) { i in
@@ -839,6 +986,7 @@ private struct WaveformIdleView: View {
                         .frame(width: 2, height: barHeight(i: i, t: t))
                 }
             }
+            .drawingGroup()
         }
     }
 

@@ -100,6 +100,9 @@ final class PillWindowController {
             panel.setFrame(frame, display: true)
         } else {
             panel = PillPanel(contentRect: frame)
+            // Lock this window to dark mode so it stays correct even if the
+            // user flips the system appearance while Shannon is running.
+            panel.appearance = NSAppearance(named: .darkAqua)
             let root = PillHost(
                 presentation: presentation,
                 nowPlaying: nowPlaying,
@@ -206,7 +209,16 @@ private struct PillHost: View {
             Spacer(minLength: 0)
         }
         .frame(width: PillMetrics.expandedWidth, height: PillMetrics.expandedHeight)
-        // Transparent host must still accept hits on the pill only.
-        .contentShape(Rectangle())
+        // NO `.contentShape(Rectangle())` here.
+        //
+        // The panel is always the full expanded size (400 × 220) so hover does
+        // not resize the window, but the *pill* is as small as 132 × 34 when
+        // quiet. A content shape on this host made the entire 400 × 220 rect
+        // hit-testable, so the pill silently swallowed every click in a large
+        // transparent region below the notch — menu-bar items and window
+        // titlebars under it became unclickable. PillView now declares its own
+        // capsule content shape, and everything outside it hit-tests to nil and
+        // falls through to whatever is behind.
+        .preferredColorScheme(.dark)
     }
 }

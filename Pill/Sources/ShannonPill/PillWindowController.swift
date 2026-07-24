@@ -111,7 +111,10 @@ final class PillWindowController {
                 idle: idle,
                 confirmation: confirmation,
                 ingest: ingest,
-                activity: activity
+                activity: activity,
+                onContentHeight: { [weak self] height in
+                    Task { @MainActor in self?.resizeToContent(height: height) }
+                }
             )
             let host = NSHostingView(rootView: root)
             host.frame = CGRect(origin: .zero, size: frame.size)
@@ -163,12 +166,40 @@ final class PillWindowController {
     func reposition() {
         guard let panel else { return }
         let geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
+        // Keep whatever height the content has grown to. Recomputing from
+        // PillMetrics.expandedHeight here would shrink the panel back to the
+        // floor on every screen-parameter change — which fires on resolution
+        // switches, exactly when the board needs to keep its room.
+        let height = max(panel.frame.height, PillMetrics.expandedHeight)
         panel.setFrame(
             geometry.windowFrame(contentSize: CGSize(width: PillMetrics.expandedWidth,
-                                                     height: PillMetrics.expandedHeight)),
+                                                     height: height)),
             display: true
         )
         reassertVisibility()
+    }
+
+    /// Match the panel to the pill's laid-out height.
+    ///
+    /// The panel is top-anchored — its top edge sits on `screen.frame.maxY` — so
+    /// a window shorter than its content does not scroll or clip gracefully: the
+    /// surplus is drawn past the top of the display and lost, which is what
+    /// sliced the header icon and the battery ring in half. Following the
+    /// measured height keeps the whole board on-screen at every display mode
+    /// (the usable menu-bar width either side of the notch ranges from ~117 pt
+    /// to ~370 pt across the resolutions a 14" MacBook Pro offers), and the
+    /// clamp stops a long agent list from growing the panel past the display.
+    func resizeToContent(height: CGFloat) {
+        guard let panel else { return }
+        let geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
+        let ceiling = geometry.screenFrame.height * PillMetrics.maxHeightFraction
+        let clamped = min(max(height, PillMetrics.expandedHeight), ceiling)
+        let frame = geometry.windowFrame(
+            contentSize: CGSize(width: PillMetrics.expandedWidth, height: clamped)
+        )
+        // Sub-pixel churn would fight the content measurement in a feedback loop.
+        guard abs(frame.height - panel.frame.height) > 0.5 else { return }
+        panel.setFrame(frame, display: true)
     }
 
     func expand() {
@@ -190,6 +221,10 @@ private struct PillHost: View {
     @ObservedObject var confirmation: ConfirmationController
     @ObservedObject var ingest: AgentIngestService
     @ObservedObject var activity: AgentActivityMonitor
+    /// Called when the pill's laid-out height changes, so the panel can follow.
+    var onContentHeight: (CGFloat) -> Void = { _ in }
+
+    @State private var hostHeight: CGFloat = PillMetrics.expandedHeight
 
     var body: some View {
         VStack {
@@ -208,7 +243,16 @@ private struct PillHost: View {
             )
             Spacer(minLength: 0)
         }
-        .frame(width: PillMetrics.expandedWidth, height: PillMetrics.expandedHeight)
+        .frame(width: PillMetrics.expandedWidth, height: hostHeight)
+        .onPreferenceChange(PillContentSizeKey.self) { size in
+            // Grow the host (and, via onContentHeight, the panel) to whatever the
+            // pill actually laid out. Shrinking back below the floor is pointless
+            // churn, so this only ever tracks the larger of the two.
+            let wanted = max(PillMetrics.expandedHeight, size.height.rounded(.up))
+            guard abs(wanted - hostHeight) > 0.5 else { return }
+            hostHeight = wanted
+            onContentHeight(wanted)
+        }
         // NO `.contentShape(Rectangle())` here.
         //
         // The panel is always the full expanded size (400 × 220) so hover does

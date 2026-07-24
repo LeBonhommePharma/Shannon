@@ -32,8 +32,33 @@ public enum PillMetrics {
     /// to what it has to say, and when it has nothing it says nothing.
     public static let idleWidth: CGFloat = 132
     public static let expandedWidth: CGFloat = 400
-    public static let expandedHeight: CGFloat = 220    // +24 for the boxed entropy strip
+    /// FLOOR for the expanded board, not a fixed size. The board grows past this
+    /// whenever it has more to show (more agents, a longer task line), and the
+    /// window follows via `PillContentSizeKey`. Treating it as a fixed height is
+    /// what pushed content off the top of the display.
+    public static let expandedHeight: CGFloat = 220
     public static let corner: CGFloat = 16
+
+    /// Hard ceiling as a fraction of the screen height, so a pathological agent
+    /// list can never grow the panel past the display it lives on.
+    public static let maxHeightFraction: CGFloat = 0.6
+}
+
+/// The pill's laid-out size, published so the hosting window can match it.
+///
+/// The panel is a borderless top-anchored window: anything the content lays out
+/// beyond the window's bounds is drawn past the top of the screen and clipped by
+/// the display edge rather than wrapping or scrolling. Measuring the content and
+/// resizing the window is what keeps the two in agreement at every display
+/// resolution — the notch band is 38 pt tall here but the usable width either
+/// side of it ranges from ~117 pt to ~370 pt depending on the mode the user picks.
+struct PillContentSizeKey: PreferenceKey {
+    static let defaultValue = CGSize.zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        // Keep the largest reported size; sibling backgrounds can report .zero.
+        if next.width * next.height > value.width * value.height { value = next }
+    }
 }
 
 struct PillView: View {
@@ -141,9 +166,29 @@ struct PillView: View {
                 collapsed
             }
         }
+        // Width is fixed per state; the EXPANDED height follows its content.
+        //
+        // A hard `height: expandedHeight` did not clip the overflow, it centred
+        // it: SwiftUI does not clip to a frame by default, so once the board
+        // grew past 220 pt (header 44 + agent rows + footer + entropy strip) the
+        // surplus spilled equally above and below. The pill window's top edge
+        // sits exactly on the top of the display, so everything that spilled
+        // upward was cut off by the physical screen edge — which is why the
+        // header icon and the battery ring appeared sliced in half. Letting the
+        // height be intrinsic (with expandedHeight as a floor, not a ceiling)
+        // means the content always has the room it asked for.
         .frame(
             width: showExpanded ? PillMetrics.expandedWidth : collapsedWidth,
-            height: showExpanded ? PillMetrics.expandedHeight : PillMetrics.collapsedHeight
+            height: showExpanded ? nil : PillMetrics.collapsedHeight
+        )
+        .frame(minHeight: showExpanded ? PillMetrics.expandedHeight : nil)
+        // Report the laid-out size so PillWindowController can size the panel to
+        // match. Without this the window stays 400x220 and the extra content,
+        // though now correctly laid out, would still land outside the window.
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: PillContentSizeKey.self, value: proxy.size)
+            }
         )
         .shannonPill(isActive: agentActive, isQuiet: isRecessive, cornerRadius: corner)
         .overlay(flashOverlay)
@@ -556,9 +601,29 @@ struct PillView: View {
 
     private var agentBoard: some View {
         VStack(alignment: .leading, spacing: 6) {
-            let rows = Array((busy.isEmpty ? summary.agents.prefix(3) : busy.prefix(4)))
-            ForEach(rows) { agent in
-                agentRow(agent)
+            // Each agent gets its companion alongside its row. The companion
+            // restates status more softly; it is never the only place a state
+            // appears, so losing the artwork never loses information.
+            //
+            // entropyDelta is passed only while the bridge is genuinely
+            // connected: a companion must not look alarmed because of a
+            // simulated reading, and `bridge.status` is nil precisely when the
+            // number on screen is the idle placeholder.
+            if #available(macOS 14, *) {
+                CompanionBoardView(
+                    summary: summary,
+                    entropyDelta: bridge.connected ? bridge.status?.deltaH : nil,
+                    maxRows: busy.isEmpty ? 3 : 4
+                )
+            } else {
+                // The companions are Canvas-drawn and need macOS 14; the package
+                // still deploys to 13. Falling back to the plain rows loses only
+                // the artwork, never information — the companion restates status,
+                // it is not the only place status appears.
+                let rows = Array((busy.isEmpty ? summary.agents.prefix(3) : busy.prefix(4)))
+                ForEach(rows) { agent in
+                    agentRow(agent)
+                }
             }
             // Entropy strip is always visible — ambient signal even when bridge is idle.
             entropyStrip

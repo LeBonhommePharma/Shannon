@@ -182,6 +182,14 @@ struct PillView: View {
             height: showExpanded ? nil : PillMetrics.collapsedHeight
         )
         .frame(minHeight: showExpanded ? PillMetrics.expandedHeight : nil)
+        // Take the IDEAL height when expanded, not the proposed one.
+        //
+        // `.frame(height: nil)` above only declines to impose a height — the view
+        // still accepts whatever its parent proposes, and PillHost proposes its
+        // own fixed height. Without this the board silently agreed to 220 pt,
+        // reported 220 pt through PillContentSizeKey, and overflowed exactly as
+        // before while the window had no idea it needed to grow.
+        .fixedSize(horizontal: false, vertical: showExpanded)
         // Report the laid-out size so PillWindowController can size the panel to
         // match. Without this the window stays 400x220 and the extra content,
         // though now correctly laid out, would still land outside the window.

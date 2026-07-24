@@ -228,6 +228,17 @@ public enum AgentAppMapper {
             return .init(id: "browser", displayName: appName ?? "Browser", source: "browser", bundleHint: bid)
         }
 
+        // Apple system services are not agents. Every app Shannon legitimately
+        // recognises under com.apple.* (Terminal, Safari, Xcode) is matched by
+        // the explicit rules above, so anything still unmatched here is
+        // infrastructure — WindowManager, Dock, Spotlight, controlcenter. These
+        // were being adopted as agents purely because they can hold focus:
+        // com.apple.windowmanager became an agent called "WindowManager" that
+        // then showed as active in the HUD.
+        if bid.hasPrefix("com.apple.") {
+            return AgentKind(id: "local_test", displayName: "Local", source: "other", bundleHint: bid)
+        }
+
         // Unknown app → pet named after the app, still works offline.
         let rawID = appName.flatMap { $0.isEmpty ? nil : $0 } ?? (bid.isEmpty ? "local_test" : bid)
         let fallbackID = AgentKind.sanitizeID(rawID)
@@ -366,7 +377,16 @@ public enum PetBootstrap {
         let now = Date().timeIntervalSince1970
         let hasTask = !(task ?? "").isEmpty
         let stateObj: [String: Any] = [
-            "status": hasTask ? "active" : "idle",
+            // "observed", never "active". This record is a ⌘D capture of whatever
+            // app happened to be frontmost — it is evidence the user was looking
+            // at something, NOT telemetry that an agent is doing work. Writing
+            // "active" here (previously `hasTask ? "active" : "idle"`) made every
+            // app ever captured claim to be a busy agent forever, because nothing
+            // ever writes the status back down. On this machine that surfaced as
+            // three "active" agents while the gate had all seven idle with
+            // disconnected_at set. The gate is the only authority on liveness.
+            "status": "observed",
+            "source": "observed",
             "last_task": task ?? "",
             "last_cf_delta": NSNull(),
             "memory_size": (try? Data(contentsOf: memory).count) ?? 0,

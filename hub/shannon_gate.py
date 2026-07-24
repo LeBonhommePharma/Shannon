@@ -504,7 +504,13 @@ class AuditDB:
                     last_seen_ns    = excluded.last_seen_ns,
                     auth_method     = excluded.auth_method,
                     disconnected_at = NULL,
-                    message_count   = 0
+                    -- message_count is deliberately NOT reset here. It is a
+                    -- lifetime total for the agent, and agent_messages rows are
+                    -- never deleted, so zeroing it on every reconnect made the
+                    -- counter disagree with the table it summarises: agents
+                    -- that had reconnected repeatedly reported 1 while
+                    -- agent_messages held 12. Only the initial INSERT seeds 0.
+                    message_count   = agents.message_count
                 """,
                 (agent_id, status, connected_at_ns, connected_at_ns, auth_method),
             )

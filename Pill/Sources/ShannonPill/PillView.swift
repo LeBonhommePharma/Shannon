@@ -4,10 +4,10 @@ import ShannonTheme
 
 /// Sizes for the two pill states.
 public enum PillMetrics {
-    public static let collapsedHeight: CGFloat = 32
-    public static let collapsedWidth: CGFloat = 260
+    public static let collapsedHeight: CGFloat = 34    // +2 for better text breathing room
+    public static let collapsedWidth: CGFloat = 270    // +10 to fit the larger H= readout
     public static let expandedWidth: CGFloat = 400
-    public static let expandedHeight: CGFloat = 196
+    public static let expandedHeight: CGFloat = 220    // +24 for the boxed entropy strip
     public static let corner: CGFloat = 16
 }
 
@@ -28,8 +28,16 @@ struct PillView: View {
     /// Drives the amber pulse shown while the gate is waiting on a human answer.
     @State private var askPulse       = false
 
-    /// The oldest open approval. Source: agent_interactions (status = pending).
-    private var pendingAsk: GateDBReader.PendingAsk? { activity.pendingAsks.last }
+    /// The newest open approval. Source: agent_interactions (status = pending),
+    /// which `readPendingAsks` already returns newest-first (ORDER BY
+    /// created_at_ns DESC), so index 0 is the one worth answering.
+    ///
+    /// This must stay `.first`: `.last` picks the OLDEST row, so a stale ask
+    /// nobody ever answered outlives every newer one and permanently occupies
+    /// the notch. It also made this banner disagree with the menu-bar popover,
+    /// which reads `.first` (MenuBarPopoverView.swift) — the same ask surfaced
+    /// as two different prompts at once.
+    private var pendingAsk: GateDBReader.PendingAsk? { activity.pendingAsks.first }
     private var hasPendingAsk: Bool { pendingAsk != nil }
 
     private var showExpanded: Bool { isExpanded || confirmation.isAwaitingConfirmation }
@@ -190,11 +198,15 @@ struct PillView: View {
 
             Spacer(minLength: 2)
 
-            // Entropy score: monospaced so the digits hold position as H drifts.
+            // Entropy score. 11 pt so the H= value is readable at arm's length.
+            // Turns amber when approaching collapse, red when collapsed.
             if entropy.entropy > 0 {
                 Text("H\(String(format: "%.1f", entropy.entropy))")
-                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.shannonTertiary)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(
+                        entropy.collapsed ? Color.shannonError
+                        : (entropy.entropy < 5.0 ? Color.shannonWarning : Color.shannonSecondary)
+                    )
                     .help(entropyTooltip)
             }
 
@@ -342,13 +354,16 @@ struct PillView: View {
     private var headerRow: some View {
         HStack(alignment: .center, spacing: 10) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color.shannonSurfaceElevated)
+                // Subtle accent glow on the icon background when active
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(headerIconColor.opacity(agentActive ? 0.18 : 0.08))
                 Image(systemName: headerIcon)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(headerIconColor)
             }
-            .frame(width: 40, height: 40)
+            .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(headerTitle)
@@ -433,25 +448,27 @@ struct PillView: View {
 
     private func agentRow(_ a: AgentActivitySnapshot) -> some View {
         HStack(spacing: 8) {
+            // Status dot: 8 pt in dark mode for better visibility
             Circle()
                 .fill(color(for: a))
-                .frame(width: 6, height: 6)
+                .frame(width: 8, height: 8)
+                .shadow(color: color(for: a).opacity(0.6), radius: 3)
             Image(systemName: iconName(for: a))
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(color(for: a))
                 .frame(width: 14)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text("\(style(for: a).emoji) \(style(for: a).displayName)")
-                        .font(.system(size: 11.5, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(ink(for: a))
                     Text(a.status.label)
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .font(.system(size: 9.5, weight: .semibold, design: .rounded))
                         .foregroundStyle(ink(for: a))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
                         .background(Capsule().fill(style(for: a).palette.wash))
-                        .overlay(Capsule().strokeBorder(style(for: a).palette.edge, lineWidth: 0.5))
+                        .overlay(Capsule().strokeBorder(style(for: a).palette.edge, lineWidth: 1))
                     Spacer(minLength: 0)
                     Text(a.relativeAge)
                         .font(.system(size: 9, design: .monospaced))
@@ -459,26 +476,31 @@ struct PillView: View {
                 }
                 if !a.lastTask.isEmpty {
                     Text(a.lastTask)
-                        .font(.system(size: 10))
+                        .font(.system(size: 10.5))
                         .foregroundStyle(Color.shannonSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.shannonSurfaceElevated.opacity(0.6))
+        )
     }
 
     private var emptyBoard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("No agents running")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.shannonSecondary)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.shannonPrimary)
             Text("Switch to Terminal, Claude, ChatGPT, Codex, or a browser and press ⌘D to attach that session as an agent with its own pet.")
-                .font(.system(size: 10))
-                .foregroundStyle(Color.shannonTertiary)
+                .font(.system(size: 10.5))
+                .foregroundStyle(Color.shannonSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 hintChip("⌘D", "capture")
                 hintChip("agent: id", "clipboard")
                 if bridge.connected {
@@ -489,41 +511,78 @@ struct PillView: View {
     }
 
     private func hintChip(_ key: String, _ label: String) -> some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 4) {
             Text(key)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color.shannonPrimary)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundStyle(Color.shannonAccent)
             Text(label)
-                .font(.system(size: 9))
-                .foregroundStyle(Color.shannonTertiary)
+                .font(.system(size: 9.5))
+                .foregroundStyle(Color.shannonSecondary)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(Color.shannonSurfaceElevated))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Capsule().fill(Color.shannonAccentSubtle))
+        .overlay(Capsule().strokeBorder(Color.shannonAccent.opacity(0.35), lineWidth: 1))
     }
 
     private var entropyStrip: some View {
-        HStack(spacing: 8) {
-            Text(String(format: "H %.2f", entropy.entropy))
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(entropy.collapsed ? Color.shannonWarning : Color.shannonSecondary)
-            Text(String(format: "ΔH %+.2f", entropy.deltaH))
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(entropy.deltaH < -1 ? Color.shannonWarning : Color.shannonTertiary)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                // H value — prominent, coloured by health
+                HStack(spacing: 3) {
+                    Text("H")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.shannonTertiary)
+                    Text(String(format: "%.2f", entropy.entropy))
+                        .font(.system(size: 12.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(
+                            entropy.collapsed ? Color.shannonError
+                            : (entropy.entropy < 5.0 ? Color.shannonWarning : Color.shannonSuccess)
+                        )
+                }
+                // ΔH value — coloured red when large negative delta (collapse risk)
+                HStack(spacing: 3) {
+                    Text("ΔH")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.shannonTertiary)
+                    Text(String(format: "%+.2f", entropy.deltaH))
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(
+                            entropy.deltaH < -1.5 ? Color.shannonError
+                            : (entropy.deltaH < -0.5 ? Color.shannonWarning : Color.shannonSecondary)
+                        )
+                }
+                Spacer(minLength: 0)
+                Text(bridge.connected ? entropy.backend : "idle")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(bridge.connected ? Color.shannonSecondary : Color.shannonTertiary)
+            }
+            // Progress rail — taller and more visible than the old 5 pt bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.shannonQuaternary)
-                    Capsule()
-                        .fill(entropy.collapsed ? Color.shannonWarning
-                              : (bridge.connected ? Color.shannonSuccess : Color.shannonAccent))
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.shannonQuaternary)
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(
+                            entropy.collapsed ? Color.shannonError
+                            : (entropy.entropy < 5.0 ? Color.shannonWarning
+                               : (bridge.connected ? Color.shannonSuccess : Color.shannonAccent))
+                        )
                         .frame(width: geo.size.width * CGFloat(min(max(entropy.entropy / 12.0, 0.04), 1)))
                 }
             }
-            .frame(height: 5)
-            Text(bridge.connected ? entropy.backend : "idle")
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(Color.shannonTertiary)
+            .frame(height: 7)
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.shannonSurfaceSunken)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.shannonSeparator, lineWidth: 1)
+        )
         .padding(.top, 2)
     }
 
@@ -570,15 +629,19 @@ struct PillView: View {
             Circle()
                 .fill(bridge.connected ? Color.shannonSuccess
                       : (busy.isEmpty ? Color.shannonTertiary : Color.shannonAccent))
-                .frame(width: 5, height: 5)
+                .frame(width: 6, height: 6)
+                .shadow(
+                    color: (bridge.connected ? Color.shannonSuccess : Color.shannonAccent).opacity(0.5),
+                    radius: bridge.connected || !busy.isEmpty ? 3 : 0
+                )
             Text(footerText)
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(Color.shannonTertiary)
+                .font(.system(size: 9.5, design: .monospaced))
+                .foregroundStyle(Color.shannonSecondary)
                 .lineLimit(1)
             Spacer()
             if ingest.isHighlighting, let last = ingest.lastResult {
                 Text("+\(last.agent.id)")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
                     .foregroundStyle(Color.shannonSuccess)
             }
         }

@@ -6,6 +6,8 @@ import math
 
 import numpy as np
 from shannon import (
+    CollapseEvent,
+    CollapseResult,
     ShannonCollapseDetector,
     shannon_configurational_entropy,
     shannon_entropy_from_logprobs,
@@ -274,3 +276,64 @@ class TestInputPolicy:
         for method in ("add_logits", "add_probs", "add_logprobs"):
             with pytest.raises(ValueError):
                 getattr(det, method)(np.array([], dtype=np.float64))
+
+
+# ── Callback contracts ───────────────────────────────────────────────────────
+
+
+class TestCallbackContracts:
+    """`callback` is handed a CollapseResult, `on_collapse` a CollapseEvent.
+
+    The two used to be merged (`self._callback = callback or on_collapse`), so a
+    caller passing only the legacy on_collapse had their CollapseEvent handler
+    invoked with a CollapseResult and raised AttributeError on delta_h. The C++
+    fast path compounded it by wiring only _callback, so on_collapse never fired
+    at all whenever the compiled core was present -- i.e. by default.
+    """
+
+    @staticmethod
+    def _drive_to_collapse(detector):
+        rng = np.random.default_rng(0)
+        for _ in range(10):
+            detector.add_logits(rng.normal(0, 0.01, 1024))
+        spike = np.full(1024, -100.0)
+        spike[0] = 100.0
+        detector.add_logits(spike)
+
+    def test_on_collapse_receives_a_collapse_event(self):
+        seen: list[object] = []
+        det = ShannonCollapseDetector(window_size=4, threshold=-3.0, on_collapse=seen.append)
+        self._drive_to_collapse(det)
+
+        assert seen, "legacy on_collapse callback never fired"
+        evt = seen[0]
+        assert isinstance(evt, CollapseEvent)
+        # Precisely the attributes CollapseResult does not carry; touching any
+        # of them is what used to raise AttributeError.
+        assert evt.delta_h < 0
+        assert evt.collapse_score > 0
+        assert len(evt.window) > 0
+
+    def test_callback_receives_a_collapse_result(self):
+        seen: list[object] = []
+        det = ShannonCollapseDetector(window_size=4, threshold=-3.0, callback=seen.append)
+        self._drive_to_collapse(det)
+
+        assert seen, "callback never fired"
+        assert all(isinstance(r, CollapseResult) for r in seen)
+
+    def test_both_callbacks_fire_with_their_own_type(self):
+        results: list[object] = []
+        events: list[object] = []
+        det = ShannonCollapseDetector(
+            window_size=4,
+            threshold=-3.0,
+            callback=results.append,
+            on_collapse=events.append,
+        )
+        self._drive_to_collapse(det)
+
+        assert len(events) == 1, f"expected exactly one collapse event, got {len(events)}"
+        assert all(isinstance(e, CollapseEvent) for e in events)
+        assert results, "modern callback never fired"
+        assert all(isinstance(r, CollapseResult) for r in results)

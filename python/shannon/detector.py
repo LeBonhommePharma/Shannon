@@ -254,7 +254,13 @@ class ShannonCollapseDetector:
         # Handle backwards-compat parameter names
         if collapse_threshold is not None:
             threshold = collapse_threshold
-        self._callback = callback or on_collapse
+        # These two are deliberately NOT merged. `callback` is handed a
+        # CollapseResult; the legacy `on_collapse` is handed a CollapseEvent.
+        # Assigning `callback or on_collapse` conflated them, so a caller who
+        # passed only on_collapse had their CollapseEvent handler invoked with a
+        # CollapseResult -- an AttributeError on the first access of delta_h,
+        # collapse_score or window, none of which CollapseResult has.
+        self._callback = callback
         self._on_collapse_event = on_collapse  # Separate CollapseEvent callback
 
         self._window_size = window_size
@@ -280,11 +286,16 @@ class ShannonCollapseDetector:
             self._cpp_detector = CppDetector(
                 window_size, threshold, expansion_threshold, oscillation_window
             )
-            if self._callback:
+            if self._callback is not None or self._on_collapse_event is not None:
                 # Wrap so Python callbacks receive the Python CollapseResult
-                # dataclass, not the raw C++ binding object.
+                # dataclass, not the raw C++ binding object, then dispatch
+                # through _emit so this fast path fires exactly the same
+                # callbacks as the pure-Python path. Previously it invoked
+                # self._callback directly and never fired _on_collapse_event at
+                # all, so the legacy on_collapse API was silently dead whenever
+                # the C++ core was present -- i.e. by default.
                 self._cpp_detector.set_callback(
-                    lambda r: self._callback(self._wrap_cpp_result(r))
+                    lambda r: self._emit(self._wrap_cpp_result(r))
                 )
         except ImportError:
             pass
@@ -516,25 +527,46 @@ class ShannonCollapseDetector:
         self._last_result = result
         self._token_count += 1
 
-        if (collapsed or expanded or oscillating) and self._callback:
-            self._callback(result)
-
-        # Fire CollapseEvent for legacy on_collapse callback
-        if collapsed and self._on_collapse_event is not None:
-            evt = CollapseEvent(
-                token_index=result.token_index,
-                entropy=h,
-                delta_h=delta,
-                collapse_score=abs(delta / self._threshold) if abs(self._threshold) > 1e-15 else 0.0,
-                window=list(self._window),
-            )
-            self._on_collapse_event(evt)
+        self._emit(result)
 
         # Trigger super-clustering on collapse
         if collapsed and self._enable_clustering:
             self._run_clustering()
 
         return result
+
+    def _emit(self, result: CollapseResult) -> None:
+        """Deliver one result to both callback flavours.
+
+        The single dispatch point for both backends. `callback` receives the
+        CollapseResult; the legacy `on_collapse` receives a CollapseEvent built
+        from it. Funnelling the C++ fast path and the pure-Python path through
+        here is what stops the two from disagreeing about which callbacks fire
+        and with what type -- the previous split let the C++ path drop
+        on_collapse entirely.
+        """
+        if (
+            result.collapsed or result.expanded or result.oscillating
+        ) and self._callback is not None:
+            self._callback(result)
+
+        if result.collapsed and self._on_collapse_event is not None:
+            # self._window is only maintained by the pure-Python path, so the
+            # window is taken from trace, which both backends populate.
+            trace = self.trace
+            self._on_collapse_event(
+                CollapseEvent(
+                    token_index=result.token_index,
+                    entropy=result.entropy,
+                    delta_h=result.delta,
+                    collapse_score=(
+                        abs(result.delta / self._threshold)
+                        if abs(self._threshold) > 1e-15
+                        else 0.0
+                    ),
+                    window=list(trace[-self._window_size:]),
+                )
+            )
 
     @staticmethod
     def _wrap_cpp_result(r: object) -> CollapseResult:

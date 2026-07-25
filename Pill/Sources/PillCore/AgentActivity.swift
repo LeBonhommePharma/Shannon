@@ -835,7 +835,7 @@ public enum AgentActivityReader {
         case "terminal": return "terminal"
         case "browser": return "browser"
         case "cursor", "vscode": return "ide"
-        case "claude_code", "chatgpt", "codex", "grok_build", "science": return "chat"
+        case "claude_code", "chatgpt", "codex", "grok_build", "science", "design": return "chat"
         default: return "other"
         }
     }

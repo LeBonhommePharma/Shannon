@@ -194,8 +194,8 @@ final class AgentIngestTests: XCTestCase {
         // hub/shannon_gate.py derives VALID_AGENTS from agent_identity.IDENTITIES;
         // an id outside that set registers and is rejected.
         let gateValid: Set<String> = [
-            "science", "grok_build", "claude_code", "codex", "dispatch", "cowork",
-            "chatgpt", "dataset_runner", "local_test", "terminal", "browser",
+            "science", "grok_build", "claude_code", "design", "codex", "dispatch", "cowork",
+            "chatgpt", "dataset_runner", "local_test", "terminal", "browser", "opencode",
         ]
         for rule in TerminalAgentProbe.rules {
             XCTAssertTrue(
@@ -203,6 +203,48 @@ final class AgentIngestTests: XCTestCase {
                 "TerminalAgentProbe emits \(rule.agentID), which the gate would reject"
             )
         }
+    }
+
+    /// Claude Design must not collapse into Claude Code (name, bundle, terminal, tab).
+    func testMapClaudeDesignNotClaudeCode() throws {
+        let byName = try XCTUnwrap(AgentAppMapper.map(
+            bundleID: "com.example.unknown", appName: "Claude Design"
+        ))
+        XCTAssertEqual(byName.id, "design")
+        XCTAssertEqual(byName.displayName, "Claude Design")
+        XCTAssertNotEqual(byName.id, "claude_code")
+
+        XCTAssertEqual(
+            AgentAppMapper.map(bundleID: "com.anthropic.claude-design", appName: nil)?.id,
+            "design"
+        )
+        XCTAssertEqual(
+            AgentAppMapper.map(bundleID: "com.anthropic.claudedesign", appName: "Design")?.id,
+            "design"
+        )
+
+        let inTerm = try XCTUnwrap(AgentAppMapper.map(
+            bundleID: "com.mitchellh.ghostty", appName: "Ghostty",
+            terminal: .init(
+                agentID: "design", displayName: "Claude Design",
+                executable: "claude-design", pid: 4242, emulatorName: "Ghostty"
+            )
+        ))
+        XCTAssertEqual(inTerm.id, "design")
+
+        let tab = try XCTUnwrap(BrowserAgentDetector.detect(page: .init(
+            title: "Claude Design", url: "https://claude.ai/design/project"
+        )))
+        XCTAssertEqual(tab.id, "design")
+
+        // Science still wins when both words appear as science product.
+        let sci = try XCTUnwrap(BrowserAgentDetector.detect(page: .init(
+            title: "Claude Science", url: "https://claude.com/science"
+        )))
+        XCTAssertEqual(sci.id, "science")
+
+        XCTAssertEqual(AgentStyleCatalog.style(for: "design").systemImage, "paintpalette.fill")
+        XCTAssertEqual(AgentStyleCatalog.style(for: "design").emoji, "🎨")
     }
 
     func testMapChatAgents() {

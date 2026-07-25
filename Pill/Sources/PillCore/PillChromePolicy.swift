@@ -54,7 +54,7 @@ public enum PillChromePolicy {
 
     /// Consumer-facing empty roster line (no raw path dumps).
     public static let emptyRosterCopy: String =
-        "⌘D attaches Terminal, Claude, Codex, Grok Build, or a browser. FlexAIDdS DatasetRunner progress appears when the hub records a benchmark_state row."
+        "⌘D attaches Terminal, Claude Code/Design/Science, Codex, Grok Build, or a browser. FlexAIDdS DatasetRunner progress appears when the hub records a benchmark_state row."
 
     /// Semantic chrome role for status glyphs (ask vs collapse).
     public enum StatusChromeRole: String, Sendable, Equatable {

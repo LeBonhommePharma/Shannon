@@ -230,6 +230,7 @@ struct AgentIdentity: Identifiable, Equatable {
         case "cowork":      return "Cowork"
         case "dispatch":    return "Dispatch"
         case "science":     return "Claude Science"
+        case "design":      return "Claude Design"
         case "grok_build":  return "Grok Build"
         case "codex":       return "Codex"
         case "chatgpt":     return "ChatGPT"
@@ -243,7 +244,7 @@ struct AgentIdentity: Identifiable, Equatable {
     /// Underlying model family — shown as a small tag next to the agent name.
     var modelTag: String {
         switch id {
-        case "claude_code", "cowork", "dispatch": return "Claude"
+        case "claude_code", "cowork", "dispatch", "design": return "Claude"
         case "science":     return "Claude Fable 5"
         case "grok_build":  return "Grok · xAI"
         case "codex", "chatgpt": return "GPT · OpenAI"
@@ -262,6 +263,7 @@ struct AgentIdentity: Identifiable, Equatable {
         case "science":        return "owl"
         case "grok_build":     return "raven"
         case "claude_code":    return "fox"
+        case "design":         return "peacock"
         case "codex":          return "dolphin"
         case "dispatch":       return "wolf"
         case "cowork":         return "beaver"
@@ -281,6 +283,7 @@ struct AgentIdentity: Identifiable, Equatable {
         case "science":        return "bird.fill"
         case "grok_build":     return "bird"
         case "claude_code":    return "hare.fill"
+        case "design":         return "paintbrush.pointed.fill"
         case "codex":          return "fish.fill"
         case "dispatch":       return "dog.fill"
         case "cowork":         return "pawprint.fill"
@@ -298,6 +301,7 @@ struct AgentIdentity: Identifiable, Equatable {
         case "science":     return "com.apple.ttsbundle.Karen-compact"
         case "grok_build":  return "com.apple.ttsbundle.Moira-compact"
         case "claude_code": return "com.apple.ttsbundle.Tom-compact"
+        case "design":      return "com.apple.ttsbundle.Samantha-compact"
         case "cowork":      return "com.apple.ttsbundle.Samantha-compact"
         case "dispatch":    return "com.apple.ttsbundle.Daniel-compact"
         default:            return AVSpeechSynthesisVoiceIdentifierAlex
@@ -308,6 +312,7 @@ struct AgentIdentity: Identifiable, Equatable {
         case "science":     return 1.15
         case "grok_build":  return 0.85
         case "claude_code": return 0.95
+        case "design":      return 1.05
         case "cowork":      return 1.10
         case "dispatch":    return 0.90
         default:            return 1.05   // codex / dataset_runner

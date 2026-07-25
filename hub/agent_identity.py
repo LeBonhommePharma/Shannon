@@ -223,7 +223,7 @@ IDENTITIES.update(
         # Design + OpenCode — Shannon skill handrail for multi-TUI orchestration.
         "design": AgentIdentity(
             id="design",
-            display_name="Design",
+            display_name="Claude Design",
             short_name="Des",
             emoji="🎨",
             color_rgb=(0.95, 0.40, 0.70),

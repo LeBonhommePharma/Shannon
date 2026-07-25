@@ -78,6 +78,11 @@ public enum AgentStyleCatalog {
               systemImage: "bubble.left.and.bubble.right.fill", emoji: "🟠",
               red: 1.00, green: 0.50, blue: 0.08,
               pet: "fox", petSymbol: "hare.fill"),
+        // Aligned with hub/agent_identity.py `design` (Claude Design).
+        .init(id: "design", displayName: "Claude Design", shortName: "Des",
+              systemImage: "paintpalette.fill", emoji: "🎨",
+              red: 0.95, green: 0.40, blue: 0.70,
+              pet: "peacock", petSymbol: "paintbrush.pointed.fill"),
         .init(id: "chatgpt", displayName: "ChatGPT", shortName: "GPT",
               systemImage: "text.bubble.fill", emoji: "🟢",
               red: 0.10, green: 0.72, blue: 0.55,
@@ -153,10 +158,11 @@ public enum BrowserAgentDetector {
     ///
     /// Priority (first match wins):
     /// 1. Claude Science — science subdomain / title / FlexAID docking cues
-    /// 2. SuperGrok / Grok — grok.x.ai, x.com/i/grok, SuperGrok title
-    /// 3. ChatGPT / Codex — chatgpt.com, chat.openai.com
-    /// 4. Claude (generic chat) — claude.ai
-    /// 5. nil → keep generic browser
+    /// 2. Claude Design — design product / canvas / Artifacts UI cues
+    /// 3. SuperGrok / Grok — grok.x.ai, x.com/i/grok, SuperGrok title
+    /// 4. ChatGPT / Codex — chatgpt.com, chat.openai.com
+    /// 5. Claude (generic chat / Code) — claude.ai
+    /// 6. nil → keep generic browser
     public static func detect(page: BrowserPageContext) -> AgentKind? {
         let title = page.title.lowercased()
         let url = page.url.lowercased()
@@ -167,6 +173,16 @@ public enum BrowserAgentDetector {
             return AgentKind(
                 id: "science",
                 displayName: "Claude Science",
+                source: "browser",
+                bundleHint: page.url.isEmpty ? nil : page.url
+            )
+        }
+
+        // ── Claude Design (must beat generic Claude / Code) ───────────────
+        if matchesDesign(title: title, url: url, blob: blob) {
+            return AgentKind(
+                id: "design",
+                displayName: "Claude Design",
                 source: "browser",
                 bundleHint: page.url.isEmpty ? nil : page.url
             )
@@ -197,12 +213,50 @@ public enum BrowserAgentDetector {
         }
 
         // ── Claude generic (desktop-like) ─────────────────────────────────
-        if url.contains("claude.ai") || (title.contains("claude") && !title.contains("science")) {
+        // Exclude design/science product titles already handled above.
+        if url.contains("claude.ai") || (title.contains("claude")
+            && !title.contains("science") && !title.contains("design")) {
             return AgentKind(id: "claude_code", displayName: "Claude", source: "browser",
                              bundleHint: page.url.isEmpty ? nil : page.url)
         }
 
         return nil
+    }
+
+    private static func matchesDesign(title: String, url: String, blob: String) -> Bool {
+        // Explicit product name (window title / marketing)
+        if title.contains("claude design") || title.contains("design · claude")
+            || title.contains("design - claude") || title.contains("design | claude")
+            || title == "claude design" || title.hasPrefix("claude design ")
+            || title.contains("claude · design") {
+            return true
+        }
+        // Official product URLs
+        if url.contains("claude.com/design") || url.contains("claude.com/product/claude-design")
+            || url.contains("claude.ai/design") || url.contains("/claude-design")
+            || url.contains("claude.com/artifacts") || url.contains("claude.ai/artifacts") {
+            return true
+        }
+        if (url.contains("claude.ai") || url.contains("claude.com") || url.contains("anthropic.com"))
+            && (url.contains("/design") || url.contains("design=") || url.contains("artifact")) {
+            return true
+        }
+        // Title: Claude + design / canvas / artboard / figma-style cues
+        if title.contains("claude") && (
+            title.contains("design") || title.contains("canvas")
+                || title.contains("artboard") || title.contains("artifact")
+                || title.contains("wireframe") || title.contains("mockup")
+        ) {
+            return true
+        }
+        // Standalone design agent label
+        if (title.hasPrefix("design") || title == "design")
+            && (title.contains("claude") || blob.contains("anthropic") || blob.contains("claude")) {
+            return true
+        }
+        // Native Claude Design.app window chrome
+        if title.contains("claude design") { return true }
+        return false
     }
 
     private static func matchesScience(title: String, url: String, blob: String) -> Bool {
@@ -270,8 +324,9 @@ public enum BrowserAgentDetector {
         }
         // Catch-all for SuperGrok branding in title even without URL
         if blob.contains("supergrok") { return true }
-        // Never treat science URLs as Grok even if title mentions both
-        if blob.contains("claude science") || url.contains("claude.com/science") {
+        // Never treat science / design URLs as Grok even if title mentions both
+        if blob.contains("claude science") || url.contains("claude.com/science")
+            || blob.contains("claude design") || url.contains("claude.com/design") {
             return false
         }
         return false

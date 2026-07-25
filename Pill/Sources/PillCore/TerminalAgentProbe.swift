@@ -174,6 +174,11 @@ public enum TerminalAgentProbe {
     public static let rules: [Rule] = [
         .init(executables: ["claude-science", "claudescience", "claude_science"],
               agentID: "science", displayName: "Claude Science"),
+        // Design before bare `claude` so `claude-design` is not swallowed by Code.
+        .init(executables: [
+            "claude-design", "claudedesign", "claude_design",
+            "claude-design-cli", "design-cli",
+        ], agentID: "design", displayName: "Claude Design"),
         .init(executables: ["claude", "claude-code", "claudecode", "claude_code"],
               agentID: "claude_code", displayName: "Claude Code"),
         .init(executables: ["codex", "codex-cli", "codex-exec"],
@@ -199,6 +204,8 @@ public enum TerminalAgentProbe {
     /// Kept narrow on purpose: a bare "/grok" would match any project folder.
     private static let pathMarkers: [(String, String, String)] = [
         ("claude-science", "science", "Claude Science"),
+        ("claude-design", "design", "Claude Design"),
+        ("@anthropic-ai/claude-design", "design", "Claude Design"),
         ("@anthropic-ai/claude-code", "claude_code", "Claude Code"),
         ("claude-code", "claude_code", "Claude Code"),
         ("/.claude/local/", "claude_code", "Claude Code"),

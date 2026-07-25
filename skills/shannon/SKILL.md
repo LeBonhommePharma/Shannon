@@ -47,7 +47,7 @@ killable from one place (pill + gate + this skill).
 | `science` | Claude Science | Science / Fable |
 | `cowork` | Cowork | Claude Cowork |
 | `dispatch` | Dispatch | Claude Dispatch |
-| `design` | Design | Design agents |
+| `design` | Claude Design | Claude Design app / design CLI / artifacts canvas |
 | `opencode` | OpenCode | OpenCode TUI |
 | `dataset_runner` | DatasetRunner | FlexAIDdS bridge |
 

@@ -198,9 +198,9 @@ public final class FrontmostAppTracker {
 public enum AgentAppMapper {
     /// Built-in agent ids (aligned with hub/pet_manager ALL_AGENTS + extras).
     public static let knownIDs: Set<String> = [
-        "claude_code", "cowork", "dispatch", "science",
+        "claude_code", "cowork", "dispatch", "science", "design",
         "grok_build", "codex", "dataset_runner", "local_test",
-        "chatgpt", "browser", "terminal", "cursor", "vscode",
+        "chatgpt", "browser", "terminal", "cursor", "vscode", "opencode",
     ]
 
     /// Best-effort identity for an app, or `nil` when the app is not an agent
@@ -332,6 +332,14 @@ public enum AgentAppMapper {
                 bundleHint: bid
             )
         }
+        // Claude Design BEFORE bare "claude" — same ordering as Dispatch/Science.
+        if name == "design" || name.contains("claude design")
+            || (name.contains("design") && name.contains("claude")) {
+            return withCatalogStyle(
+                .init(id: "design", displayName: "Claude Design", source: "chat"),
+                bundleHint: bid
+            )
+        }
         if name.contains("claude") {
             return withCatalogStyle(
                 .init(id: "claude_code", displayName: "Claude Code", source: "chat"),
@@ -430,6 +438,11 @@ public enum AgentAppMapper {
             ("com.anthropic.operon", .init(id: "science", displayName: "Claude Science", source: "chat")),
             ("com.anthropic.claudescience", .init(id: "science", displayName: "Claude Science", source: "chat")),
             ("com.anthropic.claude-science", .init(id: "science", displayName: "Claude Science", source: "chat")),
+            // Claude Design BEFORE generic Claude / Code (same ordering as Science/Dispatch).
+            ("com.anthropic.claudedesign", .init(id: "design", displayName: "Claude Design", source: "chat")),
+            ("com.anthropic.claude-design", .init(id: "design", displayName: "Claude Design", source: "chat")),
+            ("com.anthropic.claude.design", .init(id: "design", displayName: "Claude Design", source: "chat")),
+            ("com.anthropic.design", .init(id: "design", displayName: "Claude Design", source: "chat")),
             // Dispatch BEFORE any generic Claude rule: its window/app name is
             // "Claude Dispatch" in some builds, which the `name.contains("claude")`
             // fallback below would otherwise swallow into claude_code.

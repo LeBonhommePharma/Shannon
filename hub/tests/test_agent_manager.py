@@ -148,5 +148,5 @@ class TestIdentitiesShipped:
     def test_design_and_opencode_in_identities(self):
         assert "design" in IDENTITIES
         assert "opencode" in IDENTITIES
-        assert IDENTITIES["design"].display_name == "Design"
+        assert IDENTITIES["design"].display_name == "Claude Design"
         assert IDENTITIES["opencode"].display_name == "OpenCode"

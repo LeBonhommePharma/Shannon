@@ -63,6 +63,9 @@ final class MenuBarController: NSObject {
         let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         status.isVisible = true
         if let button = status.button {
+            // Status item is in the *system* menu bar — not our darkAqua app chrome.
+            // Aqua appearance + absolute title ink keeps text readable on light glass.
+            button.appearance = NSAppearance(named: .aqua)
             button.target = self
             button.action = #selector(statusItemClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -72,7 +75,7 @@ final class MenuBarController: NSObject {
         item = status
         // First-run discoverability: brief title flash (LSUIElement has no Dock).
         if FirstRunCoach.shouldShow(), let button = status.button {
-            button.title = " Shannon · click me"
+            Self.applyStatusTitle(button, text: " Shannon · click me", role: .calm)
             DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
                 self?.lastRendered = nil
                 self?.refresh()
@@ -113,20 +116,37 @@ final class MenuBarController: NSObject {
     }
 
     func flashSuccess(_ text: String) {
-        flash(text, symbol: "checkmark.circle.fill", tint: .systemGreen)
+        // Success flash: dark green absolute ink (not systemGreen via darkAqua).
+        flash(text, symbol: "checkmark.circle.fill", role: .calm, forceGreen: true)
     }
 
     /// Something was deliberately *not* done (⌘D on a system service). A green
     /// checkmark here would claim a capture that never happened.
     func flashNotice(_ text: String) {
-        flash(text, symbol: "nosign", tint: .secondaryLabelColor)
+        flash(text, symbol: "nosign", role: .calm, forceGreen: false)
     }
 
-    private func flash(_ text: String, symbol: String, tint: NSColor) {
+    private func flash(
+        _ text: String,
+        symbol: String,
+        role: MenuBarTitleInk.Role,
+        forceGreen: Bool
+    ) {
         guard let button = item?.button else { return }
+        button.appearance = NSAppearance(named: .aqua)
         button.image = Self.symbolImage(symbol, template: false)
-        button.title = " " + text
-        button.contentTintColor = tint
+        if forceGreen {
+            let green = NSColor(srgbRed: 0.12, green: 0.55, blue: 0.28, alpha: 1)
+            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+            button.attributedTitle = NSAttributedString(
+                string: " " + text,
+                attributes: [.font: font, .foregroundColor: green]
+            )
+            button.contentTintColor = green
+        } else {
+            Self.applyStatusTitle(button, text: " " + text, role: role)
+            button.contentTintColor = Self.nsColor(for: role)
+        }
         flashUntil = Date().addingTimeInterval(1.8)
         lastRendered = nil   // force a real redraw once the flash expires
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
@@ -191,9 +211,9 @@ final class MenuBarController: NSObject {
             Self.applyStatusTitle(
                 button,
                 text: pendingCount > 1 ? " \(pendingCount)" : "",
-                color: .systemOrange
+                role: .ask
             )
-            button.contentTintColor = .systemOrange
+            button.contentTintColor = Self.nsColor(for: .ask)
             button.setAccessibilityLabel(
                 "Shannon: \(pendingCount) gate approval\(pendingCount > 1 ? "s" : "") pending")
             startPulse()
@@ -206,9 +226,9 @@ final class MenuBarController: NSObject {
             Self.applyStatusTitle(
                 button,
                 text: String(format: " H %.1f", collapse.bits),
-                color: .systemRed
+                role: .collapse
             )
-            button.contentTintColor = .systemRed
+            button.contentTintColor = Self.nsColor(for: .collapse)
             button.setAccessibilityLabel(
                 String(format: "Shannon: entropy collapse, H %.1f bits (source: %@)",
                        collapse.bits, collapse.source.label))
@@ -229,8 +249,9 @@ final class MenuBarController: NSObject {
             } else {
                 titleText = ""
             }
-            // High-contrast title on Liquid Glass menu bar (labelColor adapts).
-            Self.applyStatusTitle(button, text: titleText, color: .labelColor)
+            let role = MenuBarTitleInk.loadRole(percent: constrained?.percent ?? snap.cpuPercent)
+            Self.applyStatusTitle(button, text: titleText, role: role)
+            // Do not tint the multicolor glyph with title ink.
             button.contentTintColor = nil
             let names = summary.busy.prefix(3).map(\.displayName).joined(separator: ", ")
             button.setAccessibilityLabel("Shannon: \(summary.busy.count) agents active — \(names)")
@@ -246,17 +267,8 @@ final class MenuBarController: NSObject {
                 hottest: snap.hottestCore,
                 imbalance: snap.coreImbalance
             )
-            // Load stress: strong semantic colors. Calm: system label (readable
-            // on both light and dark menu-bar glass — nil tint looked broken).
-            let titleColor: NSColor
-            if let c = constrained, c.percent >= 92 {
-                titleColor = .systemRed
-            } else if let c = constrained, c.percent >= 80 {
-                titleColor = .systemYellow
-            } else {
-                titleColor = .labelColor
-            }
-            Self.applyStatusTitle(button, text: title, color: titleColor)
+            let role = MenuBarTitleInk.loadRole(percent: constrained?.percent)
+            Self.applyStatusTitle(button, text: title, role: role)
             button.contentTintColor = nil
             let connected = summary.connected.count
             var label: String
@@ -280,16 +292,24 @@ final class MenuBarController: NSObject {
 
     /// High-contrast monospaced-digit title for the status item.
     ///
-    /// Plain `button.title` + nil `contentTintColor` washes out on macOS 27
-    /// Liquid Glass menu bars (light wallpaper / translucent bar). Attributed
-    /// titles with `.labelColor` stay readable.
-    private static func applyStatusTitle(_ button: NSStatusBarButton, text: String, color: NSColor) {
+    /// Uses **absolute sRGB** from `MenuBarTitleInk` — never `NSColor.labelColor`,
+    /// which under forced `NSApp.appearance = darkAqua` becomes white@~0.85 and
+    /// vanishes on light Liquid Glass (MBP 14" wallpaper / Image #4).
+    private static func applyStatusTitle(
+        _ button: NSStatusBarButton,
+        text: String,
+        role: MenuBarTitleInk.Role
+    ) {
+        // Status item lives in the *system* menu bar — force aqua resolution for
+        // any system metrics, but paint title with absolute ink.
+        button.appearance = NSAppearance(named: .aqua)
         if text.isEmpty {
             button.title = ""
             button.attributedTitle = NSAttributedString(string: "")
             return
         }
         let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        let color = nsColor(for: role)
         button.attributedTitle = NSAttributedString(
             string: text,
             attributes: [
@@ -297,6 +317,11 @@ final class MenuBarController: NSObject {
                 .foregroundColor: color,
             ]
         )
+    }
+
+    private static func nsColor(for role: MenuBarTitleInk.Role) -> NSColor {
+        let c = MenuBarTitleInk.sRGB(for: role)
+        return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a)
     }
 
     private static func resourceTooltip(snap: SystemResourceSnapshot, agents: AgentActivitySummary) -> String {
@@ -324,13 +349,13 @@ final class MenuBarController: NSObject {
     /// full and dimmed amber. Runs only in the pending state — no idle CPU.
     private func startPulse() {
         guard pulseTimer == nil else { return }
+        let full = Self.nsColor(for: .ask)
+        let dim = full.withAlphaComponent(0.45)
         let t = Timer(timeInterval: 0.6, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let button = self.item?.button else { return }
                 self.pulsePhase.toggle()
-                button.contentTintColor = self.pulsePhase
-                    ? NSColor.systemOrange.withAlphaComponent(0.45)
-                    : .systemOrange
+                button.contentTintColor = self.pulsePhase ? dim : full
             }
         }
         RunLoop.main.add(t, forMode: .common)

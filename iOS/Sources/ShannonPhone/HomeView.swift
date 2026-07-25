@@ -36,6 +36,22 @@ struct HomeView: View {
                         AgentCard(agent: agent)
                     }
 
+                    // Host capacity (SSD / thermal / most-constrained) from Mac.
+                    HostCapacityCard(
+                        title: snapshot.device?.deviceName ?? "Mac",
+                        capacity: snapshot.device?.capacity,
+                        platformSymbol: "laptopcomputer"
+                    )
+                    .shannonCard()
+
+                    // Local phone pressure (ProcessInfo thermal only — no die temp).
+                    HostCapacityCard(
+                        title: "iPhone",
+                        capacity: LocalHostCapacity.current(platform: "iOS"),
+                        platformSymbol: "iphone"
+                    )
+                    .shannonCard()
+
                     ForEach(snapshot.notifications) { note in
                         NotificationCard(note: note)
                     }

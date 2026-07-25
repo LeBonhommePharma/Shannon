@@ -444,6 +444,24 @@ class AgentManager:
             "ok": True,
         }
 
+    def prefer_device(
+        self,
+        devices: list[dict[str, Any]],
+        *,
+        busy_threshold: float = 85.0,
+    ) -> dict[str, Any]:
+        """Load-preference for concurrent benchmarking (pure, no gate required)."""
+        try:
+            from load_balance import preferred_device, should_defer_work
+        except ImportError:
+            from hub.load_balance import preferred_device, should_defer_work  # type: ignore
+        pick = preferred_device(devices, busy_threshold=busy_threshold)
+        return {
+            "preferred": pick,
+            "should_defer": should_defer_work(pick) if pick else True,
+            "ok": pick is not None,
+        }
+
 
 def main(argv: Optional[list[str]] = None) -> int:
     """CLI: PYTHONPATH=hub python3 -m agent_manager <cmd> ..."""
@@ -502,6 +520,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     sub.add_parser("roster", parents=[common], help="Print handrail agent roster")
     sub.add_parser("gate-status", parents=[common], help="Is the local gate socket up?")
 
+    pref = sub.add_parser(
+        "prefer-device",
+        parents=[common],
+        help="Pick least constrained device from JSON list (stdin or --devices)",
+    )
+    pref.add_argument(
+        "--devices",
+        default="-",
+        help='JSON array of device capacity dicts, or "-" for stdin',
+    )
+    pref.add_argument("--busy-threshold", type=float, default=85.0)
+
     args = p.parse_args(argv)
     mgr = AgentManager(mode=args.mode, http_url=args.http_url, socket_path=args.socket)
 
@@ -523,6 +553,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             up = gate_socket_up(args.socket)
             out({"gate_up": up, "socket": args.socket})
             return 0 if up else 2
+        if args.cmd == "prefer-device":
+            raw = args.devices
+            if raw == "-":
+                raw = sys.stdin.read()
+            devices = json.loads(raw)
+            if not isinstance(devices, list):
+                raise SystemExit("prefer-device expects a JSON array of devices")
+            result = mgr.prefer_device(devices, busy_threshold=args.busy_threshold)
+            out(result)
+            return 0 if result.get("ok") else 1
 
         if args.cmd == "spawn":
             plan = plan_spawn(args.agent, args.task, mode=args.mode, reason=args.reason)

@@ -29,6 +29,48 @@ final class SystemResourcesTests: XCTestCase {
         XCTAssertNil(SystemResourceLogic.mostConstrained(cpu: nil, gpu: nil, ram: nil))
     }
 
+    func testMostConstrainedRamOverCpu() {
+        let c = SystemResourceLogic.mostConstrained(cpu: 40, gpu: nil, ram: 95)
+        XCTAssertEqual(c?.kind, .ram)
+        XCTAssertEqual(c?.percent ?? 0, 95, accuracy: 1e-9)
+    }
+
+    func testMostConstrainedDiskAndThermalRanked() {
+        let ranked = SystemResourceLogic.constrainedRanked(
+            cpu: 30, gpu: 20, ram: 40, disk: 98, thermalPressure: 8
+        )
+        XCTAssertEqual(ranked.first?.kind, .disk)
+        XCTAssertEqual(ranked.map(\.kind).prefix(2).map(\.rawValue), ["disk", "ram"])
+    }
+
+    func testThermalCriticalBeatsDiskOnTie() {
+        let ranked = SystemResourceLogic.constrainedRanked(
+            cpu: 10, gpu: nil, ram: 10, disk: 97, thermalPressure: 97
+        )
+        XCTAssertEqual(ranked.first?.kind, .thermal)
+    }
+
+    func testSnapshotIncludesDiskThermalInMostConstrained() {
+        let snap = SystemResourceSnapshot(
+            cpuPercent: 40,
+            ramPercent: 50,
+            diskPercent: 93,
+            thermal: .fair
+        )
+        XCTAssertEqual(snap.mostConstrained?.kind, .disk)
+        XCTAssertEqual(snap.constrainedRanked.first?.kind, .disk)
+        XCTAssertEqual(snap.hostCapacity.diskPercent!, 93, accuracy: 1e-9)
+    }
+
+    func testHistoryTracksDisk() {
+        var h = SystemResourceHistory(capacity: 3)
+        h.append(SystemResourceSnapshot(diskPercent: 10))
+        h.append(SystemResourceSnapshot(diskPercent: 20))
+        h.append(SystemResourceSnapshot(diskPercent: 30))
+        h.append(SystemResourceSnapshot(diskPercent: 40))
+        XCTAssertEqual(h.disk, [20, 30, 40])
+    }
+
     func testBands() {
         XCTAssertEqual(SystemResourceLogic.band(for: 10), .calm)
         XCTAssertEqual(SystemResourceLogic.band(for: 65), .elevated)
@@ -132,7 +174,7 @@ final class SystemResourcesTests: XCTestCase {
         XCTAssertEqual(h.ram.count, 3)
     }
 
-    /// Live sampler must return coherent aggregate + per-core data on this Mac.
+    /// Live sampler must return coherent aggregate + per-core + disk + thermal.
     func testLiveSamplerProducesFiniteCPUAndRAM() {
         _ = SystemResourceSampler.sample()
         Thread.sleep(forTimeInterval: 0.2)
@@ -148,6 +190,15 @@ final class SystemResourcesTests: XCTestCase {
             XCTAssertGreaterThan(total, 0)
             XCTAssertLessThanOrEqual(used, total + 0.5)
         }
+        // SSD: FileManager attributes — fail-closed only on exotic sandboxes.
+        if let disk = snap.diskPercent {
+            XCTAssertTrue(disk >= 0 && disk <= 100, "disk=\(disk)")
+        }
+        if let total = snap.diskTotalGB {
+            XCTAssertGreaterThan(total, 0)
+        }
+        // Thermal ladder is public ProcessInfo — should always resolve.
+        XCTAssertNotNil(snap.thermal, "ProcessInfo.thermalState should map")
         // Per-core should appear after the second sample on Darwin hosts.
         if !snap.cpuCores.isEmpty {
             XCTAssertEqual(snap.cpuCores.count, snap.cpuCoreCount)

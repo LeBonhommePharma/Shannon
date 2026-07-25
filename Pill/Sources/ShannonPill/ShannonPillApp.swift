@@ -68,7 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Prefer notification permission early so ask alerts can fire later.
         ShannonNotifier.requestPermission()
 
-        let cloudPub = CloudPublisher(nowPlaying: np, battery: bat, bridge: br, activity: activityMon)
+        let cloudPub = CloudPublisher(
+            nowPlaying: np, battery: bat, bridge: br, activity: activityMon, resources: sysRes
+        )
 
         let ctl = PillWindowController(
             nowPlaying: np, battery: bat, bridge: br, idle: idlePub,

@@ -34,7 +34,7 @@ architecture and the one-time Xcode configuration needed to activate sync.
 | `AgentState` | activity, task title, turn count, last action, entropy H and δ | `agent-<id>` |
 | `DockingProgress` | benchmark, targets complete/total, best RMSD, success rate, ETA | `docking-<id>` |
 | `NowPlaying` | track, artist, album, position, downsampled artwork | `nowplaying-current` |
-| `MacDeviceState` | battery %, charging, time remaining | `device-<name>` |
+| `MacDeviceState` | battery %, charging, time remaining, **host capacity** (CPU/GPU/RAM/SSD used %, thermal ladder) for multi-device load preference | `device-<name>` |
 | `NotificationMirror` | sender, title, truncated body | `notification-<id>` |
 | `TimerState` | label, deadline, paused state | `timer-<id>` |
 | `RemoteCommand` | playback command from phone/watch | `command-<uuid>` |

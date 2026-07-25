@@ -51,6 +51,15 @@ struct ShannonFaceView: View {
                         }
                         if let docking { DockingRow(progress: docking, accent: accent) }
                         if let agent { AgentRow(agent: agent) }
+                        // Most-constrained host chip (Mac capacity or local thermal).
+                        HostCapacityChip(
+                            capacity: snapshot.device?.capacity
+                                ?? HostCapacitySnapshot(
+                                    thermal: HostThermalState.fromProcessInfoRawValue(
+                                        ProcessInfo.processInfo.thermalState.rawValue
+                                    )
+                                )
+                        )
                         if let media = snapshot.nowPlaying, !media.isIdle {
                             MediaRow(media: media)
                         }

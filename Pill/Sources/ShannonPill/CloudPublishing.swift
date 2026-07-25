@@ -28,6 +28,7 @@ final class CloudPublisher {
     private weak var nowPlaying: NowPlayingModel?
     private weak var battery: BatteryMonitor?
     private weak var bridge: ShannonBridge?
+    private weak var resources: SystemResourceMonitor?
     /// Source of the gate's pending approvals, mirrored to phone/watch/iPad and
     /// the sink the returning answers are applied to.
     private weak var activity: AgentActivityMonitor?
@@ -46,6 +47,7 @@ final class CloudPublisher {
         battery: BatteryMonitor?,
         bridge: ShannonBridge?,
         activity: AgentActivityMonitor? = nil,
+        resources: SystemResourceMonitor? = nil,
         backend: ShannonSyncBackend? = nil,
         interval: TimeInterval = 10,
         deviceName: String = Host.current().localizedName ?? "Mac"
@@ -54,6 +56,7 @@ final class CloudPublisher {
         self.battery = battery
         self.bridge = bridge
         self.activity = activity
+        self.resources = resources
         self.interval = interval
         self.deviceName = deviceName
         let resolved = backend ?? CloudPublisher.defaultBackend()
@@ -224,13 +227,16 @@ final class CloudPublisher {
 
     private func deviceSnapshot() -> MacDeviceState? {
         guard let snapshot = battery?.snapshot else { return nil }
+        // Host capacity (SSD/thermal/CPU/RAM) for multi-device load preference.
+        let capacity = resources?.snapshot.hostCapacity
         return MacDeviceState(
             deviceName: deviceName,
             batteryPercent: snapshot.percentage,
             isCharging: snapshot.isCharging,
             minutesRemaining: snapshot.isCharging
                 ? snapshot.minutesToFull
-                : snapshot.minutesToEmpty
+                : snapshot.minutesToEmpty,
+            capacity: capacity
         )
     }
 

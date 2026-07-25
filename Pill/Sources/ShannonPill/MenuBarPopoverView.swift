@@ -290,11 +290,12 @@ struct MenuBarPopoverView: View {
         .accessibilityLabel(s.shortLabel)
     }
 
-    // MARK: System resources (CPU / GPU / RAM) — iStat-style
+    // MARK: System resources (CPU / GPU / RAM / SSD / Temp) — iStat-style
 
     @State private var showPerCoreDetail = false
 
-    /// Color-coded gauges + per-core bars + sparklines, refreshed ~0.75s.
+    /// Color-coded gauges ordered **most constrained first**, plus per-core
+    /// bars and sparklines. SSD + thermal join CPU/GPU/RAM.
     private var resourcesSection: some View {
         let snap = resources.snapshot
         let hist = resources.history
@@ -302,32 +303,26 @@ struct MenuBarPopoverView: View {
             HStack(spacing: 6) {
                 sectionTitle("System")
                 Spacer(minLength: 0)
-                if let hot = snap.hottestCore, snap.cpuCoreCount > 1 {
-                    Text(String(format: "peak C%d · %.0f%%", hot.index, hot.percent))
+                if let top = snap.mostConstrained {
+                    Text("peak \(top.shortLabel)")
+                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(resourceTint(SystemResourceLogic.band(for: top.percent)))
+                } else if let hot = snap.hottestCore, snap.cpuCoreCount > 1 {
+                    Text(String(format: "C%d · %.0f%%", hot.index, hot.percent))
                         .font(.system(size: 8.5, weight: .medium, design: .monospaced))
                         .foregroundStyle(resourceTint(SystemResourceLogic.band(for: hot.percent)))
                 }
             }
 
-            // Aggregate rows with sparklines
-            resourceRow(
-                kind: .cpu,
-                percent: snap.cpuPercent,
-                detail: cpuAggregateDetail(snap),
-                history: hist.cpu
-            )
-            resourceRow(
-                kind: .gpu,
-                percent: snap.gpuPercent,
-                detail: snap.gpuPercent == nil ? "n/a" : nil,
-                history: hist.gpu
-            )
-            resourceRow(
-                kind: .ram,
-                percent: snap.ramPercent,
-                detail: ramDetail(snap),
-                history: hist.ram
-            )
+            // Rows in most-constrained-first order (not fixed CPU→GPU→RAM).
+            ForEach(resourceRowsOrdered(snap: snap, hist: hist), id: \.kind) { row in
+                resourceRow(
+                    kind: row.kind,
+                    percent: row.percent,
+                    detail: row.detail,
+                    history: row.history
+                )
+            }
 
             // Per-core bar strip (iStat-style)
             if !snap.cpuCores.isEmpty {
@@ -341,6 +336,39 @@ struct MenuBarPopoverView: View {
         .accessibilityLabel(resourcesAccessibilityLabel(snap))
     }
 
+    private struct ResourceRowModel {
+        var kind: SystemResourceSnapshot.Kind
+        var percent: Double?
+        var detail: String?
+        var history: [Double]
+    }
+
+    /// Build gauge rows sorted by current pressure (most constrained first).
+    private func resourceRowsOrdered(
+        snap: SystemResourceSnapshot,
+        hist: SystemResourceHistory
+    ) -> [ResourceRowModel] {
+        let specs: [(SystemResourceSnapshot.Kind, Double?, String?, [Double])] = [
+            (.cpu, snap.cpuPercent, cpuAggregateDetail(snap), hist.cpu),
+            (.gpu, snap.gpuPercent, snap.gpuPercent == nil ? "n/a" : nil, hist.gpu),
+            (.ram, snap.ramPercent, ramDetail(snap), hist.ram),
+            (.disk, snap.diskPercent, diskDetail(snap), hist.disk),
+            (.thermal, snap.thermal.map(\.pressurePercent), thermalDetail(snap), []),
+        ]
+        // Rank by live pressure; unknowns sink to the bottom (stable kind order).
+        let rank = Dictionary(
+            uniqueKeysWithValues: snap.constrainedRanked.enumerated().map { ($0.element.kind, $0.offset) }
+        )
+        return specs
+            .map { ResourceRowModel(kind: $0.0, percent: $0.1, detail: $0.2, history: $0.3) }
+            .sorted { a, b in
+                let ra = rank[a.kind] ?? 1000
+                let rb = rank[b.kind] ?? 1000
+                if ra != rb { return ra < rb }
+                return a.kind.rawValue < b.kind.rawValue
+            }
+    }
+
     private func cpuAggregateDetail(_ snap: SystemResourceSnapshot) -> String? {
         guard snap.cpuCoreCount > 0 else { return nil }
         if let imb = snap.coreImbalance, imb >= 20 {
@@ -352,6 +380,23 @@ struct MenuBarPopoverView: View {
     private func ramDetail(_ snap: SystemResourceSnapshot) -> String? {
         guard let u = snap.ramUsedGB, let t = snap.ramTotalGB, t > 0 else { return nil }
         return String(format: "%.1f / %.0f GB", u, t)
+    }
+
+    private func diskDetail(_ snap: SystemResourceSnapshot) -> String? {
+        if let free = snap.diskFreeGB, let total = snap.diskTotalGB, total > 0 {
+            return String(format: "%.0f GB free", free)
+        }
+        if let u = snap.diskUsedGB, let t = snap.diskTotalGB, t > 0 {
+            return String(format: "%.0f / %.0f GB", u, t)
+        }
+        return snap.diskPercent == nil ? "n/a" : nil
+    }
+
+    private func thermalDetail(_ snap: SystemResourceSnapshot) -> String? {
+        if let t = snap.temperatureCelsius {
+            return String(format: "%.0f°C · %@", t, snap.thermal?.label ?? "?")
+        }
+        return snap.thermal?.label ?? "n/a"
     }
 
     private func resourceRow(
@@ -372,7 +417,7 @@ struct MenuBarPopoverView: View {
             Text(kind.shortLabel)
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(Color.shannonSecondary)
-                .frame(width: 28, alignment: .leading)
+                .frame(width: 36, alignment: .leading)
             // Horizontal load bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -550,19 +595,19 @@ struct MenuBarPopoverView: View {
 
     private func resourcesAccessibilityLabel(_ snap: SystemResourceSnapshot) -> String {
         var parts: [String] = []
-        if let c = snap.cpuPercent {
-            var line = String(format: "CPU %.0f percent", c)
-            if snap.cpuCoreCount > 0 {
-                line += ", \(snap.cpuCoreCount) cores"
-            }
-            if let hot = snap.hottestCore {
-                line += String(format: ", peak core %d at %.0f percent", hot.index, hot.percent)
-            }
-            parts.append(line)
+        if let top = snap.mostConstrained {
+            parts.append("Most constrained \(top.shortLabel)")
         }
-        if let g = snap.gpuPercent { parts.append(String(format: "GPU %.0f percent", g)) }
-        else { parts.append("GPU unavailable") }
-        if let r = snap.ramPercent { parts.append(String(format: "RAM %.0f percent", r)) }
+        for row in snap.constrainedRanked {
+            parts.append("\(row.kind.shortLabel) \(Int(row.percent)) percent")
+        }
+        if let free = snap.diskFreeGB {
+            parts.append(String(format: "%.0f gigabytes free", free))
+        }
+        if let t = snap.thermal {
+            parts.append("Thermal \(t.label)")
+        }
+        if parts.isEmpty { return "System resources unavailable" }
         return parts.joined(separator: ", ")
     }
 

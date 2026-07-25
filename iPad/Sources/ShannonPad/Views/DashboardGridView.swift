@@ -62,6 +62,20 @@ struct DashboardGridView: View {
                     }
 
                     BatteryCardView(device: hub.snapshot.device, airPodsPercent: nil)
+
+                    // Host capacity: Mac (synced) + local iPad (thermal/SSD).
+                    HostCapacityCard(
+                        title: hub.snapshot.device?.deviceName ?? "Mac",
+                        capacity: hub.snapshot.device?.capacity,
+                        platformSymbol: "laptopcomputer"
+                    )
+                    .shannonCard()
+                    HostCapacityCard(
+                        title: "iPad",
+                        capacity: LocalHostCapacity.current(platform: "iPadOS"),
+                        platformSymbol: "ipad"
+                    )
+                    .shannonCard()
                 }
 
                 EntropyChartCardView(

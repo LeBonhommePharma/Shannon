@@ -1,6 +1,6 @@
 import Foundation
 
-/// Mac battery + host identity, mirrored to the phone and watch.
+/// Mac battery + host identity + capacity gauges, mirrored to phone / watch / iPad.
 public struct MacDeviceState: CloudSyncable, Codable, Hashable {
     public var deviceName: String
     public var batteryPercent: Int
@@ -8,6 +8,8 @@ public struct MacDeviceState: CloudSyncable, Codable, Hashable {
     /// Minutes to full when charging, to empty when discharging. Nil while
     /// macOS is still calculating.
     public var minutesRemaining: Int?
+    /// Host capacity (CPU/RAM/SSD/thermal) for multi-device load preference.
+    public var capacity: HostCapacitySnapshot?
     public var updatedAt: Date
 
     public init(
@@ -15,13 +17,30 @@ public struct MacDeviceState: CloudSyncable, Codable, Hashable {
         batteryPercent: Int,
         isCharging: Bool,
         minutesRemaining: Int? = nil,
+        capacity: HostCapacitySnapshot? = nil,
         updatedAt: Date = Date()
     ) {
         self.deviceName = deviceName
         self.batteryPercent = min(max(batteryPercent, 0), 100)
         self.isCharging = isCharging
         self.minutesRemaining = minutesRemaining
+        self.capacity = capacity
         self.updatedAt = updatedAt
+    }
+
+    /// Most constrained host gauge when capacity is present.
+    public var mostConstrainedLabel: String? {
+        capacity?.mostConstrained?.shortLabel
+    }
+
+    /// DeviceCapacity view for LoadBalancePolicy.
+    public var asDeviceCapacity: DeviceCapacity {
+        DeviceCapacity(
+            deviceId: "device-\(deviceName)",
+            displayName: deviceName,
+            capacity: capacity ?? HostCapacitySnapshot(sampledAt: updatedAt),
+            platform: "macOS"
+        )
     }
 
     public var fillFraction: Double { Double(batteryPercent) / 100.0 }
@@ -46,6 +65,12 @@ public struct MacDeviceState: CloudSyncable, Codable, Hashable {
         static let batteryPercent = "batteryPercent"
         static let isCharging = "isCharging"
         static let minutesRemaining = "minutesRemaining"
+        // Optional capacity gauges (fail-closed if absent on older peers).
+        static let cpuPercent = "cpuPercent"
+        static let ramPercent = "ramPercent"
+        static let diskPercent = "diskPercent"
+        static let thermalState = "thermalState"
+        static let gpuPercent = "gpuPercent"
     }
 
     public var cloudFields: CloudFields {
@@ -56,15 +81,41 @@ public struct MacDeviceState: CloudSyncable, Codable, Hashable {
             CloudKeys.updatedAt: .date(updatedAt),
         ]
         if let minutesRemaining { f[Field.minutesRemaining] = .int(minutesRemaining) }
+        if let cap = capacity {
+            if let v = cap.cpuPercent { f[Field.cpuPercent] = .double(v) }
+            if let v = cap.gpuPercent { f[Field.gpuPercent] = .double(v) }
+            if let v = cap.ramPercent { f[Field.ramPercent] = .double(v) }
+            if let v = cap.diskPercent { f[Field.diskPercent] = .double(v) }
+            if let t = cap.thermal { f[Field.thermalState] = .int(t.rawValue) }
+        }
         return f
     }
 
     public init(cloudFields f: CloudFields) throws {
+        let thermRaw = try f.optionalInt(Field.thermalState)
+        let cap: HostCapacitySnapshot?
+        let cpu = try f.optionalDouble(Field.cpuPercent)
+        let gpu = try f.optionalDouble(Field.gpuPercent)
+        let ram = try f.optionalDouble(Field.ramPercent)
+        let disk = try f.optionalDouble(Field.diskPercent)
+        if cpu != nil || gpu != nil || ram != nil || disk != nil || thermRaw != nil {
+            cap = HostCapacitySnapshot(
+                cpuPercent: cpu,
+                gpuPercent: gpu,
+                ramPercent: ram,
+                diskPercent: disk,
+                thermal: HostThermalState.from(raw: thermRaw),
+                sampledAt: try f.date(CloudKeys.updatedAt)
+            )
+        } else {
+            cap = nil
+        }
         self.init(
             deviceName: try f.string(CloudKeys.deviceName),
             batteryPercent: try f.int(Field.batteryPercent),
             isCharging: try f.bool(Field.isCharging),
             minutesRemaining: try f.optionalInt(Field.minutesRemaining),
+            capacity: cap,
             updatedAt: try f.date(CloudKeys.updatedAt)
         )
     }

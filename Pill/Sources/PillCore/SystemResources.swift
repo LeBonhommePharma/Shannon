@@ -1,4 +1,5 @@
 import Foundation
+import ShannonCore
 #if canImport(Darwin)
 import Darwin
 import MachO
@@ -55,10 +56,10 @@ public struct CPUCoreLoad: Sendable, Equatable, Identifiable {
 
 // MARK: - Snapshot
 
-/// One sample of host CPU / GPU / RAM utilisation, 0…100 percent each.
+/// One sample of host CPU / GPU / RAM / SSD / thermal utilisation.
 ///
-/// Built for the menu-bar HUD (all three + per-core) and the notch pill
-/// (most constrained only). Pure value type — no I/O after construction.
+/// Built for the menu-bar HUD (gauges + per-core) and the notch pill
+/// (most constrained first). Pure value type — no I/O after construction.
 public struct SystemResourceSnapshot: Sendable, Equatable {
     /// Overall CPU busy % (user + system + nice), 0…100. `nil` when unreadable.
     public var cpuPercent: Double?
@@ -70,6 +71,15 @@ public struct SystemResourceSnapshot: Sendable, Equatable {
     public var ramPercent: Double?
     public var ramUsedGB: Double?
     public var ramTotalGB: Double?
+    /// Root volume **used** %, 0…100. `nil` when unreadable.
+    public var diskPercent: Double?
+    public var diskUsedGB: Double?
+    public var diskTotalGB: Double?
+    public var diskFreeGB: Double?
+    /// ProcessInfo thermal ladder; `nil` when unknown.
+    public var thermal: HostThermalState?
+    /// Best-effort °C (usually unavailable via public API).
+    public var temperatureCelsius: Double?
     /// Wall clock of this sample.
     public var sampledAt: Date
 
@@ -80,6 +90,12 @@ public struct SystemResourceSnapshot: Sendable, Equatable {
         ramPercent: Double? = nil,
         ramUsedGB: Double? = nil,
         ramTotalGB: Double? = nil,
+        diskPercent: Double? = nil,
+        diskUsedGB: Double? = nil,
+        diskTotalGB: Double? = nil,
+        diskFreeGB: Double? = nil,
+        thermal: HostThermalState? = nil,
+        temperatureCelsius: Double? = nil,
         sampledAt: Date = Date()
     ) {
         self.cpuPercent = SystemResourceLogic.clampPct(cpuPercent)
@@ -88,7 +104,31 @@ public struct SystemResourceSnapshot: Sendable, Equatable {
         self.ramPercent = SystemResourceLogic.clampPct(ramPercent)
         self.ramUsedGB = ramUsedGB.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         self.ramTotalGB = ramTotalGB.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        self.diskPercent = SystemResourceLogic.clampPct(diskPercent)
+        self.diskUsedGB = diskUsedGB.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        self.diskTotalGB = diskTotalGB.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        self.diskFreeGB = diskFreeGB.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        self.thermal = thermal
+        self.temperatureCelsius = temperatureCelsius.flatMap {
+            $0.isFinite && $0 > -50 && $0 < 150 ? $0 : nil
+        }
         self.sampledAt = sampledAt
+    }
+
+    /// Shared multi-device / companion capacity view (no per-core arrays).
+    public var hostCapacity: HostCapacitySnapshot {
+        HostCapacitySnapshot(
+            cpuPercent: cpuPercent,
+            gpuPercent: gpuPercent,
+            ramPercent: ramPercent,
+            diskPercent: diskPercent,
+            diskUsedGB: diskUsedGB,
+            diskTotalGB: diskTotalGB,
+            diskFreeGB: diskFreeGB,
+            thermal: thermal,
+            temperatureCelsius: temperatureCelsius,
+            sampledAt: sampledAt
+        )
     }
 
     /// Equality for UI publish: **ignores `sampledAt`** so a pure wall-clock
@@ -124,12 +164,16 @@ public struct SystemResourceSnapshot: Sendable, Equatable {
         case cpu
         case gpu
         case ram
+        case disk
+        case thermal
 
         public var shortLabel: String {
             switch self {
             case .cpu: return "CPU"
             case .gpu: return "GPU"
             case .ram: return "RAM"
+            case .disk: return "SSD"
+            case .thermal: return "Temp"
             }
         }
 
@@ -138,6 +182,28 @@ public struct SystemResourceSnapshot: Sendable, Equatable {
             case .cpu: return "cpu"
             case .gpu: return "memorychip"
             case .ram: return "memorychip"
+            case .disk: return "internaldrive"
+            case .thermal: return "thermometer.medium"
+            }
+        }
+
+        public init(_ host: HostResourceKind) {
+            switch host {
+            case .cpu: self = .cpu
+            case .gpu: self = .gpu
+            case .ram: self = .ram
+            case .disk: self = .disk
+            case .thermal: self = .thermal
+            }
+        }
+
+        public var hostKind: HostResourceKind {
+            switch self {
+            case .cpu: return .cpu
+            case .gpu: return .gpu
+            case .ram: return .ram
+            case .disk: return .disk
+            case .thermal: return .thermal
             }
         }
     }
@@ -150,25 +216,25 @@ public struct SystemResourceSnapshot: Sendable, Equatable {
             self.percent = percent
         }
 
-        /// Compact pill / menu-bar label: `CPU 87%`.
+        /// Compact pill / menu-bar label: `CPU 87%` / `SSD 92%`.
         public var shortLabel: String {
             String(format: "%@ %.0f%%", kind.shortLabel, percent)
         }
+
+        public init(_ host: HostConstrainedResource) {
+            self.kind = Kind(host.kind)
+            self.percent = host.percent
+        }
+    }
+
+    /// Gauges ordered most constrained first (shared HostCapacity ranking).
+    public var constrainedRanked: [Constrained] {
+        hostCapacity.constrainedRanked.map { Constrained($0) }
     }
 
     /// Highest of the available gauges. `nil` when nothing was measured.
     public var mostConstrained: Constrained? {
-        var best: Constrained?
-        func consider(_ kind: Kind, _ pct: Double?) {
-            guard let pct else { return }
-            if best == nil || pct > best!.percent {
-                best = Constrained(kind: kind, percent: pct)
-            }
-        }
-        consider(.cpu, cpuPercent)
-        consider(.gpu, gpuPercent)
-        consider(.ram, ramPercent)
-        return best
+        constrainedRanked.first
     }
 
     /// True when any gauge is in the "pay attention" band (≥ warn threshold).
@@ -187,29 +253,28 @@ public struct SystemResourceHistory: Sendable, Equatable {
     public var cpu: [Double]
     public var gpu: [Double]
     public var ram: [Double]
+    public var disk: [Double]
     public var capacity: Int
 
     public init(capacity: Int = 48) {
         self.cpu = []
         self.gpu = []
         self.ram = []
+        self.disk = []
         self.capacity = max(2, capacity)
     }
 
     public mutating func append(_ snap: SystemResourceSnapshot) {
         let cap = capacity
-        if let v = snap.cpuPercent {
-            cpu.append(v)
-            if cpu.count > cap { cpu.removeFirst(cpu.count - cap) }
+        func push(_ v: Double?, into arr: inout [Double]) {
+            guard let v else { return }
+            arr.append(v)
+            if arr.count > cap { arr.removeFirst(arr.count - cap) }
         }
-        if let v = snap.gpuPercent {
-            gpu.append(v)
-            if gpu.count > cap { gpu.removeFirst(gpu.count - cap) }
-        }
-        if let v = snap.ramPercent {
-            ram.append(v)
-            if ram.count > cap { ram.removeFirst(ram.count - cap) }
-        }
+        push(snap.cpuPercent, into: &cpu)
+        push(snap.gpuPercent, into: &gpu)
+        push(snap.ramPercent, into: &ram)
+        push(snap.diskPercent, into: &disk)
     }
 }
 
@@ -227,15 +292,33 @@ public enum SystemResourceLogic {
         return min(100, max(0, (used / total) * 100))
     }
 
-    /// Pick the most constrained resource from optional gauges.
+    /// Pick the most constrained resource from optional gauges
+    /// (CPU/GPU/RAM/SSD/thermal pressure). Most constrained first ranking
+    /// shared with ShannonCore `HostCapacityLogic`.
     public static func mostConstrained(
         cpu: Double?,
         gpu: Double?,
-        ram: Double?
+        ram: Double?,
+        disk: Double? = nil,
+        thermalPressure: Double? = nil
     ) -> SystemResourceSnapshot.Constrained? {
-        SystemResourceSnapshot(
-            cpuPercent: cpu, gpuPercent: gpu, ramPercent: ram
-        ).mostConstrained
+        guard let h = HostCapacityLogic.mostConstrained(
+            cpu: cpu, gpu: gpu, ram: ram, disk: disk, thermalPressure: thermalPressure
+        ) else { return nil }
+        return SystemResourceSnapshot.Constrained(h)
+    }
+
+    /// Ordered list most constrained first.
+    public static func constrainedRanked(
+        cpu: Double?,
+        gpu: Double?,
+        ram: Double?,
+        disk: Double? = nil,
+        thermalPressure: Double? = nil
+    ) -> [SystemResourceSnapshot.Constrained] {
+        HostCapacityLogic.constrainedRanked(
+            cpu: cpu, gpu: gpu, ram: ram, disk: disk, thermalPressure: thermalPressure
+        ).map { SystemResourceSnapshot.Constrained($0) }
     }
 
     /// Tint band for a utilisation gauge.
@@ -261,6 +344,12 @@ public enum SystemResourceLogic {
             && approxEq(a.ramPercent, b.ramPercent)
             && approxEq(a.ramUsedGB, b.ramUsedGB)
             && approxEq(a.ramTotalGB, b.ramTotalGB)
+            && approxEq(a.diskPercent, b.diskPercent)
+            && approxEq(a.diskUsedGB, b.diskUsedGB)
+            && approxEq(a.diskTotalGB, b.diskTotalGB)
+            && approxEq(a.diskFreeGB, b.diskFreeGB)
+            && a.thermal == b.thermal
+            && approxEq(a.temperatureCelsius, b.temperatureCelsius)
     }
 
     /// Whether UI should publish a new snapshot (metrics moved).
@@ -403,6 +492,8 @@ public enum SystemResourceSampler {
         let (usedGB, totalGB) = sampleRAM()
         let ramPct = SystemResourceLogic.ramPercent(used: usedGB ?? 0, total: totalGB ?? 0)
         let gpu = sampleGPU()
+        let disk = sampleDisk()
+        let thermal = sampleThermal()
         return SystemResourceSnapshot(
             cpuPercent: cpuAgg,
             cpuCores: cores,
@@ -410,6 +501,12 @@ public enum SystemResourceSampler {
             ramPercent: ramPct,
             ramUsedGB: usedGB,
             ramTotalGB: totalGB,
+            diskPercent: disk.percent,
+            diskUsedGB: disk.usedGB,
+            diskTotalGB: disk.totalGB,
+            diskFreeGB: disk.freeGB,
+            thermal: thermal,
+            temperatureCelsius: nil, // public API: die temp not available
             sampledAt: now
         )
         #else
@@ -603,6 +700,49 @@ public enum SystemResourceSampler {
         #else
         return nil
         #endif
+    }
+
+    // MARK: SSD / disk
+
+    /// Root filesystem used/total via FileManager (fail-closed).
+    private static func sampleDisk() -> (
+        percent: Double?, usedGB: Double?, totalGB: Double?, freeGB: Double?
+    ) {
+        let path = NSHomeDirectory()
+        guard let attrs = try? FileManager.default.attributesOfFileSystem(forPath: path),
+              let total = attrs[.systemSize] as? NSNumber,
+              let free = attrs[.systemFreeSize] as? NSNumber
+        else {
+            // Fallback: root volume
+            guard let attrs = try? FileManager.default.attributesOfFileSystem(forPath: "/"),
+                  let total = attrs[.systemSize] as? NSNumber,
+                  let free = attrs[.systemFreeSize] as? NSNumber
+            else { return (nil, nil, nil, nil) }
+            return diskTuple(totalBytes: total.doubleValue, freeBytes: free.doubleValue)
+        }
+        return diskTuple(totalBytes: total.doubleValue, freeBytes: free.doubleValue)
+    }
+
+    private static func diskTuple(totalBytes: Double, freeBytes: Double) -> (
+        percent: Double?, usedGB: Double?, totalGB: Double?, freeGB: Double?
+    ) {
+        guard totalBytes > 0, freeBytes.isFinite, totalBytes.isFinite else {
+            return (nil, nil, nil, nil)
+        }
+        let usedBytes = max(0, totalBytes - freeBytes)
+        let usedGB = usedBytes / 1e9
+        let totalGB = totalBytes / 1e9
+        let freeGB = freeBytes / 1e9
+        let pct = HostCapacityLogic.diskUsedPercent(used: usedBytes, total: totalBytes)
+        return (pct, usedGB, totalGB, freeGB)
+    }
+
+    // MARK: Thermal (ProcessInfo — public, iStat-like pressure ladder)
+
+    private static func sampleThermal() -> HostThermalState? {
+        // ProcessInfo.thermalState is available on macOS 10.10.3+ / iOS / watchOS.
+        let raw = ProcessInfo.processInfo.thermalState.rawValue
+        return HostThermalState.fromProcessInfoRawValue(raw)
     }
     #endif
 }

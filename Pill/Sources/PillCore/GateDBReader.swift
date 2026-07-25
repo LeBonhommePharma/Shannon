@@ -33,19 +33,29 @@ public enum GateDBReader {
         public var staleAsks: [PendingAsk]
         /// Real `agent_activity` rows, newest first.
         public var activity: [ActivityEvent]
+        /// Gate-computed entropy per agent — the only *measured* H the pill has
+        /// access to when no detector socket is attached.
+        ///
+        /// Each element carries its own agent id, presence and measurement time,
+        /// so a 40-minute-old value cannot be presented as a current one. Rows
+        /// the gate has never scored produce **no** element rather than a zero;
+        /// see `entropyMeasurement(_:at:now:policy:)`.
+        public var agentEntropy: [EntropyMeasurement]
 
         public init(
             available: Bool = false,
             agents: [AgentActivitySnapshot] = [],
             pendingAsks: [PendingAsk] = [],
             staleAsks: [PendingAsk] = [],
-            activity: [ActivityEvent] = []
+            activity: [ActivityEvent] = [],
+            agentEntropy: [EntropyMeasurement] = []
         ) {
             self.available = available
             self.agents = agents
             self.pendingAsks = pendingAsks
             self.staleAsks = staleAsks
             self.activity = activity
+            self.agentEntropy = agentEntropy
         }
     }
 
@@ -59,7 +69,8 @@ public enum GateDBReader {
         now: Date = Date(),
         askMaxAge: TimeInterval = 6 * 3600,
         askLimit: Int = 5,
-        activityLimit: Int = 8
+        activityLimit: Int = 8,
+        entropyPolicy: EntropyPolicy = .current
     ) -> Snapshot {
         #if canImport(SQLite3)
         var db: OpaquePointer?
@@ -78,12 +89,14 @@ public enum GateDBReader {
         let keep = max(0, askLimit)
         let live = asks.filter { !$0.isOrphaned && now.timeIntervalSince($0.createdAt) <= askMaxAge }
         let stale = asks.filter { $0.isOrphaned || now.timeIntervalSince($0.createdAt) > askMaxAge }
+        let rows = agentRows(db, now: now, policy: entropyPolicy)
         return Snapshot(
             available: true,
-            agents: agentRows(db),
+            agents: rows.agents,
             pendingAsks: Array(live.prefix(keep)),
             staleAsks: Array(stale),
-            activity: activityRows(db, limit: activityLimit)
+            activity: activityRows(db, limit: activityLimit),
+            agentEntropy: rows.entropy
         )
         #else
         return Snapshot()
@@ -93,7 +106,7 @@ public enum GateDBReader {
     // MARK: - Agents
 
     /// Read agent rows. Returns [] if the DB is missing, locked, or schema-old.
-    public static func readAgents(path: String) -> [AgentActivitySnapshot] {
+    public static func readAgents(path: String, now: Date = Date()) -> [AgentActivitySnapshot] {
         #if canImport(SQLite3)
         var db: OpaquePointer?
         guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
@@ -101,14 +114,63 @@ public enum GateDBReader {
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 50)
-        return agentRows(db)
+        return agentRows(db, now: now, policy: .current).agents
+        #else
+        return []
+        #endif
+    }
+
+    /// The gate's own measured entropy, one element per agent that has actually
+    /// been scored.
+    ///
+    /// This is the number the pill should show when no detector socket is
+    /// attached — `agents.entropy_score` is written by
+    /// `ShannonGate._handle_message` as `decision.computed_H`, stamped with the
+    /// same `last_seen_ns` used as `measuredAt` here.
+    ///
+    /// Fail-closed behaviour, in order:
+    /// - DB missing/locked/unopenable → `[]` (the caller reports `.absent`).
+    /// - `entropy_score` column absent (pre-`entropy_score` DB) → `[]`.
+    /// - `entropy_score` SQL NULL → row skipped.
+    /// - `entropy_score` exactly `0.0` → row skipped. The column is
+    ///   `REAL DEFAULT 0.0`, so an unscored row is indistinguishable from a
+    ///   genuine zero; both are refused rather than rendered as total collapse.
+    /// - `last_seen_ns` absent or ≤ 0 → row skipped: a value with no timestamp
+    ///   cannot be aged, and an un-ageable value must never be called current.
+    /// - non-finite, negative, over `policy.maxBits`, or future-dated beyond
+    ///   `EntropyPolicy.clockSkewTolerance` → row skipped by
+    ///   `EntropyMeasurement.init?`.
+    ///
+    /// Nothing here invents a value; if every row is refused the result is empty
+    /// and the reading resolves to `.absent`.
+    public static func readAgentEntropy(
+        path: String,
+        now: Date = Date(),
+        policy: EntropyPolicy = .current
+    ) -> [EntropyMeasurement] {
+        #if canImport(SQLite3)
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            return []
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 50)
+        return agentRows(db, now: now, policy: policy).entropy
         #else
         return []
         #endif
     }
 
     #if canImport(SQLite3)
-    private static func agentRows(_ db: OpaquePointer) -> [AgentActivitySnapshot] {
+    /// Agent rows and their measured entropy, from one pass over `agents`.
+    struct AgentRows {
+        var agents: [AgentActivitySnapshot] = []
+        var entropy: [EntropyMeasurement] = []
+    }
+
+    private static func agentRows(
+        _ db: OpaquePointer, now: Date, policy: EntropyPolicy
+    ) -> AgentRows {
         // Preferred (current hub schema).
         //
         // `connected` is derived from `disconnected_at`, which the old reader
@@ -126,10 +188,18 @@ public enum GateDBReader {
         // `message_count` on the row is unreliable (the gate only bumps it on
         // some paths — grok_build showed 1 against 5 real rows), so the real
         // count from `agent_messages` wins when it is higher.
+        //
+        // `entropy_score` is the gate's own `decision.computed_H`, refreshed by
+        // `update_agent_seen` in the same statement that writes `last_seen_ns`.
+        // It used to be selected and then thrown away (`_ = sqlite3_column_double`)
+        // while the pill displayed a hardcoded sine instead. It is now the
+        // primary source of measured H. Selected **raw**, not `COALESCE(…, 0)`,
+        // so a SQL NULL stays distinguishable from a real zero — both are
+        // refused, but only by knowing which one we are looking at.
         let sqlBeat = """
             SELECT a.agent_id, a.status,
                    CAST(a.last_seen_ns / 1000000000.0 AS REAL) AS last_seen,
-                   COALESCE(a.entropy_score, 0),
+                   a.entropy_score,
                    COALESCE(a.task_summary, ''),
                    MAX(COALESCE(a.message_count, 0),
                        (SELECT COUNT(*) FROM agent_messages m WHERE m.agent_id = a.agent_id)),
@@ -138,14 +208,14 @@ public enum GateDBReader {
                    CAST(COALESCE(a.heartbeat_ns, 0) / 1000000000.0 AS REAL) AS heartbeat
             FROM agents a;
             """
-        if let rows = query(db, sqlBeat) { return rows }
+        if let rows = query(db, sqlBeat, now: now, policy: policy) { return rows }
 
         // Same schema without `heartbeat_ns` (gate not yet restarted on the
         // migration). Liveness then falls back to ageing `last_seen_ns`.
         let sqlNS = """
             SELECT a.agent_id, a.status,
                    CAST(a.last_seen_ns / 1000000000.0 AS REAL) AS last_seen,
-                   COALESCE(a.entropy_score, 0),
+                   a.entropy_score,
                    COALESCE(a.task_summary, ''),
                    MAX(COALESCE(a.message_count, 0),
                        (SELECT COUNT(*) FROM agent_messages m WHERE m.agent_id = a.agent_id)),
@@ -153,36 +223,52 @@ public enum GateDBReader {
                           OR a.disconnected_at < a.last_seen_ns THEN 1 ELSE 0 END AS connected
             FROM agents a;
             """
-        if let rows = query(db, sqlNS) { return rows }
+        if let rows = query(db, sqlNS, now: now, policy: policy) { return rows }
 
         // Legacy seconds-based schema without `disconnected_at`: we cannot prove
         // the connection state, so report `.observed` (unproven) rather than
         // claiming the agent is live.
         let sqlLegacy = """
             SELECT agent_id, status, last_seen,
-                   COALESCE(entropy_score, 0),
+                   entropy_score,
                    COALESCE(task_summary, ''),
                    0, -1
             FROM agents;
             """
-        return query(db, sqlLegacy) ?? []
+        if let rows = query(db, sqlLegacy, now: now, policy: policy) { return rows }
+
+        // Migration safety: a database predating `entropy_score` entirely. Every
+        // SELECT above names the column, so without this the agent list itself
+        // would come back empty on such a DB. Agents still read; entropy is
+        // simply absent, which is the honest answer.
+        let sqlNoEntropy = """
+            SELECT agent_id, status, last_seen, NULL,
+                   COALESCE(task_summary, ''),
+                   0, -1
+            FROM agents;
+            """
+        return query(db, sqlNoEntropy, now: now, policy: policy) ?? AgentRows()
     }
 
-    private static func query(_ db: OpaquePointer, _ sql: String) -> [AgentActivitySnapshot]? {
+    private static func query(
+        _ db: OpaquePointer, _ sql: String, now: Date, policy: EntropyPolicy
+    ) -> AgentRows? {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
             return nil
         }
         defer { sqlite3_finalize(stmt) }
 
-        var out: [AgentActivitySnapshot] = []
+        var out = AgentRows()
         while sqlite3_step(stmt) == SQLITE_ROW {
             let id = string(stmt, 0)
             guard !id.isEmpty else { continue }
             let statusRaw = string(stmt, 1)
             let lastSeen = sqlite3_column_double(stmt, 2)
-            // entropy available at col 3 — owned by the entropy readout, not us.
-            _ = sqlite3_column_double(stmt, 3)
+            // Column 3 is the gate's measured H. NULL (never written, or an
+            // older schema) is not a number and must not become one.
+            let entropyIsNull = sqlite3_column_type(stmt, 3) == SQLITE_NULL
+            let entropyRaw = entropyIsNull ? 0 : sqlite3_column_double(stmt, 3)
             let task = string(stmt, 4)
             let msgCount = Int(sqlite3_column_int(stmt, 5))
             let connectedFlag = Int(sqlite3_column_int(stmt, 6))
@@ -199,7 +285,27 @@ public enum GateDBReader {
             // A disconnected agent is not doing anything, whatever the last
             // status write said. Truth beats the stored string.
             let status = presence == .offline ? AgentRunStatus.idle : AgentRunStatus(raw: statusRaw)
-            out.append(AgentActivitySnapshot(
+
+            // Measured entropy, but only when the row can actually support the
+            // claim. `entropy_score` is `REAL DEFAULT 0.0`, so a row the gate has
+            // never scored looks exactly like a genuine reading of 0 bits —
+            // refuse both. An un-timestamped row is equally unusable: without
+            // `last_seen_ns` the value cannot be aged, and a value that cannot be
+            // aged must never be presented as current.
+            if !entropyIsNull, entropyRaw > 0, lastSeen > 0,
+               let measurement = EntropyMeasurement(
+                   bits: entropyRaw,
+                   deltaH: nil,
+                   collapsed: nil,
+                   source: .gate(agentId: id, presence: presence),
+                   measuredAt: Date(timeIntervalSince1970: lastSeen),
+                   now: now,
+                   policy: policy
+               ) {
+                out.entropy.append(measurement)
+            }
+
+            out.agents.append(AgentActivitySnapshot(
                 id: id,
                 displayName: id.replacingOccurrences(of: "_", with: " ").capitalized,
                 status: status,

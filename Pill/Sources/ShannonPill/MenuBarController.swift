@@ -16,7 +16,6 @@ import PillCore
 final class MenuBarController: NSObject {
     private var item: NSStatusItem?
     private let bridge: ShannonBridge
-    private let idle: IdleTelemetryPublisher
     private let battery: BatteryMonitor
     private let ingest: AgentIngestService
     private let activity: AgentActivityMonitor
@@ -37,13 +36,11 @@ final class MenuBarController: NSObject {
 
     init(
         bridge: ShannonBridge,
-        idle: IdleTelemetryPublisher,
         battery: BatteryMonitor,
         ingest: AgentIngestService,
         activity: AgentActivityMonitor
     ) {
         self.bridge = bridge
-        self.idle = idle
         self.battery = battery
         self.ingest = ingest
         self.activity = activity
@@ -107,7 +104,16 @@ final class MenuBarController: NSObject {
         flashUntil = nil
 
         let summary = activity.summary
-        let entropy = bridge.status ?? idle.status
+        // Provenance-bearing reading, not `bridge.status ?? idle.status`. The
+        // idle publisher has no number to fall back to any more, and a collapse
+        // is only ever raised from something that measured one.
+        let reading = EntropyProvenance.resolve(
+            bridgeConnected: bridge.connected,
+            bridgeStatus: bridge.status,
+            gate: activity.agentEntropy,
+            gateDBAvailable: activity.gateDBAvailable
+        )
+        let collapse: EntropyMeasurement? = reading.collapsed == true ? reading.measurement : nil
         // Only asks somebody is actually waiting on. `activity.staleAsks` holds
         // rows whose agent disconnected after asking — pulsing amber forever for
         // an approval nobody will ever read is the definition of a false alarm.
@@ -116,7 +122,7 @@ final class MenuBarController: NSObject {
         // Cheap signature of everything the icon depends on; bail when unchanged.
         let signature = [
             "p\(pendingCount)",
-            entropy.collapsed ? String(format: "c%.1f", entropy.entropy) : "-",
+            collapse.map { String(format: "c%.1f", $0.bits) } ?? "-",
             "b\(summary.busyCount)",
             summary.busy.first?.displayName ?? "",
             "l\(summary.connected.count)",
@@ -137,12 +143,13 @@ final class MenuBarController: NSObject {
         }
         stopPulse()
 
-        if entropy.collapsed {
+        if let collapse {
             button.image = Self.symbolImage("exclamationmark.triangle.fill", template: false)
-            button.title = String(format: " H %.1f", entropy.entropy)
+            button.title = String(format: " H %.1f", collapse.bits)
             button.contentTintColor = .systemRed
             button.setAccessibilityLabel(
-                String(format: "Shannon: entropy collapse, H %.1f bits", entropy.entropy))
+                String(format: "Shannon: entropy collapse, H %.1f bits (source: %@)",
+                       collapse.bits, collapse.source.label))
         } else if !summary.busy.isEmpty {
             // Template image: the system inverts it for dark mode / selection.
             button.image = Self.symbolImage("waveform.path.ecg", template: true)
@@ -220,7 +227,6 @@ final class MenuBarController: NSObject {
             rootView: MenuBarPopoverView(
                 activity: activity,
                 bridge: bridge,
-                idle: idle,
                 battery: battery,
                 onShowAllGates: { [weak self] in
                     self?.popover?.performClose(nil)

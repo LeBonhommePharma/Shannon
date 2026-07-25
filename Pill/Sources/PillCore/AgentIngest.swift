@@ -109,16 +109,36 @@ public struct AgentIngestResult: Sendable, Equatable {
     public var taskSummary: String
     public var petPath: String
     public var createdPet: Bool
-    public var gateNotified: Bool
+    /// Where the gate notification stands *for this capture*.
+    ///
+    /// `capture()` returns while the POST is still in flight off the main
+    /// actor, so the value it hands back is `.pending` on the success path.
+    /// `AgentIngestService` rewrites `lastResult`/`recent[0]` in place when the
+    /// verdict lands (see `gateNotifyTask`), which republishes through
+    /// `ObservableObject` and re-renders any view bound to `ingest.lastResult`.
+    public var gateStatus: GateNotifyStatus
     public var sourceApp: String
     public var message: String
+
+    /// True only once the gate has *confirmed* it took the message. `.pending`
+    /// is deliberately false: a capture whose POST has not answered yet must
+    /// never read as a notified gate.
+    public var gateNotified: Bool { gateStatus == .accepted }
 
     /// True only when a pet was actually written for a real agent.
     public var captured: Bool { agent != nil }
 
+    /// What the pill shows. The `+name` claims the *capture* (pet written,
+    /// registry updated) — that part is confirmed synchronously and is not
+    /// contingent on the gate. A gate refusal adds a visible marker, because a
+    /// silent failure is the thing that lets a wedged gate go unnoticed; a
+    /// pending POST adds nothing, because "not yet known" is not a failure.
     public var pillLabel: String {
         guard let agent else { return "⊘ not an agent" }
-        return "+\(agent.displayName)"
+        switch gateStatus {
+        case .refused: return "+\(agent.displayName) ⚠︎gate"
+        case .accepted, .pending, .notAttempted: return "+\(agent.displayName)"
+        }
     }
 }
 
@@ -746,7 +766,44 @@ public final class AgentIngestService: ObservableObject {
     /// Menu bar shows the agent tag until this date, then reverts to H readout.
     @Published public private(set) var highlightUntil: Date = .distantPast
 
-    public init() {}
+    /// The in-flight gate notification for the most recent capture, or nil.
+    ///
+    /// Held so a rapid second ⌘D can cancel the first rather than queue another
+    /// socket behind it. Awaiting `.value` is also how a caller (or a test) gets
+    /// the *confirmed* verdict without polling a clock: when it completes,
+    /// `lastResult.gateStatus` has left `.pending`.
+    public private(set) var gateNotifyTask: Task<Void, Never>?
+
+    /// Monotonic capture id. A verdict whose token no longer matches belongs to
+    /// a superseded capture and is discarded rather than applied to a newer row.
+    private var gateToken: UInt64 = 0
+
+    private let gateNotifier: GateNotifier
+
+    /// What performs one gate notification. Injected so tests can stand in a
+    /// deterministic (blocking, refusing, accepting) notifier with no daemon,
+    /// no socket and no clock.
+    ///
+    /// `env` is passed in rather than read by the notifier: the work now runs
+    /// later, on another thread, and a notifier that read the *live* process
+    /// environment would see whatever it had become by then. Snapshotting at
+    /// dispatch time is what keeps the endpoint deterministic.
+    public typealias GateNotifier = @Sendable (
+        _ agentID: String, _ task: String, _ env: [String: String]
+    ) -> GateNotifyOutcome
+
+    /// The shipping notifier: bounded, off-actor, loopback-by-default HTTP POST.
+    ///
+    /// `nonisolated` so the default argument below is evaluable from any
+    /// context and so this closure cannot quietly re-acquire main-actor
+    /// isolation — the exact mistake being fixed.
+    public nonisolated static let liveGateNotifier: GateNotifier = { agentID, task, env in
+        AgentIngestService.notifyGateBestEffort(agentID: agentID, task: task, env: env)
+    }
+
+    public init(gateNotifier: @escaping GateNotifier = AgentIngestService.liveGateNotifier) {
+        self.gateNotifier = gateNotifier
+    }
 
     public var isHighlighting: Bool { Date() < highlightUntil }
 
@@ -888,14 +945,13 @@ public final class AgentIngestService: ObservableObject {
                 agentID: kind.id, displayName: kind.displayName, task: task
             )
             PetBootstrap.updateRegistry(agent: kind, task: task)
-            let gateOK = Self.notifyGateBestEffort(agentID: kind.id, task: task)
             result = AgentIngestResult(
                 agent: kind,
                 refusal: nil,
                 taskSummary: task,
                 petPath: url.path,
                 createdPet: created,
-                gateNotified: gateOK,
+                gateStatus: .pending,
                 sourceApp: sourceApp,
                 message: created
                     ? "New pet for \(kind.displayName) · \(kind.id)"
@@ -909,13 +965,20 @@ public final class AgentIngestService: ObservableObject {
                 taskSummary: task,
                 petPath: PetBootstrap.petsRoot.appendingPathComponent(kind.id).path,
                 createdPet: false,
-                gateNotified: false,
+                gateStatus: .notAttempted,
                 sourceApp: sourceApp,
                 message: "Failed to write pet: \(error.localizedDescription)"
             )
         }
 
-        return publish(result)
+        let published = publish(result)
+        // Dispatched AFTER publish, so `lastResult` and `recent[0]` already hold
+        // the row the verdict will rewrite. Only the success path notifies: a
+        // failed pet write has nothing honest to report to the gate.
+        if published.gateStatus == .pending {
+            startGateNotify(agentID: kind.id, task: task)
+        }
+        return published
     }
 
     /// A refused capture: no pet, no registry row, no gate message — but it is
@@ -928,7 +991,7 @@ public final class AgentIngestService: ObservableObject {
             taskSummary: "",
             petPath: "",
             createdPet: false,
-            gateNotified: false,
+            gateStatus: .notAttempted,
             sourceApp: sourceApp,
             message: refusal.message
         ))
@@ -951,6 +1014,57 @@ public final class AgentIngestService: ObservableObject {
         #endif
     }
 
+    /// Kick off the gate notification for a just-published capture.
+    ///
+    /// Off-actor by construction. `notifyGateBestEffort` does blocking BSD
+    /// socket work, and doing that inside `capture()` — which is `@MainActor` —
+    /// froze the UI for as long as the kernel took to answer. The pattern is
+    /// `GateApprovalClient.resolveAsync`'s: `Task.detached`, "precisely to leave
+    /// the caller's actor (usually @MainActor)".
+    ///
+    /// Rapid ⌘D cancels the previous notify rather than piling up sockets; a
+    /// verdict whose token has been superseded is dropped instead of rewriting
+    /// a newer capture's row.
+    private func startGateNotify(agentID: String, task: String) {
+        gateNotifyTask?.cancel()
+        gateToken &+= 1
+        let token = gateToken
+        let notifier = gateNotifier
+        // Snapshot HERE, synchronously, while we still are the ⌘D that read it.
+        let env = ProcessInfo.processInfo.environment
+        gateNotifyTask = Task.detached(priority: .utility) { [weak self] in
+            if Task.isCancelled { return }
+            // Nothing here touches actor-isolated state; that is the point.
+            let outcome = notifier(agentID, task, env)
+            if Task.isCancelled { return }
+            guard let service = self else { return }
+            await MainActor.run { service.applyGateOutcome(token: token, outcome: outcome) }
+        }
+    }
+
+    /// Fold an asynchronous verdict back into the published capture.
+    ///
+    /// Rewrites the *same* row in `lastResult` and `recent[0]`, so the pill and
+    /// any other `ObservableObject` observer re-render with the real answer.
+    /// A plain acceptance says nothing (silence means it worked); a refusal —
+    /// or an acceptance that only happened because the host policy is
+    /// observe-only — appends its reason, and a refusal also puts `⚠︎gate` in
+    /// `pillLabel`.
+    ///
+    /// Timing: the notify is bounded by `SHANNON_GATE_NOTIFY_TIMEOUT_MS`
+    /// (250 ms default, 5 s ceiling) and `highlightUntil` runs for 8 s, so the
+    /// verdict always lands while the pill is still showing this capture.
+    private func applyGateOutcome(token: UInt64, outcome: GateNotifyOutcome) {
+        guard token == gateToken else { return }          // a newer ⌘D owns the row
+        guard var result = lastResult, result.gateStatus == .pending else { return }
+        result.gateStatus = outcome.status
+        if outcome.detail != GateNotifyOutcome.accepted.detail {
+            result.message += " · gate: \(outcome.detail)"
+        }
+        lastResult = result
+        if !recent.isEmpty { recent[0] = result }
+    }
+
     /// Tell the gate about the capture over HTTP `POST /message`.
     ///
     /// Deliberately *not* the Unix-socket session. ⌘D is an OBSERVATION — "the
@@ -971,13 +1085,27 @@ public final class AgentIngestService: ObservableObject {
     /// live it has to hold a connection open and keep `heartbeat_ns` beating,
     /// which is a daemon's job, not a keystroke's.
     ///
-    /// Never throws; loopback-only, so a refused connection fails instantly and
-    /// a wedged listener is bounded by the 200 ms receive timeout.
-    static func notifyGateBestEffort(agentID: String, task: String) -> Bool {
-        #if canImport(Darwin)
-        let env = ProcessInfo.processInfo.environment
-        let host = env["SHANNON_HTTP_HOST"] ?? "127.0.0.1"
-        let port = UInt16(env["SHANNON_HTTP_PORT"] ?? "") ?? 8765
+    /// **`nonisolated` is load-bearing.** This blocks; it must be callable from
+    /// a background executor without hopping to the main actor. Removing the
+    /// keyword re-creates the freeze, and `AgentIngestTests` will stop
+    /// compiling — deliberately.
+    ///
+    /// Never throws. Every failure path — disabled, unparseable endpoint,
+    /// non-loopback under `enforce`, connect/send/recv timeout, oversized or
+    /// unparseable reply, non-2xx, 2xx carrying an `"error"` key — returns
+    /// `.refused` with a reason. There is no path that returns `.accepted`
+    /// without a parsed 2xx response in hand.
+    nonisolated static func notifyGateBestEffort(
+        agentID: String,
+        task: String,
+        env: [String: String] = ProcessInfo.processInfo.environment,
+        transport: GateNotifyTransport = .bsdSocket
+    ) -> GateNotifyOutcome {
+        let plan: GateNotifyPlan
+        switch GateEndpointPolicy.resolve(env: env) {
+        case .refuse(let why): return .refused(why)
+        case .go(let p): plan = p
+        }
 
         let body: [String: Any] = [
             "agent_id": agentID,
@@ -986,65 +1114,18 @@ public final class AgentIngestService: ObservableObject {
             "payload": ["text": task, "event": "ingest", "source": "cmd_d"],
         ]
         guard let payload = try? JSONSerialization.data(withJSONObject: body) else {
-            return false
+            return .refused("could not encode the observation")
         }
 
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
-        defer { close(fd) }
-
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = port.bigEndian
-        let converted = host.withCString { inet_addr($0) }
-        guard converted != INADDR_NONE else { return false }
-        addr.sin_addr.s_addr = converted
-
-        var tv = timeval(tv_sec: 0, tv_usec: 200_000)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout.size(ofValue: tv)))
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout.size(ofValue: tv)))
-
-        let rc = withUnsafePointer(to: &addr) { p in
-            p.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                connect(fd, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
+        guard let text = transport.post(plan.endpoint, payload, plan.timeout) else {
+            return .refused("no answer from \(plan.endpoint.host):\(plan.endpoint.port) "
+                            + "within \(Int(plan.timeout * 1000)) ms")
         }
-        guard rc == 0 else { return false }
-
-        let head = """
-        POST /message HTTP/1.1\r
-        Host: \(host):\(port)\r
-        Content-Type: application/json\r
-        Content-Length: \(payload.count)\r
-        Connection: close\r
-        \r
-
-        """
-        var request = Array(head.utf8)
-        request.append(contentsOf: payload)
-        var offset = 0
-        while offset < request.count {
-            let sent = request[offset...].withUnsafeBufferPointer { buf in
-                send(fd, buf.baseAddress, buf.count, 0)
-            }
-            guard sent > 0 else { return false }
-            offset += sent
+        guard gateAccepted(httpResponse: text) else {
+            return .refused("gate rejected the observation")
         }
-
-        // The gate answers 200 with {"decision": …} and 403 with
-        // {"error": "unknown_agent:…"} for an id outside VALID_AGENTS. Writing
-        // bytes proves nothing, so wait for the verdict.
-        var reply = [UInt8](repeating: 0, count: 2048)
-        let received = recv(fd, &reply, reply.count, 0)
-        guard received > 0,
-              let text = String(bytes: reply[0..<received], encoding: .utf8) else {
-            return false
-        }
-        return gateAccepted(httpResponse: text)
-        #else
-        return false
-        #endif
+        if let note = plan.observeOnlyNote { return .init(status: .accepted, detail: note) }
+        return .accepted
     }
 
     /// Did the gate take the message? Pure, so the verdict is unit-tested
@@ -1065,5 +1146,406 @@ public final class AgentIngestService: ObservableObject {
         guard let bodyStart = httpResponse.range(of: "\r\n\r\n") else { return true }
         let body = httpResponse[bodyStart.upperBound...]
         return !body.contains("\"error\"")
+    }
+}
+
+// MARK: - Gate notification: status, endpoint policy, transport
+//
+// OPERATOR SURFACE — every knob on the ⌘D gate-notification path.
+//
+//   SHANNON_GATE_NOTIFY            on (default) | off
+//       Kill switch. "off"/"0"/"false"/"no" (case-insensitive) stops ⌘D from
+//       contacting the gate at all. Captures still write the pet and the
+//       registry; the pill shows "⚠︎gate" with the reason. Use this first if
+//       the notify ever misbehaves — do not patch it out.
+//
+//   SHANNON_HTTP_HOST              127.0.0.1 (default)
+//       IPv4 literal only. "localhost" is accepted as a literal alias for
+//       127.0.0.1; nothing else is resolved, because a DNS lookup on the ⌘D
+//       path is a stall waiting to happen. A hostname, an IPv6 address or any
+//       unparseable value is REFUSED, not guessed.
+//
+//   SHANNON_HTTP_PORT              8765 (default)
+//       1…65535. Unset or empty means the default. A value that is present but
+//       not a valid port is REFUSED — a typo must not silently post the
+//       observation to whatever happens to be on 8765.
+//
+//   SHANNON_GATE_HOST_POLICY       enforce (default) | observe
+//       What to do when SHANNON_HTTP_HOST is not loopback. `enforce` refuses.
+//       `observe` sends anyway and records "would be refused under enforce" in
+//       the capture's message, so a deployment that suspects it depends on an
+//       off-box gate can MEASURE that before the restriction bites.
+//
+//   SHANNON_GATE_ALLOW_REMOTE      unset (default) | 1
+//       Permanent opt-in for a non-loopback gate. Set this when an off-box gate
+//       is intended; `observe` is for finding out, this is for committing.
+//
+//   SHANNON_GATE_NOTIFY_TIMEOUT_MS 250 (default), clamped to 20…5000
+//       Hard ceiling on the WHOLE notification — connect, send and receive
+//       together, measured against one deadline. A value that is present but
+//       unparseable is REFUSED rather than silently defaulted.
+
+/// Where one ⌘D gate notification stands.
+public enum GateNotifyStatus: String, Sendable, Equatable, CaseIterable {
+    /// Nothing was sent and nothing will be — a refused capture, or a pet write
+    /// that failed. Distinct from `.refused`: no claim was ever made.
+    case notAttempted
+    /// Dispatched off the main actor; the verdict has not come back yet.
+    case pending
+    /// The gate answered 2xx and the body carried no `"error"`.
+    case accepted
+    /// Everything else. Unreachable, timed out, disabled, policy-refused,
+    /// malformed, or an explicit rejection. Always carries a reason.
+    case refused
+}
+
+/// A verdict plus the one line an operator needs to act on it.
+public struct GateNotifyOutcome: Sendable, Equatable {
+    public var status: GateNotifyStatus
+    public var detail: String
+
+    public init(status: GateNotifyStatus, detail: String) {
+        self.status = status
+        self.detail = detail
+    }
+
+    /// True only for a parsed 2xx. Never true for `.pending`.
+    public var accepted: Bool { status == .accepted }
+
+    public static let accepted = GateNotifyOutcome(status: .accepted, detail: "accepted")
+    public static func refused(_ why: String) -> GateNotifyOutcome {
+        GateNotifyOutcome(status: .refused, detail: why)
+    }
+}
+
+/// A validated IPv4 endpoint. Constructing one is the *only* way past the host
+/// policy, so there is no path from a raw env string to a socket.
+public struct GateEndpoint: Sendable, Equatable {
+    /// Dotted-quad IPv4 literal, already proven parseable by `inet_pton`.
+    public var host: String
+    public var port: UInt16
+    /// 127.0.0.0/8.
+    public var isLoopback: Bool
+
+    public init(host: String, port: UInt16, isLoopback: Bool) {
+        self.host = host
+        self.port = port
+        self.isLoopback = isLoopback
+    }
+}
+
+/// An approved notification: where to send it and how long it may take.
+public struct GateNotifyPlan: Sendable, Equatable {
+    public var endpoint: GateEndpoint
+    /// Seconds. Bounds connect + send + recv against a single deadline.
+    public var timeout: TimeInterval
+    /// Non-nil when this plan survived only because the host policy is
+    /// `observe`. The text is exactly what `enforce` would have refused with.
+    public var observeOnlyNote: String?
+
+    public init(endpoint: GateEndpoint, timeout: TimeInterval, observeOnlyNote: String? = nil) {
+        self.endpoint = endpoint
+        self.timeout = timeout
+        self.observeOnlyNote = observeOnlyNote
+    }
+}
+
+/// Turns the environment into either a plan or a refusal. Pure — no sockets, no
+/// DNS, no clock — so every branch is unit-tested on a clean machine.
+public enum GateEndpointPolicy {
+    public enum Resolution: Sendable, Equatable {
+        case go(GateNotifyPlan)
+        case refuse(String)
+    }
+
+    public static let defaultHost = "127.0.0.1"
+    public static let defaultPort: UInt16 = 8765
+    public static let defaultTimeoutMS = 250
+    public static let minTimeoutMS = 20
+    public static let maxTimeoutMS = 5000
+
+    /// See the OPERATOR SURFACE block above for every variable read here.
+    ///
+    /// Fail-closed by construction: the function returns `.refuse` for a
+    /// disabled switch, an empty/hostname/IPv6/garbage host, an unparseable
+    /// port, an unparseable timeout, and a non-loopback host under the default
+    /// `enforce` policy. `.go` is only reachable with a validated IPv4 literal.
+    public static func resolve(env: [String: String]) -> Resolution {
+        if let raw = env["SHANNON_GATE_NOTIFY"] {
+            let v = raw.trimmingCharacters(in: .whitespaces).lowercased()
+            if ["off", "0", "false", "no"].contains(v) {
+                return .refuse("disabled by SHANNON_GATE_NOTIFY=\(raw)")
+            }
+        }
+
+        let timeoutMS: Int
+        if let raw = env["SHANNON_GATE_NOTIFY_TIMEOUT_MS"]?
+            .trimmingCharacters(in: .whitespaces), !raw.isEmpty {
+            guard let parsed = Int(raw) else {
+                return .refuse("SHANNON_GATE_NOTIFY_TIMEOUT_MS=\(raw) is not a number")
+            }
+            timeoutMS = min(max(parsed, minTimeoutMS), maxTimeoutMS)
+        } else {
+            timeoutMS = defaultTimeoutMS
+        }
+
+        let port: UInt16
+        if let raw = env["SHANNON_HTTP_PORT"]?.trimmingCharacters(in: .whitespaces),
+           !raw.isEmpty {
+            guard let parsed = UInt16(raw), parsed > 0 else {
+                return .refuse("SHANNON_HTTP_PORT=\(raw) is not a port in 1…65535")
+            }
+            port = parsed
+        } else {
+            port = defaultPort
+        }
+
+        let rawHost = env["SHANNON_HTTP_HOST"]?.trimmingCharacters(in: .whitespaces) ?? ""
+        let host = rawHost.isEmpty ? defaultHost
+            : (rawHost.lowercased() == "localhost" ? defaultHost : rawHost)
+        guard let loopback = ipv4IsLoopback(host) else {
+            return .refuse("SHANNON_HTTP_HOST=\(rawHost) is not an IPv4 literal "
+                           + "(names are never resolved on this path)")
+        }
+
+        let endpoint = GateEndpoint(host: host, port: port, isLoopback: loopback)
+        let timeout = TimeInterval(timeoutMS) / 1000.0
+        if loopback { return .go(GateNotifyPlan(endpoint: endpoint, timeout: timeout)) }
+
+        let complaint = "\(host) is not loopback; set SHANNON_GATE_ALLOW_REMOTE=1 to allow it"
+        if truthy(env["SHANNON_GATE_ALLOW_REMOTE"]) {
+            return .go(GateNotifyPlan(endpoint: endpoint, timeout: timeout))
+        }
+        let policy = (env["SHANNON_GATE_HOST_POLICY"] ?? "enforce")
+            .trimmingCharacters(in: .whitespaces).lowercased()
+        switch policy {
+        case "observe":
+            return .go(GateNotifyPlan(
+                endpoint: endpoint, timeout: timeout,
+                observeOnlyNote: "observe-only: \(complaint)"
+            ))
+        case "enforce":
+            return .refuse(complaint)
+        default:
+            // An unrecognised policy is not a licence to pick the permissive one.
+            return .refuse("SHANNON_GATE_HOST_POLICY=\(policy) is not enforce|observe")
+        }
+    }
+
+    private static func truthy(_ raw: String?) -> Bool {
+        guard let v = raw?.trimmingCharacters(in: .whitespaces).lowercased() else { return false }
+        return ["1", "true", "yes", "on"].contains(v)
+    }
+
+    /// `nil` when `host` is not a strict dotted-quad IPv4 literal.
+    ///
+    /// `inet_pton`, not `inet_addr`: `inet_addr` also accepts "10", "0x7f.1" and
+    /// other legacy forms, which would let a typo become a *different* host.
+    public static func ipv4IsLoopback(_ host: String) -> Bool? {
+        #if canImport(Darwin)
+        var addr = in_addr()
+        let ok = host.withCString { inet_pton(AF_INET, $0, &addr) }
+        guard ok == 1 else { return nil }
+        return (UInt32(bigEndian: addr.s_addr) >> 24) == 127
+        #else
+        return nil
+        #endif
+    }
+}
+
+/// How the notification actually reaches the wire. Injected so a test can make
+/// "the gate is blackholed" mean "this closure blocks", with no network at all.
+public struct GateNotifyTransport: Sendable {
+    /// Send `body` to `endpoint` and return the raw HTTP response text, or nil
+    /// on any failure. MUST return within roughly `timeout` seconds.
+    public var post: @Sendable (_ endpoint: GateEndpoint, _ body: Data, _ timeout: TimeInterval)
+        -> String?
+
+    public init(
+        post: @escaping @Sendable (GateEndpoint, Data, TimeInterval) -> String?
+    ) {
+        self.post = post
+    }
+
+    /// The shipping transport: non-blocking fd + `poll(2)` against one deadline.
+    public static let bsdSocket = GateNotifyTransport { endpoint, body, timeout in
+        GateSocketIO.post(endpoint: endpoint, body: body, timeout: timeout)
+    }
+
+    /// Contacts nothing and always refuses. The fail-closed stand-in for tests
+    /// and for any context that must not touch a live gate.
+    public static let refuseAll = GateNotifyTransport { _, _, _ in nil }
+}
+
+/// The bounded socket client.
+///
+/// Exists because `SO_SNDTIMEO` does **not** bound `connect()` on Darwin: with
+/// the option reading back as 0.200000 s, `connect()` to a blackholed address
+/// still blocked for 75,000.3 ms — the `TCPTV_KEEP_INIT` default, not the socket
+/// option. The only thing that bounds a connect here is a non-blocking fd plus
+/// an explicit `poll(2)` deadline, which is what this does.
+public enum GateSocketIO {
+    /// Result of one readiness wait.
+    public enum WaitOutcome: Sendable, Equatable {
+        case ready
+        case timedOut
+        case failed(Int32)
+    }
+
+    /// Refuse a reply larger than this. A gate answering a status POST with
+    /// more than this is not our gate, and we will not grow a buffer for it.
+    public static let maxResponseBytes = 64 * 1024
+
+    /// Block until `fd` is ready for `events`, or `deadline` passes.
+    ///
+    /// This is the mechanism the whole fix rests on, so it is tested directly
+    /// against a pipe: an empty pipe is never readable, so the wait must return
+    /// `.timedOut` at the deadline and not at some kernel default.
+    /// `EINTR` is retried against the *remaining* budget, never a fresh one.
+    public static func wait(fd: Int32, events: Int16, deadline: Date) -> WaitOutcome {
+        #if canImport(Darwin)
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining <= 0 { return .timedOut }
+            let ms = Int32(min(Double(Int32.max), (remaining * 1000).rounded(.up)))
+            var pfd = pollfd(fd: fd, events: events, revents: 0)
+            let rc = poll(&pfd, 1, ms)
+            if rc > 0 { return .ready }
+            if rc == 0 { return .timedOut }
+            if errno == EINTR { continue }
+            return .failed(errno)
+        }
+        #else
+        return .failed(ENOTSUP)
+        #endif
+    }
+
+    /// A TCP socket that is non-blocking from birth and will not raise SIGPIPE.
+    ///
+    /// The `O_NONBLOCK` is not decoration: without it `connect()` ignores every
+    /// timeout we can set and the caller's thread is the kernel's to keep.
+    public static func makeSocket() -> Int32 {
+        #if canImport(Darwin)
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return -1 }
+        let flags = fcntl(fd, F_GETFL, 0)
+        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
+            close(fd)
+            return -1
+        }
+        var on: Int32 = 1
+        // A half-closed gate must fail the send, not kill the app.
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        return fd
+        #else
+        return -1
+        #endif
+    }
+
+    /// One short-lived `POST /message`. Returns the raw response text, or nil on
+    /// any failure — including the deadline expiring in connect, send or recv.
+    public static func post(
+        endpoint: GateEndpoint,
+        body: Data,
+        timeout: TimeInterval
+    ) -> String? {
+        #if canImport(Darwin)
+        let deadline = Date().addingTimeInterval(timeout)
+        let fd = makeSocket()
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = endpoint.port.bigEndian
+        guard endpoint.host.withCString({ inet_pton(AF_INET, $0, &addr.sin_addr) }) == 1 else {
+            return nil
+        }
+
+        let rc = withUnsafePointer(to: &addr) { p in
+            p.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                connect(fd, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        if rc != 0 {
+            guard errno == EINPROGRESS else { return nil }
+            // THE fix: a blackholed peer now costs `timeout`, not TCPTV_KEEP_INIT.
+            guard wait(fd: fd, events: Int16(POLLOUT), deadline: deadline) == .ready else {
+                return nil
+            }
+            var soError: Int32 = 0
+            var len = socklen_t(MemoryLayout<Int32>.size)
+            guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &len) == 0, soError == 0 else {
+                return nil
+            }
+        }
+
+        let head = """
+        POST /message HTTP/1.1\r
+        Host: \(endpoint.host):\(endpoint.port)\r
+        Content-Type: application/json\r
+        Content-Length: \(body.count)\r
+        Connection: close\r
+        \r
+
+        """
+        var request = Array(head.utf8)
+        request.append(contentsOf: body)
+        var offset = 0
+        while offset < request.count {
+            let sent = request[offset...].withUnsafeBufferPointer { buf in
+                send(fd, buf.baseAddress, buf.count, 0)
+            }
+            if sent > 0 { offset += sent; continue }
+            guard sent < 0, errno == EAGAIN || errno == EWOULDBLOCK else { return nil }
+            guard wait(fd: fd, events: Int16(POLLOUT), deadline: deadline) == .ready else {
+                return nil
+            }
+        }
+
+        // The gate answers 200 with {"decision": …} and 403 with
+        // {"error": "unknown_agent:…"} for an id outside VALID_AGENTS. Writing
+        // bytes proves nothing, so wait for the verdict.
+        var response = [UInt8]()
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let got = recv(fd, &chunk, chunk.count, 0)
+            if got > 0 {
+                response.append(contentsOf: chunk[0..<got])
+                // Oversized reply: refuse rather than keep growing a buffer.
+                if response.count > maxResponseBytes { return nil }
+                if responseIsComplete(response) { break }
+                continue
+            }
+            if got == 0 { break }   // peer closed — Connection: close
+            guard errno == EAGAIN || errno == EWOULDBLOCK else { return nil }
+            guard wait(fd: fd, events: Int16(POLLIN), deadline: deadline) == .ready else {
+                return nil
+            }
+        }
+        guard !response.isEmpty else { return nil }
+        return String(bytes: response, encoding: .utf8)
+        #else
+        return nil
+        #endif
+    }
+
+    /// Have we got the whole head, plus a `Content-Length` body if one was
+    /// declared? Lets a well-behaved gate answer in one round trip instead of
+    /// burning the remaining budget waiting for the peer to close.
+    static func responseIsComplete(_ bytes: [UInt8]) -> Bool {
+        guard let text = String(bytes: bytes, encoding: .utf8),
+              let headEnd = text.range(of: "\r\n\r\n") else { return false }
+        let head = text[text.startIndex..<headEnd.lowerBound]
+        let bodyBytes = bytes.count - head.utf8.count - 4
+        for line in head.split(separator: "\r\n") {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2,
+                  parts[0].trimmingCharacters(in: .whitespaces).lowercased() == "content-length",
+                  let want = Int(parts[1].trimmingCharacters(in: .whitespaces)) else { continue }
+            return bodyBytes >= want
+        }
+        return true
     }
 }

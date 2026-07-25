@@ -593,19 +593,25 @@ public enum AgentActivityReader {
         /// The hub DB opened. False means "no telemetry at all", which the UI
         /// should say out loud rather than implying everything is merely quiet.
         public var gateDBAvailable: Bool
+        /// Gate-measured entropy per scored agent. Feeds
+        /// `EntropyProvenance.resolve` so the pill can show a *real* H when no
+        /// detector socket is attached, instead of a fabricated one.
+        public var agentEntropy: [EntropyMeasurement]
 
         public init(
             summary: AgentActivitySummary = AgentActivitySummary(),
             pendingAsks: [GateDBReader.PendingAsk] = [],
             staleAsks: [GateDBReader.PendingAsk] = [],
             activity: [GateDBReader.ActivityEvent] = [],
-            gateDBAvailable: Bool = false
+            gateDBAvailable: Bool = false,
+            agentEntropy: [EntropyMeasurement] = []
         ) {
             self.summary = summary
             self.pendingAsks = pendingAsks
             self.staleAsks = staleAsks
             self.activity = activity
             self.gateDBAvailable = gateDBAvailable
+            self.agentEntropy = agentEntropy
         }
 
         /// Everything on screen whose text depends on the clock: agent rows,
@@ -646,7 +652,8 @@ public enum AgentActivityReader {
             pendingAsks: gate?.pendingAsks ?? [],
             staleAsks: gate?.staleAsks ?? [],
             activity: gate?.activity ?? [],
-            gateDBAvailable: gate?.available ?? false
+            gateDBAvailable: gate?.available ?? false,
+            agentEntropy: gate?.agentEntropy ?? []
         )
     }
 
@@ -698,6 +705,13 @@ public final class AgentActivityMonitor: ObservableObject {
     /// Whether `~/.shannon/agent_hub.db` could be read at all. When false the
     /// pill has *no* telemetry and everything it lists is a local observation.
     @Published public private(set) var gateDBAvailable = false
+
+    /// Gate-measured entropy per scored agent, newest-usable first.
+    ///
+    /// Empty means nothing has been measured — never "measured as zero". Feed
+    /// this to `EntropyProvenance.resolve` rather than reading `.first?.bits`
+    /// directly; the resolver is what decides whether a value is current.
+    @Published public private(set) var agentEntropy: [EntropyMeasurement] = []
 
     /// Interaction ids whose approval is currently being written to the gate.
     /// The banner shows a spinner for these instead of tappable buttons, so a
@@ -799,6 +813,7 @@ public final class AgentActivityMonitor: ObservableObject {
         if recentActivity != full.activity { recentActivity = full.activity }
         if gateDBAvailable != full.gateDBAvailable { gateDBAvailable = full.gateDBAvailable }
         if gateAvailable != socketUp { gateAvailable = socketUp }
+        if agentEntropy != full.agentEntropy { agentEntropy = full.agentEntropy }
         // Drop stale in-flight state for asks the gate has since cleared.
         let live = Set(full.pendingAsks.map(\.interactionId))
         if !resolving.isSubset(of: live) { resolving.formIntersection(live) }

@@ -35,6 +35,45 @@ Environment
   FLEXAIDDS_LOG_DIR   Override default log/DB directory
   SHANNON_H_THRESHOLD Override flag threshold (default 3.5)
   SHANNON_H_BLOCK     Override block threshold (default 5.0)
+
+Gate knobs, and what to do if one misfires
+------------------------------------------
+Every rule below has an OBSERVE-ONLY setting.  A gate that misfires gets
+switched off wholesale, which is worse than not shipping it, so each check can
+be demoted to "measure and record, change no verdict" on its own, without
+taking any other check with it.  All of them record their reason on the audit
+row (`agent_messages.gate_reasons`) in every mode except `off`, so the impact
+of enforcing is measurable BEFORE you enforce.
+
+  SHANNON_ATTEST=off|observe|enforce         (default enforce)
+      Self-report divergence.  See the block at "Self-report attestation".
+
+  SHANNON_VOLUME=off|observe|enforce         (default enforce)
+      Total information content (compressed size) + padding detection.
+      Tunables: SHANNON_VOLUME_MIN_BYTES (512), SHANNON_VOLUME_FLAG_BITS
+      (65536), SHANNON_VOLUME_BLOCK_BITS (262144),
+      SHANNON_VOLUME_REDUNDANCY_FLOOR (0.15).
+      Symptom of a bad fit: legitimate large code/log payloads flagged.
+      Response: raise SHANNON_VOLUME_FLAG_BITS, or run `observe` for a week
+      and read the `information_volume` rows.
+
+  SHANNON_UNSCORED=off|observe|flag|block    (default flag)
+      Messages carrying content the gate could not see (file paths, URLs,
+      artifact ids, or a payload too deep to walk).  `flag` still DELIVERS the
+      message — only `blocked` stops traffic.
+      Symptom of a bad fit: every docking result flagged because it ships
+      `pose_file`.  That is a true positive (the pose IS out-of-band content)
+      but it may not be one you want to act on — run `observe`.
+
+  SHANNON_STRICT_TYPES=1|0                   (default 1 = reject)
+      Reject a message whose `message_type` is not in VALID_MESSAGE_TYPES.
+      0 = observe: scored, audited, reason recorded, delivered anyway.
+
+  SHANNON_ECHO=decision|none                 (default decision)
+      How much of the verdict the measured agent is told.
+
+  SHANNON_MAX_PAYLOAD_BYTES=1000000
+      Hard ingest bound; a larger payload is refused, never measured.
 """
 
 from __future__ import annotations
@@ -45,12 +84,14 @@ import json
 import logging
 import math
 import os
+import re
 import secrets
 import signal
 import sqlite3
 import sys
 import time
 import statistics
+import zlib
 from collections import Counter, defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -172,6 +213,151 @@ DILUTION_MIN_TOKENS: int = int(os.environ.get("SHANNON_DILUTION_MIN_TOKENS", "32
 DILUTION_CAP_FRAC: float = float(os.environ.get("SHANNON_DILUTION_CAP_FRAC", "0.02"))
 DILUTION_SHARE: float = float(os.environ.get("SHANNON_DILUTION_SHARE", "0.5"))
 
+# ── Information VOLUME — the extensive statistic (SHANNON_VOLUME) ─────────────
+# ONE SENTENCE FOR THE OPERATOR:
+#   H is bits-per-token, so it says nothing about HOW MUCH went out the door;
+#   this rule measures the total, and total cannot be diluted by padding.
+#
+# Why an intensive statistic is not a gate
+# ----------------------------------------
+# `token_entropy` is a MEAN.  The dilution cap above stops padding from
+# *lowering* that mean, but it cannot fix the other half of the problem: a mean
+# is blind to length, and it degenerates completely when the tokenizer does.
+# The demonstrated bypass is one line long — ship the payload with no
+# whitespace in it:
+#
+#     {"output": "<80 000 chars of base64>"}   ->  tokens = 1
+#                                              ->  H_token = 0.00  (n < 2)
+#                                              ->  H = 0.30 * H_struct = 1.80
+#                                              ->  decision = "pass", reasons = []
+#
+# 60 kB of incompressible content, scored 1.80 bits and certified clean.  Same
+# for a bit-string, a hex dump, a single long URL-encoded blob — anything whose
+# alphabet is small enough to keep character entropy low.
+#
+# The fix is to score TOTAL information content.  bits_total is taken from the
+# compressed length rather than H_token * n_tokens because the compressor does
+# not care where the whitespace is (H_token * n_tokens is 0 for the blob above)
+# and because it charges nothing for repetition (H_token * n_tokens reads a
+# sentence repeated 100x as 100x the information, which would flag every log
+# tail an agent ever pastes).  zlib's output length is a standard, cheap,
+# deterministic upper bound on the information the message actually carries:
+#
+#     padding is free to send and free to compress  -> bits_total unchanged
+#     real content is neither                       -> bits_total goes up
+#
+# Modes (SHANNON_VOLUME): off | observe | enforce (default).
+#   observe  — measure and record the reasons, change no verdict.
+#   enforce  — volume can escalate pass -> flagged -> blocked.
+# A volume block is a per-message MEASUREMENT, not accumulated reputation, so
+# it may block directly, exactly like H_hard_block.  The "never pass->blocked
+# in one step" rule below applies to the attestation ladder, which is a verdict
+# about an agent rather than about the bytes in front of it.
+VOLUME_MODE: str = os.environ.get("SHANNON_VOLUME", "enforce").strip().lower()
+# Below this many scored bytes nothing fires, ever.  The operator's entire real
+# history maxes out at 121 scored bytes, i.e. 4x under the floor.
+VOLUME_MIN_BYTES: int = int(os.environ.get("SHANNON_VOLUME_MIN_BYTES", "512"))
+# 65 536 bits = 8 KiB of genuinely incompressible content in one message.
+VOLUME_FLAG_BITS: float = float(os.environ.get("SHANNON_VOLUME_FLAG_BITS", "65536"))
+# 262 144 bits = 32 KiB.  The demonstrated 60 kB base64 blob is 484 744 bits.
+VOLUME_BLOCK_BITS: float = float(os.environ.get("SHANNON_VOLUME_BLOCK_BITS", "262144"))
+# compressed/raw at or below this over a long stream is padding, not content.
+# "ok " x 20000 lands at 0.0014; English prose at this length lands near 0.35.
+VOLUME_REDUNDANCY_FLOOR: float = float(
+    os.environ.get("SHANNON_VOLUME_REDUNDANCY_FLOOR", "0.15")
+)
+# Hard ingest bound.  A payload larger than this is refused outright rather
+# than measured: it is the only outcome that is safe when the alternative is
+# spending unbounded CPU on an attacker-chosen string.  Raise it only if you
+# have a legitimate client that ships megabyte payloads through a broker.
+MAX_PAYLOAD_BYTES: int = int(os.environ.get("SHANNON_MAX_PAYLOAD_BYTES", "1000000"))
+
+# ── Unscored content — pointers and truncation (SHANNON_UNSCORED) ─────────────
+# ONE SENTENCE FOR THE OPERATOR:
+#   A message that hands the consumer a reference instead of the content has
+#   not been measured, and an unmeasured message must never be certified.
+#
+# The problem entropy cannot solve
+# --------------------------------
+# {"output": "analysis complete see artifact",
+#  "artifact_path": "/tmp/exfil.bin"}      ->  H = 2.71, "pass", reasons = []
+#
+# The gate scored the LABEL.  The consumer dereferences the POINTER.  Measured
+# content and delivered content are disjoint sets, so no threshold on the
+# measured side can ever be the answer — the only honest response is to refuse
+# to call such a message clean.
+#
+# THE POLICY, AND WHY: the gate NEVER DEREFERENCES ANYTHING.
+#   * No URL is ever fetched.  A gate that fetches is an SSRF primitive with an
+#     allowlist bypass built in (the attacker chooses the URL), it turns every
+#     scored message into an outbound request from a trusted host, and it makes
+#     the verdict depend on network availability — which would also make this
+#     file's tests non-deterministic.
+#   * No local path is ever opened either.  Bounding the read and refusing to
+#     follow symlinks out of a permitted root is possible, but it buys the gate
+#     a TOCTOU race it cannot win (the file is read here and delivered there,
+#     and nothing stops the sender rewriting it in between), so measuring the
+#     bytes would produce a verdict about a file that no longer exists.  The
+#     honest statement is "there is content here I did not see", and that is
+#     what gets recorded.
+# Consequence: a pointer is UNSCORED CONTENT.  It is recorded on the audit row
+# on every mode except `off`, and by default it costs the message its `pass`.
+#
+# Truncation is the same category: if the recursive walk hit its depth or count
+# bound, strings exist that were not measured, so the message cannot be clean
+# either.
+#
+# Modes (SHANNON_UNSCORED): off | observe | flag (default) | block.
+#   observe — record `unscored_pointer` / `unscored_truncated`, no escalation.
+#   flag    — such a message can never be `pass`.  It is still delivered:
+#             only `blocked` stops traffic, so this is a visible mark on the
+#             audit row and the HUD, not an outage.
+#   block   — refuse delivery.  Correct for a fleet that has been migrated to
+#             inline content; it WILL stop any client still shipping
+#             `pose_file` or an artifact id on every result.
+#
+# KNOWN FALSE POSITIVE, STATED PLAINLY: an approval prompt that NAMES a path
+# ("Edit /Users/me/main.py?") is describing content, not handing it over, and
+# it will be flagged anyway — the gate cannot tell the two apart from the
+# bytes.  On the operator's 49 real messages this fires 0 times, so it is not
+# a live problem today; if your prompts routinely carry paths it will become
+# one, and the answer is SHANNON_UNSCORED=observe, not a per-message-type
+# exemption.  Exempting `approval_needed` would recreate the exact hole W5
+# describes: a check you can switch off by choosing a message_type.
+UNSCORED_MODE: str = os.environ.get("SHANNON_UNSCORED", "flag").strip().lower()
+
+# Keys whose VALUE is a reference by definition, whatever it looks like.
+POINTER_KEYS: frozenset[str] = frozenset({
+    "path", "url", "uri", "href", "src", "link", "file", "filename", "filepath",
+    "location", "artifact", "blob", "attachment", "download", "pose_file",
+    "ref", "reference", "s3_key", "object_key", "gs_path",
+})
+POINTER_KEY_SUFFIXES: tuple[str, ...] = (
+    "_path", "_url", "_uri", "_file", "_ref", "_href", "_location",
+    "_artifact", "_blob", "_attachment", "_key",
+)
+# scheme://... anywhere, or a token that starts a filesystem path.  Anchoring
+# the path branch to start-of-string-or-whitespace is what keeps "and/or",
+# "24/7" and "I/O" out of it.
+_POINTER_VALUE_RE = re.compile(
+    r"[a-zA-Z][a-zA-Z0-9+.\-]{1,15}://\S+"
+    r"|(?:^|\s)(?:~|\.{0,2})/[^\s\"']{2,}"
+)
+# How many pointer strings to keep for the log line.  The verdict only needs
+# to know whether the count is zero.
+POINTER_SAMPLE_MAX: int = 8
+
+# A string under a metadata / *_id key is skipped as a label — but only while
+# it is SHORT.  Length is what separates a label from a payload: nothing that
+# needs 128 characters is an identifier.  Without this bound the metadata list
+# is the very allowlist-in-disguise it was written to remove, because
+# {"hash": "<80 000 chars>"} is excluded from scoring at every depth.
+METADATA_MAX_LEN: int = int(os.environ.get("SHANNON_METADATA_MAX_LEN", "128"))
+# Recursive-walk bounds.  Exceeding either is recorded as `unscored_truncated`
+# and fails closed rather than returning a partial measurement as if complete.
+WALK_MAX_DEPTH: int = int(os.environ.get("SHANNON_WALK_MAX_DEPTH", "12"))
+WALK_MAX_STRINGS: int = int(os.environ.get("SHANNON_WALK_MAX_STRINGS", "5000"))
+
 # Divergence d = log2(gate_token_H / self_reported_H), in bits.
 #   d = 0.00 -> perfect agreement       d = 1.00 -> agent under-reported 2x
 #   d = 1.50 -> under-reported 2.83x    d = 2.20 -> the production 1.00-vs-4.58
@@ -208,9 +394,33 @@ ATTEST_BONUS: float = float(os.environ.get("SHANNON_ATTEST_BONUS", "0.5"))
 # (no measurements, no thresholds, no reason detail). "none" = a bare ack, for
 # operators who can update every client. See _gate_response_envelope().
 ECHO_MODE: str = os.environ.get("SHANNON_ECHO", "decision").strip().lower()
-# Reject unknown message_type outright (1) or log and continue (0, default).
-# VALID_MESSAGE_TYPES has drifted before, so the safe default is to observe.
-STRICT_TYPES: bool = os.environ.get("SHANNON_STRICT_TYPES", "0") == "1"
+# ── message_type enforcement (SHANNON_STRICT_TYPES) ───────────────────────────
+# ONE SENTENCE FOR THE OPERATOR:
+#   An unrecognised message_type is refused, because the alternative is that
+#   the sender picks a string and decides for itself which checks run.
+#
+# `message_type` used to select whether the gate ran AT ALL: `_dispatch`
+# returned before `evaluate()` for 'query', and again for
+# 'approval_response'/'system_event' carrying 'approved'.  Those paths were
+# never scored and never wrote an `agent_messages` row — the audit row count
+# was observed unchanged at 25 across the attack.  Meanwhile
+# VALID_MESSAGE_TYPES was defined and referenced NOWHERE, so the field was a
+# free-form attacker-chosen string and 'totally_made_up_type' was accepted.
+#
+# Both halves are now closed, and the enforcement DEFAULT IS ON.  An earlier
+# revision defaulted this to observe-and-continue out of a fear that the set
+# had drifted; that fear is testable, and it was tested — every type the two
+# shipped clients can emit (agent_protocol.AgentClient.send_*, the Swift HUD
+# and the Pill's GateApprovalClient) is in the set below, verified by
+# test_every_shipped_client_message_type_is_valid.  A constant that is
+# "enforced" only when an operator opts in is the silent no-op this file keeps
+# being bitten by.
+#
+# SHANNON_STRICT_TYPES=0 is the observe-only escape hatch: the message is still
+# scored, still audited and still carries the `unknown_message_type` reason —
+# it is simply delivered anyway.  Use it for a week if you have unknown
+# in-house clients, read the audit log, then turn it back on.
+STRICT_TYPES: bool = os.environ.get("SHANNON_STRICT_TYPES", "1") == "1"
 
 # ── Liveness ──────────────────────────────────────────────────────────────────
 # `last_seen_ns` only moves when an agent *speaks*, so a connected agent that
@@ -298,6 +508,27 @@ class GateDecision:
     computed_residual: Optional[float] = None     # d after per-agent de-bias
     attested: Optional[bool] = None               # None = nothing to attest to
     trust_score: float = 0.0                      # accumulated under-reporting
+    # ── Volume / unscored content ─────────────────────────────────────────
+    # bits_total is the EXTENSIVE companion to computed_H: H says how dense
+    # the message is, this says how much of it there was. Padding moves H;
+    # it cannot move this.
+    bits_total: float = 0.0
+    redundancy: float = 0.0                       # compressed/raw, 0..~1
+    pointers: tuple[str, ...] = ()                # unscored references found
+
+
+@dataclass
+class ScoredContent:
+    """Everything the extractor learned about one payload.
+
+    ``text`` is what gets measured.  The other three fields are the record of
+    what the extractor could NOT measure, which is the half a gate that only
+    reports a number always loses.
+    """
+    text: str = ""
+    truncated: bool = False        # walk hit WALK_MAX_DEPTH / WALK_MAX_STRINGS
+    oversized_meta: tuple[str, ...] = ()  # metadata keys that held real payload
+    pointers: tuple[str, ...] = ()        # pointer-shaped values, any depth
 
 
 # ── Shannon Entropy Analyzer ──────────────────────────────────────────────────
@@ -380,13 +611,122 @@ class ShannonAnalyzer:
         return max(0.0, -sum((c / n) * math.log2(c / n) for c in counts.values()))
 
     @staticmethod
-    def scored_text(payload: Any) -> str:
+    def is_pointer(key: Optional[str], value: str) -> bool:
+        """True when this string is a REFERENCE to content held elsewhere.
+
+        Two independent tests, either sufficient:
+          * the KEY says so   — `artifact_path`, `url`, `pose_file`, `*_ref`…
+          * the VALUE says so — `scheme://…` anywhere in the string, or a token
+            that begins a filesystem path (`/tmp/x`, `./x`, `../x`, `~/x`).
+
+        Key-based detection is what makes an opaque id (`"a7f3c9"` under
+        `artifact_id`) count, and value-based detection is what stops the key
+        list from being the same allowlist-in-disguise as the old scored-key
+        list.  Nothing here dereferences anything — see the SHANNON_UNSCORED
+        block at module scope for why that is a deliberate refusal rather than
+        a missing feature.
+        """
+        if key:
+            k = key.lower()
+            if k in POINTER_KEYS or k.endswith(POINTER_KEY_SUFFIXES):
+                return True
+            # `artifact_id`, `blob_id`, `file_id`… — a pointer key wearing the
+            # `*_id` suffix that the extractor skips as metadata. Checked by
+            # stripping the suffix rather than by listing the combinations, so
+            # it cannot drift out of sync with POINTER_KEYS.
+            if k.endswith("_id") and k[:-3] in POINTER_KEYS:
+                return True
+        return bool(_POINTER_VALUE_RE.search(value))
+
+    @classmethod
+    def scan(cls, payload: Any) -> ScoredContent:
+        """Walk the whole payload once: what can be measured, and what cannot.
+
+        See :meth:`scored_text` for the extraction rules.  This is the form
+        that also reports the three things a bare string cannot:
+
+          * ``truncated``      — the walk hit a bound, so unmeasured strings
+                                 exist and the measurement is incomplete;
+          * ``oversized_meta`` — a metadata / ``*_id`` key held more than
+                                 METADATA_MAX_LEN characters, so it was scored
+                                 as content rather than skipped as a label;
+          * ``pointers``       — references to content the gate cannot see.
+        """
+        out: list[str] = []
+        seen: set[str] = set()
+        pointers: list[str] = []
+        oversized: list[str] = []
+        state = {"truncated": False}
+
+        def walk(node: Any, key: Optional[str], depth: int) -> None:
+            if depth > WALK_MAX_DEPTH or len(out) >= WALK_MAX_STRINGS:
+                # FAIL CLOSED: record that the measurement is incomplete
+                # instead of returning a partial one as if it were whole.
+                state["truncated"] = True
+                return
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    walk(v, str(k).lower(), depth + 1)
+            elif isinstance(node, (list, tuple)):
+                for v in node:
+                    walk(v, key, depth + 1)
+            elif isinstance(node, str):
+                s = node.strip()
+                if not s:
+                    return
+                # Pointer detection runs BEFORE the metadata skip: a reference
+                # parked under `pose_file` or `artifact_id` is still a
+                # reference, and those are exactly the keys it would hide in.
+                if len(pointers) < POINTER_SAMPLE_MAX and cls.is_pointer(key, s):
+                    pointers.append(s[:200])
+                if key is not None and (key in METADATA_KEYS or key.endswith("_id")):
+                    if len(s) <= METADATA_MAX_LEN:
+                        return          # a genuine label — not content
+                    oversized.append(key)   # too long to be a label: score it
+                if s not in seen:
+                    seen.add(s)
+                    out.append(s)
+
+        walk(payload, None, 0)
+        return ScoredContent(
+            text=" ".join(out),
+            truncated=state["truncated"],
+            oversized_meta=tuple(dict.fromkeys(oversized)),
+            pointers=tuple(pointers),
+        )
+
+    @staticmethod
+    def information_volume(text: str) -> tuple[float, float, int]:
+        """``(bits_total, redundancy, n_bytes)`` for one scored string.
+
+        ``bits_total``  8 * len(zlib.compress(utf-8 bytes)) — a deterministic
+                        upper bound on the information the message carries,
+                        independent of where the whitespace is.  This is the
+                        EXTENSIVE statistic: appending free padding leaves it
+                        essentially unchanged, whereas it drives the per-token
+                        mean toward zero.
+        ``redundancy``  compressed/raw.  Near 0 means padding; near 1 means
+                        incompressible content (encrypted, base64, random).
+
+        Both are 0 for an empty string.  zlib is deterministic for a fixed
+        level, so this value is reproducible across machines and runs.
+        """
+        raw = text.encode("utf-8", "replace")
+        n = len(raw)
+        if n == 0:
+            return 0.0, 0.0, 0
+        comp = len(zlib.compress(raw, 6))
+        return float(8 * comp), round(comp / n, 6), n
+
+    @classmethod
+    def scored_text(cls, payload: Any) -> str:
         """
         Every string the gate will score, from anywhere in the payload.
 
         This is the single extraction site, and it is deliberately a DENYLIST:
         every string at any nesting depth is collected unless its key is a
-        known identifier/metadata key (METADATA_KEYS, or any ``*_id``).
+        known identifier/metadata key (METADATA_KEYS, or any ``*_id``) AND the
+        value is short enough (METADATA_MAX_LEN) to actually be a label.
 
         The previous implementation read 8 hardcoded top-level keys and only
         ``isinstance(val, str)`` values, which meant three separate free passes:
@@ -400,6 +740,11 @@ class ShannonAnalyzer:
                              how every approval request in the operator's real
                              history came to be scored as JSON punctuation.
 
+        …and a fourth that survived the first fix: the metadata denylist was
+        itself an unconditional skip, so ``{"hash": "<80 000 chars>"}`` and
+        ``{"result_id": "<the whole report>"}`` were excluded from scoring at
+        every depth.  Length now decides — see METADATA_MAX_LEN.
+
         Identical strings are collected once. A payload that duplicates the
         same prose into ``prompt`` and ``text`` is one piece of information,
         not two, and double-counting it inflates the measurement of exactly
@@ -407,34 +752,25 @@ class ShannonAnalyzer:
 
         Order is stable (insertion order of first sight) so the value is
         deterministic and the client library can reproduce it byte for byte.
+
+        Thin wrapper over :meth:`scan`, which additionally reports what could
+        NOT be measured.  Kept so the public surface (and agent_protocol's
+        shared import) is unchanged.
         """
-        out: list[str] = []
-        seen: set[str] = set()
-
-        def walk(node: Any, key: Optional[str], depth: int) -> None:
-            if depth > 12 or len(out) >= 5000:
-                return
-            if isinstance(node, dict):
-                for k, v in node.items():
-                    walk(v, str(k).lower(), depth + 1)
-            elif isinstance(node, (list, tuple)):
-                for v in node:
-                    walk(v, key, depth + 1)
-            elif isinstance(node, str):
-                if key is not None and (key in METADATA_KEYS or key.endswith("_id")):
-                    return
-                s = node.strip()
-                if s and s not in seen:
-                    seen.add(s)
-                    out.append(s)
-
-        walk(payload, None, 0)
-        return " ".join(out)
+        return cls.scan(payload).text
 
     @classmethod
-    def combined_entropy_ex(cls, payload: dict[str, Any]) -> tuple[float, float, bool]:
+    def combined_entropy_ex(
+        cls,
+        payload: dict[str, Any],
+        content: Optional[ScoredContent] = None,
+    ) -> tuple[float, float, bool]:
         """
         Returns ``(H_blended, H_token, scored)``.
+
+        ``content`` lets a caller that has already walked the payload (i.e.
+        :meth:`ShannonGate.evaluate`) hand the result in rather than pay for a
+        second identical walk; omitting it is exactly equivalent.
 
         ``scored`` is False when the payload held no scorable string at all, in
         which case H is pure JSON *character* entropy — ~4.2-4.6 bits for any
@@ -444,7 +780,7 @@ class ShannonAnalyzer:
         disarmed on that branch.  Callers that need to know which branch
         produced H must use this, not ``combined_entropy``.
         """
-        text = cls.scored_text(payload)
+        text = (content if content is not None else cls.scan(payload)).text
         H_struct = cls.structural_entropy(payload)
 
         if text.strip():
@@ -1044,13 +1380,56 @@ class AuditDB:
         startup nothing is connected yet by definition, so any such row is a
         leftover and is closed here — otherwise the pill shows agents as live
         that have not existed since the last reboot.
+
+        D3 — A RESTART MUST NOT RETRACT A LIVE APPROVAL.
+        The pill's orphan rule is
+        ``a.disconnected_at > i.created_at_ns`` => "the agent that asked has
+        left, nobody can act on the answer", and it drops the ask from the HUD
+        and from the user's other devices. Stamping `now_ns` on every open row
+        therefore cancelled EVERY approval outstanding across a gate restart —
+        silently, while `agent_interactions.status` still said 'pending', so
+        the question was simultaneously unanswered and unanswerable.
+
+        So the stamp is BACKDATED for any agent that still holds an unanswered
+        question: its previous connection is recorded as having ended one
+        nanosecond before that agent's OLDEST pending ask. That is the
+        strongest claim this daemon can actually support — it never observed
+        the disconnect, it only knows the row was open when it started — and it
+        is the only one that does not manufacture evidence that an agent
+        abandoned a question it may still be waiting on. Rows with no pending
+        ask are stamped `now_ns` exactly as before.
+
+        This does NOT make an ask immortal: the pill's independent age filter
+        (`staleBeforeNs`) still expires it, and answering or denying it still
+        resolves it. It only stops the gate restarting from being the thing
+        that kills it.
         """
         with self._connect() as conn:
+            # The interactions table is created lazily by upsert_interaction,
+            # so a gate whose first action is a restart must not trip over its
+            # absence.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS agent_interactions (
+                    interaction_id TEXT PRIMARY KEY,
+                    agent_id       TEXT NOT NULL,
+                    prompt         TEXT NOT NULL,
+                    status         TEXT NOT NULL DEFAULT 'pending',
+                    created_at_ns  INTEGER NOT NULL,
+                    resolved_at_ns INTEGER
+                )
+                """
+            )
             cur = conn.execute(
                 """
                 UPDATE agents SET
                     status          = 'idle',
-                    disconnected_at = ?
+                    disconnected_at = COALESCE(
+                        (SELECT MIN(i.created_at_ns) - 1
+                           FROM agent_interactions i
+                          WHERE i.agent_id = agents.agent_id
+                            AND i.status = 'pending'),
+                        ?)
                 WHERE disconnected_at IS NULL
                 """,
                 (now_ns,),
@@ -1561,8 +1940,28 @@ class ShannonGate:
         # blended H (which carries a ~1.3-bit constant structural floor) against
         # a pure token self-report is what made the old ratio uninterpretable —
         # the floor dominates exactly where short content puts the threshold.
-        scored_text = self.analyzer.scored_text(msg.payload)
-        H, H_tok, scored = self.analyzer.combined_entropy_ex(msg.payload)
+        # ── 0. Ingest bounds — refuse before measuring ────────────────────────
+        # An oversized payload is refused rather than measured: it is the only
+        # outcome that is safe when the alternative is unbounded CPU on an
+        # attacker-chosen string. Returned early so nothing downstream can
+        # decide the giant payload was fine.
+        try:
+            payload_bytes = len(json.dumps(msg.payload).encode("utf-8", "replace"))
+        except (TypeError, ValueError):
+            payload_bytes = MAX_PAYLOAD_BYTES + 1     # unserialisable -> refuse
+        if payload_bytes > MAX_PAYLOAD_BYTES:
+            oversize = GateDecision(
+                decision="blocked",
+                reasons=["payload_oversize"],
+                computed_H=0.0,
+                computed_D=0.0,
+            )
+            self.db.log_message(msg, oversize)
+            return oversize
+
+        content = self.analyzer.scan(msg.payload)
+        scored_text = content.text
+        H, H_tok, scored = self.analyzer.combined_entropy_ex(msg.payload, content)
         H = round(H, 4)
 
         # ── 2. Extract CF value if present (docking result) ───────────────────
@@ -1610,6 +2009,56 @@ class ShannonGate:
         if diluted:
             reasons.append("payload_dilution")
 
+        # ── 4b. Information VOLUME — the extensive statistic ──────────────────
+        # H is bits-per-token and says nothing about how much left the building.
+        # bits_total is taken from the compressed length, so padding (free to
+        # send, free to compress) cannot move it, and a whitespace-free blob —
+        # one token, H_token == 0 — is measured for what it actually is.
+        bits_total, redundancy, n_bytes = self.analyzer.information_volume(scored_text)
+        vol_flag = vol_block = False
+        if VOLUME_MODE != "off" and n_bytes >= VOLUME_MIN_BYTES:
+            if bits_total >= VOLUME_BLOCK_BITS:
+                reasons.append("information_volume_block")
+                vol_block = True
+            elif bits_total >= VOLUME_FLAG_BITS:
+                reasons.append("information_volume")
+                vol_flag = True
+            if redundancy <= VOLUME_REDUNDANCY_FLOOR:
+                # Long AND near-perfectly compressible: this is padding by
+                # construction, whatever the per-token share happens to be.
+                # Fires where the single-token share test cannot — e.g. one
+                # sentence of 300 distinct tokens repeated 100 times.
+                reasons.append("payload_redundancy")
+                diluted = True
+
+        # ── 4c. UNSCORED content — pointers and truncation ────────────────────
+        # Measured content and delivered content are disjoint when the message
+        # carries a reference. Nothing is dereferenced (see SHANNON_UNSCORED);
+        # the gate records that it did not see the content and refuses to
+        # certify the message.
+        unscored: list[str] = []
+        if UNSCORED_MODE != "off":
+            if content.pointers:
+                reasons.append("unscored_pointer")
+                unscored.append("pointer")
+            if content.truncated:
+                reasons.append("unscored_truncated")
+                unscored.append("truncated")
+        if content.oversized_meta:
+            # Not an escalation on its own — the string WAS scored, so the
+            # entropy and volume rules already saw it. It is on the record
+            # because a 400-token "hash" is a fact an operator wants.
+            reasons.append("oversized_metadata_field")
+
+        # ── 4d. message_type validity ─────────────────────────────────────────
+        # Checked HERE, not at the transport, so it is enforced identically on
+        # the socket and HTTP paths and so the audit row always exists — an
+        # ingest-level `return` would refuse the message and leave no trace of
+        # it, which is how 'query' came to be invisible in the first place.
+        unknown_type = msg.message_type not in VALID_MESSAGE_TYPES
+        if unknown_type:
+            reasons.append("unknown_message_type")
+
         # ── 5. Self-report attestation ────────────────────────────────────────
         att = self.ledger.observe(
             msg.agent_id, msg.shannon_H, H_tok, msg.confidence, scored
@@ -1655,12 +2104,42 @@ class ShannonGate:
         # every block goes through flagged, so the operator always sees a
         # warning before traffic stops.
         if ATTEST_MODE == "enforce":
-            if diluted and decision == "pass":
-                decision = "flagged"
             if att.escalate_flag and decision == "pass":
                 decision = "flagged"
             if att.escalate_block and decision == "flagged":
                 decision = "blocked"
+
+        # ── 6c. Volume / dilution escalation ──────────────────────────────────
+        # Under its OWN mode knob, not ATTEST_MODE. The dilution escalation
+        # used to live inside the `if ATTEST_MODE == "enforce"` block above,
+        # which meant SHANNON_ATTEST=off silently disarmed the padding guard
+        # as a side effect — a knob quietly turning off an unrelated check is
+        # the same class of silent no-op this file keeps being bitten by.
+        # A volume block is a measurement of the bytes in hand, not a verdict
+        # about the agent, so unlike the attestation ladder it may block
+        # directly — exactly like H_hard_block.
+        if VOLUME_MODE == "enforce":
+            if vol_block:
+                decision = "blocked"
+            elif (vol_flag or diluted) and decision == "pass":
+                decision = "flagged"
+
+        # ── 6d. Unscored content ──────────────────────────────────────────────
+        # "Must not be able to reach 'pass' silently": in `flag` (default) the
+        # message is still delivered — only `blocked` stops traffic — but it
+        # can never be certified clean. `block` refuses delivery outright.
+        if unscored:
+            if UNSCORED_MODE == "block":
+                decision = "blocked"
+            elif UNSCORED_MODE == "flag" and decision == "pass":
+                decision = "flagged"
+
+        # ── 6e. Unknown message_type — hard, unconditional refusal ────────────
+        # Last, so nothing can walk it back. SHANNON_STRICT_TYPES=0 downgrades
+        # this to observe-only; the reason string is on the audit row either
+        # way.
+        if unknown_type and STRICT_TYPES:
+            decision = "blocked"
 
         gate_decision = GateDecision(
             decision=decision,
@@ -1673,6 +2152,9 @@ class ShannonGate:
             computed_residual=att.residual,
             attested=att.attested,
             trust_score=att.score,
+            bits_total=bits_total,
+            redundancy=redundancy,
+            pointers=content.pointers,
         )
 
         # ── 7. Persist to audit log ───────────────────────────────────────────
@@ -1827,11 +2309,46 @@ class AgentHub:
         except Exception as exc:
             logger.warning(f"Socket error ({agent_id or peer}): {exc}")
         finally:
-            if agent_id:
+            if agent_id and conn is not None:
+                # D5 — DEREGISTER BY IDENTITY, NOT BY NAME.
+                #
+                # This used to `pop(agent_id)` unconditionally. A reconnect
+                # replaces the registry entry while the OLD handler is still
+                # unwinding, so the old handler's `finally` removed the NEW,
+                # live connection from `_connections` and stamped
+                # `disconnected_at` on an agent that was at that moment
+                # connected and talking: the agent vanished from every reader,
+                # stopped receiving broadcasts, and (before D3 below) had its
+                # outstanding approvals retracted. Which handler runs its
+                # `finally` first is a scheduling detail, so the bug was
+                # intermittent — the worst kind to leave in a gate.
+                #
+                # `is` and not `==`: AgentConn has no __eq__, but identity is
+                # the actual question — is the object in the registry THIS
+                # handler's connection?
+                superseded = False
                 async with self._lock:
-                    self._connections.pop(agent_id, None)
-                self.db.update_agent_disconnect(agent_id, time.time_ns())
-                logger.info(f"[-] {agent_id} disconnected")
+                    if self._connections.get(agent_id) is conn:
+                        del self._connections[agent_id]
+                    else:
+                        superseded = True
+
+                shutting_down = (
+                    self._shutdown is not None and self._shutdown.is_set()
+                )
+                if superseded:
+                    logger.info(
+                        f"[-] {agent_id} old connection closed "
+                        f"(superseded by a live one — registry untouched)"
+                    )
+                elif shutting_down:
+                    # D3 — the daemon is going away, the agent is not. Leave
+                    # the row for the single honest bulk pass in run(), which
+                    # knows not to retract unanswered approvals.
+                    logger.info(f"[-] {agent_id} disconnected (gate shutdown)")
+                else:
+                    self.db.update_agent_disconnect(agent_id, time.time_ns())
+                    logger.info(f"[-] {agent_id} disconnected")
             try:
                 writer.close()
                 await writer.wait_closed()
@@ -1840,22 +2357,25 @@ class AgentHub:
 
     # ── Verdict disclosure policy ─────────────────────────────────────────────
 
-    def _check_message_type(self, msg: AgentMessage, source_id: str) -> bool:
-        """Enforce VALID_MESSAGE_TYPES. Returns False if the message is rejected.
+    @staticmethod
+    def _ingest_refusal(decision: GateDecision) -> Optional[str]:
+        """The error label when this verdict is an INGEST refusal, else None.
 
-        Default is observe-and-continue (SHANNON_STRICT_TYPES=0): the set at
-        module scope has drifted from reality before — the same class of bug
-        the VALID_AGENTS comment documents — so rejecting on it silently would
-        break live traffic. Set SHANNON_STRICT_TYPES=1 after a week of clean
-        logs.
+        An ingest refusal is a statement about the frame, not about its
+        content: the gate will not process this message at all, so no dispatch
+        branch below may run — not the query answer, and not the approval
+        control plane, which is otherwise deliberately never blocked.
+
+        Both rules are enforced inside ``ShannonGate.evaluate`` so that the two
+        transports get them identically and the audit row is written BEFORE the
+        refusal; the transports only need to know whether to answer with an
+        ingest error instead of a normal gate response.
         """
-        if msg.message_type in VALID_MESSAGE_TYPES:
-            return True
-        logger.warning(
-            f"unknown message_type {msg.message_type!r} from {source_id} "
-            f"({'rejected' if STRICT_TYPES else 'accepted — SHANNON_STRICT_TYPES=0'})"
-        )
-        return not STRICT_TYPES
+        if STRICT_TYPES and "unknown_message_type" in decision.reasons:
+            return "invalid_message_type"
+        if "payload_oversize" in decision.reasons:
+            return "payload_too_large"
+        return None
 
     @staticmethod
     def _log_verdict(msg: AgentMessage, decision: GateDecision) -> None:
@@ -1875,9 +2395,11 @@ class AgentHub:
         log_fn(
             f"GATE {decision.decision.upper()} [{msg.agent_id}] "
             f"H={decision.computed_H:.2f} H_tok={decision.computed_H_token:.2f} "
+            f"bits={decision.bits_total:.0f} redund={decision.redundancy:.3f} "
             f"D={decision.computed_D:.2f} self_H={msg.shannon_H:.2f} "
             f"divergence={d} trust={decision.trust_score:.2f} "
             f"reasons={decision.reasons}"
+            + (f" pointers={list(decision.pointers)}" if decision.pointers else "")
         )
 
     @staticmethod
@@ -1976,10 +2498,19 @@ class AgentHub:
                 message_id=str(data.get("message_id", "")),
             )
         except Exception as exc:
-            logger.debug(f"Malformed message from {source.agent_id}: {exc}")
-            return
-
-        if not self._check_message_type(msg, source.agent_id):
+            # FAIL CLOSED: a frame the gate cannot parse is a frame it cannot
+            # score, so it is dropped and never dispatched. Logged at WARNING
+            # (not debug) and written to the activity feed, because "the gate
+            # silently ignored it" is indistinguishable from "the gate approved
+            # it" to anyone reading only the audit table.
+            logger.warning(f"Malformed message from {source.agent_id}: {exc}")
+            try:
+                self.db.log_activity_event(
+                    source.agent_id, "rejected", "malformed_message",
+                    event_output=str(exc)[:500],
+                )
+            except Exception:
+                pass
             return
 
         # EVERY inbound message is scored and audited BEFORE any dispatch
@@ -1992,11 +2523,30 @@ class AgentHub:
         decision = self.gate.evaluate(msg)
         self._log_verdict(msg, decision)
 
+        # Refused at ingest. The audit row is already written (above), so the
+        # refusal is on the record — unlike the old transport-level `return`,
+        # which refused and left nothing behind. `decision` rides along so the
+        # shipped clients, which block on this reply and branch on
+        # `decision`, keep working.
+        refusal = self._ingest_refusal(decision)
+        if refusal is not None:
+            await source.send_json({
+                **self._gate_response_envelope(msg, decision),
+                "error": refusal,
+            })
+            return
+
         # Query messages are read-only, so they are measured and logged but
-        # never denied: 'read-only' is not 'harmless' when the thing being read
-        # is the detector's output, but refusing a benchmark_state read would
-        # break live clients for no security gain.
+        # never denied on ENTROPY: 'read-only' is not 'harmless' when the thing
+        # being read is the detector's output, but refusing a benchmark_state
+        # read would break live clients for no security gain. A query that the
+        # gate BLOCKED (oversized payload, refused type) is still refused —
+        # "read-only" is not a licence to skip the verdict, only to be lenient
+        # about the entropy of the request.
         if msg.message_type == "query":
+            if decision.decision == "blocked":
+                await source.send_json(self._gate_response_envelope(msg, decision))
+                return
             await self._answer_query(msg, source)
             return
 
@@ -2189,14 +2739,15 @@ class AgentHub:
 
     # ── HTTP endpoint (cloud agents) ──────────────────────────────────────────
 
-    async def _start_http(self) -> None:
-        if not HAS_AIOHTTP:
-            logger.warning(
-                "aiohttp not installed → HTTP endpoint disabled. "
-                "Install: pip install aiohttp"
-            )
-            return
+    def build_http_app(self) -> Any:
+        """The aiohttp application, with no port bound.
 
+        Split out of ``_start_http`` so the HTTP transport can be driven in a
+        test without a listening socket, a port allocation or a live daemon —
+        the socket path had end-to-end coverage and the HTTP path did not,
+        which is exactly why the ungated inline `query` branch survived the
+        first pass at W5 on this transport alone.
+        """
         from aiohttp import web
 
         async def post_message(request: web.Request) -> web.Response:
@@ -2210,20 +2761,11 @@ class AgentHub:
                 return web.json_response({"error": f"unknown_agent:{agent_id}"},
                                          status=403)
 
-            # Handle query type inline
-            if data.get("message_type") == "query":
-                qt = data.get("payload", {}).get("query_type", "benchmark_state")
-                if qt == "benchmark_state":
-                    state = self.db.get_latest_benchmark_state() or self._benchmark
-                    return web.json_response({"type": "query_response",
-                                              "query_type": qt, "data": state})
-                elif qt == "agent_list":
-                    async with self._lock:
-                        ids = list(self._connections.keys())
-                    return web.json_response({"type": "query_response",
-                                              "query_type": qt,
-                                              "data": {"connected": ids}})
-
+            # NO INLINE QUERY BRANCH. It used to live here, above the parse,
+            # above evaluate() and above every audit write — the same W5 hole
+            # the socket path had, surviving on the transport the socket fix
+            # did not touch. A query over HTTP is now parsed, scored, audited
+            # and only then answered, exactly like a query over the socket.
             try:
                 msg = AgentMessage(
                     agent_id=agent_id,
@@ -2238,13 +2780,14 @@ class AgentHub:
             except Exception as exc:
                 return web.json_response({"error": str(exc)}, status=400)
 
-            if not self._check_message_type(msg, agent_id):
-                return web.json_response(
-                    {"error": f"invalid_message_type:{msg.message_type}"}, status=400
-                )
-
             decision = self.gate.evaluate(msg)
             self._log_verdict(msg, decision)
+
+            refusal = self._ingest_refusal(decision)
+            if refusal is not None:
+                return web.json_response(
+                    {"error": f"{refusal}:{msg.message_type}"}, status=400
+                )
 
             # The socket path calls upsert_agent at registration and
             # update_agent_seen after every message; this path called neither,
@@ -2265,6 +2808,38 @@ class AgentHub:
                 return web.json_response(
                     self._gate_response_envelope(msg, decision), status=200
                 )
+
+            # Queries are answered only AFTER they have been scored and
+            # written to agent_messages — the read is cheap, the audit row is
+            # the point. Mirrors the socket path's ordering exactly.
+            if msg.message_type == "query":
+                qt = msg.payload.get("query_type", "benchmark_state")
+                if qt == "benchmark_state":
+                    state = self.db.get_latest_benchmark_state() or self._benchmark
+                    return web.json_response({"type": "query_response",
+                                              "query_type": qt, "data": state})
+                if qt == "agent_list":
+                    async with self._lock:
+                        ids = list(self._connections.keys())
+                    return web.json_response({"type": "query_response",
+                                              "query_type": qt,
+                                              "data": {"connected": ids}})
+                if qt == "cf_reports":
+                    task = msg.payload.get("task_id", msg.task_id)
+                    return web.json_response(
+                        {"type": "query_response", "query_type": qt,
+                         "data": self.db.get_latest_cf_per_agent(task)})
+                if qt == "recent_messages":
+                    # Same projection/scoping as the socket path.
+                    rows = self.db.get_recent_messages(
+                        int(msg.payload.get("limit", 50)),
+                        redact=True, agent_id=msg.agent_id,
+                    )
+                    return web.json_response({"type": "query_response",
+                                              "query_type": qt, "data": rows})
+                return web.json_response({"type": "query_response",
+                                          "query_type": qt,
+                                          "error": f"unknown query_type:{qt}"})
 
             if msg.message_type == "benchmark_update":
                 self._benchmark.update({
@@ -2311,8 +2886,19 @@ class AgentHub:
         app.router.add_get("/state", get_state)
         app.router.add_get("/health", get_health)
         app.router.add_get("/messages", get_messages)
+        return app
 
-        runner = web.AppRunner(app)
+    async def _start_http(self) -> None:
+        if not HAS_AIOHTTP:
+            logger.warning(
+                "aiohttp not installed → HTTP endpoint disabled. "
+                "Install: pip install aiohttp"
+            )
+            return
+
+        from aiohttp import web
+
+        runner = web.AppRunner(self.build_http_app())
         await runner.setup()
         site = web.TCPSite(runner, self.http_host, self.http_port)
         await site.start()
@@ -2435,6 +3021,24 @@ def _parse_args() -> argparse.Namespace:
                         "persists divergence + reasons but changes NO verdict — "
                         "run it for a week, read --attest-report, then enforce. "
                         "(default: %(default)s; env SHANNON_ATTEST)")
+    p.add_argument("--volume", choices=("off", "observe", "enforce"),
+                   default=VOLUME_MODE,
+                   help="Information-volume mode. 'observe' measures total "
+                        "content and records the reasons but changes NO "
+                        "verdict. (default: %(default)s; env SHANNON_VOLUME)")
+    p.add_argument("--unscored", choices=("off", "observe", "flag", "block"),
+                   default=UNSCORED_MODE,
+                   help="Policy for messages carrying content the gate cannot "
+                        "see (paths, URLs, artifact ids). Nothing is ever "
+                        "fetched or opened. 'flag' still delivers the message. "
+                        "(default: %(default)s; env SHANNON_UNSCORED)")
+    p.add_argument("--strict-types", dest="strict_types",
+                   action=argparse.BooleanOptionalAction, default=STRICT_TYPES,
+                   help="Reject messages whose message_type is not in "
+                        "VALID_MESSAGE_TYPES. --no-strict-types is the "
+                        "observe-only form: still scored, still audited, "
+                        "delivered anyway. (default: %(default)s; env "
+                        "SHANNON_STRICT_TYPES)")
     p.add_argument("--attest-report", action="store_true",
                    help="Print the per-agent self-report calibration table and "
                         "exit without starting a daemon")
@@ -2477,20 +3081,26 @@ def main() -> None:
 
     # Apply CLI overrides to module-level constants
     global SOCKET_PATH, DB_PATH, H_THRESHOLD, H_BLOCK_THRESHOLD, D_THRESHOLD
-    global ATTEST_MODE
+    global ATTEST_MODE, VOLUME_MODE, UNSCORED_MODE, STRICT_TYPES
     SOCKET_PATH = args.socket
     DB_PATH = Path(args.db)
     H_THRESHOLD = args.h_flag
     H_BLOCK_THRESHOLD = args.h_block
     D_THRESHOLD = args.d_flag
     ATTEST_MODE = args.attest
+    VOLUME_MODE = args.volume
+    UNSCORED_MODE = args.unscored
+    STRICT_TYPES = bool(args.strict_types)
 
     if args.attest_report:
         _print_attest_report(DB_PATH)
         return
 
     hub = AgentHub(http_host=args.http_host, http_port=args.http_port)
-    logger.info(f"Self-report attestation: {ATTEST_MODE}")
+    logger.info(
+        f"Modes: attest={ATTEST_MODE} volume={VOLUME_MODE} "
+        f"unscored={UNSCORED_MODE} strict_types={int(STRICT_TYPES)}"
+    )
     asyncio.run(hub.run())
 
 

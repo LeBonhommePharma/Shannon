@@ -37,6 +37,17 @@ public struct ShannonStatus: Codable, Sendable, Equatable {
         self.agent = agent
     }
 
+    /// Collapse as a tri-state: `nil` when the producer of this status does not
+    /// measure anything.
+    ///
+    /// `collapsed` is a non-optional `Bool` on the wire because a real detector
+    /// always answers the question. A *synthetic* producer does not, and the
+    /// placeholder used to hardcode `false` — so "no detector attached" asserted
+    /// "not collapsed" and a dead monitor read as a healthy one. Anything making
+    /// a safety judgement must read this, never `collapsed` directly: unknown is
+    /// not false.
+    public var measuredCollapsed: Bool? { isSynthetic ? nil : collapsed }
+
     /// Compact readout for the collapsed pill: "H 8.4 ▽2.1".
     public var pillLabel: String {
         let h = String(format: "%.1f", entropy)
@@ -56,6 +67,11 @@ public enum BridgeError: Error, Equatable {
     case pathTooLong
     case closed
     case decodeFailed(String)
+    /// A producer sent more than `BridgeCodec.maxFrameBytes` without a newline.
+    /// The connection is dropped rather than buffered indefinitely.
+    case frameTooLarge(Int)
+    /// The frame parsed but carried a number no detector could have measured.
+    case valueOutOfRange(String)
 }
 
 /// Newline-delimited JSON framing, shared with `shannon.pill_bridge`.
@@ -67,12 +83,60 @@ public enum BridgeCodec {
         return data
     }
 
+    /// Largest single frame we will buffer before giving up on a producer.
+    ///
+    /// Operator knob `SHANNON_PILL_MAX_FRAME_BYTES` (default 65536, clamped to
+    /// 1 KiB … 8 MiB). A producer that never sends a newline used to grow
+    /// `UnixSocketClient.buffer` without bound inside the UI process; it now
+    /// fails closed with `.frameTooLarge` and the poll reports "not connected".
+    public static let maxFrameBytes: Int = {
+        let fallback = 64 * 1024
+        guard let raw = ProcessInfo.processInfo.environment["SHANNON_PILL_MAX_FRAME_BYTES"]?
+            .trimmingCharacters(in: .whitespaces),
+            let value = Int(raw)
+        else { return fallback }
+        return min(max(value, 1024), 8 * 1024 * 1024)
+    }()
+
+    /// Hard ceiling on a decoded entropy, independent of `EntropyPolicy`. This
+    /// is a transport sanity check: above this the frame is corrupt, not merely
+    /// out of policy.
+    public static let maxDecodableBits: Double = 1024
+
+    /// Decode one status frame, refusing values no detector could have produced.
+    ///
+    /// Fail-closed behaviour:
+    /// - not JSON, or missing any required field (including `collapsed` and
+    ///   `backend`) → `.decodeFailed`. A producer that will not say whether it
+    ///   detected a collapse does not get to have its number displayed.
+    /// - a literal that overflows `Double` (`1e400`) or a JSON `NaN`/`Infinity`
+    ///   → `.decodeFailed`, refused by `JSONDecoder` before we see it.
+    /// - negative `entropy`, `entropy` above `maxDecodableBits`, or negative
+    ///   `token_count` → `.valueOutOfRange`.
+    ///
+    /// The range guard is written as `>= 0 && <= maxDecodableBits` so a NaN that
+    /// ever reached it would fail both comparisons and be refused too — there is
+    /// no separate `isFinite` check because there is no input that could reach
+    /// one, and an unreachable guard is just a claim nobody tests.
+    ///
+    /// A *blank or unrecognised* `backend` decodes successfully on purpose: it
+    /// is caught one layer up by `ShannonStatus.isSynthetic`, which turns it
+    /// into an explicit `.absent` reading. Dropping the frame here would hide
+    /// the fact that something is connected and refusing to identify itself.
     public static func decodeStatus(_ line: Data) throws -> ShannonStatus {
+        let status: ShannonStatus
         do {
-            return try JSONDecoder().decode(ShannonStatus.self, from: line)
+            status = try JSONDecoder().decode(ShannonStatus.self, from: line)
         } catch {
             throw BridgeError.decodeFailed(String(describing: error))
         }
+        guard status.entropy >= 0, status.entropy <= maxDecodableBits else {
+            throw BridgeError.valueOutOfRange("entropy=\(status.entropy)")
+        }
+        guard status.tokenCount >= 0 else {
+            throw BridgeError.valueOutOfRange("token_count=\(status.tokenCount)")
+        }
+        return status
     }
 
     /// Split a buffer into complete newline-terminated frames plus the remainder.
@@ -116,6 +180,13 @@ public final class UnixSocketClient {
                         cstr, maxLen - 1)
             }
         }
+
+        // Without this, writing to a socket whose peer has gone away raises
+        // SIGPIPE and terminates the whole pill. The gate restarting mid-poll is
+        // routine, so the default behaviour is a crash waiting to happen; we
+        // want `send` to return EPIPE and surface as `.closed` instead.
+        var noSigPipe: Int32 = 1
+        setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
         var tv = timeval(
             tv_sec: Int(timeout),
@@ -171,6 +242,12 @@ public final class UnixSocketClient {
                 remaining.append(rest)
                 buffer = remaining
                 return first
+            }
+            // Refuse before allocating more: a producer that never terminates a
+            // frame must not be able to grow this buffer without bound.
+            guard buffer.count <= BridgeCodec.maxFrameBytes else {
+                close()
+                throw BridgeError.frameTooLarge(buffer.count)
             }
             var chunk = [UInt8](repeating: 0, count: 4096)
             let n = recv(fd, &chunk, chunk.count, 0)

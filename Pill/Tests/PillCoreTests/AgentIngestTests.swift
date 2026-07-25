@@ -412,16 +412,16 @@ final class AgentIngestTests: XCTestCase {
         let ok = AgentIngestService.notifyGateBestEffort(
             agentID: "claude_code", task: "ingest probe verification"
         )
-        print("LIVE GATE accepted=\(ok)")
-        XCTAssertTrue(ok, "gate must accept a POST /message observation")
+        print("LIVE GATE accepted=\(ok.accepted) detail=\(ok.detail)")
+        XCTAssertTrue(ok.accepted, "gate must accept a POST /message observation")
 
         // An id outside hub/agent_identity.py IDENTITIES must be refused, not
         // silently reported as healthy.
         let bogus = AgentIngestService.notifyGateBestEffort(
             agentID: "claude_devtools", task: "should be refused"
         )
-        print("LIVE GATE bogus accepted=\(bogus)")
-        XCTAssertFalse(bogus, "unknown agent ids must fail closed")
+        print("LIVE GATE bogus accepted=\(bogus.accepted) detail=\(bogus.detail)")
+        XCTAssertFalse(bogus.accepted, "unknown agent ids must fail closed")
     }
 
     func testClipboardAgentOverride() {

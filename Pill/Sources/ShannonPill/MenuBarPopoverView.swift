@@ -12,7 +12,6 @@ import ShannonTheme
 struct MenuBarPopoverView: View {
     @ObservedObject var activity: AgentActivityMonitor
     @ObservedObject var bridge: ShannonBridge
-    @ObservedObject var idle: IdleTelemetryPublisher
     @ObservedObject var battery: BatteryMonitor
 
     var onShowAllGates: () -> Void
@@ -20,17 +19,25 @@ struct MenuBarPopoverView: View {
     var onOpenSettings: () -> Void
     var onQuit: () -> Void
 
-    private var entropy: ShannonStatus { bridge.status ?? idle.status }
+    /// The one reading the whole pill agrees on: live detector if there is one,
+    /// otherwise the gate's own measured H for the freshest live agent,
+    /// otherwise an explicit absence that carries no number.
+    ///
+    /// The idle publisher is not consulted at all any more: it has no number,
+    /// and this view has nothing to animate. It was removed from this view's
+    /// inputs rather than left wired up doing nothing.
+    private var reading: EntropyReading {
+        EntropyProvenance.resolve(
+            bridgeConnected: bridge.connected,
+            bridgeStatus: bridge.status,
+            gate: activity.agentEntropy,
+            gateDBAvailable: activity.gateDBAvailable
+        )
+    }
 
-    /// Same provenance rule as `PillView.isMeasured` — connectivity is not
-    /// provenance. `pill_bridge --demo` connects a real socket and serves a
-    /// sine wave tagged `backend == "demo"`. Both surfaces must agree, or the
-    /// popover contradicts the notch about whether the number is real.
-    private var isMeasured: Bool { bridge.connected && !entropy.isSynthetic }
-
-    /// Only alarm on a collapse a real detector reported. `_DemoDetector`
-    /// asserts `is_collapsed` on 28.8% of its ticks.
-    private var collapseAlarm: Bool { entropy.collapsed && isMeasured }
+    /// Only alarm on a collapse something actually measured. Unknown is not
+    /// false, and it is not a collapse either.
+    private var collapseAlarm: Bool { reading.collapsed == true }
 
     private var summary: AgentActivitySummary { activity.summary }
     private var busy: [AgentActivitySnapshot] { summary.busy }
@@ -100,8 +107,12 @@ struct MenuBarPopoverView: View {
     }
 
     private var headerSubtitle: String {
-        if collapseAlarm {
-            return String(format: "Entropy collapse — H %.1f, ΔH %+.1f", entropy.entropy, entropy.deltaH)
+        // `collapseAlarm` is only true for `.measured`, so `measurement` is
+        // non-nil here; the `if let` is belt-and-braces rather than an excuse to
+        // print a number from a reading that has none.
+        if collapseAlarm, let m = reading.measurement {
+            let delta = m.deltaH.map { String(format: ", ΔH %+.1f", $0) } ?? ""
+            return String(format: "Entropy collapse — H %.1f%@", m.bits, delta)
         }
         if busy.isEmpty { return "No agents busy" }
         if busy.count == 1, let p = busy.first { return "\(p.displayName) · \(p.statusLine)" }
@@ -271,28 +282,50 @@ struct MenuBarPopoverView: View {
             .accessibilityAddTraits(.isHeader)
     }
 
+    // MARK: Entropy readout
+
+    /// Renders the reading, never a substitute for one.
+    ///
+    /// - `.measured` → `H 2.86`, tinted by verdict.
+    /// - `.stale` under observe mode → `H⌛ 2.86` in neutral, with the age in
+    ///   the tooltip. Under enforce mode it falls through to the absent form.
+    /// - `.absent` → the words "no detector", never a digit.
+    @ViewBuilder
+    private var entropyReadout: some View {
+        let reading = self.reading
+        if let display = reading.display(at: Date()) {
+            Text(String(format: "%@ %.2f", display.badge, display.bits))
+                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(entropyTint(reading))
+                .contentTransition(.numericText())
+                .animation(.easeInOut(duration: 0.45), value: display.bits)
+                .help(reading.explain(at: Date()))
+        } else {
+            Text("no detector")
+                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.shannonNeutral)
+                .help(reading.explain(at: Date()))
+        }
+    }
+
+    private func entropyTint(_ reading: EntropyReading) -> Color {
+        switch reading.verdict {
+        case .collapsed: return .shannonWarning
+        case .watch: return .shannonWarning
+        case .healthy: return .shannonTertiary
+        case .unknown: return .shannonNeutral
+        }
+    }
+
     // MARK: Footer
 
     private var footer: some View {
         HStack(spacing: 8) {
-            // `~` and the neutral tint mark a simulated reading — see
-            // PillView.isMeasured. Without the marker a dead detector renders
-            // identically to a healthy live one.
-            Text(String(format: isMeasured ? "H %.2f" : "~H %.2f", entropy.entropy))
-                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
-                .foregroundStyle(
-                    !isMeasured ? Color.shannonNeutral
-                    : (entropy.collapsed ? Color.shannonWarning : Color.shannonTertiary)
-                )
-                .contentTransition(.numericText())
-                .animation(.easeInOut(duration: 0.45), value: entropy.entropy)
-                .help(isMeasured
-                      ? String(format: "Shannon entropy H %.2f bits · ΔH %+.2f · %@",
-                               entropy.entropy, entropy.deltaH, entropy.backend)
-                      : String(format: "H ≈ %.2f bits — SIMULATED, not a measurement "
-                               + "(source: %@). Collapse detection is NOT running; any "
-                               + "collapse this source reports is suppressed.",
-                               entropy.entropy, entropy.backend))
+            // There is no "~H 7.20" fallback any more. When nothing measured
+            // anything the readout says so in words: a plausible number in the
+            // safe band is exactly how a dead detector used to pass for a
+            // healthy one.
+            entropyReadout
             if let snap = battery.snapshot {
                 Text("\(snap.percentage)%")
                     .font(.system(size: 9.5, design: .monospaced))

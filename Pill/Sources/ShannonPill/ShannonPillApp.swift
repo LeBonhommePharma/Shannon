@@ -62,7 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ctl.show()
 
         let menu = MenuBarController(
-            bridge: br, idle: idlePub, battery: bat, ingest: ingestSvc, activity: activityMon
+            bridge: br, battery: bat, ingest: ingestSvc, activity: activityMon
         )
         menu.onShowPill = { [weak ctl] in ctl?.reassertVisibility(); ctl?.expand() }
         menu.onReposition = { [weak ctl] in ctl?.reposition() }

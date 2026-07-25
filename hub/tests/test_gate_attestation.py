@@ -16,7 +16,10 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import random
 import sqlite3
+import string
+import time
 import uuid
 from pathlib import Path
 
@@ -60,6 +63,67 @@ def _msg(**over):
     )
     base.update(over)
     return sg.AgentMessage(**base)
+
+
+# ── Transport drivers ─────────────────────────────────────────────────────────
+# Both are self-contained: they build their own server on a throwaway path/db,
+# never bind /tmp/shannon.sock, never touch ~/.shannon, and need no running
+# daemon. Nothing here depends on wall-clock timing or network availability.
+
+def _socket_roundtrip(db_path: Path, message: dict, agent_id: str = "science") -> dict:
+    """Register over a private Unix socket, send one message, return the reply."""
+    socket_path = f"/tmp/shannon_rt_{uuid.uuid4().hex[:8]}.sock"
+
+    async def scenario():
+        hub = sg.AgentHub(db_path=db_path)
+        hub.gate = sg.ShannonGate(hub.db)
+        hub._lock = asyncio.Lock()
+        hub._shutdown = asyncio.Event()
+        server = await asyncio.start_unix_server(
+            hub._handle_socket_conn, path=socket_path
+        )
+        async with server:
+            reader, writer = await asyncio.open_unix_connection(socket_path)
+            writer.write(
+                (json.dumps({"agent_id": agent_id, "task_id": "t1"}) + "\n").encode()
+            )
+            await writer.drain()
+            await reader.readline()                       # welcome
+            writer.write((json.dumps(message) + "\n").encode())
+            await writer.drain()
+            resp = json.loads((await reader.readline()).decode())
+            writer.close()
+            return resp
+
+    try:
+        return asyncio.run(scenario())
+    finally:
+        Path(socket_path).unlink(missing_ok=True)
+
+
+def _http_post(db_path: Path, message: dict) -> tuple[dict, int]:
+    """POST one message to the HTTP transport. Returns (body, status).
+
+    Uses aiohttp's in-process test server: no port is bound, so this cannot
+    collide with the operator's live gate and cannot fail for want of a free
+    port.
+    """
+    from aiohttp.test_utils import TestClient, TestServer
+
+    async def scenario():
+        hub = sg.AgentHub(db_path=db_path)
+        hub.gate = sg.ShannonGate(hub.db)
+        hub._lock = asyncio.Lock()
+        hub._shutdown = asyncio.Event()
+        client = TestClient(TestServer(hub.build_http_app()))
+        await client.start_server()
+        try:
+            r = await client.post("/message", json=message)
+            return await r.json(), r.status
+        finally:
+            await client.close()
+
+    return asyncio.run(scenario())
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -231,6 +295,30 @@ class TestRepeatOffenderEscalates:
         assert st["score"] > 0.0
         assert g2.evaluate(_msg(agent_id="grok_build",
                                 shannon_H=LIE_CLAIM)).decision == "blocked"
+
+    def test_the_accumulator_is_persisted_on_the_agents_row(self, tmp_path):
+        """W6 asked for a continuous accumulating signal PERSISTED on the
+        agents row, not a hard step at a compiled-in constant. Pinned on the
+        column, not just on the in-memory ledger: a signal that lives only in
+        RAM is reset by anything that restarts the daemon, which an agent can
+        provoke.
+        """
+        db_path = tmp_path / "attest.db"
+        g = sg.ShannonGate(sg.AuditDB(db_path))
+        for _ in range(3):
+            g.evaluate(_msg(agent_id="grok_build", shannon_H=LIE_CLAIM))
+
+        con = sqlite3.connect(str(db_path))
+        row = con.execute(
+            "SELECT calib_n, calib_score, calib_offences, calib_state "
+            "FROM agents WHERE agent_id='grok_build'"
+        ).fetchone()
+        con.close()
+        assert row is not None, "the accumulator must be on the agents row"
+        n, score, offences, state = row
+        assert n == 3 and offences == 3
+        assert score > 0.0                      # continuous, not a boolean
+        assert state in ("suspect", "untrusted")
 
     def test_sustained_small_under_reporting_converges_without_a_cliff(self, gate):
         """The red team's 'tune to just inside the constant' move.
@@ -521,6 +609,33 @@ class TestNoGradientDisclosure:
                        "self_divergence", "trust_score", "thresholds"):
             assert leaked not in env
 
+    def test_no_wire_response_contains_any_measurement_or_constant(self, tmp_path):
+        """W6's second half, pinned across EVERY new field.
+
+        The gate handed back its own measured gate_H alongside the verdict, so
+        the exact tuned under-report was computable from the previous response.
+        The new rules add three more numbers an attacker would love —
+        bits_total, redundancy and the pointer list — so the disclosure test
+        has to cover the whole serialised envelope, not a fixed key list that
+        the next field silently escapes.
+        """
+        hub = self._hub(tmp_path)
+        msg = _msg(shannon_H=LIE_CLAIM, message_id="m1",
+                   payload={"text": WORK_TEXT, "artifact_path": "/tmp/a.bin"})
+        d = hub.gate.evaluate(msg)
+        assert d.bits_total > 0 and d.pointers        # the gate DID measure them
+
+        for env in (hub._gate_response_envelope(msg, d),
+                    hub._broadcast_envelope(msg, d)):
+            blob = json.dumps(env)
+            for constant in (sg.H_THRESHOLD, sg.H_BLOCK_THRESHOLD,
+                             sg.ATTEST_MARGIN, sg.VOLUME_FLAG_BITS,
+                             sg.VOLUME_BLOCK_BITS, sg.DILUTION_SHARE):
+                assert str(constant) not in blob, (constant, env)
+            for measured in ("bits_total", "redundancy", "pointers",
+                             "gate_H", "trust_score", "reasons", "thresholds"):
+                assert measured not in blob, (measured, env)
+
     def test_echo_none_returns_a_bare_ack(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sg, "ECHO_MODE", "none")
         hub = self._hub(tmp_path)
@@ -632,18 +747,705 @@ class TestEveryMessageIsGated:
         assert any(r["message_type"] == "query" for r in rows), \
             "a query must leave a row in the audit log"
 
-    def test_unknown_message_type_is_observed_by_default(self, tmp_path, monkeypatch):
+    def test_unknown_message_type_is_blocked_by_default(self, gate):
         """VALID_MESSAGE_TYPES was defined at module scope and referenced
-        nowhere, so message_type was a free-form attacker-chosen string."""
-        monkeypatch.setattr(sg, "STRICT_TYPES", False)
-        hub = sg.AgentHub(db_path=tmp_path / "t.db")
-        assert hub._check_message_type(_msg(message_type="totally_made_up"), "science")
+        nowhere, so message_type was a free-form attacker-chosen string.
 
-    def test_unknown_message_type_is_rejected_under_strict_types(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(sg, "STRICT_TYPES", True)
-        hub = sg.AgentHub(db_path=tmp_path / "t.db")
-        assert not hub._check_message_type(_msg(message_type="totally_made_up"), "science")
-        assert hub._check_message_type(_msg(message_type="status"), "science")
+        The first fix made it referenced but left the enforcement DEFAULT OFF
+        (SHANNON_STRICT_TYPES=0), i.e. still a no-op on every deployment that
+        did not opt in. Unrecognised input must fail CLOSED.
+        """
+        assert sg.STRICT_TYPES is True, "the safe default is to reject"
+        d = gate.evaluate(_msg(message_type="totally_made_up_type"))
+        assert "unknown_message_type" in d.reasons
+        assert d.decision == "blocked"
+
+    def test_known_message_types_are_untouched_by_the_type_rule(self, gate):
+        for mt in sorted(sg.VALID_MESSAGE_TYPES):
+            d = gate.evaluate(_msg(agent_id="cowork", message_type=mt))
+            assert "unknown_message_type" not in d.reasons, mt
+
+    def test_every_shipped_client_message_type_is_valid(self):
+        """The claim that made it safe to default STRICT_TYPES to on.
+
+        VALID_MESSAGE_TYPES drifting from what the clients actually emit is the
+        failure mode that justified leaving enforcement off. It is testable, so
+        it is tested rather than feared: every literal passed to a `_send`
+        helper in agent_protocol.py, plus the types the Swift surfaces post.
+        """
+        import re as _re
+
+        src = (Path(sg.__file__).parent / "agent_protocol.py").read_text()
+        emitted = set(_re.findall(r'_send\w*\(\s*\n?\s*"([a-z_]+)"', src))
+        # The Swift HUD (hub/AgentHubApp.swift) and Pill GateApprovalClient.
+        emitted |= {"system_event", "approval_response", "status"}
+        assert emitted, "the extraction itself must not silently find nothing"
+        assert emitted <= sg.VALID_MESSAGE_TYPES, emitted - sg.VALID_MESSAGE_TYPES
+
+    def test_unknown_message_type_is_audited_before_it_is_refused(self, tmp_path):
+        """A transport-level `return` refused the message and left NO trace.
+
+        The refusal now happens after the audit write, so the operator can see
+        what was rejected and by whom — a refusal nobody can read is only
+        marginally better than an acceptance.
+        """
+        db_path = tmp_path / "reject.db"
+        resp = _socket_roundtrip(
+            db_path,
+            {"agent_id": "science", "task_id": "t1",
+             "message_type": "totally_made_up_type", "payload": {"text": "hi"}},
+        )
+        assert resp["error"] == "invalid_message_type"
+        assert resp["decision"] == "blocked"
+        rows = sg.AuditDB(db_path).get_recent_messages(10)
+        assert [r["message_type"] for r in rows] == ["totally_made_up_type"]
+        assert rows[0]["gate_decision"] == "blocked"
+        assert "unknown_message_type" in json.loads(rows[0]["gate_reasons"])
+
+    def test_unknown_message_type_observe_mode_delivers_but_records(
+        self, gate, monkeypatch
+    ):
+        """The operator surface: measure the impact before enforcing."""
+        monkeypatch.setattr(sg, "STRICT_TYPES", False)
+        d = gate.evaluate(_msg(message_type="totally_made_up_type"))
+        assert "unknown_message_type" in d.reasons     # still on the record
+        assert d.decision == "pass"                    # but delivered
+
+    def test_approval_response_is_measured_and_audited(self, tmp_path):
+        """_dispatch also returned before evaluate() for approval_response and
+        for system_event carrying 'approved' — audit row count observed
+        unchanged at 25 across the whole attack."""
+        db_path = tmp_path / "appr.db"
+        resp = _socket_roundtrip(
+            db_path,
+            {"agent_id": "science", "task_id": "t1",
+             "message_type": "approval_response",
+             "payload": {"approved": True, "interaction_id": "ask-1"}},
+        )
+        assert resp["type"] == "approval_ack"          # control plane still works
+        rows = sg.AuditDB(db_path).get_recent_messages(10)
+        assert [r["message_type"] for r in rows] == ["approval_response"]
+
+    @pytest.mark.skipif(not sg.HAS_AIOHTTP, reason="aiohttp not installed")
+    def test_http_query_is_measured_and_audited(self, tmp_path):
+        """The SAME W5 hole, on the transport the first fix did not touch.
+
+        `post_message` answered message_type=='query' inline — above the parse,
+        above evaluate(), above every audit write. An agent that could not opt
+        out over the socket could still opt out by using the door next to it.
+        """
+        db_path = tmp_path / "http.db"
+        body, status = _http_post(db_path, {
+            "agent_id": "science", "task_id": "t1",
+            "message_type": "query",
+            "payload": {"query_type": "benchmark_state"},
+        })
+        assert status == 200
+        assert body["type"] == "query_response"        # still answered
+        rows = sg.AuditDB(db_path).get_recent_messages(10)
+        assert any(r["message_type"] == "query" for r in rows), \
+            "an HTTP query must leave a row in the audit log"
+
+    @pytest.mark.skipif(not sg.HAS_AIOHTTP, reason="aiohttp not installed")
+    def test_http_unknown_message_type_is_audited_then_refused(self, tmp_path):
+        db_path = tmp_path / "http2.db"
+        body, status = _http_post(db_path, {
+            "agent_id": "science", "task_id": "t1",
+            "message_type": "totally_made_up_type", "payload": {"text": "hi"},
+        })
+        assert status == 400 and "invalid_message_type" in body["error"]
+        rows = sg.AuditDB(db_path).get_recent_messages(10)
+        assert [r["message_type"] for r in rows] == ["totally_made_up_type"]
+        assert rows[0]["gate_decision"] == "blocked"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# W1 — SCORING MUST NOT BE AN INTENSIVE STATISTIC
+#
+# H_token is bits-per-token, a MEAN. A mean is blind to length and degenerates
+# when the tokenizer does, so it can be driven to zero by two different free
+# moves: pad the stream, or remove the whitespace. The extensive companion —
+# total information content, taken from the compressed length — is immune to
+# both by construction.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _blob(n_bytes: int = 80000, alphabet: str = "") -> str:
+    """Deterministic high-information payload. Seeded RNG, no wall clock."""
+    rng = random.Random(20240724)
+    alphabet = alphabet or (string.ascii_letters + string.digits + "+/")
+    return "".join(rng.choice(alphabet) for _ in range(n_bytes))
+
+
+class TestInformationVolume:
+    def test_whitespace_free_blob_cannot_score_zero(self, gate):
+        """THE DEMONSTRATED BYPASS, in one line: ship it with no spaces in it.
+
+            {"output": "<80 000 chars>"}  ->  tokens = 1
+                                          ->  H_token = 0.00  (the n < 2 guard)
+                                          ->  H = 0.30 * H_struct = 1.80
+                                          ->  "pass", reasons = []
+
+        The dilution cap added earlier does not touch this: there is nothing to
+        cap, the mean is over a single token. 60 kB of incompressible content,
+        scored 1.80 bits, certified clean and broadcast.
+        """
+        payload = {"output": _blob()}
+
+        # The intensive statistic still reads it as nothing — that is the point.
+        H, H_tok, _ = sg.ShannonAnalyzer.combined_entropy_ex(payload)
+        assert H_tok == 0.0
+        assert H < sg.H_THRESHOLD
+
+        d = gate.evaluate(_msg(payload=payload))
+        assert d.decision == "blocked", (d.decision, d.reasons)
+        assert "information_volume_block" in d.reasons
+        assert d.bits_total > 400_000, d.bits_total
+
+    def test_the_three_evasions_stacked_still_cannot_pass(self, gate):
+        """W1 + W2 together, and the sharpest single demonstration of both.
+
+        Restrict the alphabet so CHARACTER entropy stays near 1 bit, remove the
+        whitespace so TOKEN entropy is 0, and park it under a metadata key so
+        the extractor skips it entirely. Measured against the pre-change gate:
+
+            {"hash": "<300 000 random bits>"}  ->  H = 1.0007, "pass", []
+            {"output": "<300 000 random bits>"} ->  H = 0.3002, "pass", []
+
+        ~37 kB of real content, twice certified clean with an empty reason
+        list. Every intensive statistic in the gate reads it as nothing; the
+        extensive one reads it correctly, because compressed length does not
+        care about the alphabet, the whitespace or the key.
+        """
+        bits = _blob(300_000, alphabet="01")
+        for payload in ({"hash": bits}, {"output": bits}):
+            d = gate.evaluate(_msg(agent_id="codex", payload=payload))
+            assert d.computed_H < sg.H_THRESHOLD, "still 'low entropy' — the point"
+            assert d.decision == "blocked", (payload.keys(), d.decision, d.reasons)
+            assert "information_volume_block" in d.reasons
+
+    def test_padding_cannot_reduce_total_information(self):
+        """The property that makes the statistic non-dilutable.
+
+        Padding is free to send AND free to compress, so it cannot buy the
+        sender a lower score: bits_total is monotone under appending. The
+        per-token mean is not — that is the whole weakness.
+        """
+        real = " ".join(f"finding{i}" for i in range(400))
+        padded = real + " " + ("ok " * 20000)
+
+        clean_bits, _, _ = sg.ShannonAnalyzer.information_volume(real)
+        padded_bits, padded_red, _ = sg.ShannonAnalyzer.information_volume(padded)
+
+        assert padded_bits >= clean_bits, "padding must never lower the total"
+        assert padded_red < 0.05, "20 000 copies of 'ok ' is not information"
+
+    def test_volume_is_measured_over_every_key_at_every_depth(self, gate):
+        """W1 and W2 compose: hiding the blob under an unknown key, in a list,
+        five levels down, must not hide it from the volume rule either."""
+        payload = {"meta": {"rows": [{"unknown_field": {"deeper": _blob()}}]}}
+        d = gate.evaluate(_msg(payload=payload))
+        assert "information_volume_block" in d.reasons
+        assert d.decision == "blocked"
+
+    def test_repeated_content_is_redundancy_not_information(self, gate):
+        """The failure mode of the OTHER candidate estimator.
+
+        H_token * n_tokens would read one sentence of 300 distinct words
+        repeated 100 times as 100x the information — every pasted log tail
+        would block. The compressed length charges for it once, and the
+        redundancy floor names it as padding, which is what it is. It also
+        fires where the single-token-share test cannot: no token here holds
+        more than 1/300 of the stream.
+        """
+        sentence = " ".join(f"word{i}" for i in range(300))
+        text = (sentence + " ") * 100
+        share, n_tok = sg.ShannonAnalyzer.top_token_share(text)
+        assert share < sg.DILUTION_SHARE and n_tok > 10_000
+
+        bits, red, _ = sg.ShannonAnalyzer.information_volume(text)
+        assert red <= sg.VOLUME_REDUNDANCY_FLOOR
+        assert bits < sg.VOLUME_BLOCK_BITS, "repetition is not new information"
+
+        d = gate.evaluate(_msg(payload={"text": text}))
+        assert "payload_redundancy" in d.reasons
+        assert d.decision != "pass"
+
+    def test_top_token_share_still_flags_gross_padding(self, gate):
+        """The rule the review asked for by name, kept and still enforced."""
+        d = gate.evaluate(_msg(payload={"text": "ping " * 200 + "alpha beta"}))
+        assert "payload_dilution" in d.reasons
+        assert d.decision != "pass"
+
+    def test_volume_observe_mode_records_but_changes_no_verdict(
+        self, gate, monkeypatch
+    ):
+        monkeypatch.setattr(sg, "VOLUME_MODE", "observe")
+        d = gate.evaluate(_msg(payload={"output": _blob()}))
+        assert "information_volume_block" in d.reasons   # measured + recorded
+        assert d.bits_total > 400_000                    # number is on the row
+        assert d.decision == "pass"                      # but not enforced
+
+    def test_volume_off_mode_computes_no_reasons(self, gate, monkeypatch):
+        monkeypatch.setattr(sg, "VOLUME_MODE", "off")
+        d = gate.evaluate(_msg(payload={"output": _blob()}))
+        assert not any("volume" in r or "redundancy" in r for r in d.reasons)
+        assert d.decision == "pass"
+
+    def test_dilution_guard_no_longer_depends_on_the_attestation_knob(
+        self, gate, monkeypatch
+    ):
+        """SHANNON_ATTEST=off used to silently disarm the padding guard too,
+        because the dilution escalation lived inside the attestation's enforce
+        branch. One knob quietly switching off an unrelated check is the same
+        silent no-op this file keeps being bitten by."""
+        monkeypatch.setattr(sg, "ATTEST_MODE", "off")
+        d = gate.evaluate(_msg(payload={"text": "ping " * 200 + "alpha beta"}))
+        assert "payload_dilution" in d.reasons
+        assert d.decision == "flagged"
+
+    def test_oversized_payload_is_refused_not_measured(self, gate, tmp_path):
+        """FAIL CLOSED on size: a payload past the ingest bound is refused
+        before any measurement, and the refusal is on the audit row. Measuring
+        it would be unbounded CPU on an attacker-chosen string."""
+        huge = {"text": "a" * (sg.MAX_PAYLOAD_BYTES + 1000)}
+        d = gate.evaluate(_msg(payload=huge))
+        assert d.reasons == ["payload_oversize"]
+        assert d.decision == "blocked"
+        con = sqlite3.connect(str(tmp_path / "attest.db"))
+        row = con.execute(
+            "SELECT gate_decision, gate_reasons FROM agent_messages "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        con.close()
+        assert row[0] == "blocked" and "payload_oversize" in row[1]
+
+    def test_oversized_payload_is_refused_at_ingest_on_the_control_plane_too(
+        self, tmp_path
+    ):
+        """An ingest refusal must beat EVERY dispatch branch, including the
+        approval control plane, which is otherwise deliberately never blocked.
+        A frame the gate refused to process must not be able to resolve a
+        human approval on its way out."""
+        db_path = tmp_path / "oversize.db"
+        resp = _socket_roundtrip(db_path, {
+            "agent_id": "science", "task_id": "t1",
+            "message_type": "approval_response",
+            "payload": {"approved": True, "interaction_id": "ask-1",
+                        "pad": "a" * (sg.MAX_PAYLOAD_BYTES + 1000)},
+        })
+        assert resp["error"] == "payload_too_large"
+        assert resp["decision"] == "blocked"
+        assert resp["type"] != "approval_ack"
+
+    def test_volume_never_fires_on_the_operators_real_traffic(self, gate):
+        """False-positive floor. Every distinct payload SHAPE in the operator's
+        real history is far under VOLUME_MIN_BYTES, so none of this can fire on
+        the traffic the human actually reads."""
+        real = [
+            {"message": "Grok Build: demo status at 23:38:33", "step": 1,
+             "source": "inject_agent_updates"},
+            {"approval_needed": True, "prompt": "Dock 1G9V?",
+             "interaction_id": "ask-sci-1"},
+            {"approval_needed": True,
+             "prompt": "Apply canary config for Astex Arm A?",
+             "text": "Apply canary config for Astex Arm A?",
+             "interaction_id": "ask-science-e2e-1784779386"},
+            {"text": "clipboard-derived task text", "event": "ingest",
+             "source": "cmd_d"},
+            {"text": "hi"},
+        ]
+        for payload in real:
+            d = gate.evaluate(_msg(payload=payload, shannon_H=0.0))
+            assert not any(
+                r.startswith(("information_volume", "payload_redundancy",
+                              "payload_dilution", "unscored_", "payload_oversize"))
+                for r in d.reasons
+            ), (payload, d.reasons)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# W2 / W3 — NO KEY AND NO NESTING MAY ESCAPE SCORING
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestNothingEscapesScoring:
+    def test_metadata_key_cannot_hide_a_payload(self, gate):
+        """The residual of the first W2 fix.
+
+        The scored-key ALLOWLIST was replaced with a metadata DENYLIST — but
+        the denylist was an unconditional skip, so `hash` (a metadata key)
+        excluded its value from scoring at any length. {"hash": <60 kB>} was
+        never token-scored and never volume-scored; the only thing that looked
+        at it was the 0.30-weighted character term.
+
+        Length is what separates a label from a payload.
+        """
+        payload = {"hash": _blob()}
+        assert "hash" in sg.METADATA_KEYS
+        d = gate.evaluate(_msg(payload=payload))
+        assert d.decision == "blocked", (d.decision, d.reasons)
+        assert "oversized_metadata_field" in d.reasons
+        assert sg.ShannonAnalyzer.scored_text(payload) != ""
+
+    def test_id_suffix_key_cannot_hide_a_payload(self, gate):
+        """Same hole through the `*_id` rule rather than the explicit list."""
+        payload = {"result_id": _blob()}
+        d = gate.evaluate(_msg(payload=payload))
+        assert d.decision == "blocked", (d.decision, d.reasons)
+        assert sg.ShannonAnalyzer.scored_text(payload) != ""
+
+    def test_short_metadata_values_are_still_labels(self):
+        """The other half: the fix must not start scoring real identifiers.
+
+        This is the check that keeps the operator's approval traffic clean —
+        an interaction id is not content and must not be measured as if it
+        were.
+        """
+        base = sg.ShannonAnalyzer.scored_text({"text": "hello world"})
+        with_ids = sg.ShannonAnalyzer.scored_text({
+            "text": "hello world", "interaction_id": "ask-9f3c",
+            "message_id": "m-1", "task_id": "t-2", "source": "cmd_d",
+            "hash": "9f3c1a7b", "version": "1.4.2",
+        })
+        assert base == with_ids
+
+    def test_unknown_key_carrying_a_long_string_is_scored(self):
+        """'An unrecognised key carrying a long string must be scored, never
+        ignored.' The decoy that scored 1.326 and passed."""
+        real = " ".join(f"secret{i}" for i in range(400))
+        decoy = {"output": "ok ok", "result_body": real}
+        assert real in sg.ShannonAnalyzer.scored_text(decoy)
+
+    def test_nested_strings_are_scored_at_every_container_shape(self):
+        """W3, pinned independently of W2: dicts, lists, tuples, and lists of
+        dicts, under both known and unknown keys."""
+        real = " ".join(f"secret{i}" for i in range(40))
+        for payload in (
+            {"content": {"text": real}},
+            {"content": [real]},
+            {"a": {"b": {"c": {"output": real}}}},
+            {"rows": [{"cell": [{"v": real}]}]},
+            {"unknown": ({"deep": real},)},
+        ):
+            assert real in sg.ShannonAnalyzer.scored_text(payload), payload
+            assert sg.ShannonAnalyzer.combined_entropy_ex(payload)[1] > 5.0, payload
+
+    def test_walk_truncation_fails_closed(self, gate):
+        """Nesting past the walk bound leaves strings unmeasured. Returning a
+        partial measurement as if it were complete is the fail-OPEN answer; the
+        gate records that it did not see everything and refuses to pass."""
+        node: dict = {"payload": "deep secret content"}
+        for _ in range(sg.WALK_MAX_DEPTH + 4):
+            node = {"n": node}
+        content = sg.ShannonAnalyzer.scan(node)
+        assert content.truncated
+        d = gate.evaluate(_msg(payload=node))
+        assert "unscored_truncated" in d.reasons
+        assert d.decision != "pass"
+
+    def test_a_normal_payload_is_never_marked_truncated(self):
+        assert not sg.ShannonAnalyzer.scan(
+            {"text": "hi", "nested": {"a": {"b": ["x", "y"]}}}
+        ).truncated
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# W4 — OUT-OF-BAND POINTERS
+#
+# Measured content and delivered content are disjoint when the message carries
+# a reference. No threshold on the measured side can fix that, so the gate does
+# the only honest thing: it records that it did not see the content, and it
+# refuses to certify the message. It never dereferences anything.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestOutOfBandPointers:
+    def test_the_demonstrated_artifact_handoff_cannot_pass(self, gate):
+        """Observed: scored 2.7123, decision 'pass', reasons []."""
+        payload = {"output": "analysis complete see artifact",
+                   "artifact_path": "/tmp/exfil.bin"}
+        d = gate.evaluate(_msg(payload=payload))
+        assert d.computed_H < sg.H_THRESHOLD, "still low-entropy — that is the point"
+        assert "unscored_pointer" in d.reasons
+        assert d.decision != "pass"
+
+    @pytest.mark.parametrize("payload", [
+        {"output": "done", "url": "https://example.invalid/a"},
+        {"output": "done", "download_url": "http://x.invalid/y"},
+        {"output": "see file:///etc/passwd for details"},
+        {"output": "results in /var/tmp/run42/out.json"},
+        {"output": "written to ~/reports/final.md"},
+        {"output": "cf. ./relative/path.txt"},
+        {"output": "s3://bucket/key/obj.bin"},
+        {"summary": "ok", "artifact_id": "a7f3c9d2"},     # opaque id, key says pointer
+        {"summary": "ok", "pose_file": "1G9V_pose.pdb"},
+        {"nested": {"rows": [{"blob_ref": "sha256:abcd"}]}},   # any depth
+    ])
+    def test_pointer_shapes_are_all_caught(self, gate, payload):
+        d = gate.evaluate(_msg(payload=payload))
+        assert "unscored_pointer" in d.reasons, payload
+        assert d.decision != "pass", payload
+
+    @pytest.mark.parametrize("text", [
+        "we should do this and/or that",
+        "the run took 24/7 of wall time",
+        "I/O bound, not CPU bound",
+        "ratio was 3/4 across the board",
+        "Apply canary config for Astex Arm A?",
+    ])
+    def test_ordinary_prose_is_not_a_pointer(self, text):
+        """FALSE-POSITIVE FLOOR. A gate that misfires gets switched off, and a
+        path rule that matches every slash in English prose misfires on every
+        message. The path branch is anchored to start-of-string-or-whitespace
+        precisely so these do not match."""
+        assert not sg.ShannonAnalyzer.is_pointer(None, text), text
+
+    def test_the_gate_never_dereferences_anything(self, gate, monkeypatch):
+        """THE POLICY, ENFORCED BY TEST — not just documented.
+
+        No URL is fetched (that would make the gate an SSRF primitive on a
+        trusted host, and would make this very suite depend on the network) and
+        no local path is opened (bounded reads still lose the TOCTOU race
+        between measuring the file and delivering the reference). Any future
+        edit that adds a fetch or an open on the scoring path fails here.
+        """
+        import builtins
+        import urllib.request
+
+        def boom(*a, **k):
+            raise AssertionError("the gate must never dereference a pointer")
+
+        monkeypatch.setattr(builtins, "open", boom)
+        monkeypatch.setattr(urllib.request, "urlopen", boom)
+        monkeypatch.setattr(Path, "read_text", boom)
+        monkeypatch.setattr(Path, "read_bytes", boom)
+
+        d = gate.evaluate(_msg(payload={
+            "output": "see https://example.invalid/payload and /etc/hosts",
+            "artifact_path": "/tmp/does/not/exist.bin",
+        }))
+        assert "unscored_pointer" in d.reasons
+
+    def test_an_unresolvable_pointer_is_treated_exactly_like_any_other(self, gate):
+        """'Unresolvable' is not a special case, because the gate never tries
+        to resolve anything. A path that does not exist and one that does are
+        the same statement to this gate: content it did not see."""
+        exists = gate.evaluate(_msg(agent_id="codex",
+                                    payload={"o": "x", "path": "/etc/hosts"}))
+        missing = gate.evaluate(_msg(agent_id="cowork",
+                                     payload={"o": "x", "path": "/no/such/file"}))
+        assert exists.decision == missing.decision != "pass"
+        assert exists.reasons == missing.reasons
+
+    def test_unscored_observe_mode_records_but_changes_no_verdict(
+        self, gate, monkeypatch
+    ):
+        monkeypatch.setattr(sg, "UNSCORED_MODE", "observe")
+        d = gate.evaluate(_msg(payload={"output": "done", "artifact_path": "/tmp/a"}))
+        assert "unscored_pointer" in d.reasons        # on the audit row
+        assert d.decision == "pass"                   # no verdict change
+
+    def test_unscored_block_mode_refuses_delivery(self, gate, monkeypatch):
+        monkeypatch.setattr(sg, "UNSCORED_MODE", "block")
+        d = gate.evaluate(_msg(payload={"output": "done", "artifact_path": "/tmp/a"}))
+        assert d.decision == "blocked"
+
+    def test_unscored_off_mode_is_a_true_no_op(self, gate, monkeypatch):
+        monkeypatch.setattr(sg, "UNSCORED_MODE", "off")
+        d = gate.evaluate(_msg(payload={"output": "done", "artifact_path": "/tmp/a"}))
+        assert not any(r.startswith("unscored_") for r in d.reasons)
+        assert d.decision == "pass"
+
+    def test_flag_mode_still_delivers_the_message(self, tmp_path):
+        """`flag` must not be an outage. Only `blocked` stops traffic, so a
+        pointer-carrying message is marked and forwarded — the distinction an
+        operator needs before turning anything on."""
+        resp = _socket_roundtrip(tmp_path / "ptr.db", {
+            "agent_id": "science", "task_id": "t1", "message_type": "result",
+            "payload": {"output": "done", "artifact_path": "/tmp/a.bin"},
+        })
+        assert resp["type"] == "gate_response"
+        assert resp["decision"] == "flagged"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# D3 / D5 — LIVENESS BOOKKEEPING MUST NOT DESTROY LIVE STATE
+# ══════════════════════════════════════════════════════════════════════════════
+
+# The Pill's orphan rule, copied verbatim from
+# Pill/Sources/PillCore/GateDBReader.swift:pendingAsks. An ask matching this is
+# dropped from the HUD and retracted from the user's other devices.
+_ORPHAN_SQL = """
+    SELECT CASE WHEN a.disconnected_at IS NOT NULL
+                 AND a.disconnected_at > i.created_at_ns THEN 1 ELSE 0 END
+    FROM agent_interactions i
+    LEFT JOIN agents a ON a.agent_id = i.agent_id
+    WHERE i.interaction_id = ?
+"""
+
+
+class TestRestartDoesNotRetractApprovals:
+    def _seed(self, db_path: Path) -> tuple[sg.AuditDB, int]:
+        db = sg.AuditDB(db_path)
+        now = time.time_ns()
+        db.upsert_agent("science", "active", now - 10_000_000_000)
+        db.upsert_interaction("ask-live", "science", "Dock 1G9V?", "pending")
+        con = sqlite3.connect(str(db_path))
+        con.execute(
+            "UPDATE agent_interactions SET created_at_ns = ? "
+            "WHERE interaction_id = 'ask-live'",
+            (now - 5_000_000_000,),
+        )
+        con.commit()
+        con.close()
+        return db, now
+
+    def test_restart_does_not_orphan_a_pending_approval(self, tmp_path):
+        """D3 — every approval outstanding across a gate restart disappeared.
+
+        `mark_all_disconnected` stamped `now` on every open row. The pill reads
+        `disconnected_at > created_at_ns` as "the asking agent left", so a
+        restart retracted every pending ask from the HUD and from the user's
+        other devices while `agent_interactions.status` still said 'pending':
+        the question became simultaneously unanswered and unanswerable, and
+        nothing in the UI said why.
+        """
+        db_path = tmp_path / "d3.db"
+        db, now = self._seed(db_path)
+
+        assert db.mark_all_disconnected(now) == 1        # row still closed out
+
+        con = sqlite3.connect(str(db_path))
+        orphaned = con.execute(_ORPHAN_SQL, ("ask-live",)).fetchone()[0]
+        row = con.execute(
+            "SELECT status, disconnected_at FROM agents WHERE agent_id='science'"
+        ).fetchone()
+        con.close()
+
+        assert orphaned == 0, "a gate restart must not retract a live approval"
+        assert row[0] == "idle"                          # not reported as live
+        assert row[1] is not None                        # and properly closed out
+
+    def test_restart_still_closes_out_agents_with_no_pending_ask(self, tmp_path):
+        """The behaviour that must survive the fix: a leftover 'connected' row
+        from a crashed run is still closed, or the pill shows agents as live
+        that have not existed since the last reboot."""
+        db_path = tmp_path / "d3b.db"
+        db = sg.AuditDB(db_path)
+        now = time.time_ns()
+        db.upsert_agent("codex", "active", now - 10_000_000_000)
+
+        assert db.mark_all_disconnected(now) == 1
+        con = sqlite3.connect(str(db_path))
+        row = con.execute(
+            "SELECT status, disconnected_at FROM agents WHERE agent_id='codex'"
+        ).fetchone()
+        con.close()
+        assert row[0] == "idle" and row[1] == now
+
+    def test_an_answered_ask_does_not_hold_the_stamp_back(self, tmp_path):
+        """Only UNANSWERED questions backdate the stamp. A resolved ask is
+        history and must not keep an agent looking recently-connected."""
+        db_path = tmp_path / "d3c.db"
+        db, now = self._seed(db_path)
+        db.resolve_interaction("ask-live", True)
+
+        db.mark_all_disconnected(now)
+        con = sqlite3.connect(str(db_path))
+        val = con.execute(
+            "SELECT disconnected_at FROM agents WHERE agent_id='science'"
+        ).fetchone()[0]
+        con.close()
+        assert val == now
+
+    def test_mark_all_disconnected_works_before_any_interaction_exists(
+        self, tmp_path
+    ):
+        """agent_interactions is created lazily, so a gate whose very first
+        action is a restart must not trip over its absence."""
+        db_path = tmp_path / "d3d.db"
+        db = sg.AuditDB(db_path)
+        db.upsert_agent("codex", "active", time.time_ns())
+        assert db.mark_all_disconnected(time.time_ns()) == 1
+
+
+class TestReconnectDoesNotKillTheLiveConnection:
+    def test_superseded_handler_does_not_deregister_the_new_connection(
+        self, tmp_path
+    ):
+        """D5 — the disconnect `finally` popped whatever was registered under
+        the agent id, not the connection it belonged to.
+
+        A reconnect replaces the registry entry while the OLD handler is still
+        unwinding, so the old handler removed the NEW, live connection from
+        `_connections` and stamped `disconnected_at` on an agent that was at
+        that moment connected and talking. The agent vanished from every
+        reader and stopped receiving broadcasts. Which handler unwinds first is
+        a scheduling detail, so the bug was intermittent.
+        """
+        socket_path = f"/tmp/shannon_d5_{uuid.uuid4().hex[:8]}.sock"
+        db_path = tmp_path / "d5.db"
+
+        async def scenario():
+            hub = sg.AgentHub(db_path=db_path)
+            hub.gate = sg.ShannonGate(hub.db)
+            hub._lock = asyncio.Lock()
+            hub._shutdown = asyncio.Event()
+            server = await asyncio.start_unix_server(
+                hub._handle_socket_conn, path=socket_path
+            )
+            async with server:
+                # First connection registers.
+                r1, w1 = await asyncio.open_unix_connection(socket_path)
+                w1.write((json.dumps({"agent_id": "science"}) + "\n").encode())
+                await w1.drain()
+                await r1.readline()
+
+                # Second connection for the SAME id replaces it in the registry.
+                r2, w2 = await asyncio.open_unix_connection(socket_path)
+                w2.write((json.dumps({"agent_id": "science"}) + "\n").encode())
+                await w2.drain()
+                await r2.readline()
+                live = hub._connections["science"]
+
+                # Now the first, superseded connection drops.
+                w1.close()
+                for _ in range(200):                 # deterministic: poll state,
+                    await asyncio.sleep(0)           # never sleep on a clock
+                    if w1.is_closing():
+                        break
+                await asyncio.sleep(0.05)
+
+                registered = hub._connections.get("science")
+
+                # The live connection must still work end to end.
+                w2.write((json.dumps({
+                    "agent_id": "science", "task_id": "t1",
+                    "message_type": "status", "payload": {"text": "still here"},
+                }) + "\n").encode())
+                await w2.drain()
+                reply = json.loads((await r2.readline()).decode())
+
+                # Read the registry row WHILE the second connection is still
+                # open — after w2.close() its own handler stamps the row and
+                # the assertion would be vacuous.
+                con = sqlite3.connect(str(db_path))
+                stamp = con.execute(
+                    "SELECT disconnected_at FROM agents WHERE agent_id='science'"
+                ).fetchone()[0]
+                con.close()
+
+                w2.close()
+                return registered is live, reply, stamp
+
+        try:
+            still_registered, reply, stamp = asyncio.run(scenario())
+        finally:
+            Path(socket_path).unlink(missing_ok=True)
+
+        assert still_registered, \
+            "the superseded handler deregistered the live connection"
+        assert reply["type"] == "gate_response"
+        assert stamp is None, \
+            "a live, talking agent was stamped disconnected by an old handler"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

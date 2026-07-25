@@ -6,10 +6,116 @@
 #include "shannon/collapse_detector.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <deque>
+#include <stdexcept>
+#include <string>
 
 namespace shannon {
+
+namespace {
+
+// ── Operator env parsing ────────────────────────────────────────────────────
+// Deliberately strict: an unparseable SHANNON_* value throws instead of
+// falling back to the default. A silently-ignored typo in
+// SHANNON_OSCILLATION_MIN_ALTERNATIONS would leave an operator believing they
+// had retuned the detector while it ran at stock sensitivity — the exact class
+// of silent no-op this detector has been bitten by before. Failing at
+// construction is loud, immediate and fixable.
+
+bool env_observe_only(const char* name, bool fallback) {
+    const char* raw = std::getenv(name);
+    if (raw == nullptr) return fallback;
+    std::string v(raw);
+    // Trim + lowercase so "1", " true", "ON" all behave the same as in Python.
+    const auto first = v.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return fallback;   // empty/blank == unset
+    const auto last = v.find_last_not_of(" \t\r\n");
+    v = v.substr(first, last - first + 1);
+    for (auto& c : v) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (v == "1" || v == "true" || v == "yes" || v == "on")   return true;
+    if (v == "0" || v == "false" || v == "no" || v == "off")  return false;
+    throw std::invalid_argument(
+        std::string(name) + ": expected one of 1/0/true/false/yes/no/on/off, got '" +
+        raw + "'; refusing to start with an ambiguous enforcement mode");
+}
+
+std::size_t env_min_alternations(const char* name, std::size_t fallback) {
+    const char* raw = std::getenv(name);
+    if (raw == nullptr) return fallback;
+    std::string v(raw);
+    const auto first = v.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return fallback;
+    const auto last = v.find_last_not_of(" \t\r\n");
+    v = v.substr(first, last - first + 1);
+    try {
+        std::size_t consumed = 0;
+        const long long parsed = std::stoll(v, &consumed);
+        if (consumed != v.size() || parsed < 1) throw std::invalid_argument("range");
+        return static_cast<std::size_t>(parsed);
+    } catch (const std::exception&) {
+        throw std::invalid_argument(
+            std::string(name) + ": expected an integer >= 1, got '" + raw +
+            "'; refusing to start with an unknown oscillation sensitivity");
+    }
+}
+
+// ── Shared window statistics ────────────────────────────────────────────────
+
+struct WindowStats {
+    double mean;
+    double stddev;
+};
+
+// Welford: O(n), stable. Replaces E[X²]-E[X]² which cancels catastrophically
+// near H≈2 bits — and which python/shannon/detector.py used to keep using,
+// with a POPULATION (n) denominator against this function's SAMPLE (n-1) one,
+// so window_std and z_score disagreed between the backends on every single
+// token. detector.py::_welford_window_stats is now a line-for-line twin of
+// this loop. Three properties are load-bearing for that; none may be
+// "optimised" on one side only:
+//   * SAMPLE variance, M2/(count-1), zero for count < 2.
+//   * CHRONOLOGICAL iteration (oldest first), not raw ring order. Same set,
+//     different summation order, ~1 ULP apart — enough to flip .collapsed when
+//     delta lands exactly on the threshold.
+//   * FP contraction OFF, so `M2 += delta * delta2` cannot become an FMA. An
+//     FMA skips a rounding and is likewise ~1 ULP off Python, which has no
+//     fused multiply-add. The 6/400 callback-count divergences the audit found
+//     were exactly this class of 1-ULP disagreement.
+// tests/python/test_detector.py::TestBackendParityFuzz compares mean/std with
+// == (not approx), so any of these regressing fails a test rather than a
+// deployment.
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC push_options
+#  pragma GCC optimize("-ffp-contract=off")
+#endif
+WindowStats welford_window_stats(const std::vector<double>& window,
+                                 std::size_t oldest,
+                                 std::size_t count) {
+#if defined(__clang__)
+#  pragma clang fp contract(off)
+#endif
+    const std::size_t n = window.size();
+    double mean = 0.0;
+    double M2 = 0.0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const double x = window[(oldest + i) % n];
+        const double delta = x - mean;
+        mean += delta / static_cast<double>(i + 1);
+        const double delta2 = x - mean;
+        const double prod = delta * delta2;   // separate statement: no contraction
+        M2 += prod;
+    }
+    const double variance = (count > 1) ? M2 / static_cast<double>(count - 1) : 0.0;
+    return WindowStats{mean, std::sqrt(std::max(0.0, variance))};
+}
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC pop_options
+#endif
+
+}  // namespace
 
 CollapseDetector::CollapseDetector(
     std::size_t window_size,
@@ -21,12 +127,18 @@ CollapseDetector::CollapseDetector(
     , expansion_threshold_(expansion_threshold > 0 ? expansion_threshold : -collapse_threshold)
     , oscillation_window_(oscillation_window > 0 ? oscillation_window : kDefaultOscillationWindow)
     , window_(window_size_, 0.0)
-    , event_history_(oscillation_window_, EntropyEvent::NONE) {}
+    // Starts EMPTY and grows, exactly like Python's deque(maxlen=...). The old
+    // pre-seed of oscillation_window_ NONEs was invisible to the alternation
+    // count but made the two backends' histories structurally different, which
+    // is how the rotation bug below stayed hidden for so long.
+    , event_history_()
+    , min_alternations_(env_min_alternations("SHANNON_OSCILLATION_MIN_ALTERNATIONS", 2))
+    , observe_only_(env_observe_only("SHANNON_DETECTOR_OBSERVE_ONLY", false)) {}
 
 void CollapseDetector::reset() {
     trace_.clear();
     std::fill(window_.begin(), window_.end(), 0.0);
-    std::fill(event_history_.begin(), event_history_.end(), EntropyEvent::NONE);
+    event_history_.clear();
     window_pos_ = 0;
     window_full_ = false;
     token_count_ = 0;
@@ -85,7 +197,15 @@ EntropyEvent CollapseDetector::classify_event(double delta, bool window_ready) c
 }
 
 bool CollapseDetector::detect_oscillation() const {
-    int alternations = 0;
+    // event_history_ is chronological (oldest first), so index i-1 really did
+    // precede index i. It used to be a ring buffer written at
+    // token_count_ % oscillation_window_ and READ IN ARRAY ORDER, which after
+    // the first wrap hands this loop a rotation of the true history: the pair
+    // (newest, oldest) becomes adjacent and one genuine adjacent pair is lost.
+    // For a perfectly periodic stream a rotation is indistinguishable from the
+    // original — which is why the old parity test passed while 289/400 random
+    // streams disagreed with the Python reference.
+    std::size_t alternations = 0;
     for (std::size_t i = 1; i < event_history_.size(); ++i) {
         EntropyEvent prev = event_history_[i - 1];
         EntropyEvent curr = event_history_[i];
@@ -94,10 +214,20 @@ bool CollapseDetector::detect_oscillation() const {
             ++alternations;
         }
     }
-    return alternations >= 2;
+    return alternations >= min_alternations_;
 }
 
 CollapseResult CollapseDetector::push_entropy(double h) {
+    // Fail closed on a non-finite entropy. A NaN poisons the window for
+    // window_size tokens and makes every threshold comparison false, i.e. it
+    // silently switches the detector OFF; an infinity manufactures a collapse
+    // or an expansion on the next token. Neither may be accepted quietly.
+    if (!std::isfinite(h)) {
+        throw std::invalid_argument(
+            "push_entropy: entropy must be finite, got " + std::to_string(h) +
+            "; refusing to admit a non-finite value into the sliding window");
+    }
+
     trace_.push_back(h);
     if (trace_.size() > max_trace_size_) {
         trace_.pop_front();   // O(1) with deque; max_trace_size_ defaults to MAX_TRACE (10000)
@@ -111,16 +241,13 @@ CollapseResult CollapseDetector::push_entropy(double h) {
 
     const std::size_t count = window_full_ ? window_size_ : window_pos_;
 
-    // Welford: O(n), stable. Replaces E[X²]-E[X]² which cancels catastrophically near H≈2 bits.
-    double mean = 0.0, M2 = 0.0;
-    for (std::size_t i = 0; i < count; ++i) {
-        const double delta = window_[i] - mean;
-        mean += delta / static_cast<double>(i + 1);
-        const double delta2 = window_[i] - mean;
-        M2 += delta * delta2;
-    }
-    const double variance = (count > 1) ? M2 / static_cast<double>(count - 1) : 0.0;
-    const double stddev = std::sqrt(std::max(0.0, variance));
+    // window_pos_ now points at the next slot to overwrite, which is the OLDEST
+    // sample once the ring has wrapped. Before it wraps the samples sit at
+    // 0..count-1 in order.
+    const std::size_t oldest = window_full_ ? window_pos_ : 0;
+    const WindowStats stats = welford_window_stats(window_, oldest, count);
+    const double mean   = stats.mean;
+    const double stddev = stats.stddev;
 
     const double delta = h - mean;
     const double z = (stddev > 1e-12) ? delta / stddev : 0.0;
@@ -141,7 +268,10 @@ CollapseResult CollapseDetector::push_entropy(double h) {
     const bool collapsed = (event == EntropyEvent::COLLAPSE);
     const bool expanded  = (event == EntropyEvent::EXPANSION);
 
-    event_history_[token_count_ % oscillation_window_] = event;
+    event_history_.push_back(event);
+    while (event_history_.size() > oscillation_window_) {
+        event_history_.pop_front();   // maxlen semantics, chronological order preserved
+    }
     bool oscillating = false;
     if (window_ready && event != EntropyEvent::NONE) {
         oscillating = detect_oscillation();
@@ -166,7 +296,11 @@ CollapseResult CollapseDetector::push_entropy(double h) {
 
     ++token_count_;
 
-    if ((result.collapsed || result.expanded || result.oscillating) && callback_) {
+    // observe_only_ suppresses the ACTION, never the classification: the
+    // result is fully populated and returned either way, so a deployment can
+    // count what a new threshold would have done before letting it reach the
+    // handrail. Enforcement is the default; observation is opt-in.
+    if ((result.collapsed || result.expanded || result.oscillating) && callback_ && !observe_only_) {
         callback_(result);
     }
 
@@ -194,7 +328,20 @@ void CollapseDetector::set_expansion_threshold(double threshold_bits) {
 
 void CollapseDetector::set_oscillation_window(std::size_t size) {
     oscillation_window_ = (size > 0) ? size : kDefaultOscillationWindow;
-    event_history_.assign(oscillation_window_, EntropyEvent::NONE);
+    // Trim the OLDEST entries only. assign()-ing a fresh block of NONEs here
+    // wiped every event seen so far, so shrinking the window mid-stream also
+    // blinded oscillation detection for the next oscillation_window tokens.
+    while (event_history_.size() > oscillation_window_) {
+        event_history_.pop_front();
+    }
+}
+
+std::size_t CollapseDetector::min_alternations() const noexcept {
+    return min_alternations_;
+}
+
+bool CollapseDetector::observe_only() const noexcept {
+    return observe_only_;
 }
 
 void CollapseDetector::set_threshold(double threshold_bits) {

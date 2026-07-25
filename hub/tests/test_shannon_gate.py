@@ -176,6 +176,15 @@ class TestSocketServerBasics:
         async def scenario():
             hub = sg.AgentHub(db_path=tmp_path / "agent_hub.db")
             hub.gate = sg.ShannonGate(hub.db)
+            # `run()` normally binds these to the running loop. Without them
+            # `_handle_socket_conn` raises on `async with self._lock` the
+            # instant it gets past registration, the connection is torn down
+            # with nothing written, and the assertion below fails on an empty
+            # readline — which reads like an environment problem ("something
+            # else owns the socket") and is not one. This test has never
+            # exercised the message loop; now it does.
+            hub._lock = asyncio.Lock()
+            hub._shutdown = asyncio.Event()
 
             server = await asyncio.start_unix_server(hub._handle_socket_conn, path=socket_path)
             async with server:

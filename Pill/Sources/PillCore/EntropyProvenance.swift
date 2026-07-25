@@ -11,7 +11,20 @@ extension ShannonStatus {
     /// - `unknown` — the bridge's fallback when a detector exposes no `backend`
     ///   attribute (:91). Provenance cannot be established, so it is not
     ///   trusted. A deception monitor must fail closed.
-    public static let syntheticBackends: Set<String> = ["demo", "idle", "unknown", ""]
+    /// - `absent`/`none`/`placeholder`/`simulated` — the explicit
+    ///   "nothing is attached" sentinel (`IdleTelemetry.absentStatus`) and the
+    ///   names a future placeholder is most likely to reach for. Listed so the
+    ///   sentinel can never be mistaken for a measurement by a call site that
+    ///   still reads the legacy `ShannonStatus` shape.
+    ///
+    /// Every member is enforced through `isSynthetic`, which gates
+    /// `measuredCollapsed`, `EntropySource.canBeCurrent` and
+    /// `EntropyProvenance.resolve`. There is no entry here that is merely
+    /// documentation.
+    public static let syntheticBackends: Set<String> = [
+        "demo", "idle", "unknown", "",
+        "absent", "none", "placeholder", "simulated",
+    ]
 
     /// True when this reading is a placeholder, not a measurement.
     public var isSynthetic: Bool {

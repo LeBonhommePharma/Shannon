@@ -8,7 +8,7 @@
 #
 # Features:
 #   - Z-score based collapse/expansion/oscillation detection
-#   - O(1) running-sum window statistics
+#   - Welford window statistics, bit-identical to the C++ core
 #   - FastOPTICS super-clustering on collapse (optional)
 #   - C++ acceleration with Python fallback
 #
@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import os
+import re
 from collections import deque
 from typing import Callable
 
@@ -38,6 +40,115 @@ DEFAULT_WINDOW_SIZE = 8
 DEFAULT_COLLAPSE_THRESHOLD = -3.2  # bits (delta below window mean)
 DEFAULT_EXPANSION_THRESHOLD = +3.2  # bits (delta above window mean)
 DEFAULT_OSCILLATION_WINDOW = 5
+
+# Default number of collapse<->expansion transitions inside the oscillation
+# window before a token is labelled "oscillation". Mirrored in
+# src/shannon/collapse_detector.cpp; both backends must agree.
+DEFAULT_MIN_ALTERNATIONS = 2
+
+# ── Operator surface ─────────────────────────────────────────────────────────
+#
+# Two env knobs, read ONCE per constructed detector (so a test or a supervisor
+# can set them and build a fresh detector, and so nothing changes underneath a
+# running stream). The compiled C++ core parses the same two variables with the
+# same rules in its constructor — TestOperatorSurfaceParity pins the two
+# parsers to identical answers.
+#
+#   SHANNON_OSCILLATION_MIN_ALTERNATIONS   default 2, minimum 1
+#       How many collapse<->expansion flips must appear inside
+#       ``oscillation_window`` before a token is reported as oscillating.
+#       Symptom -> action: oscillation firing on ordinary traffic -> raise to 3
+#       or 4; known flip-flopping agent slipping through -> lower to 1 (any
+#       single flip then oscillates).
+#
+#   SHANNON_DETECTOR_OBSERVE_ONLY          default 0 (enforce)
+#       "1"/"true"/"yes"/"on": still classify every token and still return a
+#       fully populated CollapseResult, but never invoke a callback. Nothing
+#       downstream (handrail, kill switch, alerting) is triggered. Use it to
+#       measure how often a new threshold WOULD fire on live traffic before
+#       letting it act: ``detector.suppressed_events`` counts exactly the
+#       callbacks that were withheld. Enforcement is the default, because a
+#       detector that ships in observe mode by accident is a detector that
+#       never fires.
+#
+# Both refuse to start on a value they cannot parse rather than silently using
+# the default: a typo in a safety knob must not quietly restore stock
+# sensitivity while the operator believes it was retuned.
+
+_TRUE_TOKENS = frozenset({"1", "true", "yes", "on"})
+_FALSE_TOKENS = frozenset({"0", "false", "no", "off"})
+_INT_RE = re.compile(r"^[+-]?[0-9]+$")
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Parse a boolean SHANNON_* env var; raise ValueError on anything else."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    token = raw.strip().lower()
+    if not token:  # blank behaves as unset, matching getenv-with-empty in C++
+        return default
+    if token in _TRUE_TOKENS:
+        return True
+    if token in _FALSE_TOKENS:
+        return False
+    raise ValueError(
+        f"{name}: expected one of 1/0/true/false/yes/no/on/off, got {raw!r}; "
+        f"refusing to start with an ambiguous enforcement mode"
+    )
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    """Parse an integer >= 1 SHANNON_* env var; raise ValueError on anything else."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    token = raw.strip()
+    if not token:
+        return default
+    if not _INT_RE.match(token) or int(token) < 1:
+        raise ValueError(
+            f"{name}: expected an integer >= 1, got {raw!r}; refusing to start "
+            f"with an unknown oscillation sensitivity"
+        )
+    return int(token)
+
+
+def _welford_window_stats(window: deque[float] | list[float]) -> tuple[float, float]:
+    """Return (mean, sample stddev) of the window, oldest sample first.
+
+    Byte-for-byte twin of ``welford_window_stats`` in
+    ``src/shannon/collapse_detector.cpp``. The two must stay identical
+    operation-for-operation, not merely mathematically equivalent:
+
+    * Welford, not ``E[X**2] - E[X]**2``. The old running-sum form here
+      cancelled catastrophically near H ~ 2 bits and drifted from the C++ mean
+      by ~1e-15 after a few hundred tokens, which flipped ``.collapsed`` on any
+      token whose delta landed exactly on the threshold (the audit's 1/400
+      ``.collapsed`` and 5/400 ``.expanded`` divergences, and all 6/400
+      callback-count divergences).
+    * SAMPLE variance, ``M2 / (count - 1)``. The old form divided by ``count``
+      while C++ divided by ``count - 1``, so ``window_std`` and ``z_score``
+      disagreed between the backends on *every* token -- a divergence the
+      flags-only fuzz never saw because neither flag reads the std.
+    * Oldest-first iteration. Same numbers in a different order round
+      differently; C++ walks its ring buffer from the oldest slot for exactly
+      this reason.
+
+    Both backends are compared with ``==`` (not ``approx``) in
+    ``tests/python/test_detector.py::TestBackendParityFuzz``.
+    """
+    mean = 0.0
+    m2 = 0.0
+    count = 0
+    for x in window:
+        count += 1
+        delta = x - mean
+        mean += delta / count
+        delta2 = x - mean
+        m2 += delta * delta2
+    variance = m2 / (count - 1) if count > 1 else 0.0
+    return mean, math.sqrt(max(0.0, variance))
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -108,6 +219,54 @@ def _validate_finite_1d(arr: np.ndarray, method: str, kind: str) -> np.ndarray:
             f"element(s) total)"
         )
     return arr
+
+
+def _validate_detector_params(
+    window_size: int,
+    threshold: float,
+    expansion_threshold: float,
+    oscillation_window: int,
+) -> None:
+    """Refuse detector parameters that would silently disarm the detector.
+
+    Every case below used to be accepted by one backend and quietly rewritten
+    or crashed by the other:
+
+    * ``window_size <= 0``  -- Python raised IndexError on the second token
+      while C++ silently substituted 8, so the same call produced a working
+      detector with the WRONG window on one backend and an exception on the
+      other.
+    * ``oscillation_window <= 0`` -- ``deque(maxlen=0)`` keeps no history at
+      all, so oscillation can never be reported; C++ silently substituted 5.
+    * A NaN threshold -- every ``<``/``>`` against NaN is False, i.e. the
+      detector is off, silently and permanently.
+    * ``threshold >= 0`` / ``expansion_threshold <= 0`` -- these inverted
+      thresholds fire on essentially every token, which is how a gate ends up
+      switched off by an operator drowning in alerts.
+    """
+    if not isinstance(window_size, int) or window_size <= 0:
+        raise ValueError(f"window_size must be a positive int, got {window_size!r}")
+    if not isinstance(oscillation_window, int) or oscillation_window <= 0:
+        raise ValueError(
+            f"oscillation_window must be a positive int, got {oscillation_window!r}; "
+            f"0 keeps no event history, so oscillation could never be detected"
+        )
+    for name, value in (("threshold", threshold), ("expansion_threshold", expansion_threshold)):
+        if not math.isfinite(value):
+            raise ValueError(
+                f"{name} must be finite, got {value!r}; every comparison against "
+                f"NaN is False, which silently disables detection"
+            )
+    if threshold >= 0:
+        raise ValueError(
+            f"threshold (collapse) must be negative -- it is compared as "
+            f"delta < threshold with delta = entropy - window_mean -- got {threshold!r}"
+        )
+    if expansion_threshold <= 0:
+        raise ValueError(
+            f"expansion_threshold must be positive -- it is compared as "
+            f"delta > expansion_threshold -- got {expansion_threshold!r}"
+        )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -232,6 +391,25 @@ class ShannonCollapseDetector:
         Alias for ``threshold`` (backwards compat). Ignored when ``threshold``
         is also provided.
 
+    Environment
+    -----------
+    ``SHANNON_OSCILLATION_MIN_ALTERNATIONS`` (default 2) and
+    ``SHANNON_DETECTOR_OBSERVE_ONLY`` (default 0 = enforce) are read once here,
+    at construction. See the module-level "Operator surface" block for what to
+    do with each. Malformed values raise ValueError instead of falling back to
+    the default.
+
+    Raises
+    ------
+    ValueError
+        On a parameter that cannot describe a working detector: a non-positive
+        ``window_size`` or ``oscillation_window``, a non-finite threshold, a
+        non-negative collapse ``threshold`` or a non-positive
+        ``expansion_threshold``. Each of those silently disables part of the
+        detection (an ``oscillation_window`` of 0, for instance, empties the
+        event history so oscillation can never fire), so construction refuses
+        rather than handing back a detector that looks armed and is not.
+
     Examples
     --------
     >>> detector = ShannonCollapseDetector()
@@ -254,6 +432,18 @@ class ShannonCollapseDetector:
         # Handle backwards-compat parameter names
         if collapse_threshold is not None:
             threshold = collapse_threshold
+
+        _validate_detector_params(window_size, threshold, expansion_threshold, oscillation_window)
+
+        # Operator knobs. Parsed BEFORE the C++ core is constructed so a
+        # malformed value reports the actionable Python message rather than the
+        # std::invalid_argument the C++ constructor would raise a line later.
+        self._min_alternations = _env_positive_int(
+            "SHANNON_OSCILLATION_MIN_ALTERNATIONS", DEFAULT_MIN_ALTERNATIONS
+        )
+        self._observe_only = _env_flag("SHANNON_DETECTOR_OBSERVE_ONLY", False)
+        self._suppressed_events = 0
+
         # These two are deliberately NOT merged. `callback` is handed a
         # CollapseResult; the legacy `on_collapse` is handed a CollapseEvent.
         # Assigning `callback or on_collapse` conflated them, so a caller who
@@ -277,10 +467,8 @@ class ShannonCollapseDetector:
         # _emit, and the C++ path appends when add_*() returns, because its
         # callback fires from inside the C++ call, before Python ever sees
         # the value. _emit appends the current entropy itself.
-        self._recent: deque[float] = deque(maxlen=window_size if window_size > 0 else 1)
+        self._recent: deque[float] = deque(maxlen=window_size)
         self._event_history: deque[str] = deque(maxlen=oscillation_window)
-        self._running_sum = 0.0
-        self._running_sum_sq = 0.0
         self._token_count = 0
 
         # C++ detector (optional fast path) — the v2 engine bound in
@@ -319,6 +507,7 @@ class ShannonCollapseDetector:
         # Backend label
         try:
             from shannon._core import SlidingWindowEntropy  # noqa: F401
+
             self._backend = "cpp"
         except ImportError:
             self._backend = "python"
@@ -332,11 +521,10 @@ class ShannonCollapseDetector:
         self._recent.clear()
         self._event_history.clear()
         self._token_count = 0
-        self._running_sum = 0.0
-        self._running_sum_sq = 0.0
         self._last_super_cluster = None
         self._active_types.clear()
         self._last_result = None
+        self._suppressed_events = 0
 
     def add_logits(self, logits: ArrayLike) -> CollapseResult:
         """Feed raw logits for the current token.
@@ -373,6 +561,31 @@ class ShannonCollapseDetector:
         if self._cpp_detector is not None:
             return self._record_cpp(self._cpp_detector.add_logprobs(arr))
         h = _entropy_from_logprobs(arr)
+        return self._push(h)
+
+    def push_entropy(self, h: float) -> CollapseResult:
+        """Feed a pre-computed entropy value (bits) for the current token.
+
+        The public twin of ``CollapseDetector::push_entropy`` in the C++ core,
+        and the only entry point that exercises the event state machine on its
+        own -- no entropy kernel in front of it. Callers that already have an
+        entropy (a proxy gate, a replayed trace, a parity test) should use this
+        rather than synthesising logits.
+
+        Raises ValueError on a non-finite value, on both backends: NaN would
+        make every threshold comparison False for the next ``window_size``
+        tokens, silently disarming the detector.
+        """
+        h = float(h)
+        if self._cpp_detector is not None:
+            if not math.isfinite(h):
+                # Pre-checked so the message is identical on both backends;
+                # the C++ core rejects it too if this is ever bypassed.
+                raise ValueError(
+                    f"push_entropy: entropy must be finite, got {h!r}; refusing "
+                    f"to admit a non-finite value into the sliding window"
+                )
+            return self._record_cpp(self._cpp_detector.push_entropy(h))
         return self._push(h)
 
     @property
@@ -457,32 +670,60 @@ class ShannonCollapseDetector:
         return self._backend
 
     @property
+    def observe_only(self) -> bool:
+        """True when SHANNON_DETECTOR_OBSERVE_ONLY held this detector's callbacks.
+
+        Classification is unaffected; only delivery to the callbacks is.
+        """
+        return self._observe_only
+
+    @property
+    def min_alternations(self) -> int:
+        """Collapse<->expansion flips required inside the oscillation window.
+
+        From SHANNON_OSCILLATION_MIN_ALTERNATIONS (default 2).
+        """
+        return self._min_alternations
+
+    @property
+    def suppressed_events(self) -> int:
+        """Callbacks withheld so far because observe-only mode is on.
+
+        This is the number a deployment should look at before enforcing: it is
+        exactly how many times the handrail would have been invoked. Always 0
+        when observe_only is False. Cleared by reset().
+        """
+        return self._suppressed_events
+
+    @property
     def super_cluster(self) -> SuperClusterInfo | None:
         """Most recent super-cluster from FastOPTICS (None if not triggered)."""
         return self._last_super_cluster
 
     def _push(self, h: float) -> CollapseResult:
         """Push an entropy value through the Python fallback detector."""
+        if not math.isfinite(h):
+            # Fail closed, identically to CollapseDetector::push_entropy in C++.
+            # A NaN entropy poisons the window for window_size tokens and makes
+            # every threshold comparison False -- it switches the detector off
+            # without a word. An infinity manufactures an event on the next
+            # token. Neither is admitted.
+            raise ValueError(
+                f"push_entropy: entropy must be finite, got {h!r}; refusing to "
+                f"admit a non-finite value into the sliding window"
+            )
+
         self._trace.append(h)
-
-        # O(1) running-sum window statistics
-        if len(self._window) == self._window.maxlen:
-            outgoing = self._window[0]
-            self._running_sum -= outgoing
-            self._running_sum_sq -= outgoing * outgoing
-
         self._window.append(h)
-        self._running_sum += h
-        self._running_sum_sq += h * h
 
+        # Window statistics: the shared Welford recurrence, oldest sample
+        # first. Deliberately O(window_size) rather than the O(1) running-sum
+        # form that used to live here -- see _welford_window_stats for why the
+        # running sums had to go (they drifted from the C++ mean by ~1e-15 and
+        # used a different variance denominator). window_size is 8 by default;
+        # this is nanoseconds next to computing the entropy itself.
         count = len(self._window)
-        mean = self._running_sum / count if count > 0 else 0.0
-
-        if count > 1:
-            variance = (self._running_sum_sq / count) - (mean * mean)
-            std = math.sqrt(max(0.0, variance))
-        else:
-            std = 0.0
+        mean, std = _welford_window_stats(self._window)
 
         delta = h - mean
         z = delta / std if std > 1e-12 else 0.0
@@ -497,6 +738,12 @@ class ShannonCollapseDetector:
         elif expanded:
             event = "expansion"
 
+        # Chronological, oldest first, capped at oscillation_window. The C++
+        # twin keeps the same shape (a deque, grown from empty) -- it used to
+        # keep a ring buffer indexed by token_count and read it in ARRAY order,
+        # i.e. a rotation of this list, which invents an adjacency between the
+        # newest and the oldest event. That disagreed with this loop on 289/400
+        # fuzzed streams.
         self._event_history.append(event)
 
         oscillating = False
@@ -508,7 +755,7 @@ class ShannonCollapseDetector:
                     prev[i - 1] == "expansion" and prev[i] == "collapse"
                 ):
                     alternations += 1
-            if alternations >= 2:
+            if alternations >= self._min_alternations:
                 oscillating = True
                 event = "oscillation"
 
@@ -527,6 +774,7 @@ class ShannonCollapseDetector:
         self._last_result = result
         self._token_count += 1
 
+        self._count_if_suppressed(result)
         self._emit(result)
         # After _emit: _recent holds the window *excluding* the token being
         # emitted, which is the invariant the C++ path can also honour.
@@ -547,7 +795,15 @@ class ShannonCollapseDetector:
         here is what stops the two from disagreeing about which callbacks fire
         and with what type -- the previous split let the C++ path drop
         on_collapse entirely.
+
+        Under SHANNON_DETECTOR_OBSERVE_ONLY no callback is delivered at all:
+        classification still happened and the result is still returned to the
+        caller, but nothing downstream is allowed to act on it. The C++ core
+        applies the same rule at its own callback site, so neither backend can
+        act while the other only watches.
         """
+        if self._observe_only:
+            return
         if (
             result.collapsed or result.expanded or result.oscillating
         ) and self._callback is not None:
@@ -569,9 +825,7 @@ class ShannonCollapseDetector:
                     entropy=result.entropy,
                     delta_h=result.delta,
                     collapse_score=(
-                        abs(result.delta / self._threshold)
-                        if abs(self._threshold) > 1e-15
-                        else 0.0
+                        abs(result.delta / self._threshold) if abs(self._threshold) > 1e-15 else 0.0
                     ),
                     window=window,
                 )
@@ -602,7 +856,17 @@ class ShannonCollapseDetector:
         result = self._wrap_cpp_result(r)
         self._last_result = result
         self._recent.append(result.entropy)
+        # Counted here, not in _emit: in observe-only mode the C++ core never
+        # calls back, so _emit never runs on this path. _record_cpp runs once
+        # per token on the C++ path exactly as _push does on the Python one,
+        # which is what keeps the two counters comparable.
+        self._count_if_suppressed(result)
         return result
+
+    def _count_if_suppressed(self, result: CollapseResult) -> None:
+        """Tally an event that observe-only mode withheld from the callbacks."""
+        if self._observe_only and (result.collapsed or result.expanded or result.oscillating):
+            self._suppressed_events += 1
 
     @staticmethod
     def _wrap_cpp_result(r: object) -> CollapseResult:
@@ -658,7 +922,3 @@ class ShannonCollapseDetector:
                 self._last_super_cluster = clusters[0]
         except Exception:
             pass  # Clustering is best-effort
-
-    @property
-    def _current_mean(self) -> float:
-        return self._running_sum / max(1, len(self._window))

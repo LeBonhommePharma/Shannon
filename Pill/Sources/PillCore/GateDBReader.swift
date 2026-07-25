@@ -3,6 +3,31 @@ import Foundation
 import SQLite3
 #endif
 
+// MARK: - Entropy measurement clock (pure)
+
+/// Resolves when a gate `entropy_score` was *substantively* written.
+///
+/// Heartbeats still advance `last_seen_ns` without touching the score. If we
+/// aged H from `last_seen`, a frozen ~2.38 bit attach-status score would look
+/// live forever. When the schema has `entropy_updated_ns`, only that clock is
+/// usable; a zero/DEFAULT value means "no honest measurement time" → refuse.
+public enum GateEntropyClock {
+    /// - Parameter hasEntropyUpdatedColumn: true when SELECT included col 8.
+    /// - Parameter entropyUpdatedSeconds: unix seconds (0 = never written).
+    /// - Parameter lastSeenSeconds: only used for pre-column legacy schemas.
+    /// - Returns: unix seconds for `measuredAt`, or `nil` to refuse the score.
+    public static func measuredAtSeconds(
+        hasEntropyUpdatedColumn: Bool,
+        entropyUpdatedSeconds: TimeInterval,
+        lastSeenSeconds: TimeInterval
+    ) -> TimeInterval? {
+        if hasEntropyUpdatedColumn {
+            return entropyUpdatedSeconds > 0 ? entropyUpdatedSeconds : nil
+        }
+        return lastSeenSeconds > 0 ? lastSeenSeconds : nil
+    }
+}
+
 /// Thin read-only access to `~/.shannon/agent_hub.db` written by `hub/shannon_gate.py`.
 ///
 /// This is the **only** source of real agent telemetry the pill has: a row in
@@ -291,11 +316,16 @@ public enum GateDBReader {
             // Absent column (older schema) or 0 → no heartbeat evidence at all,
             // which the merge layer must handle differently from a *stale* one.
             let beat = sqlite3_column_count(stmt) > 7 ? sqlite3_column_double(stmt, 7) : 0
-            // When entropy_updated_ns is present and > 0, age H from that clock
-            // so heartbeats cannot keep a frozen score looking current.
-            let entropyUpdated = sqlite3_column_count(stmt) > 8
-                ? sqlite3_column_double(stmt, 8) : 0
-            let entropyMeasuredAt: TimeInterval = entropyUpdated > 0 ? entropyUpdated : lastSeen
+            // Column 8 = entropy_updated_ns (seconds). When the column exists,
+            // NEVER fall back to last_seen — heartbeats refresh last_seen and
+            // would keep a frozen attach-status H (~2.38) looking live forever.
+            let hasEntropyUpdatedCol = sqlite3_column_count(stmt) > 8
+            let entropyUpdated = hasEntropyUpdatedCol ? sqlite3_column_double(stmt, 8) : 0
+            let entropyMeasuredAt = GateEntropyClock.measuredAtSeconds(
+                hasEntropyUpdatedColumn: hasEntropyUpdatedCol,
+                entropyUpdatedSeconds: entropyUpdated,
+                lastSeenSeconds: lastSeen
+            )
 
             let cleanTask = AgentActivitySnapshot.looksLikeSecretOrJunk(task)
                 ? ""
@@ -305,17 +335,17 @@ public enum GateDBReader {
             let status = presence == .offline ? AgentRunStatus.idle : AgentRunStatus(raw: statusRaw)
 
             // Measured entropy, but only when the row can actually support the
-            // claim. `entropy_score` is `REAL DEFAULT 0.0`, so a row the gate has
-            // never scored looks exactly like a genuine reading of 0 bits —
-            // refuse both. Age from entropy_updated when known (not last_seen
-            // heartbeats). Integrity: gate-written `decision.computed_H` only.
-            if !entropyIsNull, entropyRaw > 0, entropyMeasuredAt > 0,
+            // claim. `entropy_score` is `REAL DEFAULT 0.0`, so an unscored row
+            // is refused. When `entropy_updated_ns` exists and is 0, refuse
+            // refuse (no honest clock) — do not age from last_seen.
+            // Integrity: gate-written `decision.computed_H` only.
+            if !entropyIsNull, entropyRaw > 0, let measuredAt = entropyMeasuredAt,
                let measurement = EntropyIntegrity.accept(
                    bits: entropyRaw,
                    deltaH: nil,
                    collapsed: nil,
                    source: .gate(agentId: id, presence: presence),
-                   measuredAt: Date(timeIntervalSince1970: entropyMeasuredAt),
+                   measuredAt: Date(timeIntervalSince1970: measuredAt),
                    now: now,
                    policy: policy
                ) {

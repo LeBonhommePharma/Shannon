@@ -46,7 +46,7 @@ final class GateEntropyProvenanceTests: XCTestCase {
         }
     }
 
-    /// The hub's schema as of `shannon_gate.py` — `entropy_score REAL DEFAULT 0.0`.
+    /// Hub schema including `entropy_updated_ns` (substantive H clock).
     private func makeSchema() throws {
         try exec("""
         CREATE TABLE agents (
@@ -54,6 +54,7 @@ final class GateEntropyProvenanceTests: XCTestCase {
             connected_at INTEGER, last_seen_ns INTEGER NOT NULL DEFAULT 0,
             disconnected_at INTEGER, task_id TEXT DEFAULT '',
             message_count INTEGER DEFAULT 0, entropy_score REAL DEFAULT 0.0,
+            entropy_updated_ns INTEGER DEFAULT 0,
             task_summary TEXT DEFAULT '', auth_method TEXT DEFAULT 'socket_secret',
             heartbeat_ns INTEGER);
         CREATE TABLE agent_messages (
@@ -71,6 +72,24 @@ final class GateEntropyProvenanceTests: XCTestCase {
         """)
     }
 
+    /// Insert a scored agent; `entropy_updated_ns` defaults to `last_seen_ns`.
+    private func insertScored(
+        _ agentId: String,
+        bits: Double,
+        secondsAgo: TimeInterval,
+        entropyUpdatedAgo: TimeInterval? = nil,
+        connected: Bool = true
+    ) throws {
+        let last = ns(secondsAgo)
+        let ent = ns(entropyUpdatedAgo ?? secondsAgo)
+        let disc = connected ? "NULL" : "\(last)"
+        try exec("""
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at,
+                            entropy_score, entropy_updated_ns, message_count)
+        VALUES ('\(agentId)', 'active', \(last), \(disc), \(bits), \(ent), 1);
+        """)
+    }
+
     private func ns(_ secondsAgo: TimeInterval) -> Int64 {
         Int64((now.timeIntervalSince1970 - secondsAgo) * 1_000_000_000)
     }
@@ -83,11 +102,8 @@ final class GateEntropyProvenanceTests: XCTestCase {
 
     /// The values are the operator's real ones: claude_code 2.86, codex 2.63.
     func testGateMeasuredEntropyIsSurfacedWithAgentAndTimestamp() throws {
-        try exec("""
-        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at, entropy_score, message_count)
-        VALUES ('claude_code', 'active', \(ns(5)), NULL, 2.86, 12),
-               ('codex', 'active', \(ns(20)), NULL, 2.63, 7);
-        """)
+        try insertScored("claude_code", bits: 2.86, secondsAgo: 5)
+        try insertScored("codex", bits: 2.63, secondsAgo: 20)
         let rows = read().sorted { $0.bits < $1.bits }
         guard rows.count == 2 else {
             return XCTFail("gate-computed entropy must reach the pill, got \(rows.count) rows")
@@ -105,10 +121,7 @@ final class GateEntropyProvenanceTests: XCTestCase {
 
     /// End to end: the DB value becomes the reading the whole pill agrees on.
     func testSnapshotEntropyFeedsAMeasuredReading() throws {
-        try exec("""
-        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at, entropy_score)
-        VALUES ('claude_code', 'active', \(ns(4)), NULL, 2.86);
-        """)
+        try insertScored("claude_code", bits: 2.86, secondsAgo: 4)
         let snap = GateDBReader.readSnapshot(path: dbPath, now: now, entropyPolicy: policy)
         XCTAssertTrue(snap.available)
         XCTAssertEqual(snap.agentEntropy.count, 1)
@@ -131,10 +144,7 @@ final class GateEntropyProvenanceTests: XCTestCase {
     // MARK: - Staleness
 
     func testFortyMinuteOldGateReadingIsNotPresentedAsCurrent() throws {
-        try exec("""
-        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at, entropy_score)
-        VALUES ('claude_code', 'active', \(ns(40 * 60)), NULL, 2.86);
-        """)
+        try insertScored("claude_code", bits: 2.86, secondsAgo: 40 * 60)
         let rows = read()
         guard rows.count == 1 else {
             return XCTFail("the value must still be surfaced — just not as current; got \(rows.count)")
@@ -153,10 +163,7 @@ final class GateEntropyProvenanceTests: XCTestCase {
 
     /// A hung-up agent's last H is real, but it is not a reading about now.
     func testDisconnectedAgentEntropyCarriesOfflinePresence() throws {
-        try exec("""
-        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at, entropy_score)
-        VALUES ('claude_code', 'active', \(ns(10)), \(ns(5)), 2.86);
-        """)
+        try insertScored("claude_code", bits: 2.86, secondsAgo: 10, connected: false)
         let rows = read()
         guard rows.count == 1 else { return XCTFail("expected 1 row, got \(rows.count)") }
         XCTAssertEqual(rows[0].source, .gate(agentId: "claude_code", presence: .offline))
@@ -168,6 +175,68 @@ final class GateEntropyProvenanceTests: XCTestCase {
         )
         XCTAssertTrue(reading.isStale, "fresh timestamp, dead agent — still not current")
         XCTAssertNil(reading.currentBits)
+    }
+
+    // MARK: - Frozen 2.38 / entropy_updated_ns == 0
+
+    /// Production stuck path: score=2.38, entropy_updated_ns DEFAULT 0, heartbeats
+    /// refresh last_seen. Must NOT surface as current (or at all as measured).
+    func testFrozenScoreWithZeroEntropyUpdatedNsIsRefusedDespiteFreshLastSeen() throws {
+        try exec("""
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at,
+                            entropy_score, entropy_updated_ns, message_count)
+        VALUES ('grok_build', 'active', \(ns(2)), NULL, 2.38, 0, 6);
+        """)
+        XCTAssertTrue(
+            read().isEmpty,
+            "entropy_updated_ns=0 must refuse H even when last_seen is fresh"
+        )
+        let reading = EntropyProvenance.resolve(
+            bridgeConnected: false, bridgeStatus: nil, gate: read(),
+            gateDBAvailable: true, now: now, policy: policy
+        )
+        XCTAssertNil(reading.currentBits)
+        XCTAssertFalse(reading.isMeasured)
+    }
+
+    /// Pure clock: column present + 0 → nil; never last_seen fallback.
+    func testGateEntropyClockRefusesZeroWhenColumnPresent() {
+        XCTAssertNil(GateEntropyClock.measuredAtSeconds(
+            hasEntropyUpdatedColumn: true,
+            entropyUpdatedSeconds: 0,
+            lastSeenSeconds: 1_800_000_000
+        ))
+        let withClock = GateEntropyClock.measuredAtSeconds(
+            hasEntropyUpdatedColumn: true,
+            entropyUpdatedSeconds: 100,
+            lastSeenSeconds: 999
+        )
+        XCTAssertEqual(withClock ?? -1, 100, accuracy: 1e-9)
+        // Legacy schema without the column still ages from last_seen.
+        let legacy = GateEntropyClock.measuredAtSeconds(
+            hasEntropyUpdatedColumn: false,
+            entropyUpdatedSeconds: 0,
+            lastSeenSeconds: 50
+        )
+        XCTAssertEqual(legacy ?? -1, 50, accuracy: 1e-9)
+    }
+
+    /// Ages from entropy_updated_ns, not the fresher last_seen (heartbeat).
+    func testEntropyAgeUsesEntropyUpdatedNotLastSeen() throws {
+        try insertScored(
+            "science", bits: 4.1, secondsAgo: 5, entropyUpdatedAgo: 90
+        )
+        let rows = read()
+        guard rows.count == 1 else { return XCTFail("expected 1, got \(rows.count)") }
+        XCTAssertEqual(rows[0].age(at: now), 90, accuracy: 0.5,
+                       "must age from entropy_updated (90s), not last_seen (5s)")
+        let reading = EntropyProvenance.resolve(
+            bridgeConnected: false, bridgeStatus: nil, gate: rows,
+            gateDBAvailable: true, now: now, policy: policy
+        )
+        // 90 < maxAge 120 → still measured, but not the heartbeat clock.
+        XCTAssertTrue(reading.isMeasured)
+        XCTAssertEqual(reading.currentBits ?? 0, 4.1, accuracy: 1e-9)
     }
 
     // MARK: - Fail closed
@@ -212,10 +281,11 @@ final class GateEntropyProvenanceTests: XCTestCase {
 
     func testOversizedAndNegativeEntropyRowsAreRefused() throws {
         try exec("""
-        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at, entropy_score)
-        VALUES ('huge', 'active', \(ns(3)), NULL, 1e9),
-               ('negative', 'active', \(ns(3)), NULL, -4.0),
-               ('sane', 'active', \(ns(3)), NULL, 3.25);
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at,
+                            entropy_score, entropy_updated_ns)
+        VALUES ('huge', 'active', \(ns(3)), NULL, 1e9, \(ns(3))),
+               ('negative', 'active', \(ns(3)), NULL, -4.0, \(ns(3))),
+               ('sane', 'active', \(ns(3)), NULL, 3.25, \(ns(3)));
         """)
         let rows = read()
         guard rows.count == 1 else {
@@ -227,8 +297,9 @@ final class GateEntropyProvenanceTests: XCTestCase {
     /// Clock skew must not be able to make an old value look current.
     func testFutureDatedRowIsRefused() throws {
         try exec("""
-        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at, entropy_score)
-        VALUES ('skewed', 'active', \(ns(-3600)), NULL, 2.86);
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at,
+                            entropy_score, entropy_updated_ns)
+        VALUES ('skewed', 'active', \(ns(-3600)), NULL, 2.86, \(ns(-3600)));
         """)
         XCTAssertTrue(read().isEmpty, "a future-dated row is corrupt, not fresh")
     }
@@ -254,10 +325,7 @@ final class GateEntropyProvenanceTests: XCTestCase {
     /// migration is required, because `entropy_score` has been in the schema all
     /// along. This proves the read is non-destructive and works read-only.
     func testReaderNeverWritesToTheDatabase() throws {
-        try exec("""
-        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at, entropy_score)
-        VALUES ('claude_code', 'active', \(ns(5)), NULL, 2.86);
-        """)
+        try insertScored("claude_code", bits: 2.86, secondsAgo: 5)
         let attrs = try FileManager.default.attributesOfItem(atPath: dbPath)
         let sizeBefore = attrs[.size] as? Int
         let modifiedBefore = attrs[.modificationDate] as? Date
@@ -305,10 +373,11 @@ final class GateEntropyProvenanceTests: XCTestCase {
 
     func testRepeatedReadsOfTheSameDatabaseAgree() throws {
         try exec("""
-        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at, entropy_score)
-        VALUES ('a', 'active', \(ns(5)), NULL, 3.0),
-               ('b', 'active', \(ns(5)), NULL, 4.0),
-               ('c', 'active', \(ns(9)), NULL, 5.0);
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at,
+                            entropy_score, entropy_updated_ns)
+        VALUES ('a', 'active', \(ns(5)), NULL, 3.0, \(ns(5))),
+               ('b', 'active', \(ns(5)), NULL, 4.0, \(ns(5))),
+               ('c', 'active', \(ns(9)), NULL, 5.0, \(ns(9)));
         """)
         let first = EntropyProvenance.resolve(
             bridgeConnected: false, bridgeStatus: nil, gate: read(),

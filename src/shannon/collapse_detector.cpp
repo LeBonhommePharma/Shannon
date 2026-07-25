@@ -128,6 +128,19 @@ CollapseResult CollapseDetector::push_entropy(double h) {
 
     EntropyEvent event = classify_event(delta, window_ready);
 
+    // Latch the threshold verdict BEFORE `event` can be rewritten to
+    // OSCILLATION below. CollapseResult::collapsed is documented as
+    // "true if delta < collapse_threshold" (types.hpp) and the Python
+    // fallback keeps it independent of the oscillation relabelling, so
+    // reading it back off the rewritten `event` silently reported
+    // collapsed=false for every collapse inside an oscillating stretch —
+    // suppressing the on_collapse callback for exactly the alternating
+    // pattern this detector exists to flag. OSCILLATION stays a label on
+    // `.event`; consumers wanting the mutually-exclusive classification
+    // read `.event`, not `.collapsed`.
+    const bool collapsed = (event == EntropyEvent::COLLAPSE);
+    const bool expanded  = (event == EntropyEvent::EXPANSION);
+
     event_history_[token_count_ % oscillation_window_] = event;
     bool oscillating = false;
     if (window_ready && event != EntropyEvent::NONE) {
@@ -143,8 +156,8 @@ CollapseResult CollapseDetector::push_entropy(double h) {
         .window_std  = stddev,
         .delta       = delta,
         .z_score     = z,
-        .collapsed   = (event == EntropyEvent::COLLAPSE),
-        .expanded    = (event == EntropyEvent::EXPANSION),
+        .collapsed   = collapsed,
+        .expanded    = expanded,
         .oscillating = oscillating,
         .event       = event,
         .token_index = token_count_,

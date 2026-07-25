@@ -1,3 +1,6 @@
+import json
+import time
+
 import pytest
 
 import pet_manager as pm
@@ -203,6 +206,207 @@ class TestMoodHonesty:
 
     def test_only_two_moods_claim_work(self):
         assert pm.MOOD_CLAIMS_WORK == {"focused", "grinding"}
+
+
+class TestObservationLifecycle:
+    """An observation is a snapshot, not a permanent brand on the record.
+
+    ⌘D writes `status/source = "observed"` once. Real agent telemetry landing
+    on the same record afterwards must supersede that provenance, otherwise
+    every agent whose pet was ever captured is stuck on `watching` forever.
+    """
+
+    def _capture_via_cmd_d(self, manager, agent_id="science", task=""):
+        """Reproduce exactly what AgentIngest.PetBootstrap writes to state.json."""
+        path = manager.pets_dir / agent_id / "state.json"
+        path.write_text(json.dumps({
+            "status": "observed",
+            "source": "observed",
+            "last_task": task,
+            "last_cf_delta": None,
+            "memory_size": 0,
+            "history_count": 0,
+            "updated_at": time.time(),
+            "resumable": bool(task),
+        }))
+
+    def test_cmd_d_capture_reads_as_watching(self, manager):
+        self._capture_via_cmd_d(manager)
+        assert manager.mood("science") == "watching"
+
+    def test_turn_start_supersedes_a_previous_observation(self, manager, monkeypatch):
+        monkeypatch.setattr(pm, "_default_manager", manager)
+        self._capture_via_cmd_d(manager, task="Xcode")
+        assert manager.mood("science") == "watching"
+
+        pm.on_agent_turn_start("science", "benchmark run")
+
+        state = manager.read_state("science")
+        assert state.status == "active"
+        assert state.is_observation is False, "telemetry must clear the ⌘D marker"
+        assert manager.mood("science") == "focused"
+
+    def test_turn_end_supersedes_a_previous_observation(self, manager, monkeypatch):
+        monkeypatch.setattr(pm, "_default_manager", manager)
+        self._capture_via_cmd_d(manager, task="Xcode")
+
+        pm.on_agent_turn_end("science", "wrapped up", cf=-3.2)
+
+        state = manager.read_state("science")
+        assert state.is_observation is False
+        assert manager.mood("science") == "resting"
+
+    def test_mid_task_telemetry_after_an_observation_can_grind(self, manager, monkeypatch):
+        monkeypatch.setattr(pm, "_default_manager", manager)
+        self._capture_via_cmd_d(manager)
+
+        state = manager.read_state("science")
+        state.mark_agent_telemetry()
+        state.status = "mid_task"
+        manager.write_state("science", state)
+
+        assert manager.mood("science") == "grinding"
+
+    def test_observed_status_is_dropped_when_telemetry_supersedes(self, manager):
+        """`status == "observed"` alone also marks an observation — clear it too."""
+        state = pm.PetState(status="observed", source="observed", updated_at=1000.0)
+        state.mark_agent_telemetry()
+        assert state.is_observation is False
+        assert state.status not in pm.OBSERVED_MARKERS
+        assert state.source == pm.SOURCE_AGENT
+
+
+class TestUnknownTimestampHonesty:
+    """`updated_at == 0.0` is unknown age, not "seen just now"."""
+
+    def test_zero_timestamp_never_claims_work(self, manager):
+        for status in ("active", "mid_task"):
+            state = pm.PetState(status=status, updated_at=0.0)
+            mood = pm.derive_mood(state, [], now=1_000_000.0)
+            assert mood not in pm.MOOD_CLAIMS_WORK, (status, mood)
+            assert mood == "resting"
+
+    def test_state_json_missing_updated_at_never_claims_work(self, manager):
+        path = manager.pets_dir / "science" / "state.json"
+        path.write_text(json.dumps({"status": "active", "last_task": "who knows"}))
+        state = manager.read_state("science")
+        assert state.updated_at == 0.0
+        assert manager.mood("science") == "resting"
+
+    def test_negative_timestamp_never_claims_work(self, manager):
+        state = pm.PetState(status="active", updated_at=-1.0)
+        mood = pm.derive_mood(state, [], now=1_000_000.0)
+        assert mood not in pm.MOOD_CLAIMS_WORK
+
+    def test_unknown_age_still_reads_as_resting_not_sleeping(self, manager):
+        state = pm.PetState(status="idle", updated_at=0.0)
+        assert pm.derive_mood(state, [], now=1_000_000.0) == "resting"
+
+
+class TestOutcomeMatching:
+    """A failure phrasing that merely embeds a success word is still a failure."""
+
+    @pytest.mark.parametrize("outcome", [
+        "incomplete",
+        "unsuccessful",
+        "did not pass",
+        "task incomplete",
+        "run was unsuccessful",
+        "tests did not pass",
+        "not solved",
+        "no records written",
+        "never completed",
+        "completion failed",
+    ])
+    def test_failure_phrasings_do_not_celebrate(self, manager, outcome):
+        state = pm.PetState(updated_at=1000.0)
+        recent = [{"event": "turn_end", "outcome": outcome, "ts": 1000.0}]
+        assert pm.derive_mood(state, recent, now=1005.0) == "resting"
+
+    @pytest.mark.parametrize("outcome", [
+        "success",
+        "completed",
+        "COMPLETED",
+        "all tests passed",
+        "solved 1ACJ",
+        "finished successfully",
+        "new record CF=-187.3",
+    ])
+    def test_real_successes_still_celebrate(self, manager, outcome):
+        state = pm.PetState(updated_at=1000.0)
+        recent = [{"event": "turn_end", "outcome": outcome, "ts": 1000.0}]
+        assert pm.derive_mood(state, recent, now=1005.0) == "celebrating"
+
+
+class TestOutcomeNegationReach:
+    """A negation binds to its whole clause, not to a fixed-width lookback.
+
+    The token rewrite fixed "did not pass" with a 3-token window, but the
+    negation and the success stem can sit arbitrarily far apart — "not a single
+    test passed" is four tokens, and celebrated a failed run.
+    """
+
+    @pytest.mark.parametrize("outcome", [
+        "not a single test passed",
+        "no tests were able to pass",
+        "none of the 40 targets solved",
+        "did not successfully complete the record run",
+        "0 tests passed",
+        "un-successful",
+        "in-complete",
+    ])
+    def test_distant_negation_still_blocks_celebration(self, manager, outcome):
+        state = pm.PetState(updated_at=1000.0)
+        recent = [{"event": "turn_end", "outcome": outcome, "ts": 1000.0}]
+        assert pm.outcome_is_success(outcome) is False
+        assert pm.derive_mood(state, recent, now=1005.0) == "resting"
+
+    @pytest.mark.parametrize("outcome", [
+        "all tests passed, 0 failures",
+        "completed; 3 warnings, no errors",
+        "no regressions, all targets solved",
+    ])
+    def test_negated_failure_counts_do_not_veto_a_real_win(self, manager, outcome):
+        """A zeroed/negated failure word is not a failure — "0 failures" is a win.
+
+        The blanket failure-token veto swallowed these, so a genuinely good
+        turn stopped celebrating: a regression on the honest path.
+        """
+        state = pm.PetState(updated_at=1000.0)
+        recent = [{"event": "turn_end", "outcome": outcome, "ts": 1000.0}]
+        assert pm.outcome_is_success(outcome) is True
+        assert pm.derive_mood(state, recent, now=1005.0) == "celebrating"
+
+
+class TestFutureTimestampHonesty:
+    """A timestamp from the future is not proof of freshness either."""
+
+    def test_future_updated_at_never_claims_work(self, manager):
+        now = 1_000_000.0
+        for status in ("active", "mid_task"):
+            state = pm.PetState(status=status, updated_at=now + 10 * 365 * 86_400)
+            mood = pm.derive_mood(state, [], now=now)
+            assert mood not in pm.MOOD_CLAIMS_WORK, (status, mood)
+            assert mood == "resting"
+
+    def test_state_json_dated_in_the_future_never_claims_work(self, manager):
+        path = manager.pets_dir / "science" / "state.json"
+        path.write_text(json.dumps({"status": "active", "source": "agent",
+                                    "updated_at": time.time() + 86_400}))
+        assert manager.mood("science") == "resting"
+
+    def test_small_clock_skew_is_still_tolerated(self, manager):
+        """Sub-grace jitter between writer and reader must not break liveness."""
+        now = 1_000_000.0
+        state = pm.PetState(status="active", updated_at=now + 1.0)
+        assert pm.derive_mood(state, [], now=now) == "focused"
+
+    def test_future_dated_turn_end_does_not_celebrate(self, manager):
+        now = 1_000_000.0
+        state = pm.PetState(updated_at=now)
+        recent = [{"event": "turn_end", "outcome": "completed",
+                   "ts": now + 10 * 365 * 86_400}]
+        assert pm.derive_mood(state, recent, now=now) == "resting"
 
 
 class TestTurnHelpers:

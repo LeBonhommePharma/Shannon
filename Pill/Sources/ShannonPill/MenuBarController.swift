@@ -78,10 +78,20 @@ final class MenuBarController: NSObject {
     }
 
     func flashSuccess(_ text: String) {
+        flash(text, symbol: "checkmark.circle.fill", tint: .systemGreen)
+    }
+
+    /// Something was deliberately *not* done (⌘D on a system service). A green
+    /// checkmark here would claim a capture that never happened.
+    func flashNotice(_ text: String) {
+        flash(text, symbol: "nosign", tint: .secondaryLabelColor)
+    }
+
+    private func flash(_ text: String, symbol: String, tint: NSColor) {
         guard let button = item?.button else { return }
-        button.image = Self.symbolImage("checkmark.circle.fill", template: false)
+        button.image = Self.symbolImage(symbol, template: false)
         button.title = " " + text
-        button.contentTintColor = .systemGreen
+        button.contentTintColor = tint
         flashUntil = Date().addingTimeInterval(1.8)
         lastRendered = nil   // force a real redraw once the flash expires
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in

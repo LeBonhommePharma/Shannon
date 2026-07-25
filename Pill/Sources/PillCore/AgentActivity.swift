@@ -355,6 +355,13 @@ public enum AgentActivityReader {
         let fm = FileManager.default
         var byID: [String: AgentActivitySnapshot] = [:]
         var bundleByID: [String: String] = [:]
+        // Bundle ids are case-insensitive as identity but *not* as strings:
+        // NSWorkspace hands back `com.microsoft.VSCode` verbatim while the
+        // registry stores what `AgentAppMapper.map` lowercased. Comparing them
+        // raw made every mixed-case app look permanently quit, so anything
+        // captured from VS Code, IntelliJ, iTerm2… was reported offline while
+        // it was running. Fold both sides once, here.
+        let runningLower = runningBundleIDs.map { Set($0.map { $0.lowercased() }) }
 
         // 1) Registry first (display names / sources from ⌘D).
         if let data = try? Data(contentsOf: registryURL),
@@ -420,9 +427,9 @@ public enum AgentActivityReader {
                 // only: presence `.observed`, status `.idle`. If we can see the
                 // app it was captured from is gone, say so outright.
                 var presence: AgentPresence = .observed
-                if let running = runningBundleIDs,
+                if let runningLower,
                    let bundle = bundleByID[id],
-                   !running.contains(bundle) {
+                   !runningLower.contains(bundle.lowercased()) {
                     presence = .offline
                 }
 

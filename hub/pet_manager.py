@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -75,14 +76,25 @@ ALL_AGENTS = [
 #
 # So only `focused` and `grinding` — the two labels in MOOD_CLAIMS_WORK — assert
 # that work is happening, and both require the record to be (a) not an
-# observation and (b) fresher than LIVE_WINDOW. Everything older degrades to
-# `sleeping`, which is what the pre-fix records on disk correctly resolve to.
-# The gate (agent_hub.db) remains the only authority on liveness; this function
-# never upgrades a pet record into a liveness claim.
+# observation and (b) provably fresher than LIVE_WINDOW. Everything older
+# degrades to `sleeping`, which is what the pre-fix records on disk correctly
+# resolve to. A record with no usable `updated_at` is of *unknown* age: it is
+# neither current nor stale, so it rests — an absent timestamp is never read as
+# "seen just now". The gate (agent_hub.db) remains the only authority on
+# liveness; this function never upgrades a pet record into a liveness claim.
+#
+# OBSERVATION LIFECYCLE. `observed` is a property of one snapshot, not a
+# permanent brand on the pet. A ⌘D capture marks the record so it cannot claim
+# work, but the very next write of *real* agent telemetry (`on_agent_turn_start`
+# / `on_agent_turn_end`, or any caller that goes through
+# `PetState.mark_agent_telemetry`) supersedes that provenance with
+# `source = SOURCE_AGENT`. Without this, an agent captured once by ⌘D could
+# never again read as focused/grinding, no matter what it actually did.
 
 CELEBRATE_WINDOW: float = 60.0    # seconds a good finish still reads as a win
 LIVE_WINDOW:      float = 90.0    # a status claim older than this is not current
 MOOD_SLEEP_AFTER: float = 300.0   # seconds idle before a pet is "sleeping"
+CLOCK_SKEW_GRACE: float = 5.0     # tolerated write-vs-read clock jitter
 
 #: The only moods that assert the agent is doing work. Mirrors
 #: `CompanionMood.claimsWork` on the Swift side.
@@ -92,7 +104,121 @@ MOOD_CLAIMS_WORK = frozenset({"focused", "grinding"})
 #: rather than agent telemetry.
 OBSERVED_MARKERS = frozenset({"observed", "cmd_d"})
 
-_SUCCESS_WORDS = ("success", "complete", "pass", "record", "solved")
+#: `state.source` written by real agent telemetry. Supersedes an earlier ⌘D
+#: observation on the same record — see the observation lifecycle above.
+SOURCE_AGENT = "agent"
+
+# ── Turn-outcome classification ──────────────────────────────────────────────
+#
+# `celebrating` is the one mood driven by free text, so the match has to be
+# robust: bare substring containment made every failure phrasing that happens
+# to embed a success stem read as a win ("incomplete" ⊃ "complete",
+# "unsuccessful" ⊃ "success"). Matching is therefore token-based (word
+# boundaries, so prefixed forms cannot match), with three extra guards:
+#   * any explicit failure token vetoes the whole string ("completion failed"),
+#     including hyphen-split spellings ("un-successful", "in-complete"), unless
+#     that failure token is itself negated or zeroed ("0 failures", "no errors"),
+#   * a negation *anywhere earlier in the same clause* cancels a success token
+#     ("did not pass", "not a single test passed", "none of the targets
+#     solved") — a fixed-width lookback is not enough, because the negation and
+#     the success stem can be arbitrarily far apart, and
+#   * clauses are scored independently, so a negation cannot leak across a
+#     boundary and suppress a genuine win ("no regressions, all targets
+#     solved").
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+#: Clause boundaries. A negation binds only within its own clause.
+_CLAUSE_SPLIT_RE = re.compile(
+    r"[.,;:!?/()\[\]{}\n]+|\b(?:but|however|although|though|yet|while|and|then)\b"
+)
+
+#: Hyphen/underscore *inside* a word — removed for the failure veto so that
+#: "un-successful" is seen as the failure token "unsuccessful".
+_INWORD_JOIN_RE = re.compile(r"(?<=[a-z0-9])[-_]+(?=[a-z0-9])")
+
+#: Whole tokens (inflections listed explicitly) that assert a good finish.
+_SUCCESS_TOKENS = frozenset({
+    "success", "successes", "successful", "successfully",
+    "succeed", "succeeded", "succeeds",
+    "complete", "completed", "completes", "completing", "completion",
+    "pass", "passed", "passes", "passing",
+    "record", "records", "recorded",
+    "solve", "solved", "solves",
+})
+
+#: Tokens that flip the meaning of a success token later in the same clause.
+#: Zero quantifiers count: "0 tests passed" is not a win, and symmetrically
+#: "0 failures" is not a failure.
+_NEGATION_TOKENS = frozenset({
+    "no", "not", "never", "none", "nor", "neither", "without",
+    "cannot", "cant", "couldnt", "didnt", "doesnt", "dont",
+    "isnt", "wasnt", "werent", "wont", "unable", "failed",
+    "0", "zero",
+})
+
+#: Tokens that mark the whole outcome as a failure regardless of position.
+_FAILURE_TOKENS = frozenset({
+    "fail", "failed", "failing", "fails", "failure", "failures",
+    "error", "errored", "errors", "abort", "aborted", "aborting",
+    "crash", "crashed", "timeout", "timedout", "denied", "rejected",
+    "cancelled", "canceled", "incomplete", "unsuccessful",
+    "unresolved", "unsolved", "blocked", "broken",
+})
+
+
+def _normalize_outcome(outcome: str) -> str:
+    """Lowercase; apostrophes are dropped so "didn't" → "didnt"."""
+    return str(outcome).lower().replace("'", "").replace("’", "")
+
+
+def _outcome_clauses(outcome: str) -> list[str]:
+    """Split a normalized outcome into clauses; a negation binds to one clause."""
+    return [c for c in _CLAUSE_SPLIT_RE.split(_normalize_outcome(outcome)) if c.strip()]
+
+
+def _clause_vetoes(clause: str) -> bool:
+    """True when this clause names a failure that is not itself negated/zeroed.
+
+    Checked over both the plain tokens and the hyphen-joined ones, so neither
+    "unsuccessful" nor "un-successful" can slip through.
+    """
+    for stream in (_TOKEN_RE.findall(clause),
+                   _TOKEN_RE.findall(_INWORD_JOIN_RE.sub("", clause))):
+        negated = False
+        for tok in stream:
+            if tok in _FAILURE_TOKENS and not negated:
+                return True
+            if tok in _NEGATION_TOKENS:
+                negated = True      # "no errors" / "0 failures" don't veto
+    return False
+
+
+def _clause_succeeds(clause: str) -> bool:
+    """True when this clause asserts a good finish with no preceding negation."""
+    negated = False
+    for tok in _TOKEN_RE.findall(clause):
+        if tok in _NEGATION_TOKENS:
+            negated = True
+        elif tok in _SUCCESS_TOKENS and not negated:
+            return True
+    return False
+
+
+def outcome_is_success(outcome: str) -> bool:
+    """True when a turn outcome genuinely reports a good finish.
+
+    Word-boundary matching plus clause-scoped negation handling, so
+    "incomplete", "unsuccessful", "did not pass" and "not a single test passed"
+    are all failures — the bare substring test they used to be passed is what
+    made them read as wins. Any un-negated failure token anywhere vetoes the
+    whole outcome; ties go to *not* celebrating, since an unearned celebration
+    is the dishonest direction.
+    """
+    clauses = _outcome_clauses(outcome)
+    if any(_clause_vetoes(c) for c in clauses):
+        return False
+    return any(_clause_succeeds(c) for c in clauses)
 
 
 # ── Pet state dataclass ───────────────────────────────────────────────────────
@@ -128,6 +254,32 @@ class PetState:
         return (str(self.source).lower() in OBSERVED_MARKERS
                 or str(self.status).lower() in OBSERVED_MARKERS)
 
+    def mark_agent_telemetry(self) -> None:
+        """Stamp this record as written by the agent itself.
+
+        An observation is a snapshot, not a permanent brand: once real
+        telemetry lands on the record it supersedes the ⌘D provenance, so the
+        pet can read as focused/grinding again. Both markers have to go —
+        `is_observation` also trips on a leftover ``status == "observed"``.
+        """
+        self.source = SOURCE_AGENT
+        if str(self.status).lower() in OBSERVED_MARKERS:
+            self.status = "idle"
+
+    @property
+    def seen_at(self) -> Optional[float]:
+        """Timestamp of the last write, or None when the record has none.
+
+        `updated_at` is 0.0 on a never-written pet and missing on hand-edited
+        or truncated state.json files. That is *unknown* age — callers must not
+        substitute "now" for it (see the honesty rule).
+        """
+        try:
+            ts = float(self.updated_at)
+        except (TypeError, ValueError):
+            return None
+        return ts if ts > 0.0 else None
+
 
 def derive_mood(state: PetState, recent: list[dict],
                 now: Optional[float] = None) -> str:
@@ -137,24 +289,36 @@ def derive_mood(state: PetState, recent: list[dict],
     agree on it. `recent` is expected newest-last, as `recent_history` returns.
 
     See the honesty rule above: no combination of inputs may return a mood in
-    MOOD_CLAIMS_WORK for an observation-sourced or stale record.
+    MOOD_CLAIMS_WORK for an observation-sourced, stale, or undated record.
     """
     now = time.time() if now is None else now
-    # A never-touched pet has updated_at == 0.0; it has not slept since the
-    # epoch, it simply has no history at all.
-    seen_at  = state.updated_at or now
-    idle_for = max(0.0, now - seen_at)
-    stale    = idle_for > MOOD_SLEEP_AFTER
-    current  = idle_for <= LIVE_WINDOW
+    # A never-touched pet has updated_at == 0.0, and a hand-written state.json
+    # may omit it entirely. That is unknown age, not "seen just now": such a
+    # record has not slept since the epoch (so it is not stale), but neither
+    # has it proved it is current (so it may not claim work). A timestamp from
+    # the *future* is the same kind of non-proof — and a worse one, since
+    # `max(0.0, …)` would otherwise pin idle_for at 0 and let the record claim
+    # work forever — so beyond a small clock-skew grace it is also undated.
+    seen_at  = state.seen_at
+    dated    = seen_at is not None and seen_at <= now + CLOCK_SKEW_GRACE
+    idle_for = max(0.0, now - seen_at) if dated else None
+    stale    = dated and idle_for > MOOD_SLEEP_AFTER
+    current  = dated and idle_for <= LIVE_WINDOW
 
     # A fresh, good finish outranks liveness: the pet just did well, so it
     # celebrates even as its status settles back to idle.
     for rec in reversed(recent):
         if rec.get("event") == "turn_end":
-            outcome = str(rec.get("outcome", "")).lower()
-            ts = float(rec.get("ts", 0.0) or 0.0)
-            if (now - ts) <= CELEBRATE_WINDOW and any(
-                    w in outcome for w in _SUCCESS_WORDS):
+            outcome = str(rec.get("outcome", ""))
+            try:
+                ts = float(rec.get("ts", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                ts = 0.0
+            # Bounded on both sides: a future-dated turn_end is not evidence of
+            # a *recent* win, it is evidence of a bad clock or a hand-edit.
+            age = now - ts
+            if (-CLOCK_SKEW_GRACE <= age <= CELEBRATE_WINDOW
+                    and outcome_is_success(outcome)):
                 return "celebrating"
             break  # only the most recent turn_end is relevant
 
@@ -295,7 +459,6 @@ class PetManager:
 
         self._log_memory_access(agent_id)
 
-        import re
         # Match patterns like "CF=−187.3" or "CF: -187" or "CF −187.3"
         matches = re.findall(r"CF[\s=:]+([−\-]?\d+(?:\.\d+)?)", memory)
         if not matches:
@@ -347,6 +510,9 @@ def get_manager() -> PetManager:
 def on_agent_turn_start(agent_id: str, task_summary: str) -> None:
     pm = get_manager()
     state = pm.read_state(agent_id)
+    # This is real agent telemetry: it supersedes whatever ⌘D last observed
+    # about this pet, otherwise a single capture would pin it to "watching".
+    state.mark_agent_telemetry()
     state.status    = "active"
     state.last_task = task_summary
     state.resumable = True
@@ -358,6 +524,7 @@ def on_agent_turn_end(agent_id: str, outcome: str,
                        cf: Optional[float] = None, entropy: Optional[float] = None) -> None:
     pm = get_manager()
     state = pm.read_state(agent_id)
+    state.mark_agent_telemetry()      # supersedes any prior ⌘D observation
     state.status    = "idle"
     state.resumable = False
     if cf is not None:

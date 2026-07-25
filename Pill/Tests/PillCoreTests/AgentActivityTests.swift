@@ -128,6 +128,51 @@ final class AgentActivityTests: XCTestCase {
         XCTAssertTrue(summary.agents.first?.statusLine.hasPrefix("offline") == true)
     }
 
+    /// Bundle ids are case-insensitive identities. `AgentAppMapper.map`
+    /// lowercases what it stores in `agents.json`; NSWorkspace returns the real
+    /// casing (`com.microsoft.VSCode`). A raw `Set.contains` therefore judged
+    /// every mixed-case app "not running" and marked a live agent offline.
+    func testRunningAppWithMixedCaseBundleIDIsNotOffline() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-case-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pets = root.appendingPathComponent("pets", isDirectory: true)
+        let dir = pets.appendingPathComponent("vscode", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: [
+            "status": "active", "last_task": "Editing GateDBReader.swift",
+            "updated_at": Date().timeIntervalSince1970, "resumable": true,
+        ]).write(to: dir.appendingPathComponent("state.json"))
+        // Exactly what ⌘D writes: `AgentAppMapper.map` lowercases the bundle id
+        // it captures, so the registry never holds the real casing.
+        try JSONSerialization.data(withJSONObject: [[
+            "id": "vscode", "display_name": "VS Code", "source": "ide",
+            "bundle": "com.microsoft.vscode",
+            "updated_at": Date().timeIntervalSince1970,
+        ]]).write(to: root.appendingPathComponent("agents.json"))
+
+        // NSWorkspace preserves case — this app *is* running.
+        let summary = AgentActivityReader.load(
+            petsRoot: pets,
+            registryURL: root.appendingPathComponent("agents.json"),
+            gateDB: nil,
+            runningBundleIDs: ["com.microsoft.VSCode", "com.apple.finder"]
+        )
+        XCTAssertEqual(
+            summary.agents.first?.presence, .observed,
+            "a running mixed-case app must not be reported offline"
+        )
+
+        // The negative case still works: same casing, app genuinely gone.
+        let quit = AgentActivityReader.load(
+            petsRoot: pets,
+            registryURL: root.appendingPathComponent("agents.json"),
+            gateDB: nil,
+            runningBundleIDs: ["com.apple.finder"]
+        )
+        XCTAssertEqual(quit.agents.first?.presence, .offline)
+    }
+
     func testStaleActiveBecomesIdleInUI() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("shannon-stale-\(UUID().uuidString)", isDirectory: true)

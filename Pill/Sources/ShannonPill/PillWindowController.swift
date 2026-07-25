@@ -166,11 +166,18 @@ final class PillWindowController {
     func reposition() {
         guard let panel else { return }
         let geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
-        // Keep whatever height the content has grown to. Recomputing from
+        // Keep whatever height the content has grown to — recomputing from
         // PillMetrics.expandedHeight here would shrink the panel back to the
-        // floor on every screen-parameter change — which fires on resolution
-        // switches, exactly when the board needs to keep its room.
-        let height = max(panel.frame.height, PillMetrics.expandedHeight)
+        // floor on every screen-parameter change, which fires on resolution
+        // switches, exactly when the board needs to keep its room — but re-clamp
+        // it against the screen we just landed on. Same clamp as
+        // `resizeToContent`, deliberately via the same function.
+        let height = PillPanelHeight.onScreenChange(
+            currentHeight: panel.frame.height,
+            floor: PillMetrics.expandedHeight,
+            screenHeight: geometry.screenFrame.height,
+            maxFraction: PillMetrics.maxHeightFraction
+        )
         panel.setFrame(
             geometry.windowFrame(contentSize: CGSize(width: PillMetrics.expandedWidth,
                                                      height: height)),
@@ -192,8 +199,12 @@ final class PillWindowController {
     func resizeToContent(height: CGFloat) {
         guard let panel else { return }
         let geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
-        let ceiling = geometry.screenFrame.height * PillMetrics.maxHeightFraction
-        let clamped = min(max(height, PillMetrics.expandedHeight), ceiling)
+        let clamped = PillPanelHeight.onContentHeight(
+            height,
+            floor: PillMetrics.expandedHeight,
+            screenHeight: geometry.screenFrame.height,
+            maxFraction: PillMetrics.maxHeightFraction
+        )
         let frame = geometry.windowFrame(
             contentSize: CGSize(width: PillMetrics.expandedWidth, height: clamped)
         )

@@ -70,14 +70,19 @@ public enum GateDBReader {
         // Never block the UI on a writer holding the DB.
         sqlite3_busy_timeout(db, 50)
 
-        let asks = pendingAsks(db, limit: askLimit)
+        // Fetch a *superset* ordered actionable-first, then apply `askLimit` to
+        // what survives the orphan/age filter. Applying the SQL LIMIT to raw
+        // rows meant five abandoned approvals could hide every answerable one
+        // (the user then had no way to see, let alone answer, a live ask).
+        let asks = pendingAsks(db, limit: askLimit, staleBeforeNs: staleCutoffNs(now: now, maxAge: askMaxAge))
+        let keep = max(0, askLimit)
         let live = asks.filter { !$0.isOrphaned && now.timeIntervalSince($0.createdAt) <= askMaxAge }
         let stale = asks.filter { $0.isOrphaned || now.timeIntervalSince($0.createdAt) > askMaxAge }
         return Snapshot(
             available: true,
             agents: agentRows(db),
-            pendingAsks: live,
-            staleAsks: stale,
+            pendingAsks: Array(live.prefix(keep)),
+            staleAsks: Array(stale),
             activity: activityRows(db, limit: activityLimit)
         )
         #else
@@ -270,11 +275,50 @@ public enum GateDBReader {
             .pendingAsks
     }
 
+    /// How many raw rows to consider per actionable slot the caller asked for.
+    /// The SQL orders actionable rows first, so `limit` alone would already fill
+    /// `pendingAsks`; the extra headroom is what makes `staleAsks` a useful
+    /// count rather than "whatever was left over".
+    private static let askFetchMultiplier = 4
+    /// Hard ceiling on rows pulled per poll. A pathological `agent_interactions`
+    /// table (thousands of never-resolved rows) must not be loaded into the UI
+    /// process every 1.5 s.
+    private static let askFetchCeiling = 64
+
+    /// `created_at_ns` below this is older than `maxAge` — i.e. aged out.
+    /// Clamped so an absurd `maxAge` cannot trap on `Int64` conversion.
+    static func staleCutoffNs(now: Date, maxAge: TimeInterval) -> Int64 {
+        let seconds = now.timeIntervalSince1970 - maxAge
+        guard seconds.isFinite else { return maxAge > 0 ? .min : .max }
+        guard seconds > -9.2e9 else { return .min }
+        guard seconds < 9.2e9 else { return .max }
+        return Int64(seconds * 1_000_000_000)
+    }
+
     #if canImport(SQLite3)
-    private static func pendingAsks(_ db: OpaquePointer, limit: Int) -> [PendingAsk] {
+    /// Open approvals, **actionable first**, then newest first within each group.
+    ///
+    /// - Parameters:
+    ///   - limit: how many *actionable* asks the caller wants. The fetch is a
+    ///     bounded multiple of it (see `askFetchMultiplier`/`askFetchCeiling`),
+    ///     never the whole table.
+    ///   - staleBeforeNs: `created_at_ns` strictly below this has aged out.
+    ///     Mirrors the Swift-side age filter so the SQL sort agrees with the
+    ///     classification the caller will apply.
+    private static func pendingAsks(
+        _ db: OpaquePointer,
+        limit: Int,
+        staleBeforeNs: Int64
+    ) -> [PendingAsk] {
         guard limit > 0 else { return [] }
+        let fetch = min(max(1, limit) * askFetchMultiplier, askFetchCeiling)
         // LEFT JOIN so an ask from an agent with no `agents` row is *not*
         // declared orphaned — we only drop what we can prove is dead.
+        //
+        // The ORDER BY repeats the orphan/age predicate instead of the row
+        // limit being blind to it: with N stale rows and one live one, a plain
+        // `ORDER BY created_at_ns DESC LIMIT 5` returned five corpses and the
+        // answerable ask was never fetched at all.
         let sql = """
             SELECT i.interaction_id, i.agent_id, i.prompt,
                    CAST(i.created_at_ns / 1000000000.0 AS REAL),
@@ -283,8 +327,11 @@ public enum GateDBReader {
             FROM agent_interactions i
             LEFT JOIN agents a ON a.agent_id = i.agent_id
             WHERE i.status = 'pending'
-            ORDER BY i.created_at_ns DESC
-            LIMIT \(max(1, limit));
+            ORDER BY CASE WHEN (a.disconnected_at IS NOT NULL
+                                AND a.disconnected_at > i.created_at_ns)
+                            OR i.created_at_ns < \(staleBeforeNs) THEN 1 ELSE 0 END ASC,
+                     i.created_at_ns DESC
+            LIMIT \(fetch);
             """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {

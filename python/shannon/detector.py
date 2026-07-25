@@ -271,6 +271,13 @@ class ShannonCollapseDetector:
 
         self._trace: list[float] = []
         self._window: deque[float] = deque(maxlen=window_size)
+        # Last `window_size` entropies EXCLUDING the token currently being
+        # emitted — the O(window_size) source for CollapseEvent.window.
+        # Both backends maintain it: the pure-Python path appends after
+        # _emit, and the C++ path appends when add_*() returns, because its
+        # callback fires from inside the C++ call, before Python ever sees
+        # the value. _emit appends the current entropy itself.
+        self._recent: deque[float] = deque(maxlen=window_size if window_size > 0 else 1)
         self._event_history: deque[str] = deque(maxlen=oscillation_window)
         self._running_sum = 0.0
         self._running_sum_sq = 0.0
@@ -294,9 +301,7 @@ class ShannonCollapseDetector:
                 # self._callback directly and never fired _on_collapse_event at
                 # all, so the legacy on_collapse API was silently dead whenever
                 # the C++ core was present -- i.e. by default.
-                self._cpp_detector.set_callback(
-                    lambda r: self._emit(self._wrap_cpp_result(r))
-                )
+                self._cpp_detector.set_callback(self._on_cpp_event)
         except ImportError:
             pass
 
@@ -324,6 +329,7 @@ class ShannonCollapseDetector:
             self._cpp_detector.reset()
         self._trace.clear()
         self._window.clear()
+        self._recent.clear()
         self._event_history.clear()
         self._token_count = 0
         self._running_sum = 0.0
@@ -339,9 +345,7 @@ class ShannonCollapseDetector:
         """
         arr = _validate_finite_1d(_ensure_float64_1d(logits), "add_logits", "logits")
         if self._cpp_detector is not None:
-            r = self._cpp_detector.add_logits(arr)
-            self._last_result = self._wrap_cpp_result(r)
-            return self._last_result
+            return self._record_cpp(self._cpp_detector.add_logits(arr))
         h = shannon_configurational_entropy(arr)
         result = self._push(h)
 
@@ -359,9 +363,7 @@ class ShannonCollapseDetector:
         """Feed a normalized probability distribution."""
         arr = _validate_finite_1d(_ensure_float64_1d(probs), "add_probs", "probabilities")
         if self._cpp_detector is not None:
-            r = self._cpp_detector.add_probs(arr)
-            self._last_result = self._wrap_cpp_result(r)
-            return self._last_result
+            return self._record_cpp(self._cpp_detector.add_probs(arr))
         h = _entropy_from_probs(arr)
         return self._push(h)
 
@@ -369,9 +371,7 @@ class ShannonCollapseDetector:
         """Feed log-probabilities (base e)."""
         arr = _validate_finite_1d(_ensure_float64_1d(logprobs), "add_logprobs", "logprobs")
         if self._cpp_detector is not None:
-            r = self._cpp_detector.add_logprobs(arr)
-            self._last_result = self._wrap_cpp_result(r)
-            return self._last_result
+            return self._record_cpp(self._cpp_detector.add_logprobs(arr))
         h = _entropy_from_logprobs(arr)
         return self._push(h)
 
@@ -528,6 +528,9 @@ class ShannonCollapseDetector:
         self._token_count += 1
 
         self._emit(result)
+        # After _emit: _recent holds the window *excluding* the token being
+        # emitted, which is the invariant the C++ path can also honour.
+        self._recent.append(h)
 
         # Trigger super-clustering on collapse
         if collapsed and self._enable_clustering:
@@ -551,9 +554,15 @@ class ShannonCollapseDetector:
             self._callback(result)
 
         if result.collapsed and self._on_collapse_event is not None:
-            # self._window is only maintained by the pure-Python path, so the
-            # window is taken from trace, which both backends populate.
-            trace = self.trace
+            # O(window_size). self._window is only maintained by the
+            # pure-Python path, but self._recent is maintained by both, so the
+            # window no longer has to be sliced off self.trace -- whose getter
+            # copies the ENTIRE unbounded trace, making every collapse event
+            # cost O(total stream length).
+            window = list(self._recent)
+            window.append(result.entropy)
+            if 0 < self._window_size < len(window):
+                del window[: len(window) - self._window_size]
             self._on_collapse_event(
                 CollapseEvent(
                     token_index=result.token_index,
@@ -564,9 +573,36 @@ class ShannonCollapseDetector:
                         if abs(self._threshold) > 1e-15
                         else 0.0
                     ),
-                    window=list(trace[-self._window_size:]),
+                    window=window,
                 )
             )
+
+    def _on_cpp_event(self, r: object) -> None:
+        """Bridge one C++ event into the Python callbacks.
+
+        The C++ detector fires this from *inside* add_logits/add_probs/
+        add_logprobs, before those methods return and can assign
+        self._last_result. Assigning it here, ahead of _emit, is what keeps the
+        convenience properties (is_collapsed, collapse_score, current_entropy,
+        delta_h) describing the token that triggered the callback: the
+        pure-Python _push assigns _last_result before it calls _emit, and the
+        two backends must not disagree inside a user callback.
+        """
+        result = self._wrap_cpp_result(r)
+        self._last_result = result
+        self._emit(result)
+
+    def _record_cpp(self, r: object) -> CollapseResult:
+        """Record the result of one C++ add_*() call and return it.
+
+        Runs after any callback for this token has already fired, so appending
+        to _recent here preserves its "window excluding the current token"
+        invariant.
+        """
+        result = self._wrap_cpp_result(r)
+        self._last_result = result
+        self._recent.append(result.entropy)
+        return result
 
     @staticmethod
     def _wrap_cpp_result(r: object) -> CollapseResult:

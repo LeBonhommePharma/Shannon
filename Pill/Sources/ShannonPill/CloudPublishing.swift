@@ -31,17 +31,10 @@ final class CloudPublisher {
     /// retracted from every device rather than lingering.
     private var publishedConfirmationIDs: Set<String> = []
 
-    /// First time each still-open ask was published, kept so a given ask is
-    /// mirrored with a STABLE `createdAt` across passes.
-    ///
-    /// `PendingConfirmation.createdAt` defaults to `Date()`, and it, `expiresAt`
-    /// and `updatedAt` are all part of `cloudFields`. Rebuilding the value from
-    /// scratch each pass therefore produced a different record every tick, which
-    /// defeated ShannonPublisher's unchanged-record suppression — the same open
-    /// ask was republished every `interval` seconds and re-notified on every
-    /// device, forever. It also pushed `expiresAt` out by the full 15-minute
-    /// lifetime on each pass, so an unanswered ask could never age out.
-    private var confirmationFirstSeen: [String: Date] = [:]
+    /// Decides the `createdAt` each open ask is mirrored with — the gate's own
+    /// `created_at_ns` where there is one, a stable local first-seen otherwise.
+    /// See `ConfirmationCreatedAtResolver` for why both halves are needed.
+    private var confirmationCreatedAt = ConfirmationCreatedAtResolver()
 
     init(
         nowPlaying: NowPlayingModel?,
@@ -118,15 +111,15 @@ final class CloudPublisher {
         let asks = activity?.pendingAsks ?? []
         let now = Date()
         let confirmations = asks.map { ask -> PendingConfirmation in
-            // Reuse the first-seen timestamp so an unchanged ask serialises to
-            // an identical record and the publisher can suppress it.
-            let firstSeen = confirmationFirstSeen[ask.interactionId] ?? now
-            confirmationFirstSeen[ask.interactionId] = firstSeen
-            return PendingConfirmation(
+            // Stable across passes, so an unchanged ask serialises to an
+            // identical record and the publisher can suppress it — and anchored
+            // to the gate's clock, so `expiresAt` counts from when the agent
+            // actually asked rather than from this pill launch.
+            PendingConfirmation(
                 id: ask.interactionId,
                 question: ask.prompt,
                 agentID: ask.agentId,
-                createdAt: firstSeen
+                createdAt: confirmationCreatedAt.createdAt(for: ask, now: now)
             )
         }
         let liveIDs = Set(confirmations.map(\.id))
@@ -134,7 +127,7 @@ final class CloudPublisher {
         publishedConfirmationIDs = liveIDs
         // Drop bookkeeping for asks the gate has cleared, so this cannot grow
         // without bound and a re-used interaction id starts fresh.
-        confirmationFirstSeen = confirmationFirstSeen.filter { liveIDs.contains($0.key) }
+        confirmationCreatedAt.prune(keeping: liveIDs)
 
         Task { [publisher] in
             do {
@@ -230,17 +223,34 @@ final class CloudPublisher {
     /// readout, which publishes as a single agent record. Per-agent records
     /// land when the bridge exposes them.
     private func agentSnapshot() -> AgentState? {
-        guard let status = bridge?.status else { return nil }
+        guard let bridge, let status = bridge.status else { return nil }
+        // Same provenance rule as the pill's header, border, `~H` badge and
+        // companion board (`EntropyProvenance`) — this is the surface that
+        // actually leaves the machine, so it is the one that must not lie.
+        //
+        // `--demo` opens a REAL socket and serves `8.0 + 2.0*sin(n/12)`,
+        // asserting `is_collapsed` on ~29% of ticks. Published raw, that lands
+        // on the iPhone, Watch and iPad as `isCollapsed` (red readout) and
+        // `activity == .blocked` ("Waiting on you") — and `AgentState` has no
+        // provenance field, so `entropyLabel` renders "H 6.2" with none of the
+        // pill's `~` marking. A fabricated number must therefore not be
+        // published at all rather than published unmarked.
+        let measured = EntropyProvenance.isMeasured(
+            connected: bridge.connected, displayed: status
+        )
+        let collapsed = measured && status.collapsed
         return AgentState(
             id: status.agent ?? "shannon-gate",
             name: status.agent ?? "Shannon gate",
-            activity: status.collapsed ? .blocked : .running,
-            taskTitle: "Entropy gate (\(status.backend))",
+            activity: collapsed ? .blocked : .running,
+            taskTitle: measured
+                ? "Entropy gate (\(status.backend))"
+                : "Entropy gate (simulated)",
             turnCount: status.tokenCount,
-            lastAction: status.collapsed ? "Entropy collapse detected" : "Monitoring",
-            entropyBits: status.entropy,
-            entropyDelta: status.deltaH,
-            isCollapsed: status.collapsed
+            lastAction: collapsed ? "Entropy collapse detected" : "Monitoring",
+            entropyBits: measured ? status.entropy : nil,
+            entropyDelta: measured ? status.deltaH : nil,
+            isCollapsed: collapsed
         )
     }
 

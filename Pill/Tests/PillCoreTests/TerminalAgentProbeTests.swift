@@ -242,10 +242,14 @@ final class TerminalAgentProbeTests: XCTestCase {
             )
             let ms = Date().timeIntervalSince(started) * 1000
 
-            let before = AgentAppMapper.map(bundleID: term.bundleID, appName: term.name)
-            let after = AgentAppMapper.map(
-                bundleID: term.bundleID, appName: term.name, terminal: ctx
+            // A terminal emulator is always an agent-bearing app, so `map` must
+            // resolve (it returns nil only for refused, non-agent apps).
+            let before = try XCTUnwrap(
+                AgentAppMapper.map(bundleID: term.bundleID, appName: term.name)
             )
+            let after = try XCTUnwrap(AgentAppMapper.map(
+                bundleID: term.bundleID, appName: term.name, terminal: ctx
+            ))
             print("""
             LIVE \(term.name) [\(term.bundleID)] pid=\(term.pid) \
             probe=\(ctx.agentID.isEmpty ? "<none>" : ctx.agentID) exe=\(ctx.executable) \
@@ -284,8 +288,12 @@ final class TerminalAgentProbeTests: XCTestCase {
         try XCTSkipIf(running.isEmpty, "no agent GUI apps running")
         for app in running {
             let bid = app.bundleIdentifier ?? ""
-            let kind = AgentAppMapper.map(bundleID: bid, appName: app.localizedName)
-            print("LIVE GUI \(app.localizedName ?? "?") [\(bid)] → id=\(kind.id) name=\(kind.displayName)")
+            switch AgentAppMapper.resolve(bundleID: bid, appName: app.localizedName) {
+            case .agent(let kind):
+                print("LIVE GUI \(app.localizedName ?? "?") [\(bid)] → id=\(kind.id) name=\(kind.displayName)")
+            case .notAnAgent(let refusal):
+                print("LIVE GUI \(app.localizedName ?? "?") [\(bid)] → REFUSED (\(refusal.reason))")
+            }
         }
         #else
         throw XCTSkip("AppKit unavailable")

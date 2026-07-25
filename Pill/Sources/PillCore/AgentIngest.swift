@@ -20,7 +20,23 @@ public struct AgentKind: Sendable, Equatable, Hashable, Codable {
     }
 
     /// Lowercase snake_case, safe for directory names.
+    ///
+    /// Keeps its historical last-resort answer (`local_test`) for callers that
+    /// already know *who* they are naming and only need a directory-safe string.
+    /// Anything deciding *whose* identity this is must use ``meaningfulID``:
+    /// `local_test` is a live gate identity, not a spare slot.
     public static func sanitizeID(_ raw: String) -> String {
+        meaningfulID(raw) ?? "local_test"
+    }
+
+    /// The sanitized id, or `nil` when nothing survives sanitising ("•••", "   ",
+    /// ""). `sanitizeID` answers `local_test` in exactly that case, which is fine
+    /// as a folder name and catastrophic as *attribution*: `hub/agent_identity.py`
+    /// lists `local_test` in IDENTITIES, the gate derives VALID_AGENTS from it,
+    /// and `GateApprovalClient` registers as `local_test` to resolve approvals.
+    /// Handing it to an app Shannon could not name rewrites that agent's pet,
+    /// appends to its history and POSTs a status message in its name.
+    public static func meaningfulID(_ raw: String) -> String? {
         let lowered = raw.lowercased()
         let mapped = lowered.map { ch -> Character in
             if ch.isLetter || ch.isNumber { return ch }
@@ -29,13 +45,67 @@ public struct AgentKind: Sendable, Equatable, Hashable, Codable {
         var s = String(mapped)
         while s.contains("__") { s = s.replacingOccurrences(of: "__", with: "_") }
         s = s.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-        return s.isEmpty ? "local_test" : String(s.prefix(48))
+        return s.isEmpty ? nil : String(s.prefix(48))
     }
 }
 
+/// An app that is emphatically *not* an agent: a macOS system service, a
+/// menu-bar meter, a helper process. Capturing one must write nothing.
+///
+/// This exists because the two previous answers were both wrong. Minting a
+/// per-app identity (`window_manager`) invented an agent the gate rejects;
+/// routing to `local_test` was worse, because `local_test` is a *real* identity
+/// in `hub/agent_identity.py` — it is in the gate's VALID_AGENTS and
+/// `GateApprovalClient` registers as `local_test` to resolve approvals. So
+/// pressing ⌘D on the Dock overwrote that agent's pet state, put it at the head
+/// of the registry, and posted a broadcast message in its name. The only honest
+/// third answer is to refuse.
+public struct NonAgentApp: Sendable, Equatable {
+    /// Human label for the refused app ("WindowManager", "Usage for Claude").
+    public var label: String
+    public var bundleID: String
+    /// Why it was refused, phrased to complete "… is not an agent — it is …".
+    public var reason: String
+
+    public init(label: String, bundleID: String, reason: String) {
+        self.label = label
+        self.bundleID = bundleID
+        self.reason = reason
+    }
+
+    /// One line the UI can show verbatim.
+    public var message: String {
+        let where_ = bundleID.isEmpty ? "" : " (\(bundleID))"
+        return "\(label)\(where_) is not an agent — \(reason). Nothing captured."
+    }
+}
+
+/// What a frontmost app maps to. `.notAnAgent` is a first-class verdict, not an
+/// error: there is no agent id that may be attributed to a system service.
+public enum AgentAppResolution: Sendable, Equatable {
+    case agent(AgentKind)
+    case notAnAgent(NonAgentApp)
+
+    public var agent: AgentKind? {
+        if case .agent(let kind) = self { return kind }
+        return nil
+    }
+
+    public var refusal: NonAgentApp? {
+        if case .notAnAgent(let refusal) = self { return refusal }
+        return nil
+    }
+
+    public var isAgent: Bool { agent != nil }
+}
+
 /// Result of one ⌘D / "Add Agent" capture.
+///
+/// `agent == nil` means the capture was *refused* — nothing was written to
+/// `~/.shannon`, nothing was posted to the gate — and `refusal` says why.
 public struct AgentIngestResult: Sendable, Equatable {
-    public var agent: AgentKind
+    public var agent: AgentKind?
+    public var refusal: NonAgentApp?
     public var taskSummary: String
     public var petPath: String
     public var createdPet: Bool
@@ -43,8 +113,12 @@ public struct AgentIngestResult: Sendable, Equatable {
     public var sourceApp: String
     public var message: String
 
+    /// True only when a pet was actually written for a real agent.
+    public var captured: Bool { agent != nil }
+
     public var pillLabel: String {
-        "+\(agent.displayName)"
+        guard let agent else { return "⊘ not an agent" }
+        return "+\(agent.displayName)"
     }
 }
 
@@ -109,12 +183,24 @@ public enum AgentAppMapper {
         "chatgpt", "browser", "terminal", "cursor", "vscode",
     ]
 
+    /// Best-effort identity for an app, or `nil` when the app is not an agent
+    /// at all. Callers that need to explain the refusal use ``resolve``.
     public static func map(
         bundleID: String?,
         appName: String?,
         page: BrowserPageContext? = nil,
         terminal: TerminalAgentProbe.Context? = nil
-    ) -> AgentKind {
+    ) -> AgentKind? {
+        resolve(bundleID: bundleID, appName: appName, page: page, terminal: terminal).agent
+    }
+
+    /// Full verdict: an agent, or an explicit refusal with a reason.
+    public static func resolve(
+        bundleID: String?,
+        appName: String?,
+        page: BrowserPageContext? = nil,
+        terminal: TerminalAgentProbe.Context? = nil
+    ) -> AgentAppResolution {
         let bid = (bundleID ?? "").lowercased()
         let name = (appName ?? "").lowercased()
         let isTerminalApp = TerminalAgentProbe.isTerminal(bundleID: bid, appName: appName)
@@ -149,104 +235,54 @@ public enum AgentAppMapper {
             )
         }
 
+        // Would this app be refused outright, absent any page context? Computed
+        // here, before the page branches, because ⌘D NEVER calls resolve without
+        // one: `captureFromFrontApp` runs `BrowserPageProbe.probe` for every app
+        // and CGWindowList hands back a window title for anything with a window.
+        // A Finder window on ~/Projects/claude-notes therefore reached
+        // `BrowserAgentDetector`, matched its bare title.contains("claude") and
+        // was captured as **claude_code** — rewriting the real agent's pet,
+        // appending to its history and POSTing to the gate in its name. That is
+        // the same borrowed-identity defect the refusals below exist to stop,
+        // and the same title leak the terminal probe already guards against.
+        // A window title is not evidence of an agent; for a refused app only the
+        // process probe above (or the user typing an id) may override.
+        let refusedByBundle: NonAgentApp? = bundleRule(for: bid) == nil
+            ? (claudeAdjacentRefusal(bid: bid, name: name, appName: appName)
+                ?? appleSystemRefusal(bid: bid, appName: appName))
+            : nil
+
         // Browser tab wins over generic "browser" bundle mapping.
         // Science (amber flask) vs SuperGrok/Grok Build (purple sparkles) etc.
         //
         // Never for terminals: a Ghostty window titled "⠂ claude-notes" is a
         // directory, not an agent, and `BrowserAgentDetector` matches on bare
         // title substrings. The probe above is the only evidence that counts.
-        if !isTerminalApp, let page, !page.isEmpty,
+        if !isTerminalApp, refusedByBundle == nil, let page, !page.isEmpty,
            let web = BrowserAgentDetector.detect(page: page) {
             return withCatalogStyle(web, bundleHint: bid.isEmpty ? (web.bundleHint ?? "") : bid)
         }
         // Even without URL, title-only page context can refine.
-        if !isTerminalApp, let page, !page.title.isEmpty,
+        if !isTerminalApp, refusedByBundle == nil, let page, !page.title.isEmpty,
            let web = BrowserAgentDetector.detect(page: page) {
             return withCatalogStyle(web, bundleHint: bid)
         }
 
-        // Explicit bundle rules (most specific first).
-        let rules: [(String, AgentKind)] = [
-            // Terminals — reached only when the probe found no agent inside.
-            ("com.apple.terminal", .init(id: "terminal", displayName: "Terminal", source: "terminal")),
-            ("com.googlecode.iterm2", .init(id: "terminal", displayName: "iTerm", source: "terminal")),
-            ("dev.warp.warp-stable", .init(id: "terminal", displayName: "Warp", source: "terminal")),
-            ("dev.warp.warp", .init(id: "terminal", displayName: "Warp", source: "terminal")),
-            ("com.github.wez.wezterm", .init(id: "terminal", displayName: "WezTerm", source: "terminal")),
-            ("com.mitchellh.ghostty", .init(id: "terminal", displayName: "Ghostty", source: "terminal")),
-            ("co.zeit.hyper", .init(id: "terminal", displayName: "Hyper", source: "terminal")),
-            ("net.kovidgoyal.kitty", .init(id: "terminal", displayName: "Kitty", source: "terminal")),
-            ("io.alacritty", .init(id: "terminal", displayName: "Alacritty", source: "terminal")),
-            ("org.alacritty", .init(id: "terminal", displayName: "Alacritty", source: "terminal")),
-            // Chat / agents — Claude Science (operon) BEFORE generic Claude desktop
-            ("com.openai.chat", .init(id: "chatgpt", displayName: "ChatGPT", source: "chat")),
-            ("com.openai.codex", .init(id: "codex", displayName: "Codex", source: "chat")),
-            ("com.anthropic.operon", .init(id: "science", displayName: "Claude Science", source: "chat")),
-            ("com.anthropic.claudescience", .init(id: "science", displayName: "Claude Science", source: "chat")),
-            ("com.anthropic.claude-science", .init(id: "science", displayName: "Claude Science", source: "chat")),
-            // Dispatch BEFORE any generic Claude rule: its window/app name is
-            // "Claude Dispatch" in some builds, which the `name.contains("claude")`
-            // fallback below would otherwise swallow into claude_code.
-            ("com.anthropic.dispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
-            ("com.anthropic.claudedispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
-            ("com.anthropic.claude-dispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
-            ("com.anthropic.claude.dispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
-            // Claude Code — the native macOS app ships as com.anthropic.claude-code
-            // (/…/Application Support/Claude/claude-code/*/claude.app), which no
-            // rule matched: it only ever resolved via the appName fallback.
-            ("com.anthropic.claude-code", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
-            ("com.anthropic.claudecode", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
-            ("com.anthropic.claude-code-url-handler", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
-            // claude-devtools.app — measured on this machine, previously unmapped
-            // and therefore minted as its own bogus "claude_devtools" agent.
-            ("com.claudecode.context", .init(id: "claude_code", displayName: "Claude Code", source: "ide")),
-            ("com.anthropic.claudefordesktop", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
-            ("com.anthropic.claude", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
-            ("com.anthropic.cowork", .init(id: "cowork", displayName: "Cowork", source: "chat")),
-            ("com.xai.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
-            ("ai.x.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
-            ("com.x.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
-            ("ai.x.supergrok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
-            ("com.openai.chatgpt", .init(id: "chatgpt", displayName: "ChatGPT", source: "chat")),
-            // IDEs
-            ("com.todesktop.", .init(id: "cursor", displayName: "Cursor", source: "ide")), // prefix match below
-            ("com.microsoft.vscode", .init(id: "vscode", displayName: "VS Code", source: "ide")),
-            ("com.microsoft.VSCode", .init(id: "vscode", displayName: "VS Code", source: "ide")),
-            ("com.apple.dt.xcode", .init(id: "claude_code", displayName: "Xcode", source: "ide")),
-            // Browsers — only used when tab probe could not identify a web agent.
-            ("com.apple.safari", .init(id: "browser", displayName: "Safari", source: "browser")),
-            ("com.google.chrome", .init(id: "browser", displayName: "Chrome", source: "browser")),
-            ("company.thebrowser.browser", .init(id: "browser", displayName: "Arc", source: "browser")),
-            ("com.brave.browser", .init(id: "browser", displayName: "Brave", source: "browser")),
-            ("org.mozilla.firefox", .init(id: "browser", displayName: "Firefox", source: "browser")),
-            ("com.microsoft.edgemac", .init(id: "browser", displayName: "Edge", source: "browser")),
-        ]
-
-        // Native Grok / SuperGrok app → grok_build (purple sparkles, not Science flask)
-        // Native Claude Science (com.anthropic.operon) → science above
-
-        for (key, kind) in rules {
-            if key.hasSuffix(".") {
-                if bid.hasPrefix(key) {
-                    return withCatalogStyle(kind, bundleHint: bid)
-                }
-            } else if bid == key {
-                return withCatalogStyle(kind, bundleHint: bid)
-            }
+        // Explicit bundle rules (most specific first) — see `bundleRules`.
+        //
+        // Native Grok / SuperGrok app → grok_build (purple sparkles, not the
+        // Science flask); native Claude Science (com.anthropic.operon) → science,
+        // matched above.
+        if let hit = bundleRule(for: bid) {
+            return withCatalogStyle(hit, bundleHint: bid)
         }
 
         // Claude-adjacent utilities that are emphatically not agents. Without
         // this "Usage for Claude.app" (com.ClaudeUsage) matches the
         // name.contains("claude") fallback below and registers itself as Claude
         // Code, stealing the capture from the real thing.
-        let notAnAgentBundles: Set<String> = [
-            "com.claudeusage",
-            "com.anthropic.claude-code-url-handler",
-        ]
-        if notAnAgentBundles.contains(bid)
-            || name.contains("usage for claude") || name.contains("claude usage") {
-            return AgentKind(id: "local_test", displayName: appName ?? "Local", source: "other",
-                             bundleHint: bid.isEmpty ? nil : bid)
+        if let refusal = claudeAdjacentRefusal(bid: bid, name: name, appName: appName) {
+            return .notAnAgent(refusal)
         }
 
         // Name fallbacks (unsigned / electron apps with shifting bundle ids).
@@ -319,25 +355,158 @@ public enum AgentAppMapper {
             )
         }
         if name.contains("safari") || name.contains("chrome") || name.contains("firefox") || name.contains("arc") || name.contains("brave") {
-            return .init(id: "browser", displayName: appName ?? "Browser", source: "browser", bundleHint: bid)
+            return .agent(AgentKind(id: "browser", displayName: appName ?? "Browser",
+                                    source: "browser", bundleHint: bid))
         }
 
-        // Apple system services are not agents. Every app Shannon legitimately
-        // recognises under com.apple.* (Terminal, Safari, Xcode) is matched by
-        // the explicit rules above, so anything still unmatched here is
-        // infrastructure — WindowManager, Dock, Spotlight, controlcenter. These
-        // were being adopted as agents purely because they can hold focus:
+        // Apple system services are not agents (see `appleSystemRefusal`). They
+        // were being adopted purely because they can hold focus:
         // com.apple.windowmanager became an agent called "WindowManager" that
-        // then showed as active in the HUD.
-        if bid.hasPrefix("com.apple.") {
-            return AgentKind(id: "local_test", displayName: "Local", source: "other", bundleHint: bid)
+        // then showed as active in the HUD. Routing them to `local_test` instead
+        // was not a fix — see `NonAgentApp`. Refuse.
+        if let refusal = appleSystemRefusal(bid: bid, appName: appName) {
+            return .notAnAgent(refusal)
         }
 
         // Unknown app → pet named after the app, still works offline.
-        let rawID = appName.flatMap { $0.isEmpty ? nil : $0 } ?? (bid.isEmpty ? "local_test" : bid)
-        let fallbackID = AgentKind.sanitizeID(rawID)
+        //
+        // …unless there is nothing to name it with. The old fallback spelled the
+        // missing name `local_test` — a live gate identity — so an app with no
+        // bundle id and no usable name (`(nil, nil)` from `captureFromFrontApp`
+        // when NSWorkspace has no frontmost app, a name like "•••" that
+        // sanitises away) silently took over that agent's pet, history and gate
+        // messages. `meaningfulID` refuses to invent a name; so do we.
+        let rawID = appName.flatMap { $0.isEmpty ? nil : $0 } ?? (bid.isEmpty ? nil : bid)
+        guard let rawID, let fallbackID = AgentKind.meaningfulID(rawID) else {
+            return .notAnAgent(NonAgentApp(
+                label: displayLabel(appName: appName, bundleID: bid),
+                bundleID: bid,
+                reason: "an app Shannon cannot identify"
+            ))
+        }
         let label = appName.flatMap { $0.isEmpty ? nil : $0 } ?? (bid.isEmpty ? "Local" : bid)
-        return AgentKind(id: fallbackID, displayName: label, source: "other", bundleHint: bid.isEmpty ? nil : bid)
+        return .agent(AgentKind(id: fallbackID, displayName: label, source: "other",
+                                bundleHint: bid.isEmpty ? nil : bid))
+    }
+
+    /// Explicit bundle rules, most specific first. Hoisted out of ``resolve``
+    /// so the refusal verdict can be computed *before* the window-title branch
+    /// without duplicating the table.
+    static let bundleRules: [(String, AgentKind)] = [
+            // Terminals — reached only when the probe found no agent inside.
+            ("com.apple.terminal", .init(id: "terminal", displayName: "Terminal", source: "terminal")),
+            ("com.googlecode.iterm2", .init(id: "terminal", displayName: "iTerm", source: "terminal")),
+            ("dev.warp.warp-stable", .init(id: "terminal", displayName: "Warp", source: "terminal")),
+            ("dev.warp.warp", .init(id: "terminal", displayName: "Warp", source: "terminal")),
+            ("com.github.wez.wezterm", .init(id: "terminal", displayName: "WezTerm", source: "terminal")),
+            ("com.mitchellh.ghostty", .init(id: "terminal", displayName: "Ghostty", source: "terminal")),
+            ("co.zeit.hyper", .init(id: "terminal", displayName: "Hyper", source: "terminal")),
+            ("net.kovidgoyal.kitty", .init(id: "terminal", displayName: "Kitty", source: "terminal")),
+            ("io.alacritty", .init(id: "terminal", displayName: "Alacritty", source: "terminal")),
+            ("org.alacritty", .init(id: "terminal", displayName: "Alacritty", source: "terminal")),
+            // Chat / agents — Claude Science (operon) BEFORE generic Claude desktop
+            ("com.openai.chat", .init(id: "chatgpt", displayName: "ChatGPT", source: "chat")),
+            ("com.openai.codex", .init(id: "codex", displayName: "Codex", source: "chat")),
+            ("com.anthropic.operon", .init(id: "science", displayName: "Claude Science", source: "chat")),
+            ("com.anthropic.claudescience", .init(id: "science", displayName: "Claude Science", source: "chat")),
+            ("com.anthropic.claude-science", .init(id: "science", displayName: "Claude Science", source: "chat")),
+            // Dispatch BEFORE any generic Claude rule: its window/app name is
+            // "Claude Dispatch" in some builds, which the `name.contains("claude")`
+            // fallback below would otherwise swallow into claude_code.
+            ("com.anthropic.dispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
+            ("com.anthropic.claudedispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
+            ("com.anthropic.claude-dispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
+            ("com.anthropic.claude.dispatch", .init(id: "dispatch", displayName: "Dispatch", source: "chat")),
+            // Claude Code — the native macOS app ships as com.anthropic.claude-code
+            // (/…/Application Support/Claude/claude-code/*/claude.app), which no
+            // rule matched: it only ever resolved via the appName fallback.
+            ("com.anthropic.claude-code", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            ("com.anthropic.claudecode", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            ("com.anthropic.claude-code-url-handler", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            // claude-devtools.app — measured on this machine, previously unmapped
+            // and therefore minted as its own bogus "claude_devtools" agent.
+            ("com.claudecode.context", .init(id: "claude_code", displayName: "Claude Code", source: "ide")),
+            ("com.anthropic.claudefordesktop", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            ("com.anthropic.claude", .init(id: "claude_code", displayName: "Claude Code", source: "chat")),
+            ("com.anthropic.cowork", .init(id: "cowork", displayName: "Cowork", source: "chat")),
+            ("com.xai.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
+            ("ai.x.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
+            ("com.x.grok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
+            ("ai.x.supergrok", .init(id: "grok_build", displayName: "Grok Build", source: "chat")),
+            ("com.openai.chatgpt", .init(id: "chatgpt", displayName: "ChatGPT", source: "chat")),
+            // IDEs
+            ("com.todesktop.", .init(id: "cursor", displayName: "Cursor", source: "ide")), // prefix match below
+            ("com.microsoft.vscode", .init(id: "vscode", displayName: "VS Code", source: "ide")),
+            ("com.microsoft.VSCode", .init(id: "vscode", displayName: "VS Code", source: "ide")),
+            ("com.apple.dt.xcode", .init(id: "claude_code", displayName: "Xcode", source: "ide")),
+            // Browsers — only used when tab probe could not identify a web agent.
+            ("com.apple.safari", .init(id: "browser", displayName: "Safari", source: "browser")),
+            ("com.google.chrome", .init(id: "browser", displayName: "Chrome", source: "browser")),
+            ("company.thebrowser.browser", .init(id: "browser", displayName: "Arc", source: "browser")),
+            ("com.brave.browser", .init(id: "browser", displayName: "Brave", source: "browser")),
+            ("org.mozilla.firefox", .init(id: "browser", displayName: "Firefox", source: "browser")),
+            ("com.microsoft.edgemac", .init(id: "browser", displayName: "Edge", source: "browser")),
+    ]
+
+    /// First matching bundle rule (`"com.todesktop."` is a prefix rule).
+    static func bundleRule(for bid: String) -> AgentKind? {
+        for (key, kind) in bundleRules {
+            if key.hasSuffix(".") {
+                if bid.hasPrefix(key) { return kind }
+            } else if bid == key {
+                return kind
+            }
+        }
+        return nil
+    }
+
+    /// Menu-bar meters and helpers that merely have "Claude" in the name.
+    static func claudeAdjacentRefusal(
+        bid: String, name: String, appName: String?
+    ) -> NonAgentApp? {
+        let notAnAgentBundles: Set<String> = [
+            "com.claudeusage",
+            "com.anthropic.claude-code-url-handler",
+        ]
+        guard notAnAgentBundles.contains(bid)
+            || name.contains("usage for claude") || name.contains("claude usage") else {
+            return nil
+        }
+        // NOT `local_test`: that id is a live gate identity (agent_identity
+        // IDENTITIES / VALID_AGENTS, and the id GateApprovalClient registers
+        // as), so attributing a menu-bar meter to it clobbers a real agent's
+        // pet and speaks in its name. Refuse instead.
+        return NonAgentApp(
+            label: displayLabel(appName: appName, bundleID: bid),
+            bundleID: bid,
+            reason: "a Claude-adjacent utility, not an agent"
+        )
+    }
+
+    /// Apple system services are not agents. Every app Shannon legitimately
+    /// recognises under com.apple.* (Terminal, Safari, Xcode) is matched by
+    /// ``bundleRules`` first, so anything reaching here is infrastructure —
+    /// WindowManager, Dock, Spotlight, controlcenter. These were being adopted
+    /// as agents purely because they can hold focus.
+    static func appleSystemRefusal(bid: String, appName: String?) -> NonAgentApp? {
+        guard bid.hasPrefix("com.apple.") else { return nil }
+        return NonAgentApp(
+            label: displayLabel(appName: appName, bundleID: bid),
+            bundleID: bid,
+            reason: "a macOS system service"
+        )
+    }
+
+    /// Label for a refused app: its own name, else the tail of its bundle id
+    /// ("com.apple.windowmanager" → "windowmanager"), else something neutral.
+    static func displayLabel(appName: String?, bundleID: String) -> String {
+        if let appName, !appName.trimmingCharacters(in: .whitespaces).isEmpty {
+            return appName
+        }
+        if let tail = bundleID.split(separator: ".").last, !tail.isEmpty {
+            return String(tail)
+        }
+        return "This app"
     }
 
     /// Ids whose catalog entry is a placeholder for a *container*, not for an
@@ -365,8 +534,11 @@ public enum AgentAppMapper {
         )
     }
 
-    private static func withCatalogStyle(_ kind: AgentKind, bundleHint: String) -> AgentKind {
-        applyCatalogStyle(kind, bundleHint: bundleHint)
+    /// Styling shortcut used by every *agent* branch of `resolve`, so those
+    /// branches read as `return withCatalogStyle(…)` and only the two refusal
+    /// sites have to spell out `.notAnAgent`.
+    private static func withCatalogStyle(_ kind: AgentKind, bundleHint: String) -> AgentAppResolution {
+        .agent(applyCatalogStyle(kind, bundleHint: bundleHint))
     }
 
     /// Optional clipboard override — **only** when the user is intentional.
@@ -420,7 +592,9 @@ public enum AgentAppMapper {
         let rest = first.drop(while: { $0 != ":" && $0 != "=" }).dropFirst()
             .trimmingCharacters(in: .whitespaces)
         let parts = rest.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
-        let id = parts.first.map { AgentKind.sanitizeID(String($0)) }
+        // `meaningfulID`, not `sanitizeID`: "agent: ***" is not a claim on
+        // `local_test`, and sanitizeID's fallback would make it one.
+        let id = parts.first.flatMap { AgentKind.meaningfulID(String($0)) }
         var task: String? = parts.count > 1 ? String(parts[1]) : nil
         if task == nil { task = restTask }
         task = task?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -610,18 +784,65 @@ public final class AgentIngestService: ObservableObject {
         let terminal: TerminalAgentProbe.Context? = nil
         #endif
 
+        return capture(
+            bundleID: bid, appName: name, page: page, terminal: terminal,
+            clipboardText: clipboardText, forceAgentID: forceAgentID
+        )
+    }
+
+    /// The capture itself, with the environment passed in so it is testable
+    /// without a frontmost app. `captureFromFrontApp` is the ⌘D wrapper.
+    ///
+    /// Returns a refusal (`result.captured == false`, `result.agent == nil`)
+    /// when the app is not an agent; in that case nothing is written to
+    /// `~/.shannon` and the gate is not told anything.
+    @discardableResult
+    public func capture(
+        bundleID: String?,
+        appName: String?,
+        page: BrowserPageContext? = nil,
+        terminal: TerminalAgentProbe.Context? = nil,
+        clipboardText: String? = nil,
+        forceAgentID: String? = nil
+    ) -> AgentIngestResult {
+        // Short local names, because the body below quotes them a dozen times.
+        let bid = bundleID
+        let name = appName
+
         let clip = clipboardText ?? Self.readClipboard()
         let (clipAgent, clipTask) = AgentAppMapper.parseClipboard(clip)
 
-        var kind = AgentAppMapper.map(
+        let resolution = AgentAppMapper.resolve(
             bundleID: bid, appName: name, page: page, terminal: terminal
         )
-        // Prefer catalog display names / colors for known ids — but not for the
-        // container ids, or this re-flattens "Ghostty" back to "Terminal" after
-        // map() has already made the right call.
-        kind = AgentAppMapper.applyCatalogStyle(kind)
-        if let force = forceAgentID, !force.isEmpty {
-            let forced = AgentStyleCatalog.style(for: AgentKind.sanitizeID(force))
+        // An id the *user* typed (`agent: science`, or a forced call) is a
+        // deliberate identity claim and outranks whatever happened to be
+        // frontmost. Nothing else may rescue a refusal.
+        //
+        // `meaningfulID`, not `sanitizeID`: punctuation is not an identity
+        // claim, and sanitizeID's `local_test` fallback would turn `agent: ***`
+        // — or a junk `forceAgentID` — into a claim on a live gate identity,
+        // reopening the exact hole the refusal closes.
+        let forcedID: String? = forceAgentID.flatMap { AgentKind.meaningfulID($0) }
+        let explicitID: String? = forcedID ?? clipAgent
+
+        var kind: AgentKind
+        switch resolution {
+        case .agent(let mapped):
+            // Prefer catalog display names / colors for known ids — but not for
+            // the container ids, or this re-flattens "Ghostty" back to
+            // "Terminal" after resolve() has already made the right call.
+            kind = AgentAppMapper.applyCatalogStyle(mapped)
+        case .notAnAgent(let refusal):
+            guard let explicitID, !explicitID.isEmpty else {
+                return record(refusal: refusal, sourceApp: name ?? bid ?? "unknown")
+            }
+            kind = AgentKind(
+                id: explicitID, displayName: refusal.label, source: "other", bundleHint: bid
+            )
+        }
+        if let forcedID {
+            let forced = AgentStyleCatalog.style(for: forcedID)
             kind = AgentKind(
                 id: forced.id,
                 displayName: forced.displayName,
@@ -670,6 +891,7 @@ public final class AgentIngestService: ObservableObject {
             let gateOK = Self.notifyGateBestEffort(agentID: kind.id, task: task)
             result = AgentIngestResult(
                 agent: kind,
+                refusal: nil,
                 taskSummary: task,
                 petPath: url.path,
                 createdPet: created,
@@ -683,6 +905,7 @@ public final class AgentIngestService: ObservableObject {
             // Absolute failsafe: still return a result so UI can show the error.
             result = AgentIngestResult(
                 agent: kind,
+                refusal: nil,
                 taskSummary: task,
                 petPath: PetBootstrap.petsRoot.appendingPathComponent(kind.id).path,
                 createdPet: false,
@@ -692,6 +915,27 @@ public final class AgentIngestService: ObservableObject {
             )
         }
 
+        return publish(result)
+    }
+
+    /// A refused capture: no pet, no registry row, no gate message — but it is
+    /// still surfaced (and highlighted) so the user gets an explanation instead
+    /// of a silent no-op or a green checkmark for something that never happened.
+    private func record(refusal: NonAgentApp, sourceApp: String) -> AgentIngestResult {
+        publish(AgentIngestResult(
+            agent: nil,
+            refusal: refusal,
+            taskSummary: "",
+            petPath: "",
+            createdPet: false,
+            gateNotified: false,
+            sourceApp: sourceApp,
+            message: refusal.message
+        ))
+    }
+
+    @discardableResult
+    private func publish(_ result: AgentIngestResult) -> AgentIngestResult {
         lastResult = result
         highlightUntil = Date().addingTimeInterval(8)
         recent.insert(result, at: 0)

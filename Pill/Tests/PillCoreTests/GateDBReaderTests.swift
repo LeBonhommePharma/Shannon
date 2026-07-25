@@ -208,6 +208,93 @@ final class GateDBReaderTests: XCTestCase {
         XCTAssertEqual(GateDBReader.readSnapshot(path: dbPath).pendingAsks.count, 1)
     }
 
+    /// The row limit must bound *actionable* asks, not raw rows. Five abandoned
+    /// approvals used to fill the `LIMIT 5` before the orphan filter ever ran,
+    /// so the one ask a human could answer was never fetched — invisible in the
+    /// pill, unanswerable, forever.
+    func testOrphanedAsksDoNotCrowdOutAnActionableOne() throws {
+        try exec("""
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at)
+        VALUES ('ghost', 'idle', \(ns(3600)), \(ns(60))),
+               ('science', 'active', \(ns(2)), NULL);
+        INSERT INTO agent_interactions (interaction_id, agent_id, prompt, status, created_at_ns)
+        VALUES ('ghost-1', 'ghost', 'dead 1?', 'pending', \(ns(300))),
+               ('ghost-2', 'ghost', 'dead 2?', 'pending', \(ns(301))),
+               ('ghost-3', 'ghost', 'dead 3?', 'pending', \(ns(302))),
+               ('ghost-4', 'ghost', 'dead 4?', 'pending', \(ns(303))),
+               ('ghost-5', 'ghost', 'dead 5?', 'pending', \(ns(304))),
+               ('ghost-6', 'ghost', 'dead 6?', 'pending', \(ns(305))),
+               ('live-1',  'science', 'Dock 1G9V?', 'pending', \(ns(600)));
+        """)
+        let snap = GateDBReader.readSnapshot(path: dbPath)
+        XCTAssertEqual(
+            snap.pendingAsks.map(\.interactionId), ["live-1"],
+            "the answerable ask must survive six newer orphans"
+        )
+        XCTAssertEqual(snap.staleAsks.count, 6)
+        XCTAssertEqual(GateDBReader.readPendingAsks(path: dbPath).map(\.interactionId), ["live-1"])
+    }
+
+    /// …and it must survive a backlog far larger than anything we are willing
+    /// to read: the bound on the fetch must not reintroduce the crowding-out.
+    func testHugeOrphanBacklogStillSurfacesTheLiveAsk() throws {
+        var rows: [String] = ["('live-1', 'science', 'Dock 1G9V?', 'pending', \(ns(400)))"]
+        for i in 0..<200 {
+            rows.append("('ghost-\(i)', 'ghost', 'dead \(i)?', 'pending', \(ns(Double(i) + 1)))")
+        }
+        try exec("""
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at)
+        VALUES ('ghost', 'idle', \(ns(3600)), \(ns(0.5))),
+               ('science', 'active', \(ns(2)), NULL);
+        INSERT INTO agent_interactions (interaction_id, agent_id, prompt, status, created_at_ns)
+        VALUES \(rows.joined(separator: ",\n"));
+        """)
+        let snap = GateDBReader.readSnapshot(path: dbPath)
+        XCTAssertEqual(snap.pendingAsks.map(\.interactionId), ["live-1"])
+        XCTAssertLessThanOrEqual(
+            snap.pendingAsks.count + snap.staleAsks.count, 64,
+            "a pathological interactions table must not be read in full"
+        )
+    }
+
+    /// The age backstop must classify the same rows the new SQL ordering
+    /// prioritises — one clock in Swift, one cutoff in SQL, same answer.
+    func testAgeBackstopAgreesWithTheSQLCutoff() throws {
+        try exec("""
+        INSERT INTO agent_interactions (interaction_id, agent_id, prompt, status, created_at_ns)
+        VALUES ('aged',  'mystery', 'yesterday?', 'pending', \(ns(7 * 3600))),
+               ('fresh', 'mystery', 'just now?',  'pending', \(ns(5 * 3600)));
+        """)
+        let snap = GateDBReader.readSnapshot(path: dbPath)
+        XCTAssertEqual(snap.pendingAsks.map(\.interactionId), ["fresh"])
+        XCTAssertEqual(snap.staleAsks.map(\.interactionId), ["aged"])
+        // A tighter window ages both out; a wider one keeps both.
+        XCTAssertTrue(GateDBReader.readPendingAsks(path: dbPath, maxAge: 3600).isEmpty)
+        XCTAssertEqual(
+            GateDBReader.readPendingAsks(path: dbPath, maxAge: 48 * 3600).map(\.interactionId),
+            ["fresh", "aged"]
+        )
+    }
+
+    /// The limit still applies — to actionable asks — and the raw fetch stays
+    /// bounded so a pathological table is never loaded whole.
+    func testActionableAsksAreStillCapped() throws {
+        var rows: [String] = []
+        for i in 0..<300 {
+            rows.append("('live-\(i)', 'mystery', 'ask \(i)?', 'pending', \(ns(Double(i) + 1)))")
+        }
+        try exec("""
+        INSERT INTO agent_interactions (interaction_id, agent_id, prompt, status, created_at_ns)
+        VALUES \(rows.joined(separator: ",\n"));
+        """)
+        let snap = GateDBReader.readSnapshot(path: dbPath, askLimit: 3)
+        XCTAssertEqual(snap.pendingAsks.map(\.interactionId), ["live-0", "live-1", "live-2"])
+        XCTAssertLessThanOrEqual(
+            snap.pendingAsks.count + snap.staleAsks.count, 64,
+            "a pathological interactions table must not be read in full"
+        )
+    }
+
     func testResolvedAsksAreIgnored() throws {
         try exec("""
         INSERT INTO agent_interactions (interaction_id, agent_id, prompt, status, created_at_ns)

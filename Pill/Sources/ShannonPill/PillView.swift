@@ -2,26 +2,10 @@ import SwiftUI
 import PillCore
 import ShannonTheme
 
-extension ShannonStatus {
-    /// Backends that FABRICATE their numbers rather than measuring anything.
-    ///
-    /// - `demo`  — `python -m shannon.pill_bridge --demo`. `_DemoDetector`
-    ///   (python/shannon/pill_bridge.py:219) returns `8.0 + 2.0*sin(n/12)`, and
-    ///   `--demo` is the only standalone mode the bridge supports (:250).
-    /// - `idle`  — `IdleTelemetry`, the local placeholder sine used when no
-    ///   bridge is connected at all.
-    /// - `unknown` — the bridge's fallback when a detector exposes no `backend`
-    ///   attribute (:91). Provenance cannot be established, so it is not
-    ///   trusted. A deception monitor must fail closed.
-    static let syntheticBackends: Set<String> = ["demo", "idle", "unknown", ""]
-
-    /// True when this reading is a placeholder, not a measurement.
-    var isSynthetic: Bool {
-        Self.syntheticBackends.contains(
-            backend.trimmingCharacters(in: .whitespaces).lowercased()
-        )
-    }
-}
+// `ShannonStatus.isSynthetic` / `.syntheticBackends` and the provenance rules
+// built on them now live in PillCore (`EntropyProvenance.swift`), so the
+// companion board, the popover and this view cannot drift apart on what counts
+// as a measured reading.
 
 /// Sizes for the two pill states.
 public enum PillMetrics {
@@ -414,7 +398,9 @@ struct PillView: View {
     /// serves a real-looking payload whose numbers are `8.0 + 2.0*sin(n/12)`.
     /// That flipped this flag true and rendered a sine wave with the full
     /// measured styling — no `~`, live colour coding, and real collapse alarms.
-    private var isMeasured: Bool { bridge.connected && !entropy.isSynthetic }
+    private var isMeasured: Bool {
+        EntropyProvenance.isMeasured(connected: bridge.connected, displayed: entropy)
+    }
 
     /// A collapse we are willing to raise the deception alarm for.
     ///
@@ -493,7 +479,9 @@ struct PillView: View {
     private var collapsedText: String {
         if !busy.isEmpty { return summary.collapsedText }
         if ingest.isHighlighting, let last = ingest.lastResult {
-            return "+\(last.agent.displayName)"
+            // `pillLabel` is "⊘ not an agent" for a refused capture — the pill
+            // must never announce "+Something" for a capture that never ran.
+            return last.pillLabel
         }
         if let label = nowPlaying.collapsedLabel { return label }
         if let recent = primary, !recent.lastTask.isEmpty,
@@ -613,14 +601,17 @@ struct PillView: View {
             // restates status more softly; it is never the only place a state
             // appears, so losing the artwork never loses information.
             //
-            // entropyDelta is passed only while the bridge is genuinely
-            // connected: a companion must not look alarmed because of a
-            // simulated reading, and `bridge.status` is nil precisely when the
-            // number on screen is the idle placeholder.
+            // entropyDelta goes through the SAME provenance test as the header,
+            // the border and the `~H` badge (`EntropyProvenance`). A companion
+            // must not look alarmed about a number the rest of the pill is, at
+            // that same instant, labelling "simulated" — and connectivity alone
+            // does not establish provenance: `--demo` opens a real socket.
             if #available(macOS 14, *) {
                 CompanionBoardView(
                     summary: summary,
-                    entropyDelta: bridge.connected ? bridge.status?.deltaH : nil,
+                    entropyDelta: EntropyProvenance.companionDelta(
+                        connected: bridge.connected, status: bridge.status
+                    ),
                     maxRows: busy.isEmpty ? 3 : 4
                 )
             } else {
@@ -844,9 +835,9 @@ struct PillView: View {
                 .lineLimit(1)
             Spacer()
             if ingest.isHighlighting, let last = ingest.lastResult {
-                Text("+\(last.agent.id)")
+                Text(last.agent.map { "+\($0.id)" } ?? "⊘ not an agent")
                     .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.shannonSuccess)
+                    .foregroundStyle(last.captured ? Color.shannonSuccess : Color.shannonSecondary)
             }
         }
     }

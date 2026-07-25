@@ -337,3 +337,199 @@ class TestCallbackContracts:
         assert all(isinstance(e, CollapseEvent) for e in events)
         assert results, "modern callback never fired"
         assert all(isinstance(r, CollapseResult) for r in results)
+
+
+# ── Backend parity ───────────────────────────────────────────────────────────
+#
+# The C++ fast path and the pure-Python fallback must be indistinguishable from
+# the outside: same callbacks, same counts, same detector state while a user
+# callback is running. Every test below runs the SAME stream through both.
+
+
+def _pin_backend(det: ShannonCollapseDetector, backend: str) -> ShannonCollapseDetector:
+    """Pin an already-constructed detector to 'cpp' or 'python'."""
+    if backend == "python":
+        det._cpp_detector = None  # force the pure-Python entropy path
+        det._backend = "python"
+        return det
+    if det._cpp_detector is None:  # pragma: no cover - depends on build
+        pytest.skip("compiled shannon._core not available")
+    assert get_backend() == "cpp", "cpp parametrisation requires the compiled core"
+    return det
+
+
+def _uniform_logits(bits: int) -> np.ndarray:
+    """Uniform logits over 2**bits states → entropy is exactly `bits` bits."""
+    return np.zeros(2**bits, dtype=np.float64)
+
+
+class TestCallbackSeesCurrentToken:
+    """Detector state inside a callback must describe the token that fired it.
+
+    On the C++ fast path the callback runs from *inside*
+    self._cpp_detector.add_logits(...), so assigning self._last_result on the
+    line after that call left every convenience property one token stale:
+    is_collapsed read False in the middle of a collapse. The pure-Python _push
+    assigns _last_result before calling _emit, so the two backends disagreed --
+    the exact divergence _emit exists to remove.
+    """
+
+    @pytest.mark.parametrize("backend", ["cpp", "python"])
+    def test_properties_are_current_inside_callback(self, backend):
+        snapshots: list[tuple] = []
+        det = ShannonCollapseDetector(
+            window_size=4,
+            threshold=-3.0,
+            callback=lambda r: snapshots.append(
+                (det.is_collapsed, det.current_entropy, det.collapse_score, det.delta_h, r)
+            ),
+        )
+        _pin_backend(det, backend)
+
+        for _ in range(8):
+            det.add_logits(_uniform_logits(10))  # steady 10 bits
+        det.add_logits(_uniform_logits(0))  # → 0 bits: collapse
+
+        assert snapshots, "callback never fired"
+        is_collapsed, entropy, score, delta_h, result = snapshots[-1]
+        assert result.event == "collapse"
+        assert is_collapsed is True, "is_collapsed read False during a collapse callback"
+        assert entropy == pytest.approx(result.entropy), "current_entropy was one token stale"
+        assert score == pytest.approx(abs(result.delta / -3.0)), "collapse_score was stale"
+        assert delta_h != 0.0
+
+    @pytest.mark.parametrize("backend", ["cpp", "python"])
+    def test_on_collapse_event_window_ends_on_the_collapsing_token(self, backend):
+        events: list[CollapseEvent] = []
+        det = ShannonCollapseDetector(window_size=4, threshold=-3.0, on_collapse=events.append)
+        _pin_backend(det, backend)
+
+        for _ in range(8):
+            det.add_logits(_uniform_logits(10))
+        det.add_logits(_uniform_logits(0))
+
+        assert len(events) == 1
+        assert events[0].window == pytest.approx([10.0, 10.0, 10.0, 0.0])
+        assert events[0].entropy == pytest.approx(0.0)
+
+
+class TestOscillatingCollapseParity:
+    """A collapse that is also part of an oscillation is still a collapse.
+
+    collapse_detector.cpp derived `.collapsed` from `event` *after* `event` had
+    been rewritten to OSCILLATION, so on the C++ backend `collapsed` (and
+    `expanded`) went false for every event inside an oscillating stretch. Since
+    _emit fires the legacy on_collapse only when result.collapsed is true, the
+    callback went silent for exactly the alternating collapse/expansion pattern
+    this library exists to flag.
+    """
+
+    STREAM = [8] + [2, 10] * 8  # bits: one baseline token, then alternating
+
+    def _run(self, backend):
+        events: list[CollapseEvent] = []
+        results: list[CollapseResult] = []
+        det = ShannonCollapseDetector(
+            window_size=6,
+            threshold=-1.0,
+            expansion_threshold=1.0,
+            oscillation_window=5,
+            callback=results.append,
+            on_collapse=events.append,
+        )
+        _pin_backend(det, backend)
+        flags = []
+        for bits in self.STREAM:
+            r = det.add_logits(_uniform_logits(bits))
+            flags.append((r.collapsed, r.expanded, r.oscillating, r.event))
+        return events, results, flags
+
+    def test_both_backends_fire_identical_callback_counts(self):
+        cpp_events, cpp_results, _ = self._run("cpp")
+        py_events, py_results, _ = self._run("python")
+
+        assert len(cpp_events) == len(py_events), (
+            f"on_collapse fired {len(cpp_events)}x on cpp vs {len(py_events)}x on python "
+            f"for an identical stream"
+        )
+        assert len(cpp_events) > 1, "collapses inside an oscillating stretch never fired"
+        assert len(cpp_results) == len(py_results)
+
+    def test_both_backends_report_identical_flags(self):
+        _, _, cpp_flags = self._run("cpp")
+        _, _, py_flags = self._run("python")
+        assert cpp_flags == py_flags
+
+    @pytest.mark.parametrize("backend", ["cpp", "python"])
+    def test_oscillation_does_not_clear_the_threshold_verdict(self, backend):
+        _, results, _ = self._run(backend)
+        oscillating = [r for r in results if r.event == "oscillation"]
+        assert oscillating, "stream did not oscillate"
+        # Every oscillating token is still either a collapse or an expansion:
+        # OSCILLATION labels the pattern, it does not erase the verdict.
+        assert all(r.collapsed or r.expanded for r in oscillating)
+        assert any(r.collapsed for r in oscillating)
+
+
+class _TraceProbe(ShannonCollapseDetector):
+    """Counts how many entropy values get copied out of the full trace."""
+
+    def __init__(self, *args, **kwargs):
+        self.trace_reads = 0
+        self.trace_elements_copied = 0
+        super().__init__(*args, **kwargs)
+
+    @property
+    def trace(self) -> list[float]:
+        t = super().trace
+        self.trace_reads += 1
+        self.trace_elements_copied += len(t)
+        return t
+
+
+class TestCollapseEventWindowIsBounded:
+    """Building CollapseEvent.window must cost O(window_size), not O(stream).
+
+    _emit sliced the window off self.trace, whose getter returns a copy of the
+    entire unbounded trace, so every collapse event cost O(total tokens seen).
+    """
+
+    WINDOW = 4
+
+    def _drive(self, backend, n_tokens):
+        events: list[CollapseEvent] = []
+        det = _TraceProbe(window_size=self.WINDOW, threshold=-3.0, on_collapse=events.append)
+        _pin_backend(det, backend)
+        for _ in range(n_tokens):
+            det.add_logits(_uniform_logits(10))
+        det.add_logits(_uniform_logits(0))  # collapse
+        return det, events
+
+    @pytest.mark.parametrize("backend", ["cpp", "python"])
+    def test_window_build_is_o_window_size(self, backend):
+        det, events = self._drive(backend, 200)
+        assert len(events) == 1
+        budget = self.WINDOW * len(events)
+        assert det.trace_elements_copied <= budget, (
+            f"copied {det.trace_elements_copied} entropies to build "
+            f"{len(events)} event window(s); budget is {budget}"
+        )
+
+    @pytest.mark.parametrize("backend", ["cpp", "python"])
+    def test_window_build_cost_does_not_grow_with_stream_length(self, backend):
+        short_det, short_events = self._drive(backend, 50)
+        long_det, long_events = self._drive(backend, 500)
+        assert len(short_events) == len(long_events) == 1
+        assert short_det.trace_elements_copied == long_det.trace_elements_copied, (
+            "per-event window cost scales with total stream length"
+        )
+
+    @pytest.mark.parametrize("backend", ["cpp", "python"])
+    def test_window_content_is_unchanged(self, backend):
+        _, events = self._drive(backend, 200)
+        assert events[0].window == pytest.approx([10.0, 10.0, 10.0, 0.0])
+
+    def test_window_content_matches_across_backends(self):
+        _, cpp_events = self._drive("cpp", 20)
+        _, py_events = self._drive("python", 20)
+        assert cpp_events[0].window == pytest.approx(py_events[0].window)

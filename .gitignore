@@ -41,3 +41,12 @@ watchOS/Resources/*.entitlements
 iPad/ShannonPad.xcodeproj/
 iPad/Resources/Generated*.plist
 iPad/Resources/*.entitlements
+
+# Xcode build products (xcodebuild -derivedDataPath)
+DerivedData/
+Pill/DerivedData/
+# clangd background index
+.cache/
+# fastlane run output
+fastlane/report.xml
+fastlane/README.md

@@ -121,11 +121,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Capture Terminal / Claude / ChatGPT / Codex / browser / Cursor / … as an
     /// agent, write its pet under `~/.shannon/pets/`, update the registry, and
     /// flash the pill. Fully offline-safe; gate notify is best-effort.
+    ///
+    /// A frontmost app that is not an agent at all (WindowManager, the Dock, a
+    /// menu-bar meter) is *refused*: the menu bar says so instead of flashing a
+    /// green checkmark for a capture that never happened.
     private func addAgentFromFrontApp() {
         guard let ingest else { return }
         let result = ingest.captureFromFrontApp()
         activity?.refresh()
-        menuBar?.flashSuccess("+\(result.agent.id)")
+        if let agent = result.agent {
+            menuBar?.flashSuccess("+\(agent.id)")
+        } else {
+            menuBar?.flashNotice(result.refusal.map { "not an agent · \($0.label)" }
+                ?? "not an agent")
+        }
         controller?.reassertVisibility()
         controller?.expand()
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in

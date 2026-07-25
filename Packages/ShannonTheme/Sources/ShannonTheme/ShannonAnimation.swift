@@ -28,8 +28,9 @@ public extension Animation {
     static let shannonFloat = Animation.spring(response: 0.48, dampingFraction: 0.86)
 
     /// Gauge fill / numeric tick / core bar — continuous, never bouncy.
-    /// `spring(response: 0.32, dampingFraction: 0.92)`
-    static let shannonLiquid = Animation.spring(response: 0.32, dampingFraction: 0.92)
+    /// Snappier than earlier 0.32 so 0.35 s resource ticks still look wet.
+    /// `spring(response: 0.26, dampingFraction: 0.93)`
+    static let shannonLiquid = Animation.spring(response: 0.26, dampingFraction: 0.93)
 
     /// Chrome opacity, border glow, quiet↔active. Medium settle.
     /// `spring(response: 0.36, dampingFraction: 0.90)`
@@ -52,7 +53,7 @@ public enum ShannonMotion {
 
     /// Panel frame morph duration when the NSWindow tracks content height.
     /// Matched to `shannonFloat` response so SwiftUI and AppKit stay in phase.
-    public static let panelMorphDuration: TimeInterval = 0.42
+    public static let panelMorphDuration: TimeInterval = 0.36
 
     /// Popover open / section expand.
     public static let popoverMorphDuration: TimeInterval = 0.28

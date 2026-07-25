@@ -383,7 +383,8 @@ public enum SystemResourceLogic {
     // MARK: Smooth display (iStat-style ease, pure)
 
     /// Default blend toward a new sample (0 = hold, 1 = snap).
-    public static let defaultSmoothAlpha: Double = 0.52
+    /// Kept in sync with `UICadence.resourceSmoothAlpha`.
+    public static var defaultSmoothAlpha: Double { UICadence.resourceSmoothAlpha }
 
     /// Exponential smooth one optional percent toward a target.
     ///
@@ -851,8 +852,9 @@ public enum SystemResourceSampler {
 
 /// Polls `SystemResourceSampler` for the menu bar and pill.
 ///
-/// Default interval is ~0.55s with exponential smooth toward the raw sample so
-/// gauges crawl instead of hard-jumping. History still records **raw** samples.
+/// Default interval is `UICadence.resourceInterval` (~0.35 s) with exponential
+/// smooth toward the raw sample so gauges crawl instead of hard-jumping.
+/// History still records **raw** samples.
 @MainActor
 public final class SystemResourceMonitor: ObservableObject {
     @Published public private(set) var snapshot = SystemResourceSnapshot()
@@ -866,15 +868,15 @@ public final class SystemResourceMonitor: ObservableObject {
     private var lastHistoryRaw = SystemResourceSnapshot()
 
     /// - Parameters:
-    ///   - interval: poll period in seconds. Prefer 0.45…0.75 for smooth HUD feel.
+    ///   - interval: poll period in seconds (clamped via `UICadence`).
     ///   - smoothAlpha: blend toward each raw sample (see `SystemResourceLogic.smoothSnapshot`).
     public init(
-        interval: TimeInterval = 0.55,
+        interval: TimeInterval = UICadence.resourceInterval,
         historyCapacity: Int = 48,
-        smoothAlpha: Double = SystemResourceLogic.defaultSmoothAlpha
+        smoothAlpha: Double = UICadence.resourceSmoothAlpha
     ) {
-        self.interval = max(0.25, interval)
-        self.smoothAlpha = min(1, max(0.15, smoothAlpha))
+        self.interval = UICadence.clampResourceInterval(interval)
+        self.smoothAlpha = UICadence.clampSmoothAlpha(smoothAlpha)
         self.history = SystemResourceHistory(capacity: historyCapacity)
     }
 
@@ -895,7 +897,7 @@ public final class SystemResourceMonitor: ObservableObject {
             Task { @MainActor in self?.refresh() }
         }
         // Generous tolerance — run loop coalesces with other main-thread work.
-        t.tolerance = min(0.2, interval * 0.35)
+        t.tolerance = min(0.12, interval * 0.4)
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }

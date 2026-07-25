@@ -907,7 +907,10 @@ public final class AgentActivityMonitor: ObservableObject {
     private var runningBundleIDsAt: Date = .distantPast
     private let runningBundleTTL: TimeInterval = 5
     /// Full pets+registry disk scan cadence (gate DB / asks still every tick).
-    public static let fullScanInterval: TimeInterval = 20
+    /// `nonisolated` so pure cadence tests can read it without MainActor.
+    public nonisolated static var fullScanInterval: TimeInterval {
+        UICadence.agentFullScanInterval
+    }
     private var lastFullScanAt: Date = .distantPast
     /// Last seen mtime of `agent_hub.db`. When it advances we force a full
     /// apply so pending asks surface without waiting for the pets interval.
@@ -915,8 +918,8 @@ public final class AgentActivityMonitor: ObservableObject {
     /// Previous pending-ask count — notifications fire only on increases.
     private var lastPendingCount = 0
 
-    public init(interval: TimeInterval = 1.5) {
-        self.interval = interval
+    public init(interval: TimeInterval = UICadence.agentHubInterval) {
+        self.interval = UICadence.clampAgentHubInterval(interval)
     }
 
     public func start() {
@@ -924,7 +927,7 @@ public final class AgentActivityMonitor: ObservableObject {
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        t.tolerance = interval * 0.25   // let the run loop coalesce fires
+        t.tolerance = min(0.2, interval * 0.3)   // coalesce with resource ticks
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
@@ -946,8 +949,8 @@ public final class AgentActivityMonitor: ObservableObject {
     /// Poll disk + hub DB off the main thread and publish only what changed.
     ///
     /// Poll split (P1.9 / P0.6):
-    /// - **Every tick (1.5 s):** gate DB — agents, pending asks, entropy.
-    /// - **Every `fullScanInterval` (20 s):** pets + registry disk scan +
+    /// - **Every tick (`UICadence.agentHubInterval`):** gate DB — agents, asks, entropy.
+    /// - **Every `fullScanInterval`:** pets + registry disk scan +
     ///   process-attach re-check.
     /// - **DB mtime change:** force a full scan so asks appear immediately when
     ///   the gate writes, without waiting for the pets interval.

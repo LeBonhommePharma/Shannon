@@ -57,8 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ingestSvc = AgentIngestService()
         let activityMon = AgentActivityMonitor()
         let confirm = ConfirmationController(provider: motion, feedback: SystemConfirmationFeedback())
-        // ~0.55s + exponential smooth → continuous gauges without layout thrash.
-        let sysRes = SystemResourceMonitor(interval: 0.55)
+        // UICadence resource interval + exponential smooth → responsive continuous gauges.
+        let sysRes = SystemResourceMonitor(
+            interval: UICadence.resourceInterval,
+            smoothAlpha: UICadence.resourceSmoothAlpha
+        )
 
         // Native keep-awake (caffeinate-class IOPMAssertion) — no Amphetamine.
         let keep = KeepAwakeMonitor()

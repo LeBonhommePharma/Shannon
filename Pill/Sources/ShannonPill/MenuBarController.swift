@@ -84,10 +84,10 @@ final class MenuBarController: NSObject {
         refresh()
 
         // Backup timer for agent/ask state; resource glyph also paints on sample publish.
-        let t = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: UICadence.menuBarBackupInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        t.tolerance = 0.1
+        t.tolerance = min(0.12, UICadence.menuBarBackupInterval * 0.35)
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }

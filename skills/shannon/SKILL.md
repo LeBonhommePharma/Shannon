@@ -85,12 +85,15 @@ python3 -m agent_manager result dataset_runner --task TASK \
 python3 -m agent_manager kill claude_code --task TASK --reason "session end"
 ```
 
-Or via bootstrap script:
+Or via bootstrap script (`agent` / `agents` / `hub-agent` — **not** `hub`,
+which bootstraps the macOS app):
 
 ```bash
-./scripts/shannon hub roster
-./scripts/shannon hub spawn science --dry-run
-./scripts/shannon hub monitor
+./scripts/shannon agent roster
+./scripts/shannon agent spawn science --dry-run
+./scripts/shannon agent monitor
+./scripts/shannon agent control science "phase A" --task TASK --dry-run
+./scripts/shannon agent kill science --task TASK --dry-run
 ```
 
 ## Install into host TUIs

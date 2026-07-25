@@ -18,6 +18,11 @@ final class CloudPublisher {
     private(set) var lastPublishedAt: Date?
     private(set) var failureCount = 0
 
+    /// Honest multi-device status for the popover footer (P2.7).
+    /// - `off` / `in-memory`: unsigned or SHANNON_ICLOUD≠1
+    /// - `on`: CloudKit backend active
+    private(set) var multiDeviceStatus: String = "in-memory"
+
     /// Sources are read at publish time rather than observed, so this stays a
     /// leaf: nothing in the pill has to know it exists.
     private weak var nowPlaying: NowPlayingModel?
@@ -51,7 +56,17 @@ final class CloudPublisher {
         self.activity = activity
         self.interval = interval
         self.deviceName = deviceName
-        self.publisher = ShannonPublisher(backend: backend ?? CloudPublisher.defaultBackend())
+        let resolved = backend ?? CloudPublisher.defaultBackend()
+        self.publisher = ShannonPublisher(backend: resolved)
+        self.multiDeviceStatus = CloudPublisher.statusLabel(for: resolved)
+    }
+
+    /// Operator-facing label for the multi-device path.
+    static func statusLabel(for backend: ShannonSyncBackend) -> String {
+        let name = String(describing: type(of: backend))
+        if name.contains("CloudKit") { return "on" }
+        let optIn = ProcessInfo.processInfo.environment["SHANNON_ICLOUD"] == "1"
+        return optIn ? "off" : "in-memory"
     }
 
     /// Default backend is **always** in-memory unless the user opts into iCloud

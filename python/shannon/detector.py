@@ -450,6 +450,18 @@ class ShannonCollapseDetector:
         # passed only on_collapse had their CollapseEvent handler invoked with a
         # CollapseResult -- an AttributeError on the first access of delta_h,
         # collapse_score or window, none of which CollapseResult has.
+        #
+        # `on_collapse` is deprecated: prefer `callback=` with CollapseResult.
+        if on_collapse is not None:
+            import warnings
+
+            warnings.warn(
+                "ShannonCollapseDetector(on_collapse=...) is deprecated; "
+                "use callback= with CollapseResult (canonical API). "
+                "on_collapse will be removed in a future release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._callback = callback
         self._on_collapse_event = on_collapse  # Separate CollapseEvent callback
 

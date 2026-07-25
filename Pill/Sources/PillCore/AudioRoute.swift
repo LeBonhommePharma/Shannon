@@ -200,10 +200,22 @@ public final class CoreAudioRouteProvider: AudioRouteProviding {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        var value: CFString = "" as CFString
-        var size = UInt32(MemoryLayout<CFString>.size)
-        let status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value)
-        return status == noErr ? (value as String) : nil
+        // CFString is a ref type — pass a CFTypeRef slot, not a stack CFString
+        // (forming UnsafeMutableRawPointer to CFString is undefined / warns).
+        var prop: CFTypeRef?
+        var size = UInt32(MemoryLayout<CFTypeRef?>.size)
+        let status = withUnsafeMutablePointer(to: &prop) { ptr in
+            AudioObjectGetPropertyData(
+                id, &address, 0, nil, &size,
+                UnsafeMutableRawPointer(ptr)
+            )
+        }
+        guard status == noErr, let prop else { return nil }
+        if let s = prop as? String { return s }
+        if CFGetTypeID(prop) == CFStringGetTypeID() {
+            return (prop as! CFString) as String
+        }
+        return nil
     }
 
     static func isBluetooth(_ id: AudioDeviceID) -> Bool {

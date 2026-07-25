@@ -120,7 +120,7 @@ public struct ShannonThemeSpecimen: View {
                 width: ShannonLayout.Pill.collapsedWidth,
                 height: ShannonLayout.Pill.collapsedHeight
             )
-            .shannonPill(isActive: false)
+            .shannonPill(isActive: false, isCollapsed: true)
 
             HStack(spacing: ShannonSpacing.sm) {
                 ShannonStatusDot(state: .active)
@@ -137,7 +137,7 @@ public struct ShannonThemeSpecimen: View {
                 width: ShannonLayout.Pill.collapsedWidth,
                 height: ShannonLayout.Pill.collapsedHeight
             )
-            .shannonPill(isActive: true)
+            .shannonPill(isActive: true, isCollapsed: true)
         }
         .padding(ShannonSpacing.md)
         .background(

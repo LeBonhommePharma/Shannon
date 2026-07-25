@@ -23,7 +23,7 @@ Python bridge.
 
 ---
 
-## 1. Now Playing for *other* apps has no public API — BLOCKED, partially mitigated
+## 1. Now Playing for *other* apps has no public API — PARTIALLY SHIPPED
 
 **What the brief asked for:** read track/artist/artwork from Apple Music,
 Spotify, browsers and VLC via "AVFoundation / NowPlayingManager".
@@ -34,65 +34,55 @@ call that returns another application's Now Playing state. AVFoundation does not
 expose it either. Every notch utility that shows system-wide media (Islet
 included) uses the private **MediaRemote** framework.
 
-**What we did:** `MediaRemoteProvider` `dlopen`s
-`/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote` and
-resolves `MRMediaRemoteGetNowPlayingInfo`, `MRMediaRemoteSendCommand`,
-`MRMediaRemoteRegisterForNowPlayingNotifications` and
-`MRMediaRemoteSetElapsedTime`. Every call site tolerates a nil symbol, so the
-pill degrades to the entropy readout instead of crashing.
+**What we did:**
 
-**Current status on this machine:**
+1. **`MediaRemoteProvider`** `dlopen`s
+   `/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote` and
+   resolves `MRMediaRemoteGetNowPlayingInfo`, `MRMediaRemoteSendCommand`,
+   `MRMediaRemoteRegisterForNowPlayingNotifications` and
+   `MRMediaRemoteSetElapsedTime`. Every call site tolerates a nil symbol.
+2. **`ScriptedMediaProvider` + `CompositeNowPlayingProvider`** (shipped) —
+   when MediaRemote only ever delivers empty (entitlement wall or idle), the
+   composite falls back to AppleScript against **Music.app** and **Spotify**
+   (`ScriptedMediaLogic` pure parse + osascript). Transport controls (play/
+   pause / next / previous) follow the same path. Requires Automation consent
+   per app; no artwork for most Spotify builds; **no browsers / VLC**.
 
-```
-mediaremote: symbols resolved
-now playing: no data (entitlement-gated, or nothing playing)
-```
+**Still blocked:** browsers, VLC, system-wide media without Automation consent,
+and artwork when the scripted path is active.
 
-Symbols resolve, but no payload was delivered. Two candidate causes, and the
-probe was run with no media playing, so they are **not disambiguated**:
-
-- Starting with **macOS 15.4** Apple gated `MRMediaRemoteGetNowPlayingInfo`
-  behind `com.apple.mediaremote.now-playing-info`, a private entitlement not
-  granted to third-party developers. On a gated system the callback fires with
-  an empty dictionary. This machine (macOS 27) is well past that cutoff, so
-  this is the expected cause.
-- Nothing was playing, which produces the same empty result.
-
-**To disambiguate:** start any media, then run
-`Pill/.build/debug/ShannonPill --probe`. If it still reports no data, the
-entitlement wall is confirmed on this OS.
-
-**Fallback options if confirmed (none implemented yet):**
-
-| Option | Coverage | Cost |
+| Option | Coverage | Status |
 |---|---|---|
-| ScriptingBridge / AppleScript per app | Music, Spotify only — not browsers or VLC | Needs Automation consent per app; no artwork for some |
-| Accessibility tree scraping | Broad but brittle | Breaks on every UI redesign |
-| Browser extension for web audio | Browsers only | A whole second product |
-| Ship unsigned / user-installed with entitlement | Full | Not distributable |
+| MediaRemote (private) | System-wide when entitlement allows | Shipped; often empty post-15.4 |
+| AppleScript Music/Spotify | Music + Spotify only | **Shipped** (`CompositeNowPlayingProvider`) |
+| Accessibility tree scraping | Broad but brittle | Not pursued |
+| Browser extension for web audio | Browsers only | Not pursued |
 
-The UI already surfaces this: when the provider reports unavailable, the
-expanded pill shows "Now Playing unavailable — see BLOCKED.md", and the
-collapsed pill falls back to the Shannon entropy readout.
+The UI already surfaces gaps: when no provider has track data, the expanded
+pill shows "Now Playing unavailable — see BLOCKED.md", and the collapsed pill
+falls back to the Shannon entropy readout.
 
 ---
 
-## 2. Focus / Do Not Disturb status — BLOCKED (P1, not attempted)
+## 2. Focus / Do Not Disturb status — BEST-EFFORT SHIPPED
 
 The brief suggested `CNContactStore` or `com.apple.donotdisturb`. Neither is a
-supported read path:
+supported public read path:
 
 - `CNContactStore` is the Contacts database and has nothing to do with Focus.
 - Focus state lives in `~/Library/DoNotDisturb/DB/Assertions.json` and
-  `ModeConfigurations.json`. Reading it is possible but the files are inside the
-  app-data TCC boundary, undocumented, and their schema has changed repeatedly
-  across releases.
+  `ModeConfigurations.json`. Reading is possible but the files are undocumented
+  and their schema has changed repeatedly across releases.
 - `NSUserNotificationCenter`'s DND query was removed; the modern replacement
   (`UNUserNotificationCenter.getNotificationSettings`) reports *your own* app's
   authorization, not the system Focus mode.
 
-Not implemented. If pursued, treat the JSON files as a best-effort read with a
-schema-version guard and a hard fallback to "unknown".
+**What we shipped:** `FocusModeLogic` / `FocusModeReader` / `FocusModeMonitor`
+best-effort parse of `Assertions.json` (+ optional mode name from
+`ModeConfigurations.json`). Schema-unknown and missing-file paths fail closed
+to `.unknown`. Surfaced in the menu-bar popover footer as `Focus: off|on|unknown`
+(or `Focus: <mode>` when on and a name is present). **Do not treat this as a
+hard gate for notifications** — the mirror path remains blocked (§3).
 
 ---
 
@@ -251,12 +241,14 @@ stereo. Routing synthesized speech through the engine would require rendering
 to buffers via `write(_:toBufferCallback:)` and losing system voice routing —
 judged not worth it for a positional cue.
 
-### Head-orientation browse mode (§6)
+### Head-orientation browse mode (§6) — SHIPPED (pure detector)
 
-Not implemented. `CMHeadphoneMotionManager` already streams continuous
-attitude, so this is genuinely available — it was descoped for time, not
-blocked. `HeadGestureDetector` would need a second mode that reports sustained
-yaw offset rather than discrete gestures.
+**Implemented:** `HeadOrientationBrowser` + `HeadOrientationBrowse` report
+sustained signed yaw offset from neutral while armed (engage threshold default
+12°, normalize to ±45°). Unit-tested with synthetic attitude streams; reuses
+`HeadGestureDetector.angleDelta` for wrap-around. Wire into list-pan / scrub UI
+when a consumer needs it — the pure detector is ready; live motion still depends
+on AirPods + Motion TCC (same as nod/shake, still hardware-unproven).
 
 ---
 
@@ -285,15 +277,17 @@ development. The parser and dispatch logic have 32 unit tests.
 |---|---|---|
 | Battery / charging ring | none | ✅ works, verified |
 | Shannon entropy bridge | none (local Unix socket, 0600) | ✅ works, verified |
-| Now Playing metadata | private entitlement | ⚠️ symbols resolve, no data |
-| Now Playing transport control | Accessibility | untested (needs §1 resolved) |
+| Now Playing (MediaRemote) | private entitlement | ⚠️ symbols resolve; often empty post-15.4 |
+| Now Playing (Music/Spotify AS) | Automation per app | ✅ composite fallback shipped (§1) |
+| Now Playing transport control | Automation (scripted) / MediaRemote | ✅ follows composite path |
 | AirPods battery | Bluetooth | not implemented |
 | Head-gesture confirm | Motion & Fitness (TCC only) | ✅ built, macOS 14+, untested on hardware |
+| Head-orientation browse | Motion & Fitness | ✅ pure detector + tests (§6); UI consumer optional |
 | Voice dictation | Microphone + Speech Recognition (TCC) | ✅ built, on-device only, untested with a live mic |
 | AirPods route / model indicator | none (CoreAudio) | ✅ built |
 | AirPods in-ear detection | — | ❌ no macOS API |
 | AirPods battery | — | ❌ no third-party API |
 | Stem / Crown presses | — | ❌ requires hijacking Now Playing |
 | Notification mirror | Accessibility + Automation | ❌ blocked (§3) |
-| Focus / DND | none available | ❌ blocked (§2) |
+| Focus / DND | best-effort file read | ⚠️ shipped fail-closed (§2); not a hard gate |
 | AirDrop | none available | ❌ blocked (§4) |

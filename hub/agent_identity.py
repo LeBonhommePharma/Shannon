@@ -22,6 +22,13 @@ CORE_AGENT_IDS: tuple[str, ...] = (
     "science",
 )
 
+# Collaborative handrail roster (skill + concurrent FlexAIDdS benchmarking).
+# Includes Design + OpenCode beyond the core six.
+HANDRAIL_AGENT_IDS: tuple[str, ...] = CORE_AGENT_IDS + (
+    "design",
+    "opencode",
+)
+
 
 @dataclass(frozen=True)
 class AgentIdentity:
@@ -187,6 +194,54 @@ IDENTITIES.update(
             auth_kind="local",
             pet="gecko",  # clings to any surface
             pet_symbol="lizard.fill",
+        ),
+        # IDE agents — AgentIngest maps Cursor / VS Code here; without these
+        # entries VALID_AGENTS rejects ⌘D with unknown_agent and the attach
+        # loop dies as a silent "demo" observation.
+        "cursor": AgentIdentity(
+            id="cursor",
+            display_name="Cursor",
+            short_name="Cur",
+            emoji="⬛",
+            color_rgb=(0.45, 0.48, 0.55),
+            system_image="cursorarrow.rays",
+            auth_kind="local",
+            pet="cat",  # independent, hunts tokens
+            pet_symbol="cat.fill",
+        ),
+        "vscode": AgentIdentity(
+            id="vscode",
+            display_name="VS Code",
+            short_name="VS",
+            emoji="💙",
+            color_rgb=(0.20, 0.55, 0.90),
+            system_image="chevron.left.forwardslash.chevron.right",
+            auth_kind="local",
+            pet="cat",
+            pet_symbol="cat.circle",
+        ),
+        # Design + OpenCode — Shannon skill handrail for multi-TUI orchestration.
+        "design": AgentIdentity(
+            id="design",
+            display_name="Design",
+            short_name="Des",
+            emoji="🎨",
+            color_rgb=(0.95, 0.40, 0.70),
+            system_image="paintpalette.fill",
+            auth_kind="local",
+            pet="peacock",  # visual, deliberate
+            pet_symbol="paintbrush.pointed.fill",
+        ),
+        "opencode": AgentIdentity(
+            id="opencode",
+            display_name="OpenCode",
+            short_name="OC",
+            emoji="⌨️",
+            color_rgb=(0.25, 0.85, 0.75),
+            system_image="terminal.fill",
+            auth_kind="local",
+            pet="octopus",  # many arms / tools
+            pet_symbol="ellipsis.circle.fill",
         ),
     }
 )

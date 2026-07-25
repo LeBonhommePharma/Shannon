@@ -19,6 +19,11 @@ final class MenuBarController: NSObject {
     private let battery: BatteryMonitor
     private let ingest: AgentIngestService
     private let activity: AgentActivityMonitor
+    private let resources: SystemResourceMonitor
+    private let amphetamine: AmphetamineMonitor
+    private let focusMode: FocusModeMonitor
+    /// Honest multi-device backend label from CloudPublisher.
+    private let multiDeviceStatus: String
     private var timer: Timer?
     private var pulseTimer: Timer?
     private var pulsePhase = false
@@ -38,12 +43,20 @@ final class MenuBarController: NSObject {
         bridge: ShannonBridge,
         battery: BatteryMonitor,
         ingest: AgentIngestService,
-        activity: AgentActivityMonitor
+        activity: AgentActivityMonitor,
+        resources: SystemResourceMonitor,
+        amphetamine: AmphetamineMonitor,
+        focusMode: FocusModeMonitor,
+        multiDeviceStatus: String = "in-memory"
     ) {
         self.bridge = bridge
         self.battery = battery
         self.ingest = ingest
         self.activity = activity
+        self.resources = resources
+        self.amphetamine = amphetamine
+        self.focusMode = focusMode
+        self.multiDeviceStatus = multiDeviceStatus
     }
 
     func start() {
@@ -57,13 +70,38 @@ final class MenuBarController: NSObject {
             button.setAccessibilityLabel("Shannon agent hub")
         }
         item = status
+        // First-run discoverability: brief title flash (LSUIElement has no Dock).
+        if FirstRunCoach.shouldShow(), let button = status.button {
+            button.title = " Shannon · click me"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+                self?.lastRendered = nil
+                self?.refresh()
+            }
+        }
         refresh()
 
-        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+        // Backup timer for agent/ask state; resource glyph also paints on sample publish.
+        let t = Timer(timeInterval: 0.75, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+        t.tolerance = 0.1
         RunLoop.main.add(t, forMode: .common)
         timer = t
+    }
+
+    /// Called from `SystemResourceMonitor.onSnapshotPublished` for sample-aligned glyph.
+    func refreshFromResources() {
+        refresh()
+    }
+
+    /// Open the status popover once for first-run coaching (auto-surface).
+    func presentFirstRunPopover() {
+        guard FirstRunCoach.shouldShow() else { return }
+        guard let button = item?.button else { return }
+        if popover?.isShown == true { return }
+        togglePopover()
+        // Re-assert after open so coach is visible.
+        _ = button
     }
 
     func stop() {
@@ -99,6 +137,10 @@ final class MenuBarController: NSObject {
     // MARK: - Icon state machine
 
     private func refresh() {
+        // Amphetamine keep-awake must track agent busy even when the popover is
+        // closed (popover is only created on click — onChange there never fires).
+        amphetamine.syncWithAgents(busyCount: activity.summary.busyCount)
+
         guard let button = item?.button else { return }
         if let until = flashUntil, until > Date() { return }
         flashUntil = nil
@@ -119,6 +161,16 @@ final class MenuBarController: NSObject {
         // an approval nobody will ever read is the definition of a false alarm.
         let pendingCount = activity.pendingAsks.count
 
+        // Host gauges — used for glyph + title when not in alarm.
+        let snap = resources.snapshot
+        let constrained = snap.mostConstrained
+        // Finer signature (1%/5%/10% by core count) + peak index — sample-aligned.
+        let coresKey = SystemResourceLogic.coresSignatureKey(
+            cores: snap.cpuCores,
+            aggregate: snap.cpuPercent
+        )
+        let constrainedKey = constrained.map { "\($0.kind.rawValue):\($0.percent.rounded())" } ?? "-"
+
         // Cheap signature of everything the icon depends on; bail when unchanged.
         let signature = [
             "p\(pendingCount)",
@@ -127,6 +179,8 @@ final class MenuBarController: NSObject {
             summary.busy.first?.displayName ?? "",
             "l\(summary.connected.count)",
             bridge.connected ? "1" : "0",
+            constrainedKey,
+            coresKey,
         ].joined(separator: "|")
         guard signature != lastRendered else { return }
         lastRendered = signature
@@ -151,20 +205,47 @@ final class MenuBarController: NSObject {
                 String(format: "Shannon: entropy collapse, H %.1f bits (source: %@)",
                        collapse.bits, collapse.source.label))
         } else if !summary.busy.isEmpty {
-            // Template image: the system inverts it for dark mode / selection.
-            button.image = Self.symbolImage("waveform.path.ecg", template: true)
-            button.title = summary.busy.count > 1 ? " \(summary.busy.count)" : ""
+            // Agents busy: still show live per-core glyph so load is visible.
+            button.image = SystemResourceGlyph.image(
+                cores: snap.cpuCores,
+                aggregate: snap.cpuPercent,
+                template: false
+            )
+            if summary.busy.count > 1 {
+                button.title = " \(summary.busy.count)"
+            } else if let c = constrained, c.percent >= 80 {
+                button.title = " \(c.shortLabel)"
+            } else if let cpu = snap.cpuPercent {
+                button.title = String(format: " %.0f%%", cpu)
+            } else {
+                button.title = ""
+            }
             button.contentTintColor = nil
             let names = summary.busy.prefix(3).map(\.displayName).joined(separator: ", ")
             button.setAccessibilityLabel("Shannon: \(summary.busy.count) agents active — \(names)")
         } else {
-            // Nothing is provably working. Say which flavour of quiet this is
-            // rather than implying the hub is watching something.
-            button.image = Self.symbolImage("waveform.path.ecg", template: true)
-            button.title = ""
-            button.contentTintColor = nil
+            // Quiet: iStat-style per-core bars; glyph-first when calm.
+            button.image = SystemResourceGlyph.image(
+                cores: snap.cpuCores,
+                aggregate: snap.cpuPercent,
+                template: false
+            )
+            let title = SystemResourceLogic.calmStatusTitle(
+                constrained: constrained,
+                hottest: snap.hottestCore,
+                imbalance: snap.coreImbalance
+            )
+            button.title = title
+            // Load stress uses yellow/red — not ask-orange (amber reserved for gates).
+            if let c = constrained, c.percent >= 92 {
+                button.contentTintColor = .systemRed
+            } else if let c = constrained, c.percent >= 80 {
+                button.contentTintColor = .systemYellow
+            } else {
+                button.contentTintColor = nil
+            }
             let connected = summary.connected.count
-            let label: String
+            var label: String
             if connected > 0 {
                 label = "Shannon: \(connected) agent\(connected > 1 ? "s" : "") connected, idle"
             } else if bridge.connected {
@@ -172,8 +253,36 @@ final class MenuBarController: NSObject {
             } else {
                 label = "Shannon: no agents connected"
             }
+            if let c = constrained {
+                label += String(format: ". %@ %.0f percent", c.kind.shortLabel, c.percent)
+            }
+            if let hot = snap.hottestCore, snap.cpuCoreCount > 1 {
+                label += String(format: ". peak core %d at %.0f percent", hot.index, hot.percent)
+            }
             button.setAccessibilityLabel(label)
+            button.toolTip = Self.resourceTooltip(snap: snap, agents: summary)
         }
+    }
+
+    private static func resourceTooltip(snap: SystemResourceSnapshot, agents: AgentActivitySummary) -> String {
+        var lines: [String] = ["Shannon resources"]
+        if let cpu = snap.cpuPercent {
+            lines.append(String(format: "CPU %.0f%% (%d cores)", cpu, snap.cpuCoreCount))
+        }
+        if let hot = snap.hottestCore {
+            lines.append(String(format: "Hottest: C%d %.0f%% (%+.0f vs avg)",
+                                hot.index, hot.percent, hot.deltaVsAverage))
+        }
+        if let g = snap.gpuPercent {
+            lines.append(String(format: "GPU %.0f%%", g))
+        }
+        if let r = snap.ramPercent {
+            lines.append(String(format: "RAM %.0f%%", r))
+        }
+        if agents.busyCount > 0 {
+            lines.append("\(agents.busyCount) agent(s) active")
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Subtle attention pulse while a gate waits: the tint breathes between
@@ -222,12 +331,19 @@ final class MenuBarController: NSObject {
         guard let button = item?.button else { return }
         let pop = NSPopover()
         pop.behavior = .transient
+        // Liquid Glass: keep system open animation; appearance locked dark so
+        // the popover material composites like Control Center, not a light sheet.
         pop.animates = true
-        pop.contentViewController = NSHostingController(
+        pop.appearance = NSAppearance(named: .darkAqua)
+        let host = NSHostingController(
             rootView: MenuBarPopoverView(
                 activity: activity,
                 bridge: bridge,
                 battery: battery,
+                resources: resources,
+                amphetamine: amphetamine,
+                focusMode: focusMode,
+                multiDeviceStatus: multiDeviceStatus,
                 onShowAllGates: { [weak self] in
                     self?.popover?.performClose(nil)
                     self?.onShowPill?()
@@ -243,6 +359,9 @@ final class MenuBarController: NSObject {
                 onQuit: { NSApp.terminate(nil) }
             )
         )
+        // Intrinsic size so the popover hugs content (no tall empty chrome).
+        host.sizingOptions = [.intrinsicContentSize]
+        pop.contentViewController = host
         popover = pop
         pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         // Keyboard access: focus the popover so Tab walks its controls.

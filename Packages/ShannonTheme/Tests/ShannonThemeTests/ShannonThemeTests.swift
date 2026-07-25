@@ -60,9 +60,70 @@ final class ShannonThemeTests: XCTestCase {
 
     func testExpandedPillHeightAddsThirtyTwoPoints() {
         XCTAssertEqual(ShannonLayout.Pill.expandedHeight(contentHeight: 100), 132)
-        XCTAssertEqual(ShannonLayout.Pill.expandedWidth, 320)
+        XCTAssertEqual(ShannonLayout.Pill.expandedWidth, 400)
         XCTAssertEqual(ShannonLayout.Pill.collapsedWidth, 160)
         XCTAssertEqual(ShannonLayout.Pill.collapsedHeight, 32)
+    }
+
+    func testCollapsedHeightHugsNotchBand() {
+        // Physical cutout: menu-bar band + island hang (MBP 14" ~38+10).
+        XCTAssertEqual(
+            ShannonLayout.Pill.collapsedHeight(notchBand: 38, physicalNotch: true),
+            38 + ShannonLayout.Pill.physicalIslandOverhang,
+            accuracy: 0.01
+        )
+        XCTAssertEqual(
+            ShannonLayout.Pill.collapsedHeight(notchBand: 37, physicalNotch: true),
+            37 + ShannonLayout.Pill.physicalIslandOverhang,
+            accuracy: 0.01
+        )
+        // Synthetic external: 1 pt hairline under the band.
+        XCTAssertEqual(
+            ShannonLayout.Pill.collapsedHeight(notchBand: 37, physicalNotch: false),
+            36,
+            accuracy: 0.01
+        )
+        XCTAssertEqual(
+            ShannonLayout.Pill.collapsedHeight(notchBand: nil),
+            ShannonLayout.Pill.collapsedHeight,
+            accuracy: 0.01
+        )
+        XCTAssertEqual(
+            ShannonLayout.Pill.collapsedHeight(notchBand: 10, physicalNotch: true),
+            ShannonLayout.Pill.collapsedHeightMin,
+            accuracy: 0.01
+        )
+        XCTAssertEqual(
+            ShannonLayout.Pill.collapsedHeight(notchBand: 50, physicalNotch: true),
+            ShannonLayout.Pill.physicalIslandHeightMax,
+            accuracy: 0.01
+        )
+        XCTAssertEqual(ShannonLayout.Pill.collapsedCorner(height: 32), 16, accuracy: 0.01)
+        let h = ShannonLayout.Pill.collapsedHeight(notchBand: 38, physicalNotch: true)
+        let lip = ShannonLayout.Pill.notchBottomRadius(height: h)
+        XCTAssertGreaterThanOrEqual(lip, 11)
+        XCTAssertLessThanOrEqual(lip, 16)
+        XCTAssertLessThan(lip, h / 2)
+    }
+
+    func testCollapsedWidthFromNotchRect() {
+        // Physical MBP-scale cutout: full measured width, no recessive shrink.
+        let mbp = ShannonLayout.Pill.collapsedWidth(
+            notchWidth: 220, recessive: true, physicalNotch: true
+        )
+        XCTAssertEqual(mbp, 220, accuracy: 0.01)
+        let full = ShannonLayout.Pill.collapsedWidth(
+            notchWidth: 200, recessive: false, physicalNotch: false
+        )
+        XCTAssertEqual(full, 200, accuracy: 0.01)
+        let idle = ShannonLayout.Pill.collapsedWidth(
+            notchWidth: 200, recessive: true, physicalNotch: false
+        )
+        XCTAssertLessThan(idle, full)
+        XCTAssertEqual(
+            ShannonLayout.Pill.collapsedWidth(notchWidth: nil, recessive: false),
+            ShannonLayout.Pill.defaultCollapsedWidth
+        )
     }
 
     func testCardInsetsMatchSpec() {

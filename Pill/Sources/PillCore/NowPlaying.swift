@@ -59,6 +59,9 @@ public enum NowPlayingState: Sendable, Equatable {
     }
 
     public var isActive: Bool { info != nil }
+
+    /// No track metadata — media UI must stay hidden (not "unavailable").
+    public var isEmpty: Bool { info == nil }
 }
 
 public enum NowPlayingEvent: Sendable, Equatable {
@@ -173,6 +176,10 @@ public final class NowPlayingModel: ObservableObject {
     }
 
     public var collapsedLabel: String? { machine.collapsedLabel() }
+
+    /// True only when a real track is loaded. Prefer this over inventing an
+    /// "unavailable" placeholder when MediaRemote is idle or gated.
+    public var hasTrack: Bool { !state.isEmpty }
 
     public func start() {
         guard provider.isAvailable else { return }

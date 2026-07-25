@@ -13,21 +13,32 @@ struct MenuBarPopoverView: View {
     @ObservedObject var activity: AgentActivityMonitor
     @ObservedObject var bridge: ShannonBridge
     @ObservedObject var battery: BatteryMonitor
+    @ObservedObject var resources: SystemResourceMonitor
+    @ObservedObject var amphetamine: AmphetamineMonitor
+    @ObservedObject var focusMode: FocusModeMonitor
+    /// Cloud multi-device honesty: `"on"` / `"in-memory"` / `"off"`.
+    var multiDeviceStatus: String = "in-memory"
 
     var onShowAllGates: () -> Void
     var onOpenHubLog: () -> Void
     var onOpenSettings: () -> Void
     var onQuit: () -> Void
 
-    /// The one reading the whole pill agrees on: live detector if there is one,
-    /// otherwise the gate's own measured H for the freshest live agent,
-    /// otherwise an explicit absence that carries no number.
-    ///
-    /// The idle publisher is not consulted at all any more: it has no number,
-    /// and this view has nothing to animate. It was removed from this view's
-    /// inputs rather than left wired up doing nothing.
+    /// Fleet-level reading (worst/freshest) for the header collapse line and
+    /// footer summary. Per-agent gauges use `agentReadings`.
     private var reading: EntropyReading {
         EntropyProvenance.resolve(
+            bridgeConnected: bridge.connected,
+            bridgeStatus: bridge.status,
+            gate: activity.agentEntropy,
+            gateDBAvailable: activity.gateDBAvailable
+        )
+    }
+
+    /// Independent H per listed agent — never a single anonymous number.
+    private var agentReadings: [String: EntropyReading] {
+        EntropyProvenance.resolveAll(
+            agentIds: (busy.isEmpty ? summary.agents : busy).map(\.id),
             bridgeConnected: bridge.connected,
             bridgeStatus: bridge.status,
             gate: activity.agentEntropy,
@@ -44,9 +55,28 @@ struct MenuBarPopoverView: View {
     /// Newest pending approval — the one worth answering inline.
     private var ask: GateDBReader.PendingAsk? { activity.pendingAsks.first }
 
+    /// Gate readiness line for the hub badge / header (P0.3).
+    private var gateHealth: GateHealth {
+        GateHealthResolver.resolve(
+            socketUp: activity.gateAvailable,
+            dbAvailable: activity.gateDBAvailable,
+            pendingAsks: activity.pendingAsks.count,
+            hasMeasuredEntropy: reading.isMeasured
+        )
+    }
+
+    @State private var showFirstRun = FirstRunCoach.shouldShow()
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+            if showFirstRun && summary.agents.isEmpty {
+                firstRunTips
+                    .shannonGlassSection(emphasized: true)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
             if let ask {
                 GateInlineCard(
                     ask: ask,
@@ -58,27 +88,53 @@ struct MenuBarPopoverView: View {
                     },
                     onShowAll: onShowAllGates
                 )
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
+            resourcesSection
+                .shannonGlassSection()
+            amphetamineSection
+                .shannonGlassSection()
             agentSection
+                .shannonGlassSection()
             staleAskNotice
             recentSection
-            Divider().opacity(0.4)
             footer
+                .padding(.top, 2)
         }
-        .padding(12)
-        .frame(width: 320)
-        // Order matters: the first `.background` sits nearest the content, so
-        // the tint is layered ON TOP of the material. At 0.95 it covered the
-        // material completely and `.ultraThinMaterial` underneath was purely
-        // decorative.
-        //
-        // Now on the same measured vibrancy stack as the pill (`PillMaterial`,
-        // `.sheet`) instead of `.ultraThinMaterial`, so the popover and the
-        // notch read as one surface and the contrast numbers measured for the
-        // pill apply here unchanged: at 0.30 composite, primary text is 12.4:1
-        // and secondary 5.5:1 over the worst-case white backdrop.
-        .background(Color.shannonBackground.opacity(0.30))
-        .background(PillMaterial())
+        .animation(.shannon(reduceMotion ? .linear(duration: 0) : .shannonEase, reduceMotion: reduceMotion),
+                   value: activity.pendingAsks.count)
+        .animation(.shannon(.shannonEase, reduceMotion: reduceMotion), value: summary.busyCount)
+        .onChange(of: activity.summary.busyCount) { count in
+            amphetamine.syncWithAgents(busyCount: count)
+        }
+        .padding(14)
+        // Fixed width + intrinsic height so the popover does not stretch or
+        // shift when agent/footer content wraps.
+        .frame(width: 308, alignment: .topLeading)
+        .fixedSize(horizontal: true, vertical: true)
+        // Liquid Glass stack for macOS 27: `.popover` material (matches system
+        // menus) + light indigo tint + top specular so it reads as refractive
+        // glass rather than a flat dark slab.
+        .background {
+            ZStack {
+                PillMaterial(kind: .popover)
+                Color.shannonBackground.opacity(0.22)
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.08),
+                        Color.white.opacity(0.02),
+                        Color.clear,
+                    ],
+                    startPoint: .top,
+                    endPoint: UnitPoint(x: 0.5, y: 0.35)
+                )
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+        }
         // Keep the popover locked to dark mode regardless of system appearance.
         .preferredColorScheme(.dark)
     }
@@ -123,51 +179,425 @@ struct MenuBarPopoverView: View {
     /// so its presence is the honest "can I actually answer gates" signal.
     private var hubConnected: Bool { activity.gateAvailable || bridge.connected }
 
-    private var hubStatusText: String {
-        hubConnected ? "Hub connected" : "Hub offline"
-    }
+    private var hubStatusText: String { gateHealth.label }
 
     private var hubStatusBadge: some View {
-        HStack(spacing: 4) {
+        let ok = gateHealth.socketUp
+        return HStack(spacing: 4) {
             Circle()
-                .fill(hubConnected ? Color.shannonSuccess : Color.shannonError)
+                .fill(ok ? Color.shannonSuccess : Color.shannonError)
                 .frame(width: 6, height: 6)
                 .shadow(
-                    color: (hubConnected ? Color.shannonSuccess : Color.shannonError).opacity(0.6),
+                    color: (ok ? Color.shannonSuccess : Color.shannonError).opacity(0.6),
                     radius: 3
                 )
-            Text(hubConnected ? "hub" : "offline")
+            Text(gateHealth.label)
                 .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                .foregroundStyle(hubConnected ? Color.shannonSuccess : Color.shannonError)
+                .foregroundStyle(ok ? Color.shannonSuccess : Color.shannonError)
+                .lineLimit(1)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(Capsule().fill(
-            hubConnected ? Color.shannonSuccess.opacity(0.12) : Color.shannonError.opacity(0.12)
+            ok ? Color.shannonSuccess.opacity(0.12) : Color.shannonError.opacity(0.12)
         ))
         .overlay(Capsule().strokeBorder(
-            hubConnected ? Color.shannonSuccess.opacity(0.35) : Color.shannonError.opacity(0.35),
+            ok ? Color.shannonSuccess.opacity(0.35) : Color.shannonError.opacity(0.35),
             lineWidth: 1
         ))
-        .help(hubConnected
-              ? "Gate socket reachable — approvals will be delivered"
+        .help(ok
+              ? "Gate socket reachable — \(gateHealth.label)"
               : "Gate socket missing — start the hub to answer approvals")
         .accessibilityLabel(hubStatusText)
     }
 
+    private var firstRunTips: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Getting started")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.shannonPrimary)
+            ForEach(FirstRunCoach.steps, id: \.rawValue) { step in
+                Text("• \(FirstRunCoach.tip(for: step))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.shannonSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Got it") {
+                FirstRunCoach.markDone()
+                showFirstRun = false
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.shannonAccent)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.shannonAccent.opacity(0.08)))
+    }
+
+    // MARK: Amphetamine keep-awake
+
+    /// Amphetamine.app session control — fail-closed when app missing.
+    private var amphetamineSection: some View {
+        let s = amphetamine.session
+        return VStack(alignment: .leading, spacing: 5) {
+            sectionTitle("Keep awake")
+            HStack(spacing: 8) {
+                Image(systemName: s.isActive ? "bolt.fill" : "bolt.slash")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(s.isActive ? Color.shannonWarning : Color.shannonTertiary)
+                    .frame(width: 14)
+                Text(s.shortLabel)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.shannonSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if s.availability == .available || s.availability == .unknown {
+                    if s.isActive {
+                        Button("End") { amphetamine.endSession() }
+                            .font(.system(size: 10, weight: .semibold))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.shannonAccent)
+                    } else {
+                        Button("Start 2h") { amphetamine.startSession(.agentBusyDefault) }
+                            .font(.system(size: 10, weight: .semibold))
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.shannonAccent)
+                    }
+                }
+            }
+            .frame(height: 16)
+            Toggle(isOn: $amphetamine.autoKeepAwakeWithAgents) {
+                Text("Auto while agents busy")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(Color.shannonTertiary)
+            }
+            .toggleStyle(.checkbox)
+            .controlSize(.mini)
+            if s.availability == .notInstalled {
+                Text("Install Amphetamine.app for keep-awake.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.shannonTertiary)
+                    .lineLimit(1)
+            } else if s.availability == .scriptFailed {
+                Text("Scripting denied — Privacy → Automation.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.shannonTertiary)
+                    .lineLimit(1)
+                    .help("Amphetamine scripting denied or failed. Enable Automation for Shannon in System Settings → Privacy & Security → Automation.")
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(s.shortLabel)
+    }
+
+    // MARK: System resources (CPU / GPU / RAM) — iStat-style
+
+    @State private var showPerCoreDetail = false
+
+    /// Color-coded gauges + per-core bars + sparklines, refreshed ~0.75s.
+    private var resourcesSection: some View {
+        let snap = resources.snapshot
+        let hist = resources.history
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                sectionTitle("System")
+                Spacer(minLength: 0)
+                if let hot = snap.hottestCore, snap.cpuCoreCount > 1 {
+                    Text(String(format: "peak C%d · %.0f%%", hot.index, hot.percent))
+                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(resourceTint(SystemResourceLogic.band(for: hot.percent)))
+                }
+            }
+
+            // Aggregate rows with sparklines
+            resourceRow(
+                kind: .cpu,
+                percent: snap.cpuPercent,
+                detail: cpuAggregateDetail(snap),
+                history: hist.cpu
+            )
+            resourceRow(
+                kind: .gpu,
+                percent: snap.gpuPercent,
+                detail: snap.gpuPercent == nil ? "n/a" : nil,
+                history: hist.gpu
+            )
+            resourceRow(
+                kind: .ram,
+                percent: snap.ramPercent,
+                detail: ramDetail(snap),
+                history: hist.ram
+            )
+
+            // Per-core bar strip (iStat-style)
+            if !snap.cpuCores.isEmpty {
+                perCoreStrip(snap.cpuCores, imbalance: snap.coreImbalance)
+                if showPerCoreDetail {
+                    perCoreDetailTable(snap.cpuCores)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(resourcesAccessibilityLabel(snap))
+    }
+
+    private func cpuAggregateDetail(_ snap: SystemResourceSnapshot) -> String? {
+        guard snap.cpuCoreCount > 0 else { return nil }
+        if let imb = snap.coreImbalance, imb >= 20 {
+            return String(format: "%d-core · Δ%.0f", snap.cpuCoreCount, imb)
+        }
+        return "\(snap.cpuCoreCount)-core"
+    }
+
+    private func ramDetail(_ snap: SystemResourceSnapshot) -> String? {
+        guard let u = snap.ramUsedGB, let t = snap.ramTotalGB, t > 0 else { return nil }
+        return String(format: "%.1f / %.0f GB", u, t)
+    }
+
+    private func resourceRow(
+        kind: SystemResourceSnapshot.Kind,
+        percent: Double?,
+        detail: String?,
+        history: [Double]
+    ) -> some View {
+        let pct = percent ?? 0
+        let band = percent.map { SystemResourceLogic.band(for: $0) } ?? .calm
+        let tint = resourceTint(band)
+        let label = percent.map { String(format: "%.0f%%", $0) } ?? (detail == "n/a" ? "—" : "…")
+        return HStack(spacing: 6) {
+            Image(systemName: kind == .gpu ? "cube" : kind.systemImage)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 14)
+            Text(kind.shortLabel)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.shannonSecondary)
+                .frame(width: 28, alignment: .leading)
+            // Horizontal load bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.shannonNeutral.opacity(0.22))
+                    Capsule()
+                        .fill(tint.opacity(percent == nil ? 0.12 : 0.9))
+                        .frame(width: max(3, geo.size.width * CGFloat(pct / 100)))
+                        .animation(.shannonLiquid, value: pct)
+                }
+            }
+            .frame(height: 7)
+            // Mini sparkline (history)
+            if history.count >= 2 {
+                SparklineView(values: history, tint: tint)
+                    .frame(width: 36, height: 14)
+            }
+            Text(label)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint)
+                .frame(width: 34, alignment: .trailing)
+                .contentTransition(.numericText())
+                .animation(.shannonLiquid, value: label)
+            if let detail, detail != "n/a" {
+                Text(detail)
+                    .font(.system(size: 8.5, design: .monospaced))
+                    .foregroundStyle(Color.shannonTertiary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(height: 16)
+    }
+
+    /// Vertical bars for each logical core — color by absolute load, height by %.
+    private func perCoreStrip(_ cores: [CPUCoreLoad], imbalance: Double?) -> some View {
+        let tall = cores.count > 10 ? CGFloat(22) : CGFloat(28)
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Text("CORES")
+                    .font(.system(size: 8, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Color.shannonTertiary)
+                    .tracking(0.6)
+                if let imb = imbalance {
+                    Text(String(format: "spread %.0fpp", imb))
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(imb >= 25 ? Color.shannonWarning : Color.shannonTertiary)
+                }
+                Spacer(minLength: 0)
+                Button {
+                    withAnimation(.shannonEase) {
+                        showPerCoreDetail.toggle()
+                    }
+                } label: {
+                    Text(showPerCoreDetail ? "hide" : "vs peers")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(Color.shannonAccent)
+                }
+                .buttonStyle(.plain)
+                .help(showPerCoreDetail
+                      ? "Hide per-core comparison table"
+                      : "Show each core vs average load")
+            }
+            GeometryReader { geo in
+                let n = cores.count
+                let gap: CGFloat = n > 16 ? 1 : (n > 8 ? 1.5 : 2)
+                let barW = max(2, (geo.size.width - gap * CGFloat(max(0, n - 1))) / CGFloat(n))
+                HStack(alignment: .bottom, spacing: gap) {
+                    ForEach(cores) { core in
+                        let band = SystemResourceLogic.band(for: core.percent)
+                        let tint = resourceTint(band)
+                        let h = max(2, geo.size.height * CGFloat(core.percent / 100))
+                        RoundedRectangle(cornerRadius: 1.2, style: .continuous)
+                            .fill(tint.opacity(core.isHotRelative ? 1.0 : 0.75))
+                            .frame(width: barW, height: h)
+                            .overlay(alignment: .top) {
+                                if core.isBusiest && core.percent >= 15 {
+                                    Circle()
+                                        .fill(Color.white.opacity(0.7))
+                                        .frame(width: 2.5, height: 2.5)
+                                        .offset(y: -3)
+                                }
+                            }
+                            .help(coreHelp(core))
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+            .frame(height: tall)
+            .padding(.horizontal, 2)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.shannonNeutral.opacity(0.12))
+            )
+        }
+    }
+
+    /// Table: each core vs average (relative performance).
+    private func perCoreDetailTable(_ cores: [CPUCoreLoad]) -> some View {
+        let sorted = cores.sorted { a, b in
+            if a.percent != b.percent { return a.percent > b.percent }
+            return a.index < b.index
+        }
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text("Core").frame(width: 36, alignment: .leading)
+                Text("Load").frame(width: 40, alignment: .trailing)
+                Text("vs avg").frame(width: 48, alignment: .trailing)
+                Text("Rel").frame(width: 36, alignment: .trailing)
+                Spacer(minLength: 0)
+                Text("Rank").frame(width: 28, alignment: .trailing)
+            }
+            .font(.system(size: 8, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Color.shannonTertiary)
+
+            ForEach(sorted.prefix(12)) { core in
+                let tint = resourceTint(SystemResourceLogic.band(for: core.percent))
+                HStack(spacing: 4) {
+                    Text(String(format: "C%02d", core.index))
+                        .frame(width: 36, alignment: .leading)
+                        .foregroundStyle(core.isHotRelative ? tint : Color.shannonSecondary)
+                    Text(String(format: "%.0f%%", core.percent))
+                        .frame(width: 40, alignment: .trailing)
+                        .foregroundStyle(tint)
+                    Text(String(format: "%+.0fpp", core.deltaVsAverage))
+                        .frame(width: 48, alignment: .trailing)
+                        .foregroundStyle(core.deltaVsAverage >= 10
+                                         ? Color.shannonWarning
+                                         : Color.shannonTertiary)
+                    Text(core.relativeToAverage.map { String(format: "%.2f×", $0) } ?? "—")
+                        .frame(width: 36, alignment: .trailing)
+                        .foregroundStyle(Color.shannonSecondary)
+                    Spacer(minLength: 0)
+                    Text("#\(core.rank)")
+                        .frame(width: 28, alignment: .trailing)
+                        .foregroundStyle(core.rank == 1 ? Color.shannonAccent : Color.shannonTertiary)
+                }
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+            }
+            if cores.count > 12 {
+                Text("… \(cores.count - 12) more cores")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color.shannonTertiary)
+            }
+        }
+        .padding(6)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.shannonNeutral.opacity(0.08))
+        )
+    }
+
+    private func coreHelp(_ core: CPUCoreLoad) -> String {
+        var s = String(format: "Core %d: %.0f%% busy", core.index, core.percent)
+        s += String(format: ", %+.0f pp vs average", core.deltaVsAverage)
+        if let r = core.relativeToAverage {
+            s += String(format: " (%.2f×)", r)
+        }
+        s += ", rank #\(core.rank)"
+        return s
+    }
+
+    private func resourceTint(_ band: SystemResourceLogic.Band) -> Color {
+        // Never use ask-amber (warning) for host load — reserved for approvals.
+        switch band {
+        case .calm:
+            return Color(red: 0.35, green: 0.78, blue: 0.52) // iStat green
+        case .elevated:
+            return .shannonAccent
+        case .hot:
+            return Color(red: 0.95, green: 0.72, blue: 0.25) // gold load, not ask amber
+        case .critical:
+            return .shannonError
+        }
+    }
+
+    private func resourcesAccessibilityLabel(_ snap: SystemResourceSnapshot) -> String {
+        var parts: [String] = []
+        if let c = snap.cpuPercent {
+            var line = String(format: "CPU %.0f percent", c)
+            if snap.cpuCoreCount > 0 {
+                line += ", \(snap.cpuCoreCount) cores"
+            }
+            if let hot = snap.hottestCore {
+                line += String(format: ", peak core %d at %.0f percent", hot.index, hot.percent)
+            }
+            parts.append(line)
+        }
+        if let g = snap.gpuPercent { parts.append(String(format: "GPU %.0f percent", g)) }
+        else { parts.append("GPU unavailable") }
+        if let r = snap.ramPercent { parts.append(String(format: "RAM %.0f percent", r)) }
+        return parts.joined(separator: ", ")
+    }
+
     // MARK: Agents
+
+    /// Roster rows for the popover: busy first, then connected/live, cap at 3
+    /// so the menu does not balloon with stale offline host ghosts.
+    private var agentRows: [AgentActivitySnapshot] {
+        if !busy.isEmpty { return Array(busy.prefix(3)) }
+        let live = summary.agents.filter { agent in
+            // Prefer process-live / connected over long-offline noise.
+            let line = agent.statusLine.lowercased()
+            if line.contains("offline") { return false }
+            return true
+        }
+        return Array((live.isEmpty ? summary.agents : live).prefix(3))
+    }
 
     private var agentSection: some View {
         VStack(alignment: .leading, spacing: 5) {
             sectionTitle(busy.isEmpty ? "Agents" : "Active now")
-            if busy.isEmpty {
-                Text("Nothing running. Press ⌘D in Terminal, Claude, or a browser to attach that session as an agent.")
+            if busy.isEmpty && summary.agents.isEmpty {
+                Text("Nothing running. Press ⌘D to attach the front app as an agent.")
                     .font(.system(size: 10))
                     .foregroundStyle(Color.shannonTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                ForEach(busy.prefix(4)) { agent in
+                ForEach(agentRows) { agent in
                     agentRow(agent)
+                }
+                let hidden = max(0, (busy.isEmpty ? summary.agents.count : busy.count) - agentRows.count)
+                if hidden > 0 {
+                    Text("+\(hidden) more")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.shannonTertiary)
                 }
             }
         }
@@ -175,6 +605,14 @@ struct MenuBarPopoverView: View {
 
     private func agentRow(_ a: AgentActivitySnapshot) -> some View {
         let style = AgentStyleCatalog.style(for: a.id)
+        let agentReading = agentReadings[a.id]
+            ?? EntropyProvenance.resolveForAgent(
+                agentId: a.id,
+                bridgeConnected: bridge.connected,
+                bridgeStatus: bridge.status,
+                gate: activity.agentEntropy,
+                gateDBAvailable: activity.gateDBAvailable
+            )
         return HStack(spacing: 7) {
             Text(style.emoji).font(.system(size: 12))
             Text(style.displayName)
@@ -190,12 +628,30 @@ struct MenuBarPopoverView: View {
                 .padding(.vertical, 1)
                 .background(Capsule().fill(style.palette.wash))
             Spacer(minLength: 4)
+            agentEntropyLabel(agentReading)
             Text(a.relativeAge)
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(Color.shannonTertiary)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(style.displayName), \(a.statusLine), \(a.relativeAge)")
+        .accessibilityLabel(
+            "\(style.displayName), \(a.statusLine), \(agentReading.explain(at: Date())), \(a.relativeAge)"
+        )
+    }
+
+    @ViewBuilder
+    private func agentEntropyLabel(_ reading: EntropyReading) -> some View {
+        if let display = reading.display(at: Date()) {
+            Text(display.shortLabel)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(entropyTint(reading))
+                .help(reading.explain(at: Date()))
+        } else {
+            Text("—")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(Color.shannonNeutral)
+                .help(reading.explain(at: Date()))
+        }
     }
 
     // MARK: Abandoned approvals
@@ -298,7 +754,7 @@ struct MenuBarPopoverView: View {
                 .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(entropyTint(reading))
                 .contentTransition(.numericText())
-                .animation(.easeInOut(duration: 0.45), value: display.bits)
+                .animation(.shannonLiquid, value: display.bits)
                 .help(reading.explain(at: Date()))
         } else {
             Text("no detector")
@@ -308,33 +764,90 @@ struct MenuBarPopoverView: View {
         }
     }
 
+    /// Continuous multi-stop gradient over measured H (not discrete RYG).
     private func entropyTint(_ reading: EntropyReading) -> Color {
-        switch reading.verdict {
-        case .collapsed: return .shannonWarning
-        case .watch: return .shannonWarning
-        case .healthy: return .shannonTertiary
-        case .unknown: return .shannonNeutral
+        if let display = reading.display(at: Date()) {
+            let rgb = display.gaugeColorRGB()
+            return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
         }
+        return .shannonNeutral
     }
 
     // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: 8) {
-            // There is no "~H 7.20" fallback any more. When nothing measured
-            // anything the readout says so in words: a plausible number in the
-            // safe band is exactly how a dead detector used to pass for a
-            // healthy one.
-            entropyReadout
-            if let snap = battery.snapshot {
-                Text("\(snap.percentage)%")
-                    .font(.system(size: 9.5, design: .monospaced))
+        VStack(alignment: .leading, spacing: 6) {
+            // Status row: H · battery · focus — fixed single line, no wrap smash.
+            HStack(spacing: 6) {
+                entropyReadout
+                    .layoutPriority(1)
+                Text("·")
+                    .font(.system(size: 9))
                     .foregroundStyle(Color.shannonTertiary)
+                if let snap = battery.snapshot {
+                    HStack(spacing: 2) {
+                        Image(systemName: snap.isCharging ? "battery.100.bolt" : "battery.75")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Color.shannonTertiary)
+                            .symbolRenderingMode(.hierarchical)
+                        Text("\(snap.percentage)%")
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundStyle(Color.shannonTertiary)
+                            .contentTransition(.numericText())
+                    }
+                    .layoutPriority(0)
+                }
+                Text("·")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.shannonTertiary)
+                Text(focusMode.shortLabel)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(focusMode.state == .on ? Color.shannonAccent : Color.shannonTertiary)
+                    .lineLimit(1)
+                    .help("Best-effort Focus/DND from local Assertions.json (BLOCKED.md §2)")
+                Spacer(minLength: 4)
             }
-            Spacer()
-            footerButton("doc.text", label: "Open hub log", action: onOpenHubLog)
-            footerButton("gearshape", label: "Settings", action: onOpenSettings)
-            footerButton("power", label: "Quit Shannon", action: onQuit)
+            .frame(height: 14)
+
+            HStack(spacing: 4) {
+                Text(multiDeviceFooterLine)
+                    .font(.system(size: 8.5))
+                    .foregroundStyle(Color.shannonTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .accessibilityLabel(multiDeviceFooterLine)
+                Spacer(minLength: 4)
+                footerButton("doc.text", label: "Open hub log", action: onOpenHubLog)
+                footerButton("gearshape", label: "Settings", action: onOpenSettings)
+                footerButton("power", label: "Quit Shannon", action: onQuit)
+            }
+            .frame(height: 22)
+        }
+        .padding(.top, 6)
+        .overlay(alignment: .top) {
+            // Hairline separator — glass-friendly (no full Divider slab).
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color.white.opacity(0.12),
+                    Color.clear,
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(height: 0.5)
+        }
+    }
+
+    /// Honest multi-device path from CloudPublisher (P2.7).
+    private var multiDeviceFooterLine: String {
+        switch multiDeviceStatus {
+        case "on":
+            return "Multi-device: on (iCloud)"
+        case "off":
+            return "Multi-device: off"
+        default:
+            return "Multi-device: in-memory"
         }
     }
 
@@ -343,12 +856,62 @@ struct MenuBarPopoverView: View {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Color.shannonSecondary)
-                .frame(width: 22, height: 20)
-                .contentShape(Rectangle())
+                .symbolRenderingMode(.hierarchical)
+                .frame(width: 26, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ShannonQuietButtonStyle())
         .help(label)
         .accessibilityLabel(label)
+    }
+}
+
+/// Quiet press scale for popover chrome (Liquid Glass micro-interaction).
+private struct ShannonQuietButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
+            .opacity(configuration.isPressed ? 0.85 : 1.0)
+            .animation(.shannonSnap, value: configuration.isPressed)
+    }
+}
+
+// MARK: - Sparkline
+
+/// Tiny line chart for recent utilisation history (iStat-style).
+private struct SparklineView: View {
+    let values: [Double]
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let pts = normalized(values, in: geo.size)
+            if pts.count >= 2 {
+                Path { path in
+                    path.move(to: pts[0])
+                    for p in pts.dropFirst() { path.addLine(to: p) }
+                }
+                .stroke(tint.opacity(0.9), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func normalized(_ values: [Double], in size: CGSize) -> [CGPoint] {
+        guard values.count >= 2, size.width > 0, size.height > 0 else { return [] }
+        let minV = 0.0
+        let maxV = max(values.max() ?? 100, 1)
+        let span = max(maxV - minV, 1)
+        let step = size.width / CGFloat(values.count - 1)
+        return values.enumerated().map { i, v in
+            let x = CGFloat(i) * step
+            let y = size.height - CGFloat((v - minV) / span) * size.height
+            return CGPoint(x: x, y: y)
+        }
     }
 }
 
@@ -424,15 +987,16 @@ struct GateInlineCard: View {
                 }
             }
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.shannonWarning.opacity(0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.shannonWarning.opacity(0.35), lineWidth: 1)
-        )
+        .padding(11)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.shannonWarning.opacity(0.10))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.shannonWarning.opacity(0.38), lineWidth: 1)
+                }
+                .shadow(color: Color.shannonWarning.opacity(0.12), radius: 8, y: 2)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(style.displayName) needs approval: \(ask.prompt)")
     }
@@ -442,15 +1006,17 @@ struct GateInlineCard: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: systemImage).font(.system(size: 9, weight: .bold))
+                Image(systemName: systemImage)
+                    .font(.system(size: 9, weight: .bold))
+                    .symbolRenderingMode(.hierarchical)
                 Text(title).font(.system(size: 10.5, weight: .semibold))
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(tint))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule(style: .continuous).fill(tint))
             .foregroundStyle(.white)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ShannonQuietButtonStyle())
         .help("\(title) this request")
         .accessibilityLabel("\(title) \(style.displayName)'s request")
     }

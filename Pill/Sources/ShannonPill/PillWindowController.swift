@@ -2,6 +2,8 @@ import AppKit
 import Combine
 import SwiftUI
 import PillCore
+import ShannonTheme
+import QuartzCore
 
 /// Shared expand/collapse state between the SwiftUI view and the window.
 @MainActor
@@ -65,6 +67,7 @@ final class PillWindowController {
     private let confirmation: ConfirmationController
     private let ingest: AgentIngestService
     private let activity: AgentActivityMonitor
+    private let resources: SystemResourceMonitor
 
     init(
         nowPlaying: NowPlayingModel,
@@ -73,7 +76,8 @@ final class PillWindowController {
         idle: IdleTelemetryPublisher,
         confirmation: ConfirmationController,
         ingest: AgentIngestService,
-        activity: AgentActivityMonitor
+        activity: AgentActivityMonitor,
+        resources: SystemResourceMonitor
     ) {
         self.nowPlaying = nowPlaying
         self.battery = battery
@@ -82,6 +86,7 @@ final class PillWindowController {
         self.confirmation = confirmation
         self.ingest = ingest
         self.activity = activity
+        self.resources = resources
     }
 
     var isVisible: Bool { panel?.isVisible == true }
@@ -108,10 +113,10 @@ final class PillWindowController {
                 nowPlaying: nowPlaying,
                 battery: battery,
                 bridge: bridge,
-                idle: idle,
                 confirmation: confirmation,
                 ingest: ingest,
                 activity: activity,
+                resources: resources,
                 onContentHeight: { [weak self] height in
                     Task { @MainActor in self?.resizeToContent(height: height) }
                 }
@@ -210,7 +215,14 @@ final class PillWindowController {
         )
         // Sub-pixel churn would fight the content measurement in a feedback loop.
         guard abs(frame.height - panel.frame.height) > 0.5 else { return }
-        panel.setFrame(frame, display: true)
+        // Morph the panel in phase with SwiftUI's shannonFloat (Liquid Glass).
+        // Instant setFrame made expand/collapse feel bolted-on vs the springy content.
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = ShannonMotion.panelMorphDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ctx.allowsImplicitAnimation = true
+            panel.animator().setFrame(frame, display: true)
+        }
     }
 
     func expand() {
@@ -228,10 +240,10 @@ private struct PillHost: View {
     @ObservedObject var nowPlaying: NowPlayingModel
     @ObservedObject var battery: BatteryMonitor
     @ObservedObject var bridge: ShannonBridge
-    @ObservedObject var idle: IdleTelemetryPublisher
     @ObservedObject var confirmation: ConfirmationController
     @ObservedObject var ingest: AgentIngestService
     @ObservedObject var activity: AgentActivityMonitor
+    @ObservedObject var resources: SystemResourceMonitor
     /// Called when the pill's laid-out height changes, so the panel can follow.
     var onContentHeight: (CGFloat) -> Void = { _ in }
 
@@ -243,10 +255,10 @@ private struct PillHost: View {
                 nowPlaying: nowPlaying,
                 battery: battery,
                 bridge: bridge,
-                idle: idle,
                 confirmation: confirmation,
                 ingest: ingest,
                 activity: activity,
+                resources: resources,
                 isExpanded: Binding(
                     get: { presentation.isExpanded },
                     set: { presentation.isExpanded = $0 }

@@ -170,4 +170,76 @@ final class HeadGestureTests: XCTestCase {
         XCTAssertEqual(c.maxDuration, 0.8)
         XCTAssertEqual(c.lockout, 2.0)
     }
+
+    // MARK: Head-orientation browse (BLOCKED.md §6)
+
+    func testBrowseDisarmedIgnoresSamples() {
+        var b = HeadOrientationBrowser()
+        XCTAssertFalse(b.isArmed)
+        XCTAssertNil(b.process(HeadAttitudeSample(pitch: 0, yaw: 0.5, timestamp: 0)))
+    }
+
+    func testBrowseFirstSampleAfterArmIsNeutral() {
+        var b = HeadOrientationBrowser()
+        b.arm()
+        let r = b.process(HeadAttitudeSample(pitch: 0, yaw: 20 * deg, timestamp: 0))
+        XCTAssertEqual(r?.yawOffset ?? 1, 0, accuracy: 1e-12)
+        XCTAssertEqual(r?.engaged, false)
+        XCTAssertEqual(r?.normalized ?? 1, 0, accuracy: 1e-12)
+    }
+
+    func testBrowseReportsSustainedYawOffset() {
+        var b = HeadOrientationBrowser(config: HeadOrientationConfig(
+            engageDegrees: 12, maxBrowseDegrees: 45
+        ))
+        b.arm()
+        _ = b.process(HeadAttitudeSample(pitch: 0, yaw: 0, timestamp: 0))
+        // 20° yaw → engaged (threshold 12°), normalized ≈ 20/45
+        let r = b.process(HeadAttitudeSample(pitch: 0, yaw: 20 * deg, timestamp: 0.1))
+        XCTAssertNotNil(r)
+        XCTAssertEqual(r!.yawOffset, 20 * deg, accuracy: 1e-9)
+        XCTAssertTrue(r!.engaged)
+        XCTAssertEqual(r!.normalized, 20.0 / 45.0, accuracy: 1e-9)
+    }
+
+    func testBrowseBelowEngageIsNotEngaged() {
+        var b = HeadOrientationBrowser()
+        b.arm()
+        _ = b.process(HeadAttitudeSample(pitch: 0, yaw: 0, timestamp: 0))
+        let r = b.process(HeadAttitudeSample(pitch: 0, yaw: 5 * deg, timestamp: 0.1))
+        XCTAssertEqual(r?.engaged, false)
+        XCTAssertGreaterThan(abs(r?.yawOffset ?? 0), 0)
+    }
+
+    func testBrowseNormalizedClampsAtMax() {
+        var b = HeadOrientationBrowser(config: HeadOrientationConfig(
+            engageDegrees: 12, maxBrowseDegrees: 30
+        ))
+        b.arm()
+        _ = b.process(HeadAttitudeSample(pitch: 0, yaw: 0, timestamp: 0))
+        // 60° with max 30° → normalized clamps to ±1
+        let r = b.process(HeadAttitudeSample(pitch: 0, yaw: 60 * deg, timestamp: 0.1))
+        XCTAssertEqual(r?.normalized ?? 0, 1.0, accuracy: 1e-9)
+    }
+
+    func testBrowseDisarmClearsReference() {
+        var b = HeadOrientationBrowser()
+        b.arm()
+        _ = b.process(HeadAttitudeSample(pitch: 0, yaw: 10 * deg, timestamp: 0))
+        b.disarm()
+        b.arm()
+        // New arm must re-capture neutral, not keep old ref.
+        let r = b.process(HeadAttitudeSample(pitch: 0, yaw: 10 * deg, timestamp: 1))
+        XCTAssertEqual(r?.yawOffset ?? 1, 0, accuracy: 1e-12)
+    }
+
+    func testBrowseSignedYawLeftAndRight() {
+        var b = HeadOrientationBrowser()
+        b.arm()
+        _ = b.process(HeadAttitudeSample(pitch: 0, yaw: 0, timestamp: 0))
+        let right = b.process(HeadAttitudeSample(pitch: 0, yaw: 15 * deg, timestamp: 0.1))
+        XCTAssertGreaterThan(right?.yawOffset ?? 0, 0)
+        let left = b.process(HeadAttitudeSample(pitch: 0, yaw: -15 * deg, timestamp: 0.2))
+        XCTAssertLessThan(left?.yawOffset ?? 0, 0)
+    }
 }

@@ -105,3 +105,26 @@ class TestJsonlExport:
         assert out.exists()
         loaded = [json.loads(line) for line in out.read_text().splitlines() if line]
         assert loaded[0]["agent_id"] == "cowork"
+
+    def test_write_jsonl_shipped_cli_call_shape(self, audit_db: sg.AuditDB, tmp_path: Path):
+        """The `./scripts/shannon export` entry must use write_jsonl(out, db_path=db).
+
+        Regression: write_jsonl(db, out) treated the DB path as the output file
+        and the output Path as ``events``, corrupting the call.
+        """
+        audit_db.log_activity_event("science", "status", "cli-shape", "ok")
+        db = audit_db.db_path
+        out = tmp_path / "session_export.jsonl"
+        # Exact call shape used by scripts/shannon export:
+        n = write_jsonl(out, db_path=db)
+        assert n >= 1
+        assert out.is_file()
+        body = out.read_text()
+        assert "cli-shape" in body or "science" in body
+
+    def test_scripts_shannon_export_uses_db_path_kwarg(self):
+        """Static: the shipped CLI must not pass (db, out) positionally."""
+        script = Path(__file__).resolve().parents[2] / "scripts" / "shannon"
+        text = script.read_text()
+        assert "write_jsonl(out, db_path=db)" in text
+        assert "write_jsonl(db, out)" not in text

@@ -292,8 +292,13 @@ public enum GateDBReader {
             // refuse both. An un-timestamped row is equally unusable: without
             // `last_seen_ns` the value cannot be aged, and a value that cannot be
             // aged must never be presented as current.
+            //
+            // Integrity: this column is gate-written `decision.computed_H`
+            // only (see hub `registry_entropy_score`). We never read
+            // `agent_messages.self_H` here — a self-report cannot become the
+            // pill's displayed H even if a future schema joins the wrong table.
             if !entropyIsNull, entropyRaw > 0, lastSeen > 0,
-               let measurement = EntropyMeasurement(
+               let measurement = EntropyIntegrity.accept(
                    bits: entropyRaw,
                    deltaH: nil,
                    collapsed: nil,

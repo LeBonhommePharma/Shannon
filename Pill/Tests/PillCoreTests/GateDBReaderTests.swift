@@ -128,7 +128,8 @@ final class GateDBReaderTests: XCTestCase {
         let a = try XCTUnwrap(full.summary.agents.first)
         XCTAssertEqual(a.presence, .live, "connected and quiet is not offline")
         XCTAssertEqual(a.status, .idle, "…but it is not working either")
-        XCTAssertEqual(a.statusLine, "idle")
+        // Quiet live attach: statusLine is "live" (not "idle" — idle looked unattached).
+        XCTAssertEqual(a.statusLine, "live")
         XCTAssertEqual(a.relativeAge, "3h")
     }
 

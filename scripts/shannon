@@ -376,6 +376,8 @@ Also:
   ./scripts/shannon pets            create default pet directories
   ./scripts/shannon gate            start agent gate daemon only
   ./scripts/shannon agent-demo      live socket demo agent (needs gate)
+  ./scripts/shannon agent …         hub agent manager (spawn|control|monitor|kill|roster)
+  ./scripts/shannon skill-install   install Shannon skill into Claude/Codex/Grok/OpenCode
   ./scripts/shannon export          session timeline JSONL
   ./scripts/shannon help
 
@@ -431,15 +433,26 @@ case "${CMD}" in
   agent-demo|demo)
     agent_demo "$@"
     ;;
+  agent|agents|hub-agent)
+    # Shannon hub agent manager — spawn/control/monitor/kill handrail.
+    # Example: ./scripts/shannon agent roster
+    #          ./scripts/shannon agent spawn science --dry-run
+    export PYTHONPATH="${HUB}${PYTHONPATH:+:$PYTHONPATH}"
+    exec python3 -m agent_manager "$@"
+    ;;
+  skill-install|install-skill)
+    python3 "${REPO}/skills/shannon/scripts/install_skill.py" "$@"
+    ;;
   export|session-export)
-    python3 - <<PY
+    # write_jsonl(path, events=None, *, db_path=...) — path is OUTPUT, not DB.
+    python3 - "${HUB}" <<'PY'
 import sys
 from pathlib import Path
-sys.path.insert(0, "${HUB}")
+sys.path.insert(0, sys.argv[1])
 from session_export import write_jsonl
 db = Path.home() / ".shannon" / "agent_hub.db"
 out = Path.home() / ".shannon" / "session_export.jsonl"
-n = write_jsonl(db, out)
+n = write_jsonl(out, db_path=db)
 print(f"wrote {n} events → {out}")
 PY
     ;;

@@ -24,7 +24,7 @@ class Shannon < Formula
 
   def install
     # GPU backends (CUDA/Metal/ROCm) were removed — Shannon is CPU-only.
-    args = %W[
+    args = %w[
       -GNinja
       -DCMAKE_BUILD_TYPE=Release
       -DSHANNON_BUILD_TESTS=OFF

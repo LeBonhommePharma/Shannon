@@ -192,7 +192,7 @@ final class EntropyReadingTests: XCTestCase {
         }
         XCTAssertEqual(display.bits, 2.86, accuracy: 1e-9)
         XCTAssertFalse(display.isCurrent, "observe mode must not relabel stale as current")
-        XCTAssertEqual(display.badge, "H⌛")
+        XCTAssertEqual(display.badge, "H_msg⌛")
         XCTAssertEqual(display.age, 2400, accuracy: 0.5)
         XCTAssertEqual(reading.measurement?.deltaH, nil, "gate rows carry no per-agent delta")
         // The verdict is unaffected by mode — observe never buys health.
@@ -224,13 +224,35 @@ final class EntropyReadingTests: XCTestCase {
         )
         XCTAssertTrue(reading.isMeasured)
         XCTAssertEqual(reading.currentBits ?? 0, 2.63, accuracy: 1e-9)
-        // 2.63 < warnBits 5.0 → watch, not healthy. Real collapse-range data.
-        XCTAssertEqual(reading.verdict(policy: enforce), .watch)
+        // Gate H is message score: low is normal (short status), not collapse.
+        // High-is-watch polarity aligns with the gate's hard-block threshold.
+        XCTAssertEqual(reading.verdict(policy: enforce), .healthy)
+        XCTAssertEqual(m.source.domain, .messageContent)
         let display = reading.display(at: now, policy: enforce)
         XCTAssertEqual(display?.source, .gate(agentId: "codex", presence: .live))
         XCTAssertEqual(display?.isCurrent, true)
-        XCTAssertEqual(display?.badge, "H")
+        XCTAssertEqual(display?.badge, "H_msg")
         XCTAssertTrue(reading.explain(at: now, policy: enforce).contains("gate:codex"))
+        XCTAssertTrue(reading.explain(at: now, policy: enforce).contains("H_msg"))
+    }
+
+    /// Message scores escalate when *high* (gate polarity), not when low.
+    func testGateMessageScoreHighIsWatchLowIsHealthy() {
+        let low = EntropyReading.measured(gateMeasurement(bits: 2.0))
+        let high = EntropyReading.measured(gateMeasurement(bits: 5.5))
+        XCTAssertEqual(low.verdict(policy: enforce), .healthy)
+        XCTAssertEqual(high.verdict(policy: enforce), .watch)
+        // Token polarity is the opposite: low → watch.
+        let tokLow = EntropyMeasurement(
+            bits: 2.0, source: .bridge(backend: "cpp"),
+            measuredAt: now, now: now, policy: enforce
+        ).map { EntropyReading.measured($0) }!
+        let tokHigh = EntropyMeasurement(
+            bits: 8.0, source: .bridge(backend: "cpp"),
+            measuredAt: now, now: now, policy: enforce
+        ).map { EntropyReading.measured($0) }!
+        XCTAssertEqual(tokLow.verdict(policy: enforce), .watch)
+        XCTAssertEqual(tokHigh.verdict(policy: enforce), .healthy)
     }
 
     // MARK: - REQUIRED: no numeric entropy without provenance

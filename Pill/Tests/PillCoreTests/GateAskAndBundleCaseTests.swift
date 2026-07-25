@@ -206,7 +206,8 @@ final class GateAskAndBundleCaseTests: XCTestCase {
     // MARK: - Defect 6: bundle ids are case-insensitive identities
 
     /// Every mixed-case id the mapper can lowercase into `agents.json` must
-    /// still match what NSWorkspace reports verbatim.
+    /// still match what NSWorkspace reports verbatim → **live** process-attach
+    /// (running host app is evidence the attach is still present).
     func testEveryMixedCaseBundleIDFolds() throws {
         for (registryBundle, running) in [
             ("com.googlecode.iterm2", "com.googlecode.iTerm2"),
@@ -223,8 +224,19 @@ final class GateAskAndBundleCaseTests: XCTestCase {
                 runningBundleIDs: [running]
             )
             XCTAssertEqual(
-                s.agents.first?.presence, .observed,
-                "\(registryBundle) and \(running) are the same app"
+                s.agents.first?.presence, .live,
+                "\(registryBundle) and \(running) are the same app (case-fold → live attach)"
+            )
+            // Wrong case that does NOT fold to the same id must not false-live.
+            let miss = AgentActivityReader.load(
+                petsRoot: pets,
+                registryURL: root.appendingPathComponent("agents.json"),
+                gateDB: nil,
+                runningBundleIDs: ["com.example.NotThisApp"]
+            )
+            XCTAssertEqual(
+                miss.agents.first?.presence, .offline,
+                "unrelated running bundle must not keep attach live"
             )
         }
     }
@@ -239,7 +251,7 @@ final class GateAskAndBundleCaseTests: XCTestCase {
             gateDB: nil,
             runningBundleIDs: ["com.microsoft.VSCode"]
         )
-        XCTAssertEqual(full.summary.agents.first?.presence, .observed)
+        XCTAssertEqual(full.summary.agents.first?.presence, .live)
     }
 
     /// The folding must not turn the liveness check into a no-op: an empty

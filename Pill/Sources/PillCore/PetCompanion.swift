@@ -478,19 +478,31 @@ public enum CompanionRoster {
     /// One companion per agent, ordered the way the board should read:
     /// provably working first, then live, then most recently seen.
     ///
-    /// - Parameter entropyDelta: the live z-scored entropy delta, applied only
-    ///   to agents the gate reports as `.live`. Pass nil when the bridge is
-    ///   down; a companion then simply never goes `wary`, rather than guessing.
+    /// - Parameter entropyDeltas: per-agent measured ΔH (or collapse proxy),
+    ///   from `EntropyProvenance.companionDeltas`. Only agents present in the
+    ///   map and reported `.live` can go `wary`. Prefer this over the shared
+    ///   `entropyDelta` fallback so one collapsed agent does not alarm every pet.
+    /// - Parameter entropyDelta: legacy single delta applied to every live
+    ///   agent when that agent has no entry in `entropyDeltas`. Pass nil when
+    ///   nothing measured is available.
     public static func build(from summary: AgentActivitySummary,
                              now: Date = Date(),
                              approvals: [String: Date] = [:],
+                             entropyDeltas: [String: Double] = [:],
                              entropyDelta: Double? = nil) -> [CompanionState] {
         summary.agents
             .map { agent in
-                CompanionState(agent: agent,
-                               now: now,
-                               approvedAt: approvals[agent.id],
-                               entropyDelta: agent.presence == .live ? entropyDelta : nil)
+                let perAgent = entropyDeltas[agent.id]
+                let shared = entropyDelta
+                let delta: Double? = {
+                    guard agent.presence == .live else { return nil }
+                    if let perAgent { return perAgent }
+                    return shared
+                }()
+                return CompanionState(agent: agent,
+                                      now: now,
+                                      approvedAt: approvals[agent.id],
+                                      entropyDelta: delta)
             }
             .sorted { l, r in
                 let lb = l.mood.claimsWork, rb = r.mood.claimsWork

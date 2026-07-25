@@ -1,7 +1,9 @@
 cask "shannon-pill" do
   version "0.1.0"
-  # Filled by `scripts/package_pill.sh --update-cask` or release CI.
-  # Zeros intentionally reject installs until a real artifact is published.
+  # NOT production-ready until `scripts/package_pill.sh --update-cask` writes a
+  # real sha after publishing Shannon-<version>.zip. All-zero sha256 is deliberate:
+  # Homebrew will refuse a remote cask install rather than silently fetching junk.
+  # Local path (recommended while unsigned): ./scripts/package_pill.sh --install
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
   # ZIP is the cask asset (reproducible sha256). DMG is also published for humans.

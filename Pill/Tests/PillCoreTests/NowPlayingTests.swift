@@ -3,6 +3,17 @@ import XCTest
 
 final class NowPlayingTests: XCTestCase {
 
+    func testIdleStateIsEmptyHasNoTrack() {
+        XCTAssertTrue(NowPlayingState.idle.isEmpty)
+        XCTAssertFalse(NowPlayingState.idle.isActive)
+        let playing = NowPlayingState.playing(
+            NowPlayingInfo(title: "Track", artist: "Artist", isPlaying: true)
+        )
+        XCTAssertFalse(playing.isEmpty)
+        XCTAssertTrue(playing.isActive)
+    }
+
+
     private func track(
         _ title: String = "Configurational Entropy",
         artist: String = "Shannon",

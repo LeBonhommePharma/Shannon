@@ -641,8 +641,20 @@ public enum PetBootstrap {
     public static var registryURL: URL { shannonHome.appendingPathComponent("agents.json") }
 
     /// Ensure pet directory layout exists. Returns (path, createdNew).
+    ///
+    /// - Parameters:
+    ///   - attachPid: optional process id of the attached CLI / host app. When
+    ///     set, each activity poll re-checks liveness so a quit process goes
+    ///     offline instead of lingering as "seen" forever.
+    ///   - attachBundle: optional host app bundle id for the same purpose.
     @discardableResult
-    public static func ensurePet(agentID: String, displayName: String, task: String?) throws -> (URL, Bool) {
+    public static func ensurePet(
+        agentID: String,
+        displayName: String,
+        task: String?,
+        attachPid: Int32? = nil,
+        attachBundle: String? = nil
+    ) throws -> (URL, Bool) {
         let id = AgentKind.sanitizeID(agentID)
         let dir = petsRoot.appendingPathComponent(id, isDirectory: true)
         let fm = FileManager.default
@@ -681,17 +693,12 @@ public enum PetBootstrap {
 
         let now = Date().timeIntervalSince1970
         let hasTask = !(task ?? "").isEmpty
-        let stateObj: [String: Any] = [
-            // "observed", never "active". This record is a ⌘D capture of whatever
-            // app happened to be frontmost — it is evidence the user was looking
-            // at something, NOT telemetry that an agent is doing work. Writing
-            // "active" here (previously `hasTask ? "active" : "idle"`) made every
-            // app ever captured claim to be a busy agent forever, because nothing
-            // ever writes the status back down. On this machine that surfaced as
-            // three "active" agents while the gate had all seven idle with
-            // disconnected_at set. The gate is the only authority on liveness.
+        // Process-attach evidence. AgentActivityReader re-checks pid/bundle each
+        // poll: still running → presence **live** (attached); quit → offline.
+        // Status on disk stays non-busy — only the gate may claim active work.
+        var stateObj: [String: Any] = [
             "status": "observed",
-            "source": "observed",
+            "source": "process",
             "last_task": task ?? "",
             "last_cf_delta": NSNull(),
             "memory_size": (try? Data(contentsOf: memory).count) ?? 0,
@@ -699,6 +706,12 @@ public enum PetBootstrap {
             "updated_at": now,
             "resumable": hasTask,
         ]
+        if let attachPid, attachPid > 0 {
+            stateObj["attach_pid"] = Int(attachPid)
+        }
+        if let attachBundle, !attachBundle.isEmpty {
+            stateObj["attach_bundle"] = attachBundle
+        }
         try JSONSerialization.data(withJSONObject: stateObj, options: [.prettyPrinted, .sortedKeys])
             .write(to: state, options: .atomic)
 
@@ -834,15 +847,18 @@ public final class AgentIngestService: ObservableObject {
         // agentID for a terminal that is only running a shell.
         let terminal: TerminalAgentProbe.Context? =
             TerminalAgentProbe.probe(bundleID: bid, appName: name)
+        let hostPid = front?.processIdentifier
         #else
         let bid: String? = nil
         let name: String? = nil
         let page: BrowserPageContext? = nil
         let terminal: TerminalAgentProbe.Context? = nil
+        let hostPid: Int32? = nil
         #endif
 
         return capture(
             bundleID: bid, appName: name, page: page, terminal: terminal,
+            hostPid: hostPid,
             clipboardText: clipboardText, forceAgentID: forceAgentID
         )
     }
@@ -859,6 +875,7 @@ public final class AgentIngestService: ObservableObject {
         appName: String?,
         page: BrowserPageContext? = nil,
         terminal: TerminalAgentProbe.Context? = nil,
+        hostPid: Int32? = nil,
         clipboardText: String? = nil,
         forceAgentID: String? = nil
     ) -> AgentIngestResult {
@@ -941,8 +958,21 @@ public final class AgentIngestService: ObservableObject {
 
         let result: AgentIngestResult
         do {
+            // Prefer the terminal CLI pid (real agent process) over the host
+            // app pid so tracking follows `claude`/`codex` under Ghostty.
+            // For IDEs (Cursor / VS Code) use the host app pid so process-attach
+            // can report **live** while the app is open.
+            let attachPid: Int32? = {
+                if let terminal, terminal.pid > 0 { return terminal.pid }
+                if let hostPid, hostPid > 0 { return hostPid }
+                return nil
+            }()
             let (url, created) = try PetBootstrap.ensurePet(
-                agentID: kind.id, displayName: kind.displayName, task: task
+                agentID: kind.id,
+                displayName: kind.displayName,
+                task: task,
+                attachPid: attachPid,
+                attachBundle: bid
             )
             PetBootstrap.updateRegistry(agent: kind, task: task)
             result = AgentIngestResult(

@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var demoMotion: StubHeadphoneMotionProvider?
     private var confirmation: ConfirmationController?
     private var cloud: CloudPublisher?
+    private var resources: SystemResourceMonitor?
+    private var amphetamine: AmphetamineMonitor?
+    private var focusMode: FocusModeMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard claimSingleInstance() else { return }
@@ -38,10 +41,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         watchForReactivate()
         FrontmostAppTracker.shared.start()
 
-        // Core models
+        // Core models — MediaRemote first, Music/Spotify AppleScript when gated empty
+        // (BLOCKED.md §1). Demo still uses the stub.
         let media: NowPlayingProviding = Self.useDemo
             ? { let s = StubNowPlayingProvider(); demoProvider = s; return s }()
-            : MediaRemoteProvider()
+            : CompositeNowPlayingProvider()
         let motion: HeadphoneMotionProviding = Self.useDemo
             ? { let s = StubHeadphoneMotionProvider(); demoMotion = s; return s }()
             : makeHeadphoneMotionProvider()
@@ -53,16 +57,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ingestSvc = AgentIngestService()
         let activityMon = AgentActivityMonitor()
         let confirm = ConfirmationController(provider: motion, feedback: SystemConfirmationFeedback())
+        // ~0.75s matches iStat-style menu-bar motion without thrashing host_processor_info.
+        let sysRes = SystemResourceMonitor(interval: 0.75)
+        // Amphetamine keep-awake (fail-closed if app missing).
+        let amph = AmphetamineMonitor(interval: 5.0)
+        // Focus / DND best-effort (BLOCKED.md §2) — fail-closed to unknown.
+        let focus = FocusModeMonitor()
 
         // UI
+        // Prefer notification permission early so ask alerts can fire later.
+        ShannonNotifier.requestPermission()
+
+        let cloudPub = CloudPublisher(nowPlaying: np, battery: bat, bridge: br, activity: activityMon)
+
         let ctl = PillWindowController(
             nowPlaying: np, battery: bat, bridge: br, idle: idlePub,
-            confirmation: confirm, ingest: ingestSvc, activity: activityMon
+            confirmation: confirm, ingest: ingestSvc, activity: activityMon,
+            resources: sysRes
         )
         ctl.show()
 
         let menu = MenuBarController(
-            bridge: br, battery: bat, ingest: ingestSvc, activity: activityMon
+            bridge: br, battery: bat, ingest: ingestSvc, activity: activityMon,
+            resources: sysRes,
+            amphetamine: amph,
+            focusMode: focus,
+            multiDeviceStatus: cloudPub.multiDeviceStatus
         )
         menu.onShowPill = { [weak ctl] in ctl?.reassertVisibility(); ctl?.expand() }
         menu.onReposition = { [weak ctl] in ctl?.reposition() }
@@ -75,16 +95,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hk.start()
 
         // Services
-        np.start(); bat.start(); br.start(); idlePub.start(); activityMon.start()
+        // Idle telemetry publisher is kept for bridge-absent provenance paths but
+        // is NOT started — its 1 Hz @Published was thrashing the pill with no UI.
+        np.start(); bat.start(); br.start(); activityMon.start()
+        sysRes.start()
+        amph.start()
+        focus.start()
+        // Sample-aligned menu-bar paint (not a second lagging timer alone).
+        sysRes.onSnapshotPublished = { [weak menu] in
+            menu?.refreshFromResources()
+        }
         bootstrapDefaultPets()
         sanitizePollutedTasks()
-        let cloudPub = CloudPublisher(nowPlaying: np, battery: bat, bridge: br, activity: activityMon)
         cloudPub.start()
 
         nowPlaying = np; battery = bat; bridge = br; idle = idlePub
         ingest = ingestSvc; activity = activityMon; hotkey = hk
-        cloud = cloudPub; confirmation = confirm
+        cloud = cloudPub; confirmation = confirm; resources = sysRes
+        amphetamine = amph; focusMode = focus
         controller = ctl; menuBar = menu
+
+        // Auto-attach Shannon hub (gate) so ⌘D process attach can register
+        // agents without a manual "start gate" ritual. Best-effort, off main.
+        Self.ensureHubAttached()
 
         if Self.useDemo {
             injectDemoMedia()
@@ -95,9 +128,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Hello flash so a first launch is obviously alive, then tuck into the notch.
         ctl.expand()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak ctl, weak confirm] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak ctl, weak confirm, weak menu] in
             guard confirm?.isAwaitingConfirmation != true else { return }
             ctl?.presentation.isExpanded = false
+            // First-run: auto-open popover once so coach is not buried behind a click.
+            if FirstRunCoach.shouldShow() {
+                menu?.presentFirstRunPopover()
+            }
+        }
+    }
+
+    /// Best-effort hub ensure on launch. Never blocks the UI thread.
+    private static func ensureHubAttached() {
+        Task.detached(priority: .utility) {
+            // Repo root for developers: env or sibling of common checkouts.
+            var env = ProcessInfo.processInfo.environment
+            if env["SHANNON_ROOT"] == nil {
+                // Prefer the monorepo if Shannon is opened from a known path.
+                let candidates = [
+                    "/Users/lp.more/Projects/Shannon",
+                    FileManager.default.homeDirectoryForCurrentUser
+                        .appendingPathComponent("Projects/Shannon").path,
+                ]
+                for c in candidates {
+                    let gate = (c as NSString).appendingPathComponent("hub/shannon_gate.py")
+                    if FileManager.default.fileExists(atPath: gate) {
+                        env["SHANNON_ROOT"] = c
+                        break
+                    }
+                }
+            }
+            let result = HubEnsure.ensureRunning(environment: env)
+            #if DEBUG
+            print("Shannon hub ensure: \(result.shortLabel)")
+            #endif
+            // Nudge activity so socket-up is noticed quickly after a start.
+            if result.isUp {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
         }
     }
 
@@ -111,6 +179,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activity?.stop()
         nowPlaying?.stop()
         battery?.stop()
+        resources?.stop()
+        amphetamine?.stop()
+        focusMode?.stop()
         cloud?.stop()
         FrontmostAppTracker.shared.stop()
         processLock = nil
@@ -310,19 +381,24 @@ struct ShannonPillMain {
             print("  battery:     none (desktop?)")
         }
 
-        let media = MediaRemoteProvider()
-        print("  mediaremote: \(media.isAvailable ? "ok" : "missing")")
+        let media = CompositeNowPlayingProvider()
+        print("  mediaremote: \(media.isAvailable ? "ok (composite + scripted fallback)" : "missing")")
         if media.isAvailable {
             media.start { _ in }
-            RunLoop.main.run(until: Date().addingTimeInterval(1.5))
+            RunLoop.main.run(until: Date().addingTimeInterval(2.0))
             media.stop()
-            print("  now playing: \(media.hasDelivered ? "live" : "gated / idle")")
+            print("  now playing: MediaRemote / Music / Spotify composite (see BLOCKED.md §1)")
         }
+
+        let focus = FocusModeReader.read()
+        print("  focus/dnd:   \(focus.state.rawValue)"
+              + (focus.modeName.map { " (\($0))" } ?? ""))
 
         print("  bridge:      \(FileManager.default.fileExists(atPath: ShannonBridge.defaultSocketPath) ? "socket present" : "offline")")
         print("  pets:        \(PetBootstrap.petsRoot.path)")
         print("  registry:    \(PetBootstrap.listRegistry().count) agent(s)")
         print("  hotkey:      ⌘D = add agent from frontmost app")
+        print("  head browse: HeadOrientationBrowser (sustained yaw) pure + tested")
         print("  verdict:     READY")
         exit(0)
     }

@@ -82,6 +82,8 @@ public final class ConfirmationController: ObservableObject {
     @Published public private(set) var prompt: ConfirmationPrompt?
     @Published public private(set) var flash: ConfirmationFlash?
     @Published public private(set) var gesturesAvailable: Bool
+    /// Gate interaction id currently armed for gestures/voice, if any.
+    @Published public private(set) var armedInteractionId: String?
 
     /// Why gestures are unavailable, surfaced in the expanded pill.
     public var gestureStatus: String { provider.authorizationDescription }
@@ -124,6 +126,26 @@ public final class ConfirmationController: ObservableObject {
         }
     }
 
+    /// Arm gestures/voice for a real gate approval (not a demo prompt).
+    ///
+    /// Stores `interactionId` so the host can re-arm only when the open ask
+    /// changes, and wires the same answer path as a click on the gate card.
+    public func armForGateAsk(
+        prompt: String,
+        interactionId: String,
+        detail: String? = nil,
+        onAnswer: @escaping (ConfirmationAnswer, ConfirmationSource) -> Void
+    ) {
+        armedInteractionId = interactionId
+        let body = ConfirmationPrompt(
+            question: prompt,
+            detail: detail ?? interactionId
+        )
+        // `ask` calls `cancel`, which clears `armedInteractionId` — restore it.
+        ask(body, onAnswer: onAnswer)
+        armedInteractionId = interactionId
+    }
+
     /// Answer from the UI.
     public func answer(_ answer: ConfirmationAnswer) {
         resolve(answer, source: .click)
@@ -134,6 +156,7 @@ public final class ConfirmationController: ObservableObject {
         teardown()
         prompt = nil
         completion = nil
+        armedInteractionId = nil
     }
 
     private func handle(_ sample: HeadAttitudeSample) {
@@ -148,6 +171,7 @@ public final class ConfirmationController: ObservableObject {
         teardown()
         self.prompt = nil
         self.completion = nil
+        self.armedInteractionId = nil
 
         feedback.perform(answer)
         showFlash(answer == .confirmed ? .confirm : .deny)

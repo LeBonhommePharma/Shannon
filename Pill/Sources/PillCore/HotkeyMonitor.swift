@@ -64,7 +64,7 @@ public final class HotkeyMonitor {
 
     private func installCarbonHotKey() {
         // signature 'ShnD' + id 1
-        var hotKeyID = EventHotKeyID(signature: OSType(0x53686E44), id: 1)
+        let hotKeyID = EventHotKeyID(signature: OSType(0x53686E44), id: 1)
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                       eventKind: UInt32(kEventHotKeyPressed))
 

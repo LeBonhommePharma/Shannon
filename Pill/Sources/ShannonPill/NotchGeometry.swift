@@ -1,13 +1,21 @@
 import AppKit
 import PillCore
+import ShannonTheme
 
 /// Resolves where the pill should sit on a given screen.
 ///
-/// On notched Macs the notch occupies the middle of the menu bar; the usable
-/// menu-bar strips either side are reported as `auxiliaryTopLeftArea` /
-/// `auxiliaryTopRightArea`. On non-notched displays (and external monitors)
-/// there is no notch, so we synthesise a pill of the same height centred on
-/// the menu bar — the UI is identical, it just floats instead of hugging.
+/// On notched Macs (MacBook Pro 14"/16") the camera cutout occupies the middle
+/// of the menu bar. Usable menu-bar strips either side are reported as
+/// `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`. The derived `notchRect`
+/// is the exact black hole the collapsed island must fill — measured live, not
+/// hard-coded (width/height change with resolution scaling).
+///
+/// Example (14" MBP, common "More Space" scale, probed live):
+///   safeArea.top = 38, notch width = 220, centred on the display.
+///
+/// On non-notched displays (external monitors) there is no cutout, so we
+/// synthesise a pill-sized band centred on the menu bar — the UI is identical,
+/// it just floats instead of hugging hardware.
 ///
 /// macOS 27 (Tahoe) notes:
 /// - Menu bar is more translucent ("Liquid Glass"); we still anchor to the
@@ -21,6 +29,7 @@ import PillCore
 public struct NotchGeometry {
     public let hasNotch: Bool
     /// Rect of the notch itself (or the synthetic equivalent), in screen coords.
+    /// Pixel-snapped so the island chrome lands on whole points.
     public let notchRect: CGRect
     public let screenFrame: CGRect
     /// Screen this geometry was computed for (retained for reposition).
@@ -29,13 +38,15 @@ public struct NotchGeometry {
     /// Fallback height for displays without a physical notch.
     public static let syntheticNotchHeight: CGFloat = 32
     /// Synthetic notch width for displays with no physical notch, so the
-    /// collapsed pill centres within it.
-    ///
-    /// Derived from PillMetrics rather than restated: this was a hardcoded 260
-    /// carrying the comment "must match PillMetrics.collapsedWidth (260pt)"
-    /// while collapsedWidth had since moved to 270. Two constants that must be
-    /// equal should not be written down twice.
+    /// collapsed pill centres within it. Always tracks `PillMetrics.collapsedWidth`.
     public static var syntheticNotchWidth: CGFloat { PillMetrics.collapsedWidth }
+
+    /// Physical notch band height (safe-area top), or synthetic height when
+    /// there is no hardware cutout. Use this for collapsed pill height.
+    public var bandHeight: CGFloat { notchRect.height }
+
+    /// Convenience: same as `hasNotch` — true only for a real camera cutout.
+    public var isPhysical: Bool { hasNotch }
 
     public init(screen: NSScreen) {
         self.screen = screen
@@ -49,23 +60,42 @@ public struct NotchGeometry {
            let right = screen.auxiliaryTopRightArea,
            left.width > 1, right.width > 1 {
             let notchWidth = screen.frame.width - left.width - right.width
-            if notchWidth > 40 {
+            // Real MBP cutouts are ~150–230 pt depending on scale; reject noise.
+            if notchWidth > 40, notchWidth < screen.frame.width * 0.45 {
                 hasNotch = true
-                notchRect = CGRect(
-                    x: screen.frame.minX + left.width,
-                    y: screen.frame.maxY - topInset,
-                    width: notchWidth,
-                    height: topInset
-                )
+                // Snap to whole points so the black island doesn't leave a
+                // sub-pixel seam beside the camera housing.
+                let x = (screen.frame.minX + left.width).rounded(.toNearestOrAwayFromZero)
+                let w = notchWidth.rounded(.toNearestOrAwayFromZero)
+                let h = topInset.rounded(.toNearestOrAwayFromZero)
+                let y = (screen.frame.maxY - h).rounded(.toNearestOrAwayFromZero)
+                notchRect = CGRect(x: x, y: y, width: w, height: h)
                 return
             }
         }
 
+        // Some notched Macs briefly report nil aux areas while still advertising
+        // a non-zero top safe area (sleep/wake, clamshell). Prefer a centred
+        // physical-sized band over a synthetic default so we don't shrink the
+        // island under the camera.
+        if topInset >= 28 {
+            hasNotch = true
+            let h = topInset.rounded(.toNearestOrAwayFromZero)
+            // MBP 14"/16" cutouts cluster near ~200–220 pt at typical scales.
+            let w = max(PillMetrics.collapsedWidth, 200 as CGFloat)
+                .rounded(.toNearestOrAwayFromZero)
+            notchRect = CGRect(
+                x: (screen.frame.midX - w / 2).rounded(.toNearestOrAwayFromZero),
+                y: (screen.frame.maxY - h).rounded(.toNearestOrAwayFromZero),
+                width: w,
+                height: h
+            )
+            return
+        }
+
         hasNotch = false
         let w = Self.syntheticNotchWidth
-        // Prefer the menu-bar band: use safeAreaInsets.top when present (Stage
-        // Manager / external displays with camera housing), else synthetic.
-        let h = topInset > 0 ? topInset : Self.syntheticNotchHeight
+        let h = Self.syntheticNotchHeight
         notchRect = CGRect(
             x: screen.frame.midX - w / 2,
             y: screen.frame.maxY - h,
@@ -81,7 +111,7 @@ public struct NotchGeometry {
         if let underMouse = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) {
             return underMouse
         }
-        // 2. Main screen (menu-bar owning display).
+        // 2. Main screen (menu-bar owning display) — usually the notched laptop.
         if let main = NSScreen.main { return main }
         // 3. First notched screen.
         if let notched = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
@@ -94,15 +124,26 @@ public struct NotchGeometry {
     /// Window frame for the pill at a given content size, centred on the notch
     /// and clamped so it never runs off either edge of the display.
     public func windowFrame(contentSize: CGSize) -> CGRect {
-        let width = max(contentSize.width, 1)
-        let height = max(contentSize.height, 1)
-        let x = notchRect.midX - width / 2
-        let clampedX = min(max(x, screenFrame.minX + 4),
-                           screenFrame.maxX - width - 4)
-        // Anchor the top edge to the top of the screen so the pill grows downward.
-        // CRITICAL: use screen.frame.maxY, NOT visibleFrame — visibleFrame is
-        // below the menu bar and would hide an LSUIElement under the desktop.
-        let y = screenFrame.maxY - height
-        return CGRect(x: clampedX, y: y, width: width, height: height)
+        // Pure helper (ShannonLayout) so unit tests cover top-anchor math without AppKit.
+        ShannonLayout.Pill.windowFrame(
+            contentSize: contentSize,
+            notchRect: notchRect,
+            screenFrame: screenFrame,
+            hasNotch: hasNotch
+        )
+    }
+
+    /// Ideal collapsed content size that paints the hardware cutout (or synthetic band).
+    public func collapsedContentSize(recessive: Bool) -> CGSize {
+        let h = PillMetrics.collapsedHeight(
+            notchBand: bandHeight,
+            physicalNotch: hasNotch
+        )
+        let w = PillMetrics.collapsedWidth(
+            notchWidth: hasNotch ? notchRect.width : nil,
+            recessive: recessive,
+            physicalNotch: hasNotch
+        )
+        return CGSize(width: w, height: h)
     }
 }

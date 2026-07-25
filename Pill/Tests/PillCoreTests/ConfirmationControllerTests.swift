@@ -189,4 +189,35 @@ final class ConfirmationControllerTests: XCTestCase {
         XCTAssertFalse(controller.gesturesAvailable)
         XCTAssertTrue(controller.gestureStatus.contains("macOS 14"))
     }
+
+    // MARK: Gate asks (P1.2)
+
+    func testArmForGateAskStoresInteractionIdAndArms() {
+        let (controller, provider, _) = makeController()
+        var received: ConfirmationAnswer?
+        controller.armForGateAsk(
+            prompt: "Write ~/.ssh/config?",
+            interactionId: "ix-42",
+            detail: "Claude"
+        ) { answer, _ in received = answer }
+
+        XCTAssertTrue(controller.isAwaitingConfirmation)
+        XCTAssertEqual(controller.armedInteractionId, "ix-42")
+        XCTAssertEqual(controller.prompt?.question, "Write ~/.ssh/config?")
+        XCTAssertEqual(controller.prompt?.detail, "Claude")
+        XCTAssertTrue(provider.isRunning)
+
+        controller.answer(.denied)
+        XCTAssertEqual(received, .denied)
+        XCTAssertNil(controller.armedInteractionId)
+        XCTAssertFalse(controller.isAwaitingConfirmation)
+    }
+
+    func testArmForGateAskSupersedesPrevious() {
+        let (controller, _, _) = makeController()
+        controller.armForGateAsk(prompt: "A", interactionId: "a") { _, _ in }
+        controller.armForGateAsk(prompt: "B", interactionId: "b") { _, _ in }
+        XCTAssertEqual(controller.armedInteractionId, "b")
+        XCTAssertEqual(controller.prompt?.question, "B")
+    }
 }

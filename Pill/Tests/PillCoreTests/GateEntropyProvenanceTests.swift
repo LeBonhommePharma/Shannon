@@ -120,9 +120,12 @@ final class GateEntropyProvenanceTests: XCTestCase {
         )
         XCTAssertTrue(reading.isMeasured)
         XCTAssertEqual(reading.currentBits ?? 0, 2.86, accuracy: 1e-9)
-        XCTAssertEqual(reading.verdict(policy: policy), .watch, "2.86 bits is below the 5.0 band")
+        // Gate column is message score: 2.86 is normal, not collapse-watch.
+        XCTAssertEqual(reading.verdict(policy: policy), .healthy,
+                       "low H_msg must not paint as approaching collapse")
         XCTAssertEqual(reading.display(at: now, policy: policy)?.source,
                        .gate(agentId: "claude_code", presence: .live))
+        XCTAssertEqual(reading.display(at: now, policy: policy)?.badge, "H_msg")
     }
 
     // MARK: - Staleness

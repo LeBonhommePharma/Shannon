@@ -1,5 +1,20 @@
 # Agent Hub
 
+> ## ⚠️ STALE — DO NOT USE FOR PRODUCTION
+>
+> **Canonical hub is `hub/`** at the repo root (not this tree).
+>
+> | Item | Live path |
+> |------|-----------|
+> | Gate daemon | `hub/shannon_gate.py` |
+> | Socket | `/tmp/shannon.sock` |
+> | Tests | `hub/tests/` |
+> | Identities | `hub/agent_identity.py` |
+>
+> This `agent_hub/` directory is a historical snapshot. Entropy integrity,
+> approval-always-surfaces, process-attach, and Keychain service names all
+> live only under **`hub/`**. Scripts and docs must point there.
+
 A macOS multi-agent coordination layer, added alongside the Shannon entropy
 library but functionally and architecturally independent from it — it does
 not link against or modify any of the core C++/CUDA code.

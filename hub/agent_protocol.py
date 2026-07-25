@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-agent_protocol.py — FlexAIDdS Agent Hub Client Library
-=======================================================
+agent_protocol.py — Shannon Agent Hub Client Library
+====================================================
 A zero-dependency (standard library only for socket mode) Python client
 that lets any AI agent integration push messages to the Shannon Gate hub
 and receive broadcasts from other agents.
 
 Two transport modes
 -------------------
-socket  — Unix domain socket (/tmp/flexaidds_agent_hub.sock)
+socket  — Unix domain socket (/tmp/shannon.sock)
           Designed for local agents: DatasetRunner bridge, local test harnesses.
           Supports real-time .subscribe() callbacks via background thread.
 
@@ -114,12 +114,15 @@ class CredentialManager:
 
     Keychain layout
     ---------------
-    service  : "FlexAIDdS.AgentHub"
+    service  : "Shannon.AgentHub" (legacy read: FlexAIDdS.AgentHub)
     account  : "<agent_id>.token"
     value    : the API key / OAuth access token
     """
 
-    SERVICE = "FlexAIDdS.AgentHub"
+    # Must match hub/credentials.py KEYCHAIN_SERVICE (Shannon.AgentHub).
+    # Legacy FlexAIDdS.AgentHub is only used as a read fallback for old tokens.
+    SERVICE = "Shannon.AgentHub"
+    LEGACY_SERVICE = "FlexAIDdS.AgentHub"
 
     _AUTH_ENDPOINTS: dict[str, str] = {
         "codex":      "https://api.github.com/user",
@@ -133,24 +136,24 @@ class CredentialManager:
 
     @classmethod
     def load(cls, agent_id: str) -> Optional[str]:
-        """Load token: Keychain first, then env-var fallback."""
-        # 1. macOS Keychain via `security` CLI
-        try:
-            result = subprocess.run(
-                [
-                    "security", "find-generic-password",
-                    "-s", cls.SERVICE,
-                    "-a", f"{agent_id}.token",
-                    "-w",
-                ],
-                capture_output=True, text=True, timeout=3,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except Exception:
-            pass
+        """Load token: Keychain first (new + legacy service), then env-var fallback."""
+        for service in (cls.SERVICE, cls.LEGACY_SERVICE):
+            try:
+                result = subprocess.run(
+                    [
+                        "security", "find-generic-password",
+                        "-s", service,
+                        "-a", f"{agent_id}.token",
+                        "-w",
+                    ],
+                    capture_output=True, text=True, timeout=3,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+            except Exception:
+                pass
 
-        # 2. Env-var fallback (CI / development)
+        # Env-var fallback (CI / development)
         for var in cls._FALLBACK_ENV.get(agent_id, ()):
             val = os.environ.get(var)
             if val:
@@ -309,7 +312,7 @@ def _payload_entropy(payload: dict[str, Any]) -> float:
 
 class AgentClient:
     """
-    Multi-mode client for the FlexAIDdS Shannon Gate Agent Hub.
+    Multi-mode client for the Shannon Gate Agent Hub.
 
     Parameters
     ----------
@@ -610,7 +613,7 @@ class AgentClient:
 
     def query_benchmark_state(self) -> dict[str, Any]:
         """
-        Returns the current shared FlexAIDdS benchmark run status:
+        Returns the current shared benchmark run status:
           {"completed": int, "total": int, "best_cf": float,
            "best_rmsd": float, "active_target": str, ...}
         """
@@ -988,7 +991,7 @@ if __name__ == "__main__":
     import argparse
 
     p = argparse.ArgumentParser(
-        description="FlexAIDdS agent_protocol.py utilities",
+        description="Shannon agent_protocol.py utilities",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:

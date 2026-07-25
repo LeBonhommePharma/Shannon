@@ -156,6 +156,83 @@ public struct HeadGestureDetector: Sendable {
     }
 }
 
+// MARK: - Browse mode (BLOCKED.md §8 — available, was time-descoped)
+
+/// Continuous head-orientation for browse mode (sustained yaw offset).
+///
+/// Unlike discrete nod/shake, this reports a signed yaw delta from neutral
+/// while armed — used to pan a list / scrub a long board without gestures.
+public struct HeadOrientationBrowse: Sendable, Equatable {
+    /// Signed yaw offset from neutral, in radians (−π…π).
+    public var yawOffset: Double
+    /// True when |yawOffset| exceeds the engagement threshold.
+    public var engaged: Bool
+    /// Normalised −1…1 for UI (clamped to ±maxBrowseRadians).
+    public var normalized: Double
+
+    public init(yawOffset: Double, engaged: Bool, normalized: Double) {
+        self.yawOffset = yawOffset
+        self.engaged = engaged
+        self.normalized = min(1, max(-1, normalized))
+    }
+}
+
+public struct HeadOrientationConfig: Sendable, Equatable {
+    /// |yaw| above this (radians) counts as engaged browse.
+    public var engageRadians: Double
+    /// |yaw| full-scale for normalization (radians).
+    public var maxBrowseRadians: Double
+
+    public init(engageDegrees: Double = 12, maxBrowseDegrees: Double = 45) {
+        self.engageRadians = engageDegrees * .pi / 180
+        self.maxBrowseRadians = maxBrowseDegrees * .pi / 180
+    }
+
+    public static let `default` = HeadOrientationConfig()
+}
+
+/// Pure detector for sustained yaw browse (unit-tested without CoreMotion).
+public struct HeadOrientationBrowser: Sendable {
+    public let config: HeadOrientationConfig
+    private var armed = false
+    private var referenceYaw: Double?
+
+    public init(config: HeadOrientationConfig = .default) {
+        self.config = config
+    }
+
+    public var isArmed: Bool { armed }
+
+    public mutating func arm() {
+        armed = true
+        referenceYaw = nil
+    }
+
+    public mutating func disarm() {
+        armed = false
+        referenceYaw = nil
+    }
+
+    /// Feed one attitude sample. First sample after arm sets neutral yaw.
+    public mutating func process(_ sample: HeadAttitudeSample) -> HeadOrientationBrowse? {
+        guard armed else { return nil }
+        guard let ref = referenceYaw else {
+            referenceYaw = sample.yaw
+            return HeadOrientationBrowse(yawOffset: 0, engaged: false, normalized: 0)
+        }
+        let dy = HeadGestureDetector.angleDelta(sample.yaw, ref)
+        let eng = abs(dy) >= config.engageRadians
+        let norm = config.maxBrowseRadians > 0
+            ? dy / config.maxBrowseRadians
+            : 0
+        return HeadOrientationBrowse(
+            yawOffset: dy,
+            engaged: eng,
+            normalized: norm
+        )
+    }
+}
+
 // MARK: - Motion source
 
 public protocol HeadphoneMotionProviding: AnyObject {

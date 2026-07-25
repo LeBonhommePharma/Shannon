@@ -13,9 +13,8 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Generator
 
-import numpy as np
-
-from shannon.detector import CollapseEvent, ShannonCollapseDetector
+from shannon.detector import ShannonCollapseDetector
+from shannon.integrations.logprob_feed import feed_token_logprobs
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -93,17 +92,10 @@ def monitor_openai_stream(
         for token_logprobs in choice.logprobs.content:
             token_text = token_logprobs.token
 
-            if token_logprobs.top_logprobs:
-                lps = np.array(
-                    [tlp.logprob for tlp in token_logprobs.top_logprobs],
-                    dtype=np.float64,
-                )
-                res = detector.add_logprobs(lps)
-            else:
-                # No alternatives reported → degenerate one-hot distribution,
-                # H = 0 bits. Goes through the public API so both the Python
-                # and C++ backends stay in sync.
-                res = detector.add_probs(np.array([1.0], dtype=np.float64))
+            # Missing top_logprobs → absent, not collapse (never one-hot H=0).
+            res = feed_token_logprobs(detector, token_logprobs.top_logprobs)
+            if res is None:
+                continue
 
             event = StreamEvent(
                 token=token_text,

@@ -233,11 +233,13 @@ public struct CompanionBoardView: View {
     public init(summary: AgentActivitySummary,
                 now: Date = Date(),
                 approvals: [String: Date] = [:],
+                entropyDeltas: [String: Double] = [:],
                 entropyDelta: Double? = nil,
                 maxRows: Int = 6) {
         self.states = CompanionRoster.build(from: summary,
                                             now: now,
                                             approvals: approvals,
+                                            entropyDeltas: entropyDeltas,
                                             entropyDelta: entropyDelta)
         self.maxRows = maxRows
     }

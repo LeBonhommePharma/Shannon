@@ -181,25 +181,27 @@ struct MenuBarPopoverView: View {
                     .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(1)
+                    // Fixed height so live subtitle swaps never shove the badge.
+                    .frame(height: 14, alignment: .leading)
             }
-            Spacer()
+            Spacer(minLength: 4)
             hubStatusBadge
         }
+        .frame(height: 36)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Shannon. \(headerSubtitle). \(hubStatusText)")
     }
 
+    /// One-line founder scan: collapse > busy agents > live FlexAIDdS run > hub state.
     private var headerSubtitle: String {
-        // `collapseAlarm` is only true for `.measured`, so `measurement` is
-        // non-nil here; the `if let` is belt-and-braces rather than an excuse to
-        // print a number from a reading that has none.
-        if collapseAlarm, let m = reading.measurement {
-            let delta = m.deltaH.map { String(format: ", ΔH %+.1f", $0) } ?? ""
-            return String(format: "Entropy collapse — H %.1f%@", m.bits, delta)
-        }
-        if busy.isEmpty { return "No agents busy" }
-        if busy.count == 1, let p = busy.first { return "\(p.displayName) · \(p.statusLine)" }
-        return "\(busy.count) agents active"
+        HubScanLine.resolve(
+            collapseBits: collapseAlarm ? reading.measurement?.bits : nil,
+            collapseDelta: collapseAlarm ? reading.measurement?.deltaH : nil,
+            busyNames: busy.map(\.displayName),
+            busyStatus: busy.first.map(\.statusLine),
+            benchmarkTitle: BenchmarkRunLogic.collapsedTitle(activity.benchmark),
+            hubReady: activity.gateAvailable || bridge.connected
+        )
     }
 
     /// Hub = gate socket + bridge. The socket is what approvals travel over,
@@ -353,11 +355,11 @@ struct MenuBarPopoverView: View {
             }
             .toggleStyle(.checkbox)
             .controlSize(.mini)
-            Text("Native: no idle/display sleep (caffeinate-class). Amphetamine not required.")
+            Text("Native caffeinate-class hold · Amphetamine not required.")
                 .font(.shannonMenuFootnote)
                 .foregroundStyle(Color.shannonTertiary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .frame(height: 14, alignment: .leading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.shortLabel)
@@ -698,10 +700,11 @@ struct MenuBarPopoverView: View {
         VStack(alignment: .leading, spacing: 5) {
             sectionTitle(busy.isEmpty ? "Agents" : "Active now")
             if busy.isEmpty && summary.agents.isEmpty {
-                Text("Nothing running. Press ⌘D to attach the front app as an agent.")
+                Text("No agents. ⌘D attaches the front app · DatasetRunner fills FlexAIDdS progress.")
                     .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2)
+                    .frame(minHeight: 28, alignment: .topLeading)
             } else {
                 ForEach(agentRows) { agent in
                     agentRow(agent)

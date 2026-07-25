@@ -893,23 +893,27 @@ struct PillView: View {
     }
 
     private var headerSubtitle: String {
-        if collapseAlarm, let m = fleetReading.measurement {
-            let delta = m.deltaH.map { String(format: "  ΔH %+.1f", $0) } ?? ""
-            return String(format: "H %.1f%@ · %@", m.bits, delta, m.source.label)
-        }
-        if let p = busy.first {
-            let task = AgentActivitySnapshot.shorten(p.lastTask, max: 52)
-            if busy.count == 1 {
-                return task.isEmpty ? p.statusLine : task
+        // Media artist only when media chrome is intentionally shown.
+        if showMedia, busy.isEmpty, !collapseAlarm {
+            if let artist = nowPlaying.state.info?.artist, !artist.isEmpty {
+                return artist
             }
-            return task.isEmpty
-                ? busy.map(\.displayName).prefix(3).joined(separator: " · ")
-                : task
         }
-        if showMedia {
-            return nowPlaying.state.info?.artist ?? ""
-        }
-        return "⌘D capture · pets in ~/.shannon/pets"
+        // Shared founder-scan priority with the menubar popover (collapse → busy
+        // → FlexAIDdS progress → hub state). Never invents H or success rates.
+        let taskHint: String? = {
+            guard let p = busy.first else { return busy.first.map(\.statusLine) }
+            let task = AgentActivitySnapshot.shorten(p.lastTask, max: 52)
+            return task.isEmpty ? p.statusLine : task
+        }()
+        return HubScanLine.resolve(
+            collapseBits: collapseAlarm ? fleetReading.measurement?.bits : nil,
+            collapseDelta: collapseAlarm ? fleetReading.measurement?.deltaH : nil,
+            busyNames: busy.map(\.displayName),
+            busyStatus: taskHint,
+            benchmarkTitle: BenchmarkRunLogic.collapsedTitle(activity.benchmark),
+            hubReady: activity.gateAvailable || bridge.connected
+        )
     }
 
     // MARK: Agent board

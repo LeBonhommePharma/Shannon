@@ -38,6 +38,8 @@ final class MenuBarController: NSObject {
     var onShowPill: (() -> Void)?
     var onReposition: (() -> Void)?
     var onAddAgent: (() -> Void)?
+    /// Opens the real Settings window (not only Finder on ~/.shannon).
+    var onOpenSettings: (() -> Void)?
 
     init(
         bridge: ShannonBridge,
@@ -435,7 +437,7 @@ final class MenuBarController: NSObject {
                 },
                 onOpenSettings: { [weak self] in
                     self?.popover?.performClose(nil)
-                    Self.openSettings()
+                    self?.openSettings()
                 },
                 onQuit: { NSApp.terminate(nil) }
             )
@@ -540,9 +542,13 @@ final class MenuBarController: NSObject {
         }
     }
 
-    /// Shannon's configuration lives on disk under ~/.shannon (pets, registry,
-    /// hub DB) — "Settings" opens that folder until a preferences window exists.
-    private static func openSettings() {
+    /// Opens the Settings window. Falls back to ~/.shannon only if no callback.
+    private func openSettings() {
+        if let onOpenSettings {
+            onOpenSettings()
+            return
+        }
+        // Fail-closed fallback for tests / incomplete wiring.
         NSWorkspace.shared.open(PetBootstrap.shannonHome)
     }
 

@@ -29,11 +29,12 @@ public enum FirstRunCoach {
 
     /// True until the user dismisses the coach (or tests call `markDone`).
     public static func shouldShow(defaults: UserDefaults = .standard) -> Bool {
-        !defaults.bool(forKey: defaultsKey)
+        // Shared key with ShannonPreferences.firstRunDone.
+        !ShannonPreferences.firstRunDone(defaults: defaults)
     }
 
     /// Persist that first-run tips have been seen.
     public static func markDone(defaults: UserDefaults = .standard) {
-        defaults.set(true, forKey: defaultsKey)
+        ShannonPreferences.setFirstRunDone(true, defaults: defaults)
     }
 }

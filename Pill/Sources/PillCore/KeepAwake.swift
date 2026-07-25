@@ -171,7 +171,13 @@ public enum KeepAwakeRunner {
 public final class KeepAwakeMonitor: ObservableObject {
     @Published public private(set) var session = KeepAwakeSession()
     /// Auto-hold while any agent is busy (same role as Amphetamine auto toggle).
-    @Published public var autoKeepAwakeWithAgents: Bool = true
+    /// Persists via `ShannonPreferences` when the user toggles in the popover or Settings.
+    @Published public var autoKeepAwakeWithAgents: Bool {
+        didSet {
+            guard !suppressPersist, autoKeepAwakeWithAgents != oldValue else { return }
+            ShannonPreferences.setAutoKeepAwakeWithAgents(autoKeepAwakeWithAgents)
+        }
+    }
 
     private var idleAssertion: UInt32 = 0
     private var displayAssertion: UInt32 = 0
@@ -180,10 +186,24 @@ public final class KeepAwakeMonitor: ObservableObject {
     private var duration: TimeInterval?
     private var timer: Timer?
     private var hadAgentsBusy = false
+    /// Skip didSet during init / programmatic reload from store.
+    private var suppressPersist = true
 
-    public init() {}
+    public init(autoKeepAwakeWithAgents: Bool = ShannonPreferences.autoKeepAwakeWithAgents()) {
+        self.autoKeepAwakeWithAgents = autoKeepAwakeWithAgents
+        self.suppressPersist = false
+    }
+
+    /// Apply value from Settings without re-writing UserDefaults.
+    public func applyAutoKeepAwakeFromPreferences(_ value: Bool) {
+        suppressPersist = true
+        autoKeepAwakeWithAgents = value
+        suppressPersist = false
+    }
 
     public func start(interval: TimeInterval = 5.0) {
+        // Re-load preference in case Settings changed while stopped.
+        applyAutoKeepAwakeFromPreferences(ShannonPreferences.autoKeepAwakeWithAgents())
         refresh()
         let t = Timer(timeInterval: max(2, interval), repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }

@@ -28,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resources: SystemResourceMonitor?
     private var keepAwake: KeepAwakeMonitor?
     private var focusMode: FocusModeMonitor?
+    private var preferencesStore: ShannonPreferencesStore?
+    private var settingsWindow: SettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard claimSingleInstance() else { return }
@@ -68,6 +70,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Focus / DND best-effort (BLOCKED.md §2) — fail-closed to unknown.
         let focus = FocusModeMonitor()
 
+        // Preferences (Settings window + launch behavior).
+        let prefs = ShannonPreferencesStore()
+        // Honor persisted keep-awake auto before first agent tick.
+        keep.applyAutoKeepAwakeFromPreferences(prefs.autoKeepAwakeWithAgents)
+        prefs.onAutoKeepAwakeChanged = { [weak keep] value in
+            keep?.applyAutoKeepAwakeFromPreferences(value)
+        }
+        if prefs.startWithMonitoringPaused {
+            activityMon.isPaused = true
+        }
+
         // UI
         // Prefer notification permission early so ask alerts can fire later.
         ShannonNotifier.requestPermission()
@@ -83,6 +96,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         ctl.show()
 
+        let settings = SettingsWindowController(
+            store: prefs,
+            onOpenShannonHome: { NSWorkspace.shared.open(PetBootstrap.shannonHome) },
+            onOpenHubLog: {
+                let log = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Logs/Shannon/pill.log")
+                if FileManager.default.fileExists(atPath: log.path) {
+                    NSWorkspace.shared.open(log)
+                } else {
+                    NSWorkspace.shared.open(log.deletingLastPathComponent())
+                }
+            }
+        )
+
         let menu = MenuBarController(
             bridge: br, battery: bat, ingest: ingestSvc, activity: activityMon,
             resources: sysRes,
@@ -93,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.onShowPill = { [weak ctl] in ctl?.reassertVisibility(); ctl?.expand() }
         menu.onReposition = { [weak ctl] in ctl?.reposition() }
         menu.onAddAgent = { [weak self] in self?.addAgentFromFrontApp() }
+        menu.onOpenSettings = { [weak settings] in settings?.show() }
         menu.start()
 
         // Global ⌘D (Carbon) — works while you're in Terminal / Claude / browser.
@@ -119,6 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ingest = ingestSvc; activity = activityMon; hotkey = hk
         cloud = cloudPub; confirmation = confirm; resources = sysRes
         keepAwake = keep; focusMode = focus
+        preferencesStore = prefs; settingsWindow = settings
         controller = ctl; menuBar = menu
 
         // Auto-attach Shannon hub (gate) so ⌘D process attach can register
@@ -132,13 +161,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Hello flash so a first launch is obviously alive, then tuck into the notch.
-        ctl.expand()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak ctl, weak confirm, weak menu] in
-            guard confirm?.isAwaitingConfirmation != true else { return }
-            ctl?.presentation.isExpanded = false
-            // First-run: auto-open popover once so coach is not buried behind a click.
-            if FirstRunCoach.shouldShow() {
+        // Hello flash (optional via Settings) so a first launch is obviously alive.
+        if prefs.expandPillOnLaunch {
+            ctl.expand()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak ctl, weak confirm, weak menu] in
+                guard confirm?.isAwaitingConfirmation != true else { return }
+                ctl?.presentation.isExpanded = false
+                // First-run: auto-open popover once so coach is not buried behind a click.
+                if FirstRunCoach.shouldShow() {
+                    menu?.presentFirstRunPopover()
+                }
+            }
+        } else if FirstRunCoach.shouldShow() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak menu] in
                 menu?.presentFirstRunPopover()
             }
         }

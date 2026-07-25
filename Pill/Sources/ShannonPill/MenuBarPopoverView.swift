@@ -355,11 +355,6 @@ struct MenuBarPopoverView: View {
             }
             .toggleStyle(.checkbox)
             .controlSize(.mini)
-            Text("Native caffeinate-class hold · Amphetamine not required.")
-                .font(.shannonMenuFootnote)
-                .foregroundStyle(Color.shannonTertiary)
-                .lineLimit(1)
-                .frame(height: 14, alignment: .leading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.shortLabel)

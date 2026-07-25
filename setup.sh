@@ -47,7 +47,7 @@ success "Homebrew $(brew --version | head -1)"
 
 # ─── Step 3 · brew bundle ──────────────────────────────────────────────────────
 info "Installing dependencies from Brewfile..."
-brew bundle install --no-lock --file="$REPO_ROOT/Brewfile"
+brew bundle install --file="$REPO_ROOT/Brewfile"
 success "Homebrew dependencies installed."
 
 # ─── Step 4 · Python virtual environment ───────────────────────────────────────

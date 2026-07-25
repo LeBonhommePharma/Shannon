@@ -28,6 +28,19 @@ _CORE_SOURCES = [
     "src/shannon.cpp",
     "src/energy_matrix.cpp",
     "src/fast_optics.cpp",
+    # v2 engine — collapse detector + unified hardware dispatch
+    "src/shannon/collapse_detector.cpp",
+    "src/shannon/unified_dispatch.cpp",
+    "src/shannon/hardware_detect.cpp",
+    # entropy kernels (platform guards inside each file)
+    "src/shannon/entropy_scalar.cpp",
+    "src/shannon/entropy_neon.cpp",
+    "src/shannon/entropy_omp.cpp",
+    "src/shannon/entropy_avx2.cpp",
+    "src/shannon/entropy_sse42.cpp",
+    "src/shannon/entropy_avx512.cpp",
+    # contact matrix (SoftContactMatrix bound in _core bindings)
+    "src/contact/soft_contact_matrix.cpp",
 ]
 
 _CORE_HEADERS_GLOBS = [

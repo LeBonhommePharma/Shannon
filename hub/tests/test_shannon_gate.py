@@ -174,8 +174,7 @@ class TestSocketServerBasics:
         monkeypatch.setattr(sg, "SOCKET_PATH", socket_path)
 
         async def scenario():
-            hub = sg.AgentHub()
-            hub.db = sg.AuditDB(tmp_path / "agent_hub.db")
+            hub = sg.AgentHub(db_path=tmp_path / "agent_hub.db")
             hub.gate = sg.ShannonGate(hub.db)
 
             server = await asyncio.start_unix_server(hub._handle_socket_conn, path=socket_path)
@@ -214,8 +213,7 @@ class TestSocketServerBasics:
         monkeypatch.setattr(sg, "SOCKET_PATH", socket_path)
 
         async def scenario():
-            hub = sg.AgentHub()
-            hub.db = sg.AuditDB(tmp_path / "agent_hub.db")
+            hub = sg.AgentHub(db_path=tmp_path / "agent_hub.db")
             hub.gate = sg.ShannonGate(hub.db)
 
             server = await asyncio.start_unix_server(hub._handle_socket_conn, path=socket_path)

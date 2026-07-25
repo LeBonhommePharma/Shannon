@@ -506,8 +506,9 @@ class TestRedTeamEvasions:
 
 class TestNoGradientDisclosure:
     def _hub(self, tmp_path):
-        hub = sg.AgentHub()
-        hub.db = sg.AuditDB(tmp_path / "wire.db")
+        # db_path explicit: constructing AgentHub must never open the real
+        # ~/.shannon/agent_hub.db.
+        hub = sg.AgentHub(db_path=tmp_path / "wire.db")
         hub.gate = sg.ShannonGate(hub.db)
         return hub
 
@@ -597,8 +598,7 @@ class TestEveryMessageIsGated:
         socket_path = f"/tmp/shannon_att_{uuid.uuid4().hex[:8]}.sock"
 
         async def scenario():
-            hub = sg.AgentHub()
-            hub.db = sg.AuditDB(tmp_path / "q.db")
+            hub = sg.AgentHub(db_path=tmp_path / "q.db")
             hub.gate = sg.ShannonGate(hub.db)
             hub._lock = asyncio.Lock()
             hub._shutdown = asyncio.Event()
@@ -636,14 +636,12 @@ class TestEveryMessageIsGated:
         """VALID_MESSAGE_TYPES was defined at module scope and referenced
         nowhere, so message_type was a free-form attacker-chosen string."""
         monkeypatch.setattr(sg, "STRICT_TYPES", False)
-        hub = sg.AgentHub()
-        hub.db = sg.AuditDB(tmp_path / "t.db")
+        hub = sg.AgentHub(db_path=tmp_path / "t.db")
         assert hub._check_message_type(_msg(message_type="totally_made_up"), "science")
 
     def test_unknown_message_type_is_rejected_under_strict_types(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sg, "STRICT_TYPES", True)
-        hub = sg.AgentHub()
-        hub.db = sg.AuditDB(tmp_path / "t.db")
+        hub = sg.AgentHub(db_path=tmp_path / "t.db")
         assert not hub._check_message_type(_msg(message_type="totally_made_up"), "science")
         assert hub._check_message_type(_msg(message_type="status"), "science")
 

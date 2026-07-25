@@ -213,12 +213,13 @@ final class PillWindowController {
         let frame = geometry.windowFrame(
             contentSize: CGSize(width: PillMetrics.expandedWidth, height: clamped)
         )
-        // Ignore sub-pixel and small content jitter from live H/resource ticks.
+        // Ignore content jitter from live H/resource ticks (text reflow).
+        // Threshold matches PillHost preference hysteresis (~6–8 pt).
         let delta = abs(frame.height - panel.frame.height)
-        guard delta > 2.0 else { return }
-        // Large morph (expand/collapse board): spring. Small-ish reflow: snap
-        // so continuous telemetry never "pops" the notch island.
-        if delta > 24 {
+        guard delta > 8.0 else { return }
+        // Large morph (expand/collapse board): spring. Small reflow: silent snap
+        // without display:true repaint thrash when possible.
+        if delta > 28 {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = ShannonMotion.panelMorphDuration
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -226,7 +227,9 @@ final class PillWindowController {
                 panel.animator().setFrame(frame, display: true)
             }
         } else {
-            panel.setFrame(frame, display: true)
+            // display:false avoids an extra screen flash on small reflows.
+            panel.setFrame(frame, display: false)
+            panel.contentView?.needsDisplay = true
         }
     }
 
@@ -276,8 +279,11 @@ private struct PillHost: View {
             // Grow the host (and, via onContentHeight, the panel) to whatever the
             // pill actually laid out. Shrinking back below the floor is pointless
             // churn, so this only ever tracks the larger of the two.
+            //
+            // Hysteresis of 6 pt: live H/resource text reflow used to report
+            // ±1–3 pt every sample and morph the notch window ("pop" on refresh).
             let wanted = max(PillMetrics.expandedHeight, size.height.rounded(.up))
-            guard abs(wanted - hostHeight) > 0.5 else { return }
+            guard abs(wanted - hostHeight) > 6 else { return }
             hostHeight = wanted
             onContentHeight(wanted)
         }

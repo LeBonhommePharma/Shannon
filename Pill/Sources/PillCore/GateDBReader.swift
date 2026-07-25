@@ -66,6 +66,8 @@ public enum GateDBReader {
         /// the gate has never scored produce **no** element rather than a zero;
         /// see `entropyMeasurement(_:at:now:policy:)`.
         public var agentEntropy: [EntropyMeasurement]
+        /// Latest FlexAIDdS / DatasetRunner progress from `benchmark_state`, if any.
+        public var benchmark: BenchmarkRunSnapshot?
 
         public init(
             available: Bool = false,
@@ -73,7 +75,8 @@ public enum GateDBReader {
             pendingAsks: [PendingAsk] = [],
             staleAsks: [PendingAsk] = [],
             activity: [ActivityEvent] = [],
-            agentEntropy: [EntropyMeasurement] = []
+            agentEntropy: [EntropyMeasurement] = [],
+            benchmark: BenchmarkRunSnapshot? = nil
         ) {
             self.available = available
             self.agents = agents
@@ -81,6 +84,7 @@ public enum GateDBReader {
             self.staleAsks = staleAsks
             self.activity = activity
             self.agentEntropy = agentEntropy
+            self.benchmark = benchmark
         }
     }
 
@@ -121,7 +125,8 @@ public enum GateDBReader {
             pendingAsks: Array(live.prefix(keep)),
             staleAsks: Array(stale),
             activity: activityRows(db, limit: activityLimit),
-            agentEntropy: rows.entropy
+            agentEntropy: rows.entropy,
+            benchmark: latestBenchmark(db)
         )
         #else
         return Snapshot()
@@ -556,6 +561,40 @@ public enum GateDBReader {
     }
 
     #if canImport(SQLite3)
+    /// Latest `benchmark_state` row (FlexAIDdS DatasetRunner progress).
+    private static func latestBenchmark(_ db: OpaquePointer) -> BenchmarkRunSnapshot? {
+        let sql = """
+            SELECT task_id, completed, total, best_cf, best_rmsd, active_target, updated_at
+            FROM benchmark_state
+            ORDER BY updated_at DESC
+            LIMIT 1;
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        let taskId = string(stmt, 0)
+        let completed = Int(sqlite3_column_int(stmt, 1))
+        let total = Int(sqlite3_column_int(stmt, 2))
+        let bestCF: Double? = sqlite3_column_type(stmt, 3) == SQLITE_NULL
+            ? nil : sqlite3_column_double(stmt, 3)
+        let bestRMSD: Double? = sqlite3_column_type(stmt, 4) == SQLITE_NULL
+            ? nil : sqlite3_column_double(stmt, 4)
+        let target = string(stmt, 5)
+        let updated = sqlite3_column_int64(stmt, 6)
+        return BenchmarkRunSnapshot.fromGateRow(
+            taskId: taskId,
+            completed: completed,
+            total: total,
+            bestCF: bestCF,
+            bestRMSD: bestRMSD,
+            activeTarget: target.isEmpty ? nil : target,
+            updatedAtNs: updated
+        )
+    }
+
     private static func activityRows(_ db: OpaquePointer, limit: Int) -> [ActivityEvent] {
         guard limit > 0 else { return [] }
         let sql = """

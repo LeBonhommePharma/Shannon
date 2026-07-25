@@ -13,8 +13,9 @@ import SwiftUI
 
 public extension Font {
 
-    /// Display type. `.largeTitle` · bold · SF Rounded
-    static let shannonLargeTitle = Font.system(.largeTitle, design: .rounded, weight: .bold)
+    /// Display type. `.largeTitle` · bold · **default SF Pro** (native, not rounded
+    /// chrome — rounded is reserved for rare marketing display only).
+    static let shannonLargeTitle = Font.system(.largeTitle, design: .default, weight: .bold)
 
     /// Screen and section titles. `.title2` · semibold · SF Pro
     static let shannonTitle = Font.system(.title2, design: .default, weight: .semibold)
@@ -36,6 +37,32 @@ public extension Font {
     /// Numeric readouts — RMSD, CF scores, turn counts, entropy in bits.
     /// `.caption` · regular · SF Mono
     static let shannonMono = Font.system(.caption, design: .monospaced, weight: .regular)
+
+    // MARK: Menubar + notch chrome (native macOS)
+
+    /// Popover / pill section headers — SF Pro default (system UI face).
+    static let shannonMenuSection = Font.system(.caption2, design: .default, weight: .semibold)
+
+    /// Primary menubar popover title (e.g. "Shannon").
+    static let shannonMenuTitle = Font.system(.subheadline, design: .default, weight: .semibold)
+
+    /// Secondary line under titles.
+    static let shannonMenuSubtitle = Font.system(.caption2, design: .default, weight: .regular)
+
+    /// Body rows in the status popover (agent names, tips).
+    static let shannonMenuBody = Font.system(.caption, design: .default, weight: .semibold)
+
+    /// Supporting popover copy.
+    static let shannonMenuFootnote = Font.system(.caption2, design: .default, weight: .regular)
+
+    /// Telemetry numbers in the menubar (H, %, RMSD) — SF Mono.
+    static let shannonMenuMono = Font.system(.caption2, design: .monospaced, weight: .semibold)
+
+    /// Collapsed notch label — SF Pro default (matches menu bar text).
+    static let shannonPillLabel = Font.system(.caption, design: .default, weight: .semibold)
+
+    /// Collapsed notch numeric H — SF Mono.
+    static let shannonPillMono = Font.system(.caption, design: .monospaced, weight: .semibold)
 }
 
 // MARK: - Text style modifiers
@@ -73,12 +100,20 @@ public struct ShannonFontToken: Identifiable, Sendable {
 
 public enum ShannonTypeCatalogue {
     public static let all: [ShannonFontToken] = [
-        .init("shannonLargeTitle", .shannonLargeTitle, usage: "largeTitle · bold · SF Rounded"),
+        .init("shannonLargeTitle", .shannonLargeTitle, usage: "largeTitle · bold · SF Pro"),
         .init("shannonTitle", .shannonTitle, usage: "title2 · semibold · SF Pro"),
         .init("shannonHeadline", .shannonHeadline, usage: "headline · semibold · SF Pro"),
         .init("shannonBody", .shannonBody, usage: "body · regular · SF Pro"),
         .init("shannonCallout", .shannonCallout, usage: "callout · medium · SF Pro"),
         .init("shannonCaption", .shannonCaption, usage: "caption · regular · SF Pro"),
         .init("shannonMono", .shannonMono, usage: "caption · regular · SF Mono"),
+        .init("shannonMenuSection", .shannonMenuSection, usage: "caption2 · semibold · SF Pro"),
+        .init("shannonMenuTitle", .shannonMenuTitle, usage: "subheadline · semibold · SF Pro"),
+        .init("shannonMenuSubtitle", .shannonMenuSubtitle, usage: "caption2 · regular · SF Pro"),
+        .init("shannonMenuBody", .shannonMenuBody, usage: "caption · semibold · SF Pro"),
+        .init("shannonMenuFootnote", .shannonMenuFootnote, usage: "caption2 · regular · SF Pro"),
+        .init("shannonMenuMono", .shannonMenuMono, usage: "caption2 · semibold · SF Mono"),
+        .init("shannonPillLabel", .shannonPillLabel, usage: "caption · semibold · SF Pro"),
+        .init("shannonPillMono", .shannonPillMono, usage: "caption · semibold · SF Mono"),
     ]
 }

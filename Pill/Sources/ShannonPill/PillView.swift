@@ -332,13 +332,16 @@ struct PillView: View {
         // Only the pill island takes hits. The transparent surround around it
         // must stay click-through — see PillHost in PillWindowController.
         .contentShape(pillOutline)
-        // Only expand/collapse morphs. Busy-count / primary-name springs on
-        // every poll made the notch island jitter ("pop") during live refresh.
+        // Only intentional expand/collapse morphs via withAnimation below.
+        // Never attach value-based .animation to recessive/busy text — those
+        // flip on live telemetry and made the notch island "pop" on refresh.
         .animation(.shannon(.shannonFloat, reduceMotion: reduceMotion), value: showExpanded)
-        .animation(.shannon(.shannonChrome, reduceMotion: reduceMotion), value: isRecessive)
         .transaction { txn in
-            // Telemetry-driven text/H updates must not animate the chrome frame.
-            if !showExpanded { txn.disablesAnimations = reduceMotion }
+            // Kill implicit layout animations from @Published resource/agent ticks.
+            // Expand/collapse still runs inside explicit withAnimation scopes.
+            if txn.animation == nil {
+                txn.disablesAnimations = true
+            }
         }
         // Intentional expand: brief hover dwell expands; click toggles dismiss.
         // Instant hover-expand was twitchy (UX audit). Leave does not auto-collapse.
@@ -484,13 +487,14 @@ struct PillView: View {
             // Recessive mode drops the filler copy entirely.
             if !isRecessive {
                 Text(collapsedText)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.shannonPillLabel)
                     .foregroundStyle(Color.shannonPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                     .truncationMode(.tail)
-                    .contentTransition(.opacity)
-                    .animation(.shannon(.shannonSnap, reduceMotion: reduceMotion), value: collapsedText)
+                    // No opacity/content transition — live H/CPU text must swap
+                    // in place. Crossfades looked like the island popping.
+                    .contentTransition(.identity)
             }
 
             Spacer(minLength: 2)
@@ -507,7 +511,7 @@ struct PillView: View {
 
             if summary.busyCount > 1 {
                 Text("\(summary.busyCount)")
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonAccent)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
@@ -517,7 +521,7 @@ struct PillView: View {
 
             if hasPendingAsk {
                 Image(systemName: "questionmark.circle.fill")
-                    .font(.system(size: 11))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonWarning)
                     .help("An agent is waiting for your approval — click to answer")
             }
@@ -526,7 +530,7 @@ struct PillView: View {
                 // Red — matches status legend / MenuBarController collapse glyph.
                 // Amber is reserved for pending approval only.
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonError)
             }
 
@@ -552,7 +556,7 @@ struct PillView: View {
         if busy.count == 1, let p = busy.first {
             // Single active agent: prominent emoji communicates identity at a glance.
             Text(style(for: p).emoji)
-                .font(.system(size: 15))
+                .font(.shannonMenuBody)
                 .help("\(style(for: p).displayName) · \(p.statusLine) · \(style(for: p).pet)")
         } else if busy.count > 1 {
             // One dot per agent in its own brand colour, ordered by last-seen so
@@ -578,7 +582,7 @@ struct PillView: View {
                 .joined(separator: "\n"))
         } else if showMedia {
             Image(systemName: "music.note")
-                .font(.system(size: 11))
+                .font(.shannonMenuFootnote)
                 .foregroundStyle(Color.shannonSecondary)
         } else {
             // Quiet: breathing waveform. Bound to `isQuiet` (>30 s since any
@@ -619,15 +623,15 @@ struct PillView: View {
         let reading = fleetReading
         if let display = reading.display(at: Date()) {
             Text(display.shortLabel)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.shannonPillMono)
                 .foregroundStyle(entropyTint(for: reading))
-                .contentTransition(.numericText())
-                .animation(.shannon(.shannonLiquid, reduceMotion: reduceMotion), value: display.bits)
+                // Identity swap — numeric morph + animation looked like a pop.
+                .contentTransition(.identity)
                 .help(reading.explain(at: Date()))
                 .accessibilityLabel(reading.explain(at: Date()))
         } else {
             Text("no H")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .font(.shannonPillMono)
                 .foregroundStyle(Color.shannonNeutral)
                 .help(reading.explain(at: Date()))
                 .accessibilityLabel(reading.explain(at: Date()))
@@ -665,6 +669,9 @@ struct PillView: View {
             // must never announce "+Something" for a capture that never ran.
             return last.pillLabel
         }
+        if let bench = BenchmarkRunLogic.collapsedTitle(activity.benchmark) {
+            return bench
+        }
         if let label = nowPlaying.collapsedLabel { return label }
         if let recent = primary, !recent.lastTask.isEmpty,
            Date().timeIntervalSince(recent.updatedAt) < 600 {
@@ -693,7 +700,7 @@ struct PillView: View {
                 }
             }()
             Text(c.shortLabel)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.shannonPillMono)
                 .foregroundStyle(tint)
                 .help(resourceHelpLine)
                 .accessibilityLabel(resourceHelpLine)
@@ -735,7 +742,7 @@ struct PillView: View {
                 firstRunPending: FirstRunCoach.shouldShow()
             ) {
                 Text(PillChromePolicy.statusLegend)
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonTertiary)
                     .accessibilityLabel(PillChromePolicy.statusLegend)
             }
@@ -748,10 +755,74 @@ struct PillView: View {
                 emptyBoard
             }
 
+            // FlexAIDdS DatasetRunner progress from gate `benchmark_state`.
+            // Fail-closed: only when the hub has a non-stale row — no invented S.
+            if BenchmarkRunLogic.shouldShowCard(activity.benchmark) {
+                expandedBenchmarkCard
+            }
+
             Spacer(minLength: 0)
             footer
         }
         .padding(12)
+    }
+
+    /// Honest FlexAIDdS hub surface on the expanded notch board.
+    @ViewBuilder
+    private var expandedBenchmarkCard: some View {
+        if let run = activity.benchmark, BenchmarkRunLogic.shouldShowCard(run) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("FLEXAIDDS BENCHMARK")
+                    .font(.shannonMenuSection)
+                    .foregroundStyle(Color.shannonTertiary)
+                    .tracking(0.6)
+                HStack(spacing: 10) {
+                    Image(systemName: run.isComplete ? "checkmark.seal.fill" : "chart.bar.doc.horizontal")
+                        .font(.shannonMenuBody)
+                        .foregroundStyle(run.isComplete ? Color.shannonSuccess : Color.shannonAccent)
+                        .frame(width: 16)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(run.displayName)
+                            .font(.shannonMenuBody)
+                            .foregroundStyle(Color.shannonPrimary)
+                            .lineLimit(1)
+                        Text(run.shortLabel)
+                            .font(.shannonPillMono)
+                            .foregroundStyle(Color.shannonSecondary)
+                            .lineLimit(1)
+                            .contentTransition(.identity)
+                        if let t = run.activeTarget, !run.isComplete {
+                            Text("Active · \(t)")
+                                .font(.shannonMenuFootnote)
+                                .foregroundStyle(Color.shannonTertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    ZStack {
+                        Circle()
+                            .stroke(Color.shannonNeutral.opacity(0.25), lineWidth: 2.5)
+                        Circle()
+                            .trim(from: 0, to: CGFloat(run.fraction))
+                            .stroke(Color.shannonAccent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                        Text(run.countLabel)
+                            .font(.shannonPillMono)
+                            .foregroundStyle(Color.shannonPrimary)
+                            .minimumScaleFactor(0.65)
+                    }
+                    .frame(width: 42, height: 42)
+                    .accessibilityLabel("Progress \(run.countLabel)")
+                }
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.shannonSurfaceElevated.opacity(0.55))
+            )
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("FlexAIDdS benchmark \(run.shortLabel)")
+        }
     }
 
     private var headerRow: some View {
@@ -763,18 +834,18 @@ struct PillView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(headerIconColor.opacity(agentActive ? 0.18 : 0.08))
                 Image(systemName: headerIcon)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.shannonMenuTitle)
                     .foregroundStyle(headerIconColor)
             }
             .frame(width: 44, height: 44)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(headerTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.shannonMenuTitle)
                     .foregroundStyle(Color.shannonPrimary)
                     .lineLimit(1)
                 Text(headerSubtitle)
-                    .font(.system(size: 11))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(2)
             }
@@ -785,7 +856,7 @@ struct PillView: View {
                 VStack(spacing: 2) {
                     BatteryRing(snapshot: snap, diameter: 28)
                     Text(snap.timeLabel)
-                        .font(.system(size: 8))
+                        .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonTertiary)
                         .lineLimit(1)
                 }
@@ -890,16 +961,16 @@ struct PillView: View {
                 .frame(width: 8, height: 8)
                 .shadow(color: color(for: a).opacity(0.6), radius: 3)
             Image(systemName: iconName(for: a))
-                .font(.system(size: 11, weight: .semibold))
+                .font(.shannonPillLabel)
                 .foregroundStyle(color(for: a))
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text("\(style(for: a).emoji) \(style(for: a).displayName)")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.shannonMenuBody)
                         .foregroundStyle(ink(for: a))
                     Text(a.statusLine)
-                        .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        .font(.shannonMenuSection)
                         .foregroundStyle(ink(for: a))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -908,12 +979,12 @@ struct PillView: View {
                     Spacer(minLength: 0)
                     agentEntropyBadge(reading)
                     Text(a.relativeAge)
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(.shannonPillMono)
                         .foregroundStyle(Color.shannonSecondary)
                 }
                 if !a.lastTask.isEmpty {
                     Text(a.lastTask)
-                        .font(.system(size: 10.5))
+                        .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -932,12 +1003,12 @@ struct PillView: View {
     private func agentEntropyBadge(_ reading: EntropyReading) -> some View {
         if let display = reading.display(at: Date()) {
             Text(display.shortLabel)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(.shannonPillMono)
                 .foregroundStyle(entropyTint(for: reading))
                 .help(reading.explain(at: Date()))
         } else {
             Text("—")
-                .font(.system(size: 9, design: .monospaced))
+                .font(.shannonPillMono)
                 .foregroundStyle(Color.shannonNeutral)
                 .help(reading.explain(at: Date()))
         }
@@ -946,15 +1017,15 @@ struct PillView: View {
     private var emptyBoard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("No agents running")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.shannonMenuTitle)
                 .foregroundStyle(Color.shannonPrimary)
             Text(PillChromePolicy.emptyRosterCopy)
-                .font(.system(size: 10.5))
+                .font(.shannonMenuFootnote)
                 .foregroundStyle(Color.shannonSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             if FirstRunCoach.shouldShow() {
                 Text(PillChromePolicy.statusLegend)
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonTertiary)
             }
             HStack(spacing: 8) {
@@ -969,10 +1040,10 @@ struct PillView: View {
     private func hintChip(_ key: String, _ label: String) -> some View {
         HStack(spacing: 4) {
             Text(key)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .font(.shannonPillMono)
                 .foregroundStyle(Color.shannonAccent)
             Text(label)
-                .font(.system(size: 9.5))
+                .font(.shannonMenuFootnote)
                 .foregroundStyle(Color.shannonSecondary)
         }
         .padding(.horizontal, 8)
@@ -1027,23 +1098,22 @@ struct PillView: View {
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
                 Text(style.displayName)
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .font(.shannonMenuBody)
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let display {
                     Text(display.shortLabel)
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .font(.shannonPillMono)
                         .foregroundStyle(Self.color(from: display.gaugeColorRGB()))
-                        .contentTransition(.numericText())
-                        .animation(.shannonLiquid, value: display.bits)
+                        .contentTransition(.identity)
                 } else {
                     Text(reading.isStale ? "stale" : "no H")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(.shannonPillMono)
                         .foregroundStyle(Color.shannonNeutral)
                 }
                 Text(display.map { $0.source.label } ?? "—")
-                    .font(.system(size: 8.5, design: .monospaced))
+                    .font(.shannonMenuMono)
                     .foregroundStyle(Color.shannonTertiary)
                     .lineLimit(1)
             }
@@ -1064,15 +1134,14 @@ struct PillView: View {
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
                 Text(display.map(\.shortLabel) ?? "no detector")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .font(.shannonPillMono)
                     .foregroundStyle(
                         display.map { Self.color(from: $0.gaugeColorRGB()) } ?? Color.shannonNeutral
                     )
-                    .contentTransition(.numericText())
-                    .animation(.shannonLiquid, value: display?.bits ?? -1)
+                    .contentTransition(.identity)
                 Spacer(minLength: 0)
                 Text(display.map { $0.source.label } ?? "absent")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.shannonPillMono)
                     .foregroundStyle(Color.shannonTertiary)
             }
             FluidEntropyRail(
@@ -1114,7 +1183,7 @@ struct PillView: View {
                 mediaBtn("forward.fill") { nowPlaying.nextTrack() }
                 Spacer()
                 Text(NowPlayingInfo.formatTime(nowPlaying.state.info?.elapsed ?? 0))
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.shannonPillMono)
                     .foregroundStyle(Color.shannonTertiary)
             }
         }
@@ -1123,7 +1192,7 @@ struct PillView: View {
     private func mediaBtn(_ name: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: name)
-                .font(.system(size: 12))
+                .font(.shannonMenuBody)
                 .foregroundStyle(Color.shannonPrimary)
         }
         .buttonStyle(.plain)
@@ -1143,14 +1212,14 @@ struct PillView: View {
                     radius: bridge.connected || !busy.isEmpty ? 3 : 0
                 )
             Text(footerText)
-                .font(.system(size: 9.5, design: .monospaced))
+                .font(.shannonPillMono)
                 .foregroundStyle(Color.shannonSecondary)
                 .lineLimit(1)
             Spacer()
             constrainedResourceChip
             if ingest.isHighlighting, let last = ingest.lastResult {
                 Text(last.agent.map { "+\($0.id)" } ?? "⊘ not an agent")
-                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                    .font(.shannonPillMono)
                     .foregroundStyle(last.captured ? Color.shannonSuccess : Color.shannonSecondary)
             }
         }
@@ -1253,13 +1322,13 @@ struct ConfirmationPromptView: View {
                 Image(systemName: "questionmark.circle.fill")
                     .foregroundStyle(Color.shannonWarning)
                 Text(confirmation.prompt?.question ?? "")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.shannonMenuTitle)
                     .foregroundStyle(Color.shannonPrimary)
                     .lineLimit(2)
             }
             if let detail = confirmation.prompt?.detail {
                 Text(detail)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.shannonPillMono)
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(1)
             }
@@ -1275,11 +1344,11 @@ struct ConfirmationPromptView: View {
             HStack(spacing: 5) {
                 Image(systemName: confirmation.gesturesAvailable
                       ? "airpods.gen3" : "airpods.gen3.slash")
-                    .font(.system(size: 9))
+                    .font(.shannonMenuFootnote)
                 Text(confirmation.gesturesAvailable
                      ? "Nod to confirm · shake to deny"
                      : "Head gestures unavailable — \(confirmation.gestureStatus)")
-                    .font(.system(size: 9))
+                    .font(.shannonMenuFootnote)
                     .lineLimit(2)
             }
             .foregroundStyle(confirmation.gesturesAvailable ? Color.shannonSecondary : Color.shannonTertiary)
@@ -1293,8 +1362,8 @@ struct ConfirmationPromptView: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: systemImage).font(.system(size: 10, weight: .bold))
-                Text(title).font(.system(size: 11, weight: .medium))
+                Image(systemName: systemImage).font(.shannonMenuBody)
+                Text(title).font(.shannonMenuBody)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
@@ -1328,11 +1397,13 @@ struct BatteryRing: View {
                 .rotationEffect(.degrees(-90))
             if snapshot.isCharging {
                 Image(systemName: "bolt.fill")
-                    .font(.system(size: diameter * 0.4))
+                    // Proportional SF glyph — system default design (native).
+                    .font(.system(size: diameter * 0.4, weight: .semibold, design: .default))
                     .foregroundStyle(tint)
             } else if diameter >= 28 {
                 Text("\(snapshot.percentage)")
-                    .font(.system(size: diameter * 0.32, weight: .medium, design: .rounded))
+                    // System monospaced digits for stable ring readout.
+                    .font(.system(size: diameter * 0.32, weight: .medium, design: .monospaced))
                     .foregroundStyle(Color.shannonPrimary)
             }
         }
@@ -1495,12 +1566,12 @@ struct GateAskCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text(style.emoji).font(.system(size: 14))
+                Text(style.emoji).font(.shannonMenuBody)
                 Text(style.displayName)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.shannonMenuBody)
                     .foregroundStyle(style.palette.ink)
                 Text("needs approval")
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonWarning)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
@@ -1509,20 +1580,20 @@ struct GateAskCard: View {
             }
 
             Text(ask.prompt)
-                .font(.system(size: 11))
+                .font(.shannonMenuFootnote)
                 .foregroundStyle(Color.shannonPrimary)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let errorText {
                 Text(errorText)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonError)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             } else if !gateAvailable {
                 Text("Hub offline — start the gate to approve from here")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonWarning)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1535,7 +1606,7 @@ struct GateAskCard: View {
                     ProgressView()
                         .controlSize(.small)
                     Text("Sending…")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonSecondary)
                     Spacer(minLength: 0)
                 } else {
@@ -1547,7 +1618,7 @@ struct GateAskCard: View {
                     }
                     Spacer(minLength: 0)
                     Text("right-click for more")
-                        .font(.system(size: 8))
+                        .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonTertiary)
                 }
             }
@@ -1561,8 +1632,8 @@ struct GateAskCard: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: systemImage).font(.system(size: 10, weight: .bold))
-                Text(title).font(.system(size: 11, weight: .semibold))
+                Image(systemName: systemImage).font(.shannonMenuBody)
+                Text(title).font(.shannonPillLabel)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)

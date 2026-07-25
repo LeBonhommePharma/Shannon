@@ -329,49 +329,51 @@ final class MenuBarController: NSObject {
             return
         }
         guard let button = item?.button else { return }
-        // Reuse one popover + hosting controller so sample ticks do not
-        // re-create the window (which looked like pop-in/out on refresh).
-        let pop = popover ?? {
+        // Reuse one popover + hosting controller for the whole process lifetime.
+        // Recreating on every open (or, worse, on sample ticks) looked like the
+        // menu was popping in and out while the HUD refreshed.
+        let pop: NSPopover
+        if let existing = popover {
+            pop = existing
+        } else {
             let p = NSPopover()
-            p.behavior = .transient
-            // Open animation once is fine; size morphs on every CPU tick are not.
+            p.behavior = .semitransient
+            // No open/close size animation — live metric ticks must never morph.
             p.animates = false
             p.appearance = NSAppearance(named: .darkAqua)
-            return p
-        }()
-        let root = MenuBarPopoverView(
-            activity: activity,
-            bridge: bridge,
-            battery: battery,
-            resources: resources,
-            keepAwake: keepAwake,
-            focusMode: focusMode,
-            multiDeviceStatus: multiDeviceStatus,
-            onShowAllGates: { [weak self] in
-                self?.popover?.performClose(nil)
-                self?.onShowPill?()
-            },
-            onOpenHubLog: { [weak self] in
-                self?.popover?.performClose(nil)
-                Self.openHubLog()
-            },
-            onOpenSettings: { [weak self] in
-                self?.popover?.performClose(nil)
-                Self.openSettings()
-            },
-            onQuit: { NSApp.terminate(nil) }
-        )
-        if let host = pop.contentViewController as? NSHostingController<MenuBarPopoverView> {
-            host.rootView = root
-        } else {
+            let root = MenuBarPopoverView(
+                activity: activity,
+                bridge: bridge,
+                battery: battery,
+                resources: resources,
+                keepAwake: keepAwake,
+                focusMode: focusMode,
+                multiDeviceStatus: multiDeviceStatus,
+                onShowAllGates: { [weak self] in
+                    self?.popover?.performClose(nil)
+                    self?.onShowPill?()
+                },
+                onOpenHubLog: { [weak self] in
+                    self?.popover?.performClose(nil)
+                    Self.openHubLog()
+                },
+                onOpenSettings: { [weak self] in
+                    self?.popover?.performClose(nil)
+                    Self.openSettings()
+                },
+                onQuit: { NSApp.terminate(nil) }
+            )
             let host = NSHostingController(rootView: root)
-            // Prefer fixed fitting without continuous animated resize thrash.
+            // Intrinsic size once; ObservedObject updates re-render in place.
             host.sizingOptions = [.intrinsicContentSize]
-            pop.contentViewController = host
+            p.contentViewController = host
+            popover = p
+            pop = p
         }
-        popover = pop
+        // Do not re-assign rootView on every open — that tears down SwiftUI
+        // state and flashes the whole popover. Models are ObservedObject so
+        // live data already flows through the existing tree.
         pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        pop.contentViewController?.view.window?.makeKey()
     }
 
     // MARK: - Context menu (right-click / ⌥-click)

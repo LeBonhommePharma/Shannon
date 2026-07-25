@@ -385,6 +385,40 @@ final class AgentActivityTests: XCTestCase {
         )
     }
 
+    /// Sub-minute second ticks must not thrash the publish signature (pill/popover pop).
+    func testRenderSignatureBucketsSubMinuteAges() {
+        let now = Date()
+        let a = AgentActivitySnapshot(
+            id: "ask", displayName: "Claude", status: .active,
+            lastTask: "docking", source: "gate",
+            updatedAt: now.addingTimeInterval(-20), resumable: true,
+            historyCount: 0, presence: .observed
+        )
+        let summary = AgentActivitySummary(agents: [a], scannedAt: now)
+        // 20s and 25s both land in the 15s bucket → same signature.
+        XCTAssertEqual(
+            summary.renderSignature(at: now),
+            summary.renderSignature(at: now.addingTimeInterval(5))
+        )
+        // Crossing into the next 15s bucket forces a redraw.
+        XCTAssertNotEqual(
+            summary.renderSignature(at: now),
+            summary.renderSignature(at: now.addingTimeInterval(16))
+        )
+        // Display age stays fine-grained when drawn.
+        XCTAssertEqual(a.relativeAge(at: now), "20s")
+        XCTAssertEqual(a.relativeAge(at: now.addingTimeInterval(5)), "25s")
+    }
+
+    func testSignatureAgeBuckets() {
+        let now = Date()
+        let t = now.addingTimeInterval(-22)
+        XCTAssertEqual(AgentActivitySnapshot.signatureAge(since: t, now: now), "15s")
+        XCTAssertEqual(AgentActivitySnapshot.signatureAge(since: t, now: now.addingTimeInterval(10)), "30s")
+        XCTAssertEqual(AgentActivitySnapshot.signatureAge(since: now.addingTimeInterval(-3), now: now), "now")
+        XCTAssertEqual(AgentActivitySnapshot.signatureAge(since: now.addingTimeInterval(-120), now: now), "2m")
+    }
+
     /// Ages come from each agent's own `updatedAt`, never from a shared scan
     /// timestamp — three rows seen minutes apart must not all read alike.
     func testAgesAreIndependentPerAgent() {

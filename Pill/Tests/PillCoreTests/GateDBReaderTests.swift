@@ -328,6 +328,51 @@ final class GateDBReaderTests: XCTestCase {
         XCTAssertTrue(snap.agents.isEmpty)
         XCTAssertTrue(snap.pendingAsks.isEmpty)
         XCTAssertTrue(snap.activity.isEmpty)
+        XCTAssertNil(snap.benchmark, "missing DB must not invent a benchmark row")
+    }
+
+    /// FlexAIDdS hub: `benchmark_state` is optional; absent table → nil (fail-closed).
+    func testBenchmarkStateAbsentIsNilNotInvented() throws {
+        let snap = GateDBReader.readSnapshot(path: dbPath)
+        XCTAssertTrue(snap.available)
+        XCTAssertNil(snap.benchmark)
+    }
+
+    /// Real gate row flows into Snapshot + loadFull (agentic hub binding).
+    func testBenchmarkStateRowIsReadHonestly() throws {
+        let updated = ns(30)
+        try exec("""
+        CREATE TABLE benchmark_state (
+            task_id TEXT PRIMARY KEY,
+            completed INTEGER NOT NULL DEFAULT 0,
+            total INTEGER NOT NULL DEFAULT 0,
+            best_cf REAL,
+            best_rmsd REAL,
+            active_target TEXT,
+            updated_at INTEGER NOT NULL
+        );
+        INSERT INTO benchmark_state
+            (task_id, completed, total, best_cf, best_rmsd, active_target, updated_at)
+        VALUES ('benchmark_v133_astex85', 34, 85, -12.5, 1.42, '1hpv', \(updated));
+        """)
+        let snap = GateDBReader.readSnapshot(path: dbPath)
+        XCTAssertNotNil(snap.benchmark)
+        XCTAssertEqual(snap.benchmark?.taskId, "benchmark_v133_astex85")
+        XCTAssertEqual(snap.benchmark?.completed, 34)
+        XCTAssertEqual(snap.benchmark?.total, 85)
+        XCTAssertEqual(snap.benchmark?.countLabel, "34/85")
+        XCTAssertEqual(snap.benchmark?.activeTarget, "1hpv")
+        XCTAssertEqual(snap.benchmark?.bestRMSD ?? 0, 1.42, accuracy: 1e-9)
+        // No invented success % — only gate fields.
+        XCTAssertFalse(snap.benchmark?.shortLabel.contains("%") ?? true)
+
+        let full = AgentActivityReader.loadFull(
+            petsRoot: dir.appendingPathComponent("pets_empty", isDirectory: true),
+            registryURL: dir.appendingPathComponent("agents.json"),
+            gateDB: URL(fileURLWithPath: dbPath)
+        )
+        XCTAssertEqual(full.benchmark?.countLabel, "34/85")
+        XCTAssertEqual(full.benchmark?.activeTarget, "1hpv")
     }
 
     /// End-to-end through the merge layer: a stale ⌘D pet plus a disconnected

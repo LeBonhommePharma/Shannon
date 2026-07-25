@@ -53,9 +53,15 @@ final class ShannonThemeTests: XCTestCase {
         XCTAssertTrue(names.contains("shannonAccentSubtle"))
     }
 
-    func testTypeCatalogueHasSevenTokens() {
-        XCTAssertEqual(ShannonTypeCatalogue.all.count, 7)
-        XCTAssertEqual(Set(ShannonTypeCatalogue.all.map(\.name)).count, 7)
+    func testTypeCatalogueTokensAreUniqueAndNative() {
+        let names = ShannonTypeCatalogue.all.map(\.name)
+        XCTAssertEqual(Set(names).count, names.count, "token names must be unique")
+        XCTAssertGreaterThanOrEqual(names.count, 7)
+        // Menubar/pill chrome tokens present for native SF Pro / SF Mono.
+        XCTAssertTrue(names.contains("shannonMenuTitle"))
+        XCTAssertTrue(names.contains("shannonMenuMono"))
+        XCTAssertTrue(names.contains("shannonPillLabel"))
+        XCTAssertTrue(names.contains("shannonPillMono"))
     }
 
     func testExpandedPillHeightAddsThirtyTwoPoints() {

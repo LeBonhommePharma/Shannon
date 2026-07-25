@@ -213,8 +213,9 @@ public struct PillStyle: ViewModifier {
                 radius: ambientShadowRadius,
                 y: isQuiet ? 2 : 5
             )
-            .animation(.shannonChrome, value: isActive)
-            .animation(.shannonChrome, value: isQuiet)
+            // Animate only expand/collapse of the island. isActive/isQuiet flip
+            // on live telemetry and used to chrome-animate every resource tick
+            // (looked like the notch pill popping in and out while refreshing).
             .animation(.shannonFloat, value: isCollapsed)
     }
 }

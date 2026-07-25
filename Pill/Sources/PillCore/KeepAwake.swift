@@ -206,9 +206,14 @@ public final class KeepAwakeMonitor: ObservableObject {
             return
         }
         if session.isActive, let start = startedAt, let dur = duration, dur > 0 {
-            session.secondsRemaining = KeepAwakeLogic.secondsRemaining(
-                startedAt: start, duration: dur
-            )
+            let left = KeepAwakeLogic.secondsRemaining(startedAt: start, duration: dur)
+            // Bucket to whole minutes for publish (format shows "m s" otherwise).
+            // Second-level session updates invalidated the menu-bar popover.
+            let prevBucket = session.secondsRemaining.map { $0 / 60 }
+            let nextBucket = left.map { $0 / 60 }
+            if prevBucket != nextBucket {
+                session.secondsRemaining = left
+            }
         }
     }
 

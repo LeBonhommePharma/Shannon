@@ -204,6 +204,23 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
         return "\(Int(s / 86_400))d"
     }
 
+    /// Coarse age for **publish gating only** — not drawn in the UI.
+    ///
+    /// Fine ages (`"12s"` → `"13s"`) thrash the monitor every poll while an
+    /// ask is open or an agent was just seen, which re-laid-out the notch
+    /// pill and menu-bar popover and looked like a pop in/out. Buckets keep
+    /// ages eventually live (resource ticks + other data still re-render)
+    /// without forcing a structural invalidation every second.
+    public static func signatureAge(since date: Date, now: Date = Date()) -> String {
+        guard date > .distantPast else { return "never" }
+        let s = now.timeIntervalSince(date)
+        if s < 15 { return "now" }
+        if s < 60 { return "\(Int(s / 15) * 15)s" } // 15 / 30 / 45
+        if s < 3600 { return "\(Int(s / 60))m" }
+        if s < 86_400 { return "\(Int(s / 3600))h" }
+        return "\(Int(s / 86_400))d"
+    }
+
     /// Honest one-liner for a status column: never claims work we cannot prove.
     ///
     ///   live + working  → "working" / "active" / …
@@ -225,10 +242,23 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
         }
     }
 
+    /// Status line using coarse ages — for publish signatures only.
+    public func signatureStatusLine(at now: Date) -> String {
+        switch presence {
+        case .live:
+            return status.isBusy ? status.label : "live"
+        case .offline:
+            return "offline · last seen \(Self.signatureAge(since: updatedAt, now: now))"
+        case .observed:
+            return "seen \(Self.signatureAge(since: updatedAt, now: now)) ago"
+        }
+    }
+
     /// Everything a row renders that can change without the underlying data
     /// changing. Used to decide whether a re-render is actually needed.
+    /// Ages use `signatureAge` so sub-minute second ticks do not thrash UI.
     public func renderSignature(at now: Date) -> String {
-        "\(id)|\(displayName)|\(lastTask)|\(statusLine(at: now))|\(relativeAge(at: now))"
+        "\(id)|\(displayName)|\(lastTask)|\(signatureStatusLine(at: now))|\(Self.signatureAge(since: updatedAt, now: now))"
     }
 
     public static func shorten(_ text: String, max: Int) -> String {
@@ -707,6 +737,8 @@ public enum AgentActivityReader {
         /// `EntropyProvenance.resolve` so the pill can show a *real* H when no
         /// detector socket is attached, instead of a fabricated one.
         public var agentEntropy: [EntropyMeasurement]
+        /// FlexAIDdS / DatasetRunner progress from gate `benchmark_state`.
+        public var benchmark: BenchmarkRunSnapshot?
 
         public init(
             summary: AgentActivitySummary = AgentActivitySummary(),
@@ -714,7 +746,8 @@ public enum AgentActivityReader {
             staleAsks: [GateDBReader.PendingAsk] = [],
             activity: [GateDBReader.ActivityEvent] = [],
             gateDBAvailable: Bool = false,
-            agentEntropy: [EntropyMeasurement] = []
+            agentEntropy: [EntropyMeasurement] = [],
+            benchmark: BenchmarkRunSnapshot? = nil
         ) {
             self.summary = summary
             self.pendingAsks = pendingAsks
@@ -722,15 +755,26 @@ public enum AgentActivityReader {
             self.activity = activity
             self.gateDBAvailable = gateDBAvailable
             self.agentEntropy = agentEntropy
+            self.benchmark = benchmark
         }
 
         /// Everything on screen whose text depends on the clock: agent rows,
         /// "waiting 3m" on an open approval, "5m ago" in the activity feed.
         /// The monitor republishes exactly when this changes.
+        ///
+        /// Sub-minute ages use `signatureAge` (15 s buckets) so a pending ask
+        /// does not force pill/popover layout every poll ("pop" on refresh).
         public func renderSignature(at now: Date) -> String {
             var parts = [summary.renderSignature(at: now)]
-            parts += pendingAsks.map { "\($0.interactionId)|\($0.waitingFor(at: now))" }
-            parts += activity.map { "\($0.id)|\($0.relativeAge(at: now))" }
+            parts += pendingAsks.map {
+                "\($0.interactionId)|\(AgentActivitySnapshot.signatureAge(since: $0.createdAt, now: now))"
+            }
+            parts += activity.map {
+                "\($0.id)|\(AgentActivitySnapshot.signatureAge(since: $0.at, now: now))"
+            }
+            if let b = benchmark {
+                parts.append("bench|\(b.taskId)|\(b.completed)/\(b.total)|\(b.activeTarget ?? "")")
+            }
             return parts.joined(separator: "\n")
         }
     }
@@ -772,7 +816,8 @@ public enum AgentActivityReader {
             staleAsks: gate?.staleAsks ?? [],
             activity: gate?.activity ?? [],
             gateDBAvailable: gate?.available ?? false,
-            agentEntropy: gate?.agentEntropy ?? []
+            agentEntropy: gate?.agentEntropy ?? [],
+            benchmark: gate?.benchmark
         )
     }
 
@@ -831,6 +876,9 @@ public final class AgentActivityMonitor: ObservableObject {
     /// this to `EntropyProvenance.resolve` rather than reading `.first?.bits`
     /// directly; the resolver is what decides whether a value is current.
     @Published public private(set) var agentEntropy: [EntropyMeasurement] = []
+
+    /// Latest FlexAIDdS / DatasetRunner benchmark progress from the gate (nil if none).
+    @Published public private(set) var benchmark: BenchmarkRunSnapshot?
 
     /// Interaction ids whose approval is currently being written to the gate.
     /// The banner shows a spinner for these instead of tappable buttons, so a
@@ -966,6 +1014,7 @@ public final class AgentActivityMonitor: ObservableObject {
         if gateDBAvailable != full.gateDBAvailable { gateDBAvailable = full.gateDBAvailable }
         if gateAvailable != socketUp { gateAvailable = socketUp }
         if agentEntropy != full.agentEntropy { agentEntropy = full.agentEntropy }
+        if benchmark != full.benchmark { benchmark = full.benchmark }
         // Drop stale in-flight state for asks the gate has since cleared.
         let live = Set(full.pendingAsks.map(\.interactionId))
         if !resolving.isSubset(of: live) { resolving.formIntersection(live) }

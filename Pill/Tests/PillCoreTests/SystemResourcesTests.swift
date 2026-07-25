@@ -40,6 +40,14 @@ final class SystemResourcesTests: XCTestCase {
         XCTAssertTrue(SystemResourceLogic.shouldPublishSnapshot(previous: a, next: c))
     }
 
+    /// Pure wall-clock change alone must never force a HUD publish.
+    func testDisplayEqualIgnoresSampledAt() {
+        let a = SystemResourceSnapshot(cpuPercent: 50, ramPercent: 40, sampledAt: Date(timeIntervalSince1970: 1))
+        let b = SystemResourceSnapshot(cpuPercent: 50, ramPercent: 40, sampledAt: Date(timeIntervalSince1970: 999))
+        XCTAssertTrue(SystemResourceLogic.displayEqual(a, b))
+        XCTAssertFalse(SystemResourceLogic.shouldPublishSnapshot(previous: a, next: b))
+    }
+
     func testBucketPct() {
         XCTAssertEqual(SystemResourceLogic.bucketPct(41.4), 41)
         XCTAssertEqual(SystemResourceLogic.bucketPct(41.6), 42)

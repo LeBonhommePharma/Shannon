@@ -95,6 +95,10 @@ struct MenuBarPopoverView: View {
             }
             resourcesSection
                 .shannonGlassSection()
+            if BenchmarkRunLogic.shouldShowCard(activity.benchmark) {
+                benchmarkSection
+                    .shannonGlassSection(emphasized: activity.benchmark.map { !$0.isComplete } ?? false)
+            }
             keepAwakeSection
                 .shannonGlassSection()
             agentSection
@@ -105,8 +109,12 @@ struct MenuBarPopoverView: View {
                 .padding(.top, 2)
         }
         .transaction { txn in
-            // Suppress implicit layout animation from @Published resource ticks.
-            if reduceMotion { txn.animation = nil }
+            // Always kill implicit layout animation on telemetry ticks.
+            // Resource/agent @Published updates used to animate height/section
+            // morphs and made the popover look like it was popping in and out.
+            // Explicit button presses still use withAnimation where needed.
+            txn.animation = nil
+            txn.disablesAnimations = true
         }
         .onChange(of: activity.summary.busyCount) { count in
             keepAwake.syncWithAgents(busyCount: count)
@@ -147,14 +155,14 @@ struct MenuBarPopoverView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: collapseAlarm ? "exclamationmark.triangle.fill" : "waveform.path.ecg")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.shannonMenuTitle)
                 .foregroundStyle(collapseAlarm ? Color.shannonError : Color.shannonAccent)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Shannon")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.shannonMenuTitle)
                     .foregroundStyle(Color.shannonPrimary)
                 Text(headerSubtitle)
-                    .font(.system(size: 10))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(1)
             }
@@ -195,7 +203,7 @@ struct MenuBarPopoverView: View {
                     radius: 3
                 )
             Text(gateHealth.label)
-                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                .font(.shannonMenuMono)
                 .foregroundStyle(ok ? Color.shannonSuccess : Color.shannonError)
                 .lineLimit(1)
         }
@@ -217,11 +225,11 @@ struct MenuBarPopoverView: View {
     private var firstRunTips: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Getting started")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.shannonMenuBody)
                 .foregroundStyle(Color.shannonPrimary)
             ForEach(FirstRunCoach.steps, id: \.rawValue) { step in
                 Text("• \(FirstRunCoach.tip(for: step))")
-                    .font(.system(size: 10))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -229,12 +237,66 @@ struct MenuBarPopoverView: View {
                 FirstRunCoach.markDone()
                 showFirstRun = false
             }
-            .font(.system(size: 10, weight: .semibold))
+            .font(.shannonMenuBody)
             .buttonStyle(.plain)
             .foregroundStyle(Color.shannonAccent)
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.shannonAccent.opacity(0.08)))
+    }
+
+    // MARK: FlexAIDdS / DatasetRunner benchmark (agentic hub)
+
+    /// Honest hub progress for concurrent FlexAIDdS success-rate work.
+    /// Empty when the gate has no `benchmark_state` row (or it is stale).
+    @ViewBuilder
+    private var benchmarkSection: some View {
+        if let run = activity.benchmark, BenchmarkRunLogic.shouldShowCard(run) {
+            VStack(alignment: .leading, spacing: 5) {
+                sectionTitle("FlexAIDdS benchmark")
+                HStack(spacing: 8) {
+                    Image(systemName: run.isComplete ? "checkmark.seal.fill" : "chart.bar.doc.horizontal")
+                        .font(.shannonMenuBody)
+                        .foregroundStyle(run.isComplete ? Color.shannonSuccess : Color.shannonAccent)
+                        .frame(width: 14)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(run.displayName)
+                            .font(.shannonMenuBody)
+                            .foregroundStyle(Color.shannonPrimary)
+                            .lineLimit(1)
+                        Text(run.shortLabel)
+                            .font(.shannonMenuMono)
+                            .foregroundStyle(Color.shannonSecondary)
+                            .lineLimit(1)
+                            .contentTransition(.identity)
+                    }
+                    Spacer(minLength: 4)
+                    // Progress ring fraction (completed/total only — not invented S).
+                    ZStack {
+                        Circle()
+                            .stroke(Color.shannonNeutral.opacity(0.25), lineWidth: 2.5)
+                        Circle()
+                            .trim(from: 0, to: CGFloat(run.fraction))
+                            .stroke(Color.shannonAccent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                        Text(run.countLabel)
+                            .font(.shannonMenuMono)
+                            .foregroundStyle(Color.shannonPrimary)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .frame(width: 40, height: 40)
+                    .accessibilityLabel("Progress \(run.countLabel)")
+                }
+                if let t = run.activeTarget, !run.isComplete {
+                    Text("Active · \(t)")
+                        .font(.shannonMenuFootnote)
+                        .foregroundStyle(Color.shannonTertiary)
+                        .lineLimit(1)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Benchmark \(run.shortLabel)")
+        }
     }
 
     // MARK: Keep awake (native caffeinate-class — no Amphetamine required)
@@ -246,23 +308,23 @@ struct MenuBarPopoverView: View {
             sectionTitle("Keep awake")
             HStack(spacing: 8) {
                 Image(systemName: s.isActive ? "cup.and.saucer.fill" : "cup.and.saucer")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.shannonMenuBody)
                     .foregroundStyle(s.isActive ? Color.shannonWarning : Color.shannonTertiary)
                     .frame(width: 14)
                 Text(s.shortLabel)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.shannonMenuMono)
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(1)
                     .help(s.detail ?? "Prevents system idle sleep (and display sleep) like caffeinate -dims while agents run.")
                 Spacer(minLength: 4)
                 if s.isActive {
                     Button("End") { keepAwake.endSession() }
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.shannonMenuBody)
                         .buttonStyle(.plain)
                         .foregroundStyle(Color.shannonAccent)
                 } else {
                     Button("Start 2h") { keepAwake.startSession(durationHours: 2.0) }
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.shannonMenuBody)
                         .buttonStyle(.plain)
                         .foregroundStyle(Color.shannonAccent)
                 }
@@ -270,13 +332,13 @@ struct MenuBarPopoverView: View {
             .frame(height: 16)
             Toggle(isOn: $keepAwake.autoKeepAwakeWithAgents) {
                 Text("Auto while agents busy")
-                    .font(.system(size: 9.5))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
             }
             .toggleStyle(.checkbox)
             .controlSize(.mini)
             Text("Native: no idle/display sleep (caffeinate-class). Amphetamine not required.")
-                .font(.system(size: 8.5))
+                .font(.shannonMenuFootnote)
                 .foregroundStyle(Color.shannonTertiary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -300,11 +362,11 @@ struct MenuBarPopoverView: View {
                 Spacer(minLength: 0)
                 if let top = snap.mostConstrained {
                     Text("peak \(top.shortLabel)")
-                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .font(.shannonMenuMono)
                         .foregroundStyle(resourceTint(SystemResourceLogic.band(for: top.percent)))
                 } else if let hot = snap.hottestCore, snap.cpuCoreCount > 1 {
                     Text(String(format: "C%d · %.0f%%", hot.index, hot.percent))
-                        .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                        .font(.shannonMenuMono)
                         .foregroundStyle(resourceTint(SystemResourceLogic.band(for: hot.percent)))
                 }
             }
@@ -397,42 +459,44 @@ struct MenuBarPopoverView: View {
         let label = percent.map { String(format: "%.0f%%", $0) } ?? (detail == "n/a" ? "—" : "…")
         return HStack(spacing: 6) {
             Image(systemName: kind == .gpu ? "cube" : kind.systemImage)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.shannonMenuBody)
                 .foregroundStyle(tint)
                 .frame(width: 14)
             Text(kind.shortLabel)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.shannonMenuMono)
                 .foregroundStyle(Color.shannonSecondary)
                 .frame(width: 36, alignment: .leading)
-            // Horizontal load bar
+            // Horizontal load bar — width snaps; no layout animation (avoids pop).
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.shannonNeutral.opacity(0.22))
                     Capsule()
                         .fill(tint.opacity(percent == nil ? 0.12 : 0.9))
                         .frame(width: max(3, geo.size.width * CGFloat(pct / 100)))
-                        // Local fill only — not a layout transition.
-                        .animation(reduceMotion ? nil : .shannonLiquid, value: Int(pct.rounded()))
                 }
             }
             .frame(height: 7)
-            // Mini sparkline (history)
-            if history.count >= 2 {
-                SparklineView(values: history, tint: tint)
-                    .frame(width: 36, height: 14)
+            // Always reserve sparkline slot so history growth never shifts rows.
+            Group {
+                if history.count >= 2 {
+                    SparklineView(values: history, tint: tint)
+                } else {
+                    Color.clear
+                }
             }
+            .frame(width: 36, height: 14)
             Text(label)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.shannonMenuMono)
                 .foregroundStyle(tint)
                 .frame(width: 34, alignment: .trailing)
-                .contentTransition(.numericText())
-                .animation(.shannonLiquid, value: label)
-            if let detail, detail != "n/a" {
-                Text(detail)
-                    .font(.system(size: 8.5, design: .monospaced))
-                    .foregroundStyle(Color.shannonTertiary)
-                    .lineLimit(1)
-            }
+                .contentTransition(.identity)
+            // Fixed detail width so "16-core · Δ25" appearing does not reflow.
+            Text(detail == "n/a" ? "" : (detail ?? ""))
+                .font(.shannonMenuMono)
+                .foregroundStyle(Color.shannonTertiary)
+                .lineLimit(1)
+                .frame(minWidth: 52, alignment: .leading)
+                .opacity((detail == nil || detail == "n/a") ? 0 : 1)
         }
         .frame(height: 16)
     }
@@ -443,22 +507,22 @@ struct MenuBarPopoverView: View {
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Text("CORES")
-                    .font(.system(size: 8, weight: .heavy, design: .rounded))
+                    .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonTertiary)
                     .tracking(0.6)
                 if let imb = imbalance {
                     Text(String(format: "spread %.0fpp", imb))
-                        .font(.system(size: 8, design: .monospaced))
+                        .font(.shannonMenuMono)
                         .foregroundStyle(imb >= 25 ? Color.shannonWarning : Color.shannonTertiary)
                 }
                 Spacer(minLength: 0)
                 Button {
-                    withAnimation(.shannonEase) {
+                    withAnimation(reduceMotion ? nil : .shannonEase) {
                         showPerCoreDetail.toggle()
                     }
                 } label: {
                     Text(showPerCoreDetail ? "hide" : "vs peers")
-                        .font(.system(size: 8.5, weight: .semibold))
+                        .font(.shannonMenuSection)
                         .foregroundStyle(Color.shannonAccent)
                 }
                 .buttonStyle(.plain)
@@ -516,7 +580,7 @@ struct MenuBarPopoverView: View {
                 Spacer(minLength: 0)
                 Text("Rank").frame(width: 28, alignment: .trailing)
             }
-            .font(.system(size: 8, weight: .semibold, design: .monospaced))
+            .font(.shannonMenuMono)
             .foregroundStyle(Color.shannonTertiary)
 
             ForEach(sorted.prefix(12)) { core in
@@ -541,11 +605,11 @@ struct MenuBarPopoverView: View {
                         .frame(width: 28, alignment: .trailing)
                         .foregroundStyle(core.rank == 1 ? Color.shannonAccent : Color.shannonTertiary)
                 }
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .font(.shannonMenuMono)
             }
             if cores.count > 12 {
                 Text("… \(cores.count - 12) more cores")
-                    .font(.system(size: 8))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
             }
         }
@@ -618,7 +682,7 @@ struct MenuBarPopoverView: View {
             sectionTitle(busy.isEmpty ? "Agents" : "Active now")
             if busy.isEmpty && summary.agents.isEmpty {
                 Text("Nothing running. Press ⌘D to attach the front app as an agent.")
-                    .font(.system(size: 10))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
@@ -628,7 +692,7 @@ struct MenuBarPopoverView: View {
                 let hidden = max(0, (busy.isEmpty ? summary.agents.count : busy.count) - agentRows.count)
                 if hidden > 0 {
                     Text("+\(hidden) more")
-                        .font(.system(size: 9))
+                        .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonTertiary)
                 }
             }
@@ -646,15 +710,15 @@ struct MenuBarPopoverView: View {
                 gateDBAvailable: activity.gateDBAvailable
             )
         return HStack(spacing: 7) {
-            Text(style.emoji).font(.system(size: 12))
+            Text(style.emoji).font(.shannonMenuBody)
             Text(style.displayName)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.shannonMenuBody)
                 .foregroundStyle(style.palette.ink)
             // `statusLine`, not `status.label`: an agent that vanished two days
             // ago used to render the bare word "idle", which reads as "present
             // and waiting". This says "offline · last seen 2d".
             Text(a.statusLine)
-                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                .font(.shannonMenuSection)
                 .foregroundStyle(style.palette.ink)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 1)
@@ -662,7 +726,7 @@ struct MenuBarPopoverView: View {
             Spacer(minLength: 4)
             agentEntropyLabel(agentReading)
             Text(a.relativeAge)
-                .font(.system(size: 9, design: .monospaced))
+                .font(.shannonMenuMono)
                 .foregroundStyle(Color.shannonTertiary)
         }
         .accessibilityElement(children: .combine)
@@ -675,12 +739,12 @@ struct MenuBarPopoverView: View {
     private func agentEntropyLabel(_ reading: EntropyReading) -> some View {
         if let display = reading.display(at: Date()) {
             Text(display.shortLabel)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(.shannonMenuMono)
                 .foregroundStyle(entropyTint(reading))
                 .help(reading.explain(at: Date()))
         } else {
             Text("—")
-                .font(.system(size: 9, design: .monospaced))
+                .font(.shannonMenuMono)
                 .foregroundStyle(Color.shannonNeutral)
                 .help(reading.explain(at: Date()))
         }
@@ -700,12 +764,12 @@ struct MenuBarPopoverView: View {
         if n > 0 {
             HStack(spacing: 5) {
                 Image(systemName: "clock.badge.xmark")
-                    .font(.system(size: 9))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonNeutral)
                 Text(n == 1
                      ? "1 abandoned approval — requester disconnected"
                      : "\(n) abandoned approvals — requesters disconnected")
-                    .font(.system(size: 9.5))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonNeutral)
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -750,11 +814,11 @@ struct MenuBarPopoverView: View {
         let style = AgentStyleCatalog.style(for: e.agentId)
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(e.relativeAge)
-                .font(.system(size: 8.5, design: .monospaced))
+                .font(.shannonMenuMono)
                 .foregroundStyle(Color.shannonTertiary)
                 .frame(width: 34, alignment: .trailing)
             Text("\(style.displayName): \(AgentActivitySnapshot.shorten(e.line, max: 46))")
-                .font(.system(size: 10))
+                .font(.shannonMenuFootnote)
                 .foregroundStyle(Color.shannonSecondary)
                 .lineLimit(1)
         }
@@ -764,7 +828,7 @@ struct MenuBarPopoverView: View {
 
     private func sectionTitle(_ t: String) -> some View {
         Text(t.uppercased())
-            .font(.system(size: 9, weight: .heavy, design: .rounded))
+            .font(.shannonMenuSection)
             .foregroundStyle(Color.shannonSecondary)
             .tracking(0.8)
             .accessibilityAddTraits(.isHeader)
@@ -783,14 +847,13 @@ struct MenuBarPopoverView: View {
         let reading = self.reading
         if let display = reading.display(at: Date()) {
             Text(String(format: "%@ %.2f", display.badge, display.bits))
-                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                .font(.shannonMenuMono)
                 .foregroundStyle(entropyTint(reading))
-                .contentTransition(.numericText())
-                .animation(.shannonLiquid, value: display.bits)
+                .contentTransition(.identity)
                 .help(reading.explain(at: Date()))
         } else {
             Text("no detector")
-                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                .font(.shannonMenuMono)
                 .foregroundStyle(Color.shannonNeutral)
                 .help(reading.explain(at: Date()))
         }
@@ -814,26 +877,26 @@ struct MenuBarPopoverView: View {
                 entropyReadout
                     .layoutPriority(1)
                 Text("·")
-                    .font(.system(size: 9))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
                 if let snap = battery.snapshot {
                     HStack(spacing: 2) {
                         Image(systemName: snap.isCharging ? "battery.100.bolt" : "battery.75")
-                            .font(.system(size: 9))
+                            .font(.shannonMenuFootnote)
                             .foregroundStyle(Color.shannonTertiary)
                             .symbolRenderingMode(.hierarchical)
                         Text("\(snap.percentage)%")
-                            .font(.system(size: 9.5, design: .monospaced))
+                            .font(.shannonMenuMono)
                             .foregroundStyle(Color.shannonTertiary)
                             .contentTransition(.numericText())
                     }
                     .layoutPriority(0)
                 }
                 Text("·")
-                    .font(.system(size: 9))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
                 Text(focusMode.shortLabel)
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(.shannonMenuMono)
                     .foregroundStyle(focusMode.state == .on ? Color.shannonAccent : Color.shannonTertiary)
                     .lineLimit(1)
                     .help("Best-effort Focus/DND from local Assertions.json (BLOCKED.md §2)")
@@ -843,7 +906,7 @@ struct MenuBarPopoverView: View {
 
             HStack(spacing: 4) {
                 Text(multiDeviceFooterLine)
-                    .font(.system(size: 8.5))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
@@ -886,7 +949,7 @@ struct MenuBarPopoverView: View {
     private func footerButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .medium))
+                .font(.shannonMenuBody)
                 .foregroundStyle(Color.shannonSecondary)
                 .symbolRenderingMode(.hierarchical)
                 .frame(width: 26, height: 22)
@@ -965,12 +1028,12 @@ struct GateInlineCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
-                Text(style.emoji).font(.system(size: 13))
+                Text(style.emoji).font(.shannonMenuBody)
                 Text(style.displayName)
-                    .font(.system(size: 11.5, weight: .semibold))
+                    .font(.shannonMenuBody)
                     .foregroundStyle(style.palette.ink)
                 Text("needs approval")
-                    .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                    .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonWarning)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
@@ -979,14 +1042,14 @@ struct GateInlineCard: View {
             }
 
             Text(ask.prompt)
-                .font(.system(size: 11))
+                .font(.shannonMenuFootnote)
                 .foregroundStyle(Color.shannonPrimary)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
             if let error {
                 Text(error)
-                    .font(.system(size: 9.5))
+                    .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonError)
                     .lineLimit(2)
                     .accessibilityLabel("Approval error: \(error)")
@@ -996,7 +1059,7 @@ struct GateInlineCard: View {
                 if isResolving {
                     ProgressView().controlSize(.small)
                     Text("Sending to gate…")
-                        .font(.system(size: 10))
+                        .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonSecondary)
                 } else {
                     answerButton("Approve", systemImage: "checkmark", tint: .shannonSuccess) {
@@ -1010,7 +1073,7 @@ struct GateInlineCard: View {
                 if extraPending > 0 {
                     Button(action: onShowAll) {
                         Text("+\(extraPending) more")
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.shannonMenuFootnote)
                             .foregroundStyle(Color.shannonAccent)
                     }
                     .buttonStyle(.plain)
@@ -1039,9 +1102,9 @@ struct GateInlineCard: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.shannonMenuBody)
                     .symbolRenderingMode(.hierarchical)
-                Text(title).font(.system(size: 10.5, weight: .semibold))
+                Text(title).font(.shannonMenuBody)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)

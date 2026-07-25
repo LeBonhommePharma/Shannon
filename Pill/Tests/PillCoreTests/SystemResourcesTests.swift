@@ -29,6 +29,29 @@ final class SystemResourcesTests: XCTestCase {
         XCTAssertNil(SystemResourceLogic.mostConstrained(cpu: nil, gpu: nil, ram: nil))
     }
 
+    func testDisplayEqualBucketsSubPercentNoise() {
+        let a = SystemResourceSnapshot(cpuPercent: 41.2, ramPercent: 50.4)
+        let b = SystemResourceSnapshot(cpuPercent: 41.4, ramPercent: 50.4)
+        // Both round to 41 / 50 — HUD must not republish (avoids popover thrash).
+        XCTAssertTrue(SystemResourceLogic.displayEqual(a, b))
+        XCTAssertFalse(SystemResourceLogic.shouldPublishSnapshot(previous: a, next: b))
+        let c = SystemResourceSnapshot(cpuPercent: 42.6, ramPercent: 50.4)
+        XCTAssertFalse(SystemResourceLogic.displayEqual(a, c))
+        XCTAssertTrue(SystemResourceLogic.shouldPublishSnapshot(previous: a, next: c))
+    }
+
+    func testBucketPct() {
+        XCTAssertEqual(SystemResourceLogic.bucketPct(41.4), 41)
+        XCTAssertEqual(SystemResourceLogic.bucketPct(41.6), 42)
+        XCTAssertNil(SystemResourceLogic.bucketPct(nil))
+    }
+
+    /// Stable menu row order is fixed kinds, not live re-rank (re-rank caused pop).
+    func testStableResourceKindsOrder() {
+        let kinds: [SystemResourceSnapshot.Kind] = [.cpu, .gpu, .ram, .disk, .thermal]
+        XCTAssertEqual(kinds.map(\.rawValue), ["cpu", "gpu", "ram", "disk", "thermal"])
+    }
+
     func testMostConstrainedRamOverCpu() {
         let c = SystemResourceLogic.mostConstrained(cpu: 40, gpu: nil, ram: 95)
         XCTAssertEqual(c?.kind, .ram)

@@ -353,11 +353,31 @@ public enum SystemResourceLogic {
     }
 
     /// Whether UI should publish a new snapshot (metrics moved).
+    ///
+    /// Uses coarse buckets so 0.75 s sample noise does not thrash SwiftUI /
+    /// the menu-bar popover (which felt like the menu "popping" on refresh).
     public static func shouldPublishSnapshot(
         previous: SystemResourceSnapshot,
         next: SystemResourceSnapshot
     ) -> Bool {
-        !metricsEqual(previous, next)
+        !displayEqual(previous, next)
+    }
+
+    /// Coarse equality for HUD publish gating (1 pp aggregates, signature cores).
+    public static func displayEqual(_ a: SystemResourceSnapshot, _ b: SystemResourceSnapshot) -> Bool {
+        bucketPct(a.cpuPercent) == bucketPct(b.cpuPercent)
+            && bucketPct(a.gpuPercent) == bucketPct(b.gpuPercent)
+            && bucketPct(a.ramPercent) == bucketPct(b.ramPercent)
+            && bucketPct(a.diskPercent) == bucketPct(b.diskPercent)
+            && a.thermal == b.thermal
+            && coresSignatureKey(cores: a.cpuCores, aggregate: a.cpuPercent)
+                == coresSignatureKey(cores: b.cpuCores, aggregate: b.cpuPercent)
+    }
+
+    /// Round to whole percent for publish gating (nil stays nil).
+    public static func bucketPct(_ v: Double?) -> Int? {
+        guard let v = clampPct(v) else { return nil }
+        return Int(v.rounded())
     }
 
     private static func approxEq(_ a: Double?, _ b: Double?, eps: Double = 1e-9) -> Bool {
@@ -804,11 +824,12 @@ public final class SystemResourceMonitor: ObservableObject {
     }
 
     private func apply(_ snap: SystemResourceSnapshot) {
-        // Publish only when host metrics move — not on pure `sampledAt` ticks.
+        // Coarse publish gate: 1 pp aggregate + core signature. Stops the
+        // popover/pill thrashing on sub-percent host_processor_info noise.
         guard SystemResourceLogic.shouldPublishSnapshot(previous: snapshot, next: snap) else {
             return
         }
-        if snap.cpuPercent != nil || snap.ramPercent != nil {
+        if snap.cpuPercent != nil || snap.ramPercent != nil || snap.diskPercent != nil {
             history.append(snap)
         }
         snapshot = snap
@@ -820,7 +841,8 @@ public final class SystemResourceMonitor: ObservableObject {
     private func applyAndNotify(_ snap: SystemResourceSnapshot) {
         let before = snapshot
         apply(snap)
-        if !SystemResourceLogic.metricsEqual(before, snapshot) {
+        // Only notify when the published snapshot actually changed.
+        if !SystemResourceLogic.displayEqual(before, snapshot) {
             onSnapshotPublished?()
         }
     }

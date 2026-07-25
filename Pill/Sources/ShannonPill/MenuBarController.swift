@@ -329,42 +329,48 @@ final class MenuBarController: NSObject {
             return
         }
         guard let button = item?.button else { return }
-        let pop = NSPopover()
-        pop.behavior = .transient
-        // Liquid Glass: keep system open animation; appearance locked dark so
-        // the popover material composites like Control Center, not a light sheet.
-        pop.animates = true
-        pop.appearance = NSAppearance(named: .darkAqua)
-        let host = NSHostingController(
-            rootView: MenuBarPopoverView(
-                activity: activity,
-                bridge: bridge,
-                battery: battery,
-                resources: resources,
-                keepAwake: keepAwake,
-                focusMode: focusMode,
-                multiDeviceStatus: multiDeviceStatus,
-                onShowAllGates: { [weak self] in
-                    self?.popover?.performClose(nil)
-                    self?.onShowPill?()
-                },
-                onOpenHubLog: { [weak self] in
-                    self?.popover?.performClose(nil)
-                    Self.openHubLog()
-                },
-                onOpenSettings: { [weak self] in
-                    self?.popover?.performClose(nil)
-                    Self.openSettings()
-                },
-                onQuit: { NSApp.terminate(nil) }
-            )
+        // Reuse one popover + hosting controller so sample ticks do not
+        // re-create the window (which looked like pop-in/out on refresh).
+        let pop = popover ?? {
+            let p = NSPopover()
+            p.behavior = .transient
+            // Open animation once is fine; size morphs on every CPU tick are not.
+            p.animates = false
+            p.appearance = NSAppearance(named: .darkAqua)
+            return p
+        }()
+        let root = MenuBarPopoverView(
+            activity: activity,
+            bridge: bridge,
+            battery: battery,
+            resources: resources,
+            keepAwake: keepAwake,
+            focusMode: focusMode,
+            multiDeviceStatus: multiDeviceStatus,
+            onShowAllGates: { [weak self] in
+                self?.popover?.performClose(nil)
+                self?.onShowPill?()
+            },
+            onOpenHubLog: { [weak self] in
+                self?.popover?.performClose(nil)
+                Self.openHubLog()
+            },
+            onOpenSettings: { [weak self] in
+                self?.popover?.performClose(nil)
+                Self.openSettings()
+            },
+            onQuit: { NSApp.terminate(nil) }
         )
-        // Intrinsic size so the popover hugs content (no tall empty chrome).
-        host.sizingOptions = [.intrinsicContentSize]
-        pop.contentViewController = host
+        if let host = pop.contentViewController as? NSHostingController<MenuBarPopoverView> {
+            host.rootView = root
+        } else {
+            let host = NSHostingController(rootView: root)
+            // Prefer fixed fitting without continuous animated resize thrash.
+            host.sizingOptions = [.intrinsicContentSize]
+            pop.contentViewController = host
+        }
         popover = pop
         pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        // Keyboard access: focus the popover so Tab walks its controls.
         pop.contentViewController?.view.window?.makeKey()
     }
 

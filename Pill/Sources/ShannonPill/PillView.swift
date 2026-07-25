@@ -332,14 +332,14 @@ struct PillView: View {
         // Only the pill island takes hits. The transparent surround around it
         // must stay click-through — see PillHost in PillWindowController.
         .contentShape(pillOutline)
+        // Only expand/collapse morphs. Busy-count / primary-name springs on
+        // every poll made the notch island jitter ("pop") during live refresh.
         .animation(.shannon(.shannonFloat, reduceMotion: reduceMotion), value: showExpanded)
         .animation(.shannon(.shannonChrome, reduceMotion: reduceMotion), value: isRecessive)
-        .animation(.shannon(.shannonSnap, reduceMotion: reduceMotion), value: summary.busyCount)
-        // Spring transition when the primary agent switches (e.g. Claude → Codex).
-        .animation(
-            .shannon(.shannonEase, reduceMotion: reduceMotion),
-            value: summary.primary?.displayName
-        )
+        .transaction { txn in
+            // Telemetry-driven text/H updates must not animate the chrome frame.
+            if !showExpanded { txn.disablesAnimations = reduceMotion }
+        }
         // Intentional expand: brief hover dwell expands; click toggles dismiss.
         // Instant hover-expand was twitchy (UX audit). Leave does not auto-collapse.
         .onHover { hovering in

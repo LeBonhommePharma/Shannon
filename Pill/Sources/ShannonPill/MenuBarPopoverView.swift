@@ -70,12 +70,14 @@ struct MenuBarPopoverView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        // No container-level transitions/animations: resource ticks used to
+        // re-sort rows + animate layout, which made the popover "pop" in/out.
+        // Gauge fills animate locally; section structure stays put.
         VStack(alignment: .leading, spacing: 10) {
             header
             if showFirstRun && summary.agents.isEmpty {
                 firstRunTips
                     .shannonGlassSection(emphasized: true)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
             if let ask {
                 GateInlineCard(
@@ -88,7 +90,8 @@ struct MenuBarPopoverView: View {
                     },
                     onShowAll: onShowAllGates
                 )
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                // Stable id so only ask *identity* changes swap the card.
+                .id(ask.interactionId)
             }
             resourcesSection
                 .shannonGlassSection()
@@ -101,15 +104,15 @@ struct MenuBarPopoverView: View {
             footer
                 .padding(.top, 2)
         }
-        .animation(.shannon(reduceMotion ? .linear(duration: 0) : .shannonEase, reduceMotion: reduceMotion),
-                   value: activity.pendingAsks.count)
-        .animation(.shannon(.shannonEase, reduceMotion: reduceMotion), value: summary.busyCount)
+        .transaction { txn in
+            // Suppress implicit layout animation from @Published resource ticks.
+            if reduceMotion { txn.animation = nil }
+        }
         .onChange(of: activity.summary.busyCount) { count in
             keepAwake.syncWithAgents(busyCount: count)
         }
         .padding(14)
-        // Fixed width + intrinsic height so the popover does not stretch or
-        // shift when agent/footer content wraps.
+        // Fixed width; height hugs content but without animated size morphs.
         .frame(width: 308, alignment: .topLeading)
         .fixedSize(horizontal: true, vertical: true)
         // Liquid Glass stack for macOS 27: `.popover` material (matches system
@@ -335,30 +338,21 @@ struct MenuBarPopoverView: View {
         var history: [Double]
     }
 
-    /// Build gauge rows sorted by current pressure (most constrained first).
+    /// Stable row order (CPU → GPU → RAM → SSD → Temp).
+    ///
+    /// Most-constrained is called out in the section header — re-sorting rows
+    /// every 0.75 s sample made the popover jump and "pop" during refresh.
     private func resourceRowsOrdered(
         snap: SystemResourceSnapshot,
         hist: SystemResourceHistory
     ) -> [ResourceRowModel] {
-        let specs: [(SystemResourceSnapshot.Kind, Double?, String?, [Double])] = [
-            (.cpu, snap.cpuPercent, cpuAggregateDetail(snap), hist.cpu),
-            (.gpu, snap.gpuPercent, snap.gpuPercent == nil ? "n/a" : nil, hist.gpu),
-            (.ram, snap.ramPercent, ramDetail(snap), hist.ram),
-            (.disk, snap.diskPercent, diskDetail(snap), hist.disk),
-            (.thermal, snap.thermal.map(\.pressurePercent), thermalDetail(snap), []),
+        [
+            ResourceRowModel(kind: .cpu, percent: snap.cpuPercent, detail: cpuAggregateDetail(snap), history: hist.cpu),
+            ResourceRowModel(kind: .gpu, percent: snap.gpuPercent, detail: snap.gpuPercent == nil ? "n/a" : nil, history: hist.gpu),
+            ResourceRowModel(kind: .ram, percent: snap.ramPercent, detail: ramDetail(snap), history: hist.ram),
+            ResourceRowModel(kind: .disk, percent: snap.diskPercent, detail: diskDetail(snap), history: hist.disk),
+            ResourceRowModel(kind: .thermal, percent: snap.thermal.map(\.pressurePercent), detail: thermalDetail(snap), history: []),
         ]
-        // Rank by live pressure; unknowns sink to the bottom (stable kind order).
-        let rank = Dictionary(
-            uniqueKeysWithValues: snap.constrainedRanked.enumerated().map { ($0.element.kind, $0.offset) }
-        )
-        return specs
-            .map { ResourceRowModel(kind: $0.0, percent: $0.1, detail: $0.2, history: $0.3) }
-            .sorted { a, b in
-                let ra = rank[a.kind] ?? 1000
-                let rb = rank[b.kind] ?? 1000
-                if ra != rb { return ra < rb }
-                return a.kind.rawValue < b.kind.rawValue
-            }
     }
 
     private func cpuAggregateDetail(_ snap: SystemResourceSnapshot) -> String? {
@@ -417,7 +411,8 @@ struct MenuBarPopoverView: View {
                     Capsule()
                         .fill(tint.opacity(percent == nil ? 0.12 : 0.9))
                         .frame(width: max(3, geo.size.width * CGFloat(pct / 100)))
-                        .animation(.shannonLiquid, value: pct)
+                        // Local fill only — not a layout transition.
+                        .animation(reduceMotion ? nil : .shannonLiquid, value: Int(pct.rounded()))
                 }
             }
             .frame(height: 7)

@@ -213,15 +213,20 @@ final class PillWindowController {
         let frame = geometry.windowFrame(
             contentSize: CGSize(width: PillMetrics.expandedWidth, height: clamped)
         )
-        // Sub-pixel churn would fight the content measurement in a feedback loop.
-        guard abs(frame.height - panel.frame.height) > 0.5 else { return }
-        // Morph the panel in phase with SwiftUI's shannonFloat (Liquid Glass).
-        // Instant setFrame made expand/collapse feel bolted-on vs the springy content.
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = ShannonMotion.panelMorphDuration
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            ctx.allowsImplicitAnimation = true
-            panel.animator().setFrame(frame, display: true)
+        // Ignore sub-pixel and small content jitter from live H/resource ticks.
+        let delta = abs(frame.height - panel.frame.height)
+        guard delta > 2.0 else { return }
+        // Large morph (expand/collapse board): spring. Small-ish reflow: snap
+        // so continuous telemetry never "pops" the notch island.
+        if delta > 24 {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = ShannonMotion.panelMorphDuration
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ctx.allowsImplicitAnimation = true
+                panel.animator().setFrame(frame, display: true)
+            }
+        } else {
+            panel.setFrame(frame, display: true)
         }
     }
 

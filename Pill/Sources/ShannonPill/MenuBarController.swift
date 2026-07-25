@@ -24,6 +24,8 @@ final class MenuBarController: NSObject {
     private let focusMode: FocusModeMonitor
     /// Honest multi-device backend label from CloudPublisher.
     private let multiDeviceStatus: String
+    /// AgentPeek-parity surfaces (pulled sessions, dev servers, routes).
+    private let parity = ParityPanelModel()
     private var timer: Timer?
     private var pulseTimer: Timer?
     private var pulsePhase = false
@@ -427,6 +429,7 @@ final class MenuBarController: NSObject {
                 keepAwake: keepAwake,
                 focusMode: focusMode,
                 multiDeviceStatus: multiDeviceStatus,
+                parity: parity,
                 onShowAllGates: { [weak self] in
                     self?.popover?.performClose(nil)
                     self?.onShowPill?()

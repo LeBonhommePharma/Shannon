@@ -7,6 +7,9 @@ let package = Package(
     products: [
         .executable(name: "ShannonPill", targets: ["ShannonPill"]),
         .library(name: "PillCore", targets: ["PillCore"]),
+        .library(name: "AgentReaders", targets: ["AgentReaders"]),
+        .library(name: "DevServers", targets: ["DevServers"]),
+        .library(name: "Routes", targets: ["Routes"]),
     ],
     dependencies: [
         .package(path: "../Packages/ShannonTheme"),
@@ -24,15 +27,42 @@ let package = Package(
                 .linkedFramework("AppKit"),
             ]
         ),
+        // W1 — vendor artifact readers (Claude Code, Codex, …)
+        .target(name: "AgentReaders", dependencies: ["PillCore"]),
+        // W3 — local dev server discovery
+        .target(name: "DevServers", dependencies: ["PillCore"]),
+        // W4 — Quick Routes + Fast Actions
+        .target(name: "Routes", dependencies: ["PillCore"]),
+        // Declared empty for future streams (W2 / W5 / Views)
+        .target(name: "UsageCore", dependencies: ["PillCore"]),
+        .target(name: "Workspaces", dependencies: ["PillCore"]),
+        .target(name: "Surfaces", dependencies: ["PillCore"]),
         .executableTarget(
             name: "ShannonPill",
             dependencies: [
                 "PillCore",
+                "AgentReaders",
+                "DevServers",
+                "Routes",
+                "UsageCore",
+                "Workspaces",
+                "Surfaces",
                 .product(name: "ShannonTheme", package: "ShannonTheme"),
                 .product(name: "ShannonCore", package: "ShannonCore"),
             ]
         ),
-        .testTarget(name: "PillCoreTests", dependencies: ["PillCore"]),
+        .testTarget(
+            name: "PillCoreTests",
+            dependencies: [
+                "PillCore",
+                "AgentReaders",
+                "DevServers",
+                "Routes",
+            ],
+            resources: [
+                .copy("Fixtures"),
+            ]
+        ),
         // Covers the app target's own wiring. PillCoreTests can only reach the
         // extracted policy types (`EntropyProvenance`, `PillPanelHeight`,
         // `ConfirmationCreatedAtResolver`); every defect those types were

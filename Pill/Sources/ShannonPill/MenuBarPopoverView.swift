@@ -1,6 +1,9 @@
 import SwiftUI
+import AppKit
 import PillCore
 import ShannonTheme
+import DevServers
+import Routes
 
 /// The menu-bar popover: everything LP needs at a glance without opening the
 /// notch pill — busy agents, the newest pending gate (answerable inline),
@@ -23,6 +26,8 @@ struct MenuBarPopoverView: View {
     @ObservedObject var focusMode: FocusModeMonitor
     /// Cloud multi-device honesty: `"on"` / `"in-memory"` / `"off"`.
     var multiDeviceStatus: String = "in-memory"
+    /// Additive AgentPeek-parity surfaces (sessions / servers / routes).
+    @ObservedObject var parity: ParityPanelModel
 
     var onShowAllGates: () -> Void
     var onOpenHubLog: () -> Void
@@ -113,6 +118,36 @@ struct MenuBarPopoverView: View {
                         .shannonGlassSection()
                     agentSection
                         .shannonGlassSection()
+                    PulledSessionsSection(sessions: parity.sessions)
+                        .shannonGlassSection()
+                    DevServersSection(
+                        servers: parity.servers,
+                        onOpen: { s in
+                            if let url = DevServerDiscovery.openURL(for: s) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        },
+                        onCopy: { s in
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(s.url, forType: .string)
+                        },
+                        onStop: { s in
+                            _ = DevServerDiscovery.stop(s)
+                            parity.refresh(gateAgents: summary.agents, force: true)
+                        }
+                    )
+                    .shannonGlassSection()
+                    QuickRoutesSection(routes: parity.routes) { route in
+                        NSWorkspace.shared.open(URL(fileURLWithPath: route.path))
+                    }
+                    .shannonGlassSection()
+                    FastActionsSection(
+                        actions: parity.actions,
+                        status: parity.lastActionStatus,
+                        error: parity.lastActionError,
+                        onRun: { parity.runAction($0) }
+                    )
+                    .shannonGlassSection()
                     staleAskNotice
                     recentSection
                 }
@@ -141,6 +176,12 @@ struct MenuBarPopoverView: View {
         }
         .onChange(of: activity.summary.busyCount) { count in
             keepAwake.syncWithAgents(busyCount: count)
+        }
+        .onAppear {
+            parity.refresh(gateAgents: summary.agents, force: true)
+        }
+        .onChange(of: activity.summary.agents.count) { _ in
+            parity.refresh(gateAgents: summary.agents)
         }
         // Liquid Glass stack for macOS 27: `.popover` material + specular.
         .background {
@@ -1047,7 +1088,7 @@ struct MenuBarPopoverView: View {
 ///
 /// No scaleEffect — scaling the Quit control made the hit target shrink under
 /// the cursor and felt like the button was "escaping" mid-click.
-private struct ShannonQuietButtonStyle: ButtonStyle {
+struct ShannonQuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(configuration.isPressed ? 0.72 : 1.0)
@@ -1144,112 +1185,5 @@ private struct SparklineView: View {
             let y = size.height - CGFloat((v - minV) / span) * size.height
             return CGPoint(x: x, y: y)
         }
-    }
-}
-
-// MARK: - GateInlineCard
-
-/// The newest pending gate approval, answerable without leaving the popover.
-/// While the write is in flight the buttons give way to a spinner (no double
-/// resolution); a failed write leaves the ask in place with the error inline.
-struct GateInlineCard: View {
-    let ask: GateDBReader.PendingAsk
-    let isResolving: Bool
-    let error: String?
-    let extraPending: Int
-    let onAnswer: (Bool) -> Void
-    let onShowAll: () -> Void
-
-    private var style: AgentStyle { AgentStyleCatalog.style(for: ask.agentId) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                Text(style.emoji).font(.shannonMenuBody)
-                Text(style.displayName)
-                    .font(.shannonMenuBody)
-                    .foregroundStyle(style.palette.ink)
-                Text("needs approval")
-                    .font(.shannonMenuSection)
-                    .foregroundStyle(Color.shannonWarning)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(Color.shannonWarning.opacity(0.18)))
-                Spacer(minLength: 0)
-            }
-
-            Text(ask.prompt)
-                .font(.shannonMenuFootnote)
-                .foregroundStyle(Color.shannonPrimary)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let error {
-                Text(error)
-                    .font(.shannonMenuFootnote)
-                    .foregroundStyle(Color.shannonError)
-                    .lineLimit(2)
-                    .accessibilityLabel("Approval error: \(error)")
-            }
-
-            HStack(spacing: 8) {
-                if isResolving {
-                    ProgressView().controlSize(.small)
-                    Text("Sending to gate…")
-                        .font(.shannonMenuFootnote)
-                        .foregroundStyle(Color.shannonSecondary)
-                } else {
-                    answerButton("Approve", systemImage: "checkmark", tint: .shannonSuccess) {
-                        onAnswer(true)
-                    }
-                    answerButton("Deny", systemImage: "xmark", tint: .shannonError) {
-                        onAnswer(false)
-                    }
-                }
-                Spacer(minLength: 0)
-                if extraPending > 0 {
-                    Button(action: onShowAll) {
-                        Text("+\(extraPending) more")
-                            .font(.shannonMenuFootnote)
-                            .foregroundStyle(Color.shannonAccent)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Show all pending gates")
-                    .accessibilityLabel("\(extraPending) more pending gates. Show all.")
-                }
-            }
-        }
-        .padding(11)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.shannonWarning.opacity(0.10))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.shannonWarning.opacity(0.38), lineWidth: 1)
-                }
-                .shadow(color: Color.shannonWarning.opacity(0.12), radius: 8, y: 2)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(style.displayName) needs approval: \(ask.prompt)")
-    }
-
-    private func answerButton(
-        _ title: String, systemImage: String, tint: Color, action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: systemImage)
-                    .font(.shannonMenuBody)
-                    .symbolRenderingMode(.hierarchical)
-                Text(title).font(.shannonMenuBody)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(Capsule(style: .continuous).fill(tint))
-            .foregroundStyle(.white)
-        }
-        .buttonStyle(ShannonQuietButtonStyle())
-        .help("\(title) this request")
-        .accessibilityLabel("\(title) \(style.displayName)'s request")
     }
 }

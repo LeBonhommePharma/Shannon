@@ -658,11 +658,13 @@ try:
     from gate_scores import (  # type: ignore
         is_human_approval_request,
         registry_entropy_score,
+        should_refresh_registry_entropy,
     )
 except ImportError:  # package-style import when hub is a package
     from hub.gate_scores import (  # type: ignore
         is_human_approval_request,
         registry_entropy_score,
+        should_refresh_registry_entropy,
     )
 
 # Optional behavioural entropy monitor (observe-only by default).
@@ -1350,6 +1352,8 @@ class AuditDB:
             ("calib_silence",    "INTEGER DEFAULT 0"),
             ("calib_state",      "TEXT DEFAULT 'unknown'"),
             ("calib_updated_ns", "INTEGER"),
+            # Wall clock of last *substantive* entropy_score write (not heartbeat).
+            ("entropy_updated_ns", "INTEGER DEFAULT 0"),
         ]:
             if col_name not in agent_cols:
                 try:
@@ -1532,24 +1536,38 @@ class AuditDB:
         task_summary: str = "",
         status: str = "observed",
         auth_method: str = "http_observe",
+        update_entropy: bool = True,
     ) -> None:
         """Record an observation without claiming a live socket connection.
 
         Used for HTTP ``POST /message`` and ⌘D ingest. Leaves (or sets)
         ``disconnected_at`` so Pill presence stays offline/observed until a
         real socket registration clears it via :meth:`upsert_agent`.
+
+        ``update_entropy=False`` keeps the previous registry H (process-attach
+        heartbeats must not freeze the HUD on a repeated short-status score).
         """
+        # On first insert with heartbeat-only traffic, store 0 so the pill
+        # skips DEFAULT-looking scores until a substantive message arrives.
+        insert_h = float(entropy_score) if update_entropy else 0.0
+        entropy_sql = (
+            "excluded.entropy_score" if update_entropy else "agents.entropy_score"
+        )
+        entropy_ts_sql = (
+            "excluded.last_seen_ns" if update_entropy else "agents.entropy_updated_ns"
+        )
         with self._connect() as conn:
             conn.execute(
-                """
+                f"""
                 INSERT INTO agents
                     (agent_id, status, connected_at, last_seen_ns, auth_method,
                      disconnected_at, message_count, heartbeat_ns, entropy_score,
-                     task_id, task_summary)
-                VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
+                     entropy_updated_ns, task_id, task_summary)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
                 ON CONFLICT(agent_id) DO UPDATE SET
                     last_seen_ns  = excluded.last_seen_ns,
-                    entropy_score = excluded.entropy_score,
+                    entropy_score = {entropy_sql},
+                    entropy_updated_ns = {entropy_ts_sql},
                     task_id       = excluded.task_id,
                     message_count = agents.message_count + 1,
                     status        = CASE
@@ -1586,7 +1604,8 @@ class AuditDB:
                     last_seen_ns,
                     auth_method,
                     last_seen_ns,  # disconnected_at on insert → not live
-                    float(entropy_score),
+                    insert_h,
+                    last_seen_ns if update_entropy else 0,  # entropy_updated_ns
                     task_id or "",
                     task_summary or "",
                 ),
@@ -1601,35 +1620,70 @@ class AuditDB:
         *,
         task_summary: str = "",
         status: str = "active",
+        update_entropy: bool = True,
     ) -> None:
-        """Increment message_count, refresh last_seen_ns and entropy after each message."""
+        """Increment message_count and refresh last_seen after each message.
+
+        When ``update_entropy`` is False (heartbeat / process-attach status),
+        ``entropy_score`` is left unchanged so the HUD keeps the last
+        *substantive* measurement instead of freezing on a repeated short
+        status H (~2.38 for "Working in Ghostty").
+        """
         with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE agents SET
-                    last_seen_ns  = ?,
-                    heartbeat_ns  = ?,
-                    entropy_score = ?,
-                    task_id       = ?,
-                    message_count = message_count + 1,
-                    status        = ?,
-                    task_summary  = CASE
-                        WHEN ? != '' THEN ?
-                        ELSE task_summary
-                    END
-                WHERE agent_id = ?
-                """,
-                (
-                    last_seen_ns,
-                    last_seen_ns,
-                    entropy_score,
-                    task_id,
-                    status or "active",
-                    task_summary or "",
-                    task_summary or "",
-                    agent_id,
-                ),
-            )
+            if update_entropy:
+                conn.execute(
+                    """
+                    UPDATE agents SET
+                        last_seen_ns  = ?,
+                        heartbeat_ns  = ?,
+                        entropy_score = ?,
+                        entropy_updated_ns = ?,
+                        task_id       = ?,
+                        message_count = message_count + 1,
+                        status        = ?,
+                        task_summary  = CASE
+                            WHEN ? != '' THEN ?
+                            ELSE task_summary
+                        END
+                    WHERE agent_id = ?
+                    """,
+                    (
+                        last_seen_ns,
+                        last_seen_ns,
+                        entropy_score,
+                        last_seen_ns,
+                        task_id,
+                        status or "active",
+                        task_summary or "",
+                        task_summary or "",
+                        agent_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE agents SET
+                        last_seen_ns  = ?,
+                        heartbeat_ns  = ?,
+                        task_id       = ?,
+                        message_count = message_count + 1,
+                        status        = ?,
+                        task_summary  = CASE
+                            WHEN ? != '' THEN ?
+                            ELSE task_summary
+                        END
+                    WHERE agent_id = ?
+                    """,
+                    (
+                        last_seen_ns,
+                        last_seen_ns,
+                        task_id,
+                        status or "active",
+                        task_summary or "",
+                        task_summary or "",
+                        agent_id,
+                    ),
+                )
 
     def upsert_interaction(
         self,
@@ -3087,9 +3141,10 @@ class AgentHub:
                 msg.agent_id, "approval_needed", msg.payload
             )
 
-        # Refresh agent registry — last_seen, entropy, task text for HUD/pill.
-        # entropy_score is ALWAYS gate-computed message H (registry_entropy_score);
-        # the agent's shannon_H self-report never lands in this column.
+        # Refresh agent registry — last_seen always; entropy only for
+        # substantive messages (see should_refresh_registry_entropy). Process-
+        # attach status spam used to freeze the pill on ~2.38 bits forever.
+        refresh_h = should_refresh_registry_entropy(msg.message_type, msg.payload)
         self.db.update_agent_seen(
             msg.agent_id,
             time.time_ns(),
@@ -3097,6 +3152,7 @@ class AgentHub:
             msg.task_id,
             task_summary=status_upd.task_summary,
             status=status_upd.status if decision.decision != "blocked" else "blocked",
+            update_entropy=refresh_h,
         )
 
         # Echo gate decision back to sender (redacted — see
@@ -3302,6 +3358,9 @@ class AgentHub:
                 except ImportError:
                     from hub.agent_identity import status_from_payload as _status_fp  # type: ignore
                 _upd = _status_fp(msg.agent_id, msg.message_type, msg.payload)
+                refresh_h = should_refresh_registry_entropy(
+                    msg.message_type, msg.payload
+                )
                 self.db.observe_agent(
                     agent_id,
                     time.time_ns(),
@@ -3312,6 +3371,7 @@ class AgentHub:
                         "blocked" if decision.decision == "blocked"
                         else (_upd.status if _upd.status != "active" else "observed")
                     ),
+                    update_entropy=refresh_h,
                 )
             except Exception as exc:
                 logger.debug(f"HTTP agent registry update failed: {exc}")

@@ -14,7 +14,7 @@ struct MenuBarPopoverView: View {
     @ObservedObject var bridge: ShannonBridge
     @ObservedObject var battery: BatteryMonitor
     @ObservedObject var resources: SystemResourceMonitor
-    @ObservedObject var amphetamine: AmphetamineMonitor
+    @ObservedObject var keepAwake: KeepAwakeMonitor
     @ObservedObject var focusMode: FocusModeMonitor
     /// Cloud multi-device honesty: `"on"` / `"in-memory"` / `"off"`.
     var multiDeviceStatus: String = "in-memory"
@@ -92,7 +92,7 @@ struct MenuBarPopoverView: View {
             }
             resourcesSection
                 .shannonGlassSection()
-            amphetamineSection
+            keepAwakeSection
                 .shannonGlassSection()
             agentSection
                 .shannonGlassSection()
@@ -105,7 +105,7 @@ struct MenuBarPopoverView: View {
                    value: activity.pendingAsks.count)
         .animation(.shannon(.shannonEase, reduceMotion: reduceMotion), value: summary.busyCount)
         .onChange(of: activity.summary.busyCount) { count in
-            amphetamine.syncWithAgents(busyCount: count)
+            keepAwake.syncWithAgents(busyCount: count)
         }
         .padding(14)
         // Fixed width + intrinsic height so the popover does not stretch or
@@ -234,15 +234,15 @@ struct MenuBarPopoverView: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.shannonAccent.opacity(0.08)))
     }
 
-    // MARK: Amphetamine keep-awake
+    // MARK: Keep awake (native caffeinate-class — no Amphetamine required)
 
-    /// Amphetamine.app session control — fail-closed when app missing.
-    private var amphetamineSection: some View {
-        let s = amphetamine.session
+    /// Primary: IOPMAssertion / `caffeinate -dims` style idle+display hold.
+    private var keepAwakeSection: some View {
+        let s = keepAwake.session
         return VStack(alignment: .leading, spacing: 5) {
             sectionTitle("Keep awake")
             HStack(spacing: 8) {
-                Image(systemName: s.isActive ? "bolt.fill" : "bolt.slash")
+                Image(systemName: s.isActive ? "cup.and.saucer.fill" : "cup.and.saucer")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(s.isActive ? Color.shannonWarning : Color.shannonTertiary)
                     .frame(width: 14)
@@ -250,41 +250,33 @@ struct MenuBarPopoverView: View {
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(1)
+                    .help(s.detail ?? "Prevents system idle sleep (and display sleep) like caffeinate -dims while agents run.")
                 Spacer(minLength: 4)
-                if s.availability == .available || s.availability == .unknown {
-                    if s.isActive {
-                        Button("End") { amphetamine.endSession() }
-                            .font(.system(size: 10, weight: .semibold))
-                            .buttonStyle(.plain)
-                            .foregroundStyle(Color.shannonAccent)
-                    } else {
-                        Button("Start 2h") { amphetamine.startSession(.agentBusyDefault) }
-                            .font(.system(size: 10, weight: .semibold))
-                            .buttonStyle(.plain)
-                            .foregroundStyle(Color.shannonAccent)
-                    }
+                if s.isActive {
+                    Button("End") { keepAwake.endSession() }
+                        .font(.system(size: 10, weight: .semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.shannonAccent)
+                } else {
+                    Button("Start 2h") { keepAwake.startSession(durationHours: 2.0) }
+                        .font(.system(size: 10, weight: .semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.shannonAccent)
                 }
             }
             .frame(height: 16)
-            Toggle(isOn: $amphetamine.autoKeepAwakeWithAgents) {
+            Toggle(isOn: $keepAwake.autoKeepAwakeWithAgents) {
                 Text("Auto while agents busy")
                     .font(.system(size: 9.5))
                     .foregroundStyle(Color.shannonTertiary)
             }
             .toggleStyle(.checkbox)
             .controlSize(.mini)
-            if s.availability == .notInstalled {
-                Text("Install Amphetamine.app for keep-awake.")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Color.shannonTertiary)
-                    .lineLimit(1)
-            } else if s.availability == .scriptFailed {
-                Text("Scripting denied — Privacy → Automation.")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Color.shannonTertiary)
-                    .lineLimit(1)
-                    .help("Amphetamine scripting denied or failed. Enable Automation for Shannon in System Settings → Privacy & Security → Automation.")
-            }
+            Text("Native: no idle/display sleep (caffeinate-class). Amphetamine not required.")
+                .font(.system(size: 8.5))
+                .foregroundStyle(Color.shannonTertiary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(s.shortLabel)

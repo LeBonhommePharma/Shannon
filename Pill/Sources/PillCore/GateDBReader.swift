@@ -189,14 +189,27 @@ public enum GateDBReader {
         // some paths — grok_build showed 1 against 5 real rows), so the real
         // count from `agent_messages` wins when it is higher.
         //
-        // `entropy_score` is the gate's own `decision.computed_H`, refreshed by
-        // `update_agent_seen` in the same statement that writes `last_seen_ns`.
-        // It used to be selected and then thrown away (`_ = sqlite3_column_double`)
-        // while the pill displayed a hardcoded sine instead. It is now the
-        // primary source of measured H. Selected **raw**, not `COALESCE(…, 0)`,
-        // so a SQL NULL stays distinguishable from a real zero — both are
-        // refused, but only by knowing which one we are looking at.
+        // `entropy_score` is gate-computed message H. Age it from
+        // `entropy_updated_ns` (last *substantive* write), not `last_seen_ns`
+        // (which heartbeats still refresh). Using last_seen made a frozen
+        // ~2.38 bit attach-status score look "live" forever.
         let sqlBeat = """
+            SELECT a.agent_id, a.status,
+                   CAST(a.last_seen_ns / 1000000000.0 AS REAL) AS last_seen,
+                   a.entropy_score,
+                   COALESCE(a.task_summary, ''),
+                   MAX(COALESCE(a.message_count, 0),
+                       (SELECT COUNT(*) FROM agent_messages m WHERE m.agent_id = a.agent_id)),
+                   CASE WHEN a.disconnected_at IS NULL
+                          OR a.disconnected_at < a.last_seen_ns THEN 1 ELSE 0 END AS connected,
+                   CAST(COALESCE(a.heartbeat_ns, 0) / 1000000000.0 AS REAL) AS heartbeat,
+                   CAST(COALESCE(a.entropy_updated_ns, 0) / 1000000000.0 AS REAL) AS entropy_updated
+            FROM agents a;
+            """
+        if let rows = query(db, sqlBeat, now: now, policy: policy) { return rows }
+
+        // Same schema without `entropy_updated_ns` / with heartbeat.
+        let sqlBeatNoEntTs = """
             SELECT a.agent_id, a.status,
                    CAST(a.last_seen_ns / 1000000000.0 AS REAL) AS last_seen,
                    a.entropy_score,
@@ -208,7 +221,7 @@ public enum GateDBReader {
                    CAST(COALESCE(a.heartbeat_ns, 0) / 1000000000.0 AS REAL) AS heartbeat
             FROM agents a;
             """
-        if let rows = query(db, sqlBeat, now: now, policy: policy) { return rows }
+        if let rows = query(db, sqlBeatNoEntTs, now: now, policy: policy) { return rows }
 
         // Same schema without `heartbeat_ns` (gate not yet restarted on the
         // migration). Liveness then falls back to ageing `last_seen_ns`.
@@ -278,6 +291,11 @@ public enum GateDBReader {
             // Absent column (older schema) or 0 → no heartbeat evidence at all,
             // which the merge layer must handle differently from a *stale* one.
             let beat = sqlite3_column_count(stmt) > 7 ? sqlite3_column_double(stmt, 7) : 0
+            // When entropy_updated_ns is present and > 0, age H from that clock
+            // so heartbeats cannot keep a frozen score looking current.
+            let entropyUpdated = sqlite3_column_count(stmt) > 8
+                ? sqlite3_column_double(stmt, 8) : 0
+            let entropyMeasuredAt: TimeInterval = entropyUpdated > 0 ? entropyUpdated : lastSeen
 
             let cleanTask = AgentActivitySnapshot.looksLikeSecretOrJunk(task)
                 ? ""
@@ -289,21 +307,15 @@ public enum GateDBReader {
             // Measured entropy, but only when the row can actually support the
             // claim. `entropy_score` is `REAL DEFAULT 0.0`, so a row the gate has
             // never scored looks exactly like a genuine reading of 0 bits —
-            // refuse both. An un-timestamped row is equally unusable: without
-            // `last_seen_ns` the value cannot be aged, and a value that cannot be
-            // aged must never be presented as current.
-            //
-            // Integrity: this column is gate-written `decision.computed_H`
-            // only (see hub `registry_entropy_score`). We never read
-            // `agent_messages.self_H` here — a self-report cannot become the
-            // pill's displayed H even if a future schema joins the wrong table.
-            if !entropyIsNull, entropyRaw > 0, lastSeen > 0,
+            // refuse both. Age from entropy_updated when known (not last_seen
+            // heartbeats). Integrity: gate-written `decision.computed_H` only.
+            if !entropyIsNull, entropyRaw > 0, entropyMeasuredAt > 0,
                let measurement = EntropyIntegrity.accept(
                    bits: entropyRaw,
                    deltaH: nil,
                    collapsed: nil,
                    source: .gate(agentId: id, presence: presence),
-                   measuredAt: Date(timeIntervalSince1970: lastSeen),
+                   measuredAt: Date(timeIntervalSince1970: entropyMeasuredAt),
                    now: now,
                    policy: policy
                ) {

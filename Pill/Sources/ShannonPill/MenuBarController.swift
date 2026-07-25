@@ -20,7 +20,7 @@ final class MenuBarController: NSObject {
     private let ingest: AgentIngestService
     private let activity: AgentActivityMonitor
     private let resources: SystemResourceMonitor
-    private let amphetamine: AmphetamineMonitor
+    private let keepAwake: KeepAwakeMonitor
     private let focusMode: FocusModeMonitor
     /// Honest multi-device backend label from CloudPublisher.
     private let multiDeviceStatus: String
@@ -45,7 +45,7 @@ final class MenuBarController: NSObject {
         ingest: AgentIngestService,
         activity: AgentActivityMonitor,
         resources: SystemResourceMonitor,
-        amphetamine: AmphetamineMonitor,
+        keepAwake: KeepAwakeMonitor,
         focusMode: FocusModeMonitor,
         multiDeviceStatus: String = "in-memory"
     ) {
@@ -54,7 +54,7 @@ final class MenuBarController: NSObject {
         self.ingest = ingest
         self.activity = activity
         self.resources = resources
-        self.amphetamine = amphetamine
+        self.keepAwake = keepAwake
         self.focusMode = focusMode
         self.multiDeviceStatus = multiDeviceStatus
     }
@@ -137,9 +137,9 @@ final class MenuBarController: NSObject {
     // MARK: - Icon state machine
 
     private func refresh() {
-        // Amphetamine keep-awake must track agent busy even when the popover is
+        // Native keep-awake must track agent busy even when the popover is
         // closed (popover is only created on click — onChange there never fires).
-        amphetamine.syncWithAgents(busyCount: activity.summary.busyCount)
+        keepAwake.syncWithAgents(busyCount: activity.summary.busyCount)
 
         guard let button = item?.button else { return }
         if let until = flashUntil, until > Date() { return }
@@ -341,7 +341,7 @@ final class MenuBarController: NSObject {
                 bridge: bridge,
                 battery: battery,
                 resources: resources,
-                amphetamine: amphetamine,
+                keepAwake: keepAwake,
                 focusMode: focusMode,
                 multiDeviceStatus: multiDeviceStatus,
                 onShowAllGates: { [weak self] in

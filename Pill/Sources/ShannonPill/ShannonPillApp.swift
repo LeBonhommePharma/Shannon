@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var confirmation: ConfirmationController?
     private var cloud: CloudPublisher?
     private var resources: SystemResourceMonitor?
-    private var amphetamine: AmphetamineMonitor?
+    private var keepAwake: KeepAwakeMonitor?
     private var focusMode: FocusModeMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -59,8 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let confirm = ConfirmationController(provider: motion, feedback: SystemConfirmationFeedback())
         // ~0.75s matches iStat-style menu-bar motion without thrashing host_processor_info.
         let sysRes = SystemResourceMonitor(interval: 0.75)
-        // Amphetamine keep-awake (fail-closed if app missing).
-        let amph = AmphetamineMonitor(interval: 5.0)
+        // Native keep-awake (caffeinate-class IOPMAssertion) — no Amphetamine.
+        let keep = KeepAwakeMonitor()
         // Focus / DND best-effort (BLOCKED.md §2) — fail-closed to unknown.
         let focus = FocusModeMonitor()
 
@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = MenuBarController(
             bridge: br, battery: bat, ingest: ingestSvc, activity: activityMon,
             resources: sysRes,
-            amphetamine: amph,
+            keepAwake: keep,
             focusMode: focus,
             multiDeviceStatus: cloudPub.multiDeviceStatus
         )
@@ -101,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // is NOT started — its 1 Hz @Published was thrashing the pill with no UI.
         np.start(); bat.start(); br.start(); activityMon.start()
         sysRes.start()
-        amph.start()
+        keep.start()
         focus.start()
         // Sample-aligned menu-bar paint (not a second lagging timer alone).
         sysRes.onSnapshotPublished = { [weak menu] in
@@ -114,7 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nowPlaying = np; battery = bat; bridge = br; idle = idlePub
         ingest = ingestSvc; activity = activityMon; hotkey = hk
         cloud = cloudPub; confirmation = confirm; resources = sysRes
-        amphetamine = amph; focusMode = focus
+        keepAwake = keep; focusMode = focus
         controller = ctl; menuBar = menu
 
         // Auto-attach Shannon hub (gate) so ⌘D process attach can register
@@ -182,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nowPlaying?.stop()
         battery?.stop()
         resources?.stop()
-        amphetamine?.stop()
+        keepAwake?.stop()
         focusMode?.stop()
         cloud?.stop()
         FrontmostAppTracker.shared.stop()

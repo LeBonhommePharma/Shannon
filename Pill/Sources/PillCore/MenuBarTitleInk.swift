@@ -6,16 +6,17 @@ import Foundation
 ///
 /// Shannon forces `NSApp.appearance = darkAqua` for the pill overlay. Under that
 /// appearance, `NSColor.labelColor` resolves to **white @ ~0.85** — unreadable
-/// on a light / translucent menu bar (MBP 14" wallpaper glass). Status-item
-/// chrome must therefore use **absolute sRGB**, not dynamic label colors that
-/// follow the app appearance.
+/// on a light / translucent menu bar. Status-item chrome uses **absolute sRGB**.
+///
+/// Host-load titles prefer `sRGB(loadPercent:)` — continuous scarcity intensity
+/// (red only at critical), not full solid gold/red band jumps.
 public enum MenuBarTitleInk: Sendable {
     public enum Role: String, Sendable, Equatable, CaseIterable {
-        /// Idle / busy telemetry (CPU %, agent count) — dark ink on light glass.
+        /// Idle / busy telemetry without a load percent.
         case calm
-        /// Host load ≥ 80% — gold, still dark enough for light glass.
+        /// Legacy elevated band (~80–92%). Prefer `sRGB(loadPercent:)`.
         case elevated
-        /// Host load ≥ 92% — red stress.
+        /// Legacy critical band (≥92%). Prefer `sRGB(loadPercent:)`.
         case critical
         /// Gate approval pending.
         case ask
@@ -47,17 +48,33 @@ public enum MenuBarTitleInk: Sendable {
         }
     }
 
-    /// Absolute sRGB components for a status-item title role.
+    /// Continuous host-load ink (preferred for CPU % / constrained titles).
+    public static func sRGB(loadPercent: Double?) -> SRGB {
+        let scar = ResourceScarcityTint.sRGB(percent: loadPercent)
+        let I = ResourceScarcityTint.intensity(percent: loadPercent ?? 0)
+        // Dark base for Liquid Glass legibility; blend scarcity chroma in.
+        let baseR = 0.08, baseG = 0.08, baseB = 0.10
+        let mix = 0.30 + 0.70 * I
+        return SRGB(
+            r: baseR + (scar.r - baseR) * mix,
+            g: baseG + (scar.g - baseG) * mix,
+            b: baseB + (scar.b - baseB) * mix,
+            a: 0.88 + 0.12 * I
+        )
+    }
+
+    /// Absolute sRGB for a discrete role.
+    ///
+    /// Load roles sample the continuous scarcity ramp at representative percents.
+    /// Ask/collapse stay discrete (not host-load).
     public static func sRGB(for role: Role) -> SRGB {
         switch role {
         case .calm:
-            // Near-black @ high alpha — readable on light Liquid Glass.
-            return SRGB(r: 0.08, g: 0.08, b: 0.10, a: 0.94)
+            return sRGB(loadPercent: 20)
         case .elevated:
-            // Dark gold (not systemYellow washed to white under darkAqua).
-            return SRGB(r: 0.72, g: 0.42, b: 0.02, a: 1)
+            return sRGB(loadPercent: 85)
         case .critical:
-            return SRGB(r: 0.82, g: 0.12, b: 0.10, a: 1)
+            return sRGB(loadPercent: 96)
         case .ask:
             return SRGB(r: 0.86, g: 0.40, b: 0.04, a: 1)
         case .collapse:
@@ -65,23 +82,19 @@ public enum MenuBarTitleInk: Sendable {
         }
     }
 
-    /// Role from host load percent (same bands as SystemResourceLogic).
+    /// Role from host load percent (legacy). Prefer `sRGB(loadPercent:)`.
     public static func loadRole(percent: Double?) -> Role {
         guard let p = percent, p.isFinite else { return .calm }
-        if p >= 92 { return .critical }
+        if p >= ResourceScarcityTint.criticalThreshold { return .critical }
         if p >= 80 { return .elevated }
         return .calm
     }
 
     /// True when ink is dark enough for a light / translucent menu bar.
-    ///
-    /// Rejects near-white (the darkAqua `labelColor` failure mode).
     public static func isReadableOnLightGlass(_ ink: SRGB) -> Bool {
-        // White@0.85 luminance ≈ 0.85 — must stay well below that.
         ink.relativeLuminance < 0.55 && ink.a >= 0.75
     }
 
-    /// Pure proof that calm ink is not the darkAqua white-label failure.
     public static func calmIsNotWhiteOnLight() -> Bool {
         isReadableOnLightGlass(sRGB(for: .calm))
     }

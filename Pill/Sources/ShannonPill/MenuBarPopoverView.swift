@@ -381,11 +381,11 @@ struct MenuBarPopoverView: View {
                 if let top = snap.mostConstrained {
                     Text("peak \(top.shortLabel)")
                         .font(.shannonMenuMono)
-                        .foregroundStyle(resourceTint(SystemResourceLogic.band(for: top.percent)))
+                        .foregroundStyle(resourceTint(percent: top.percent))
                 } else if let hot = snap.hottestCore, snap.cpuCoreCount > 1 {
                     Text(String(format: "C%d · %.0f%%", hot.index, hot.percent))
                         .font(.shannonMenuMono)
-                        .foregroundStyle(resourceTint(SystemResourceLogic.band(for: hot.percent)))
+                        .foregroundStyle(resourceTint(percent: hot.percent))
                 }
             }
 
@@ -472,8 +472,7 @@ struct MenuBarPopoverView: View {
         history: [Double]
     ) -> some View {
         let pct = percent ?? 0
-        let band = percent.map { SystemResourceLogic.band(for: $0) } ?? .calm
-        let tint = resourceTint(band)
+        let tint = resourceTint(percent: percent)
         let label = percent.map { String(format: "%.0f%%", $0) } ?? (detail == "n/a" ? "—" : "…")
         return HStack(spacing: 6) {
             Image(systemName: kind == .gpu ? "cube" : kind.systemImage)
@@ -553,8 +552,7 @@ struct MenuBarPopoverView: View {
                 let barW = max(2, (geo.size.width - gap * CGFloat(max(0, n - 1))) / CGFloat(n))
                 HStack(alignment: .bottom, spacing: gap) {
                     ForEach(cores) { core in
-                        let band = SystemResourceLogic.band(for: core.percent)
-                        let tint = resourceTint(band)
+                        let tint = resourceTint(percent: core.percent)
                         SmoothCoreBar(
                             percent: core.percent,
                             tint: tint,
@@ -600,7 +598,7 @@ struct MenuBarPopoverView: View {
             .foregroundStyle(Color.shannonTertiary)
 
             ForEach(sorted.prefix(12)) { core in
-                let tint = resourceTint(SystemResourceLogic.band(for: core.percent))
+                let tint = resourceTint(percent: core.percent)
                 HStack(spacing: 4) {
                     Text(String(format: "C%02d", core.index))
                         .frame(width: 36, alignment: .leading)
@@ -646,18 +644,10 @@ struct MenuBarPopoverView: View {
         return s
     }
 
-    private func resourceTint(_ band: SystemResourceLogic.Band) -> Color {
-        // Never use ask-amber (warning) for host load — reserved for approvals.
-        switch band {
-        case .calm:
-            return Color(red: 0.35, green: 0.78, blue: 0.52) // iStat green
-        case .elevated:
-            return .shannonAccent
-        case .hot:
-            return Color(red: 0.95, green: 0.72, blue: 0.25) // gold load, not ask amber
-        case .critical:
-            return .shannonError
-        }
+    /// Continuous scarcity ink — intensity scales with percent; red only at critical.
+    private func resourceTint(percent: Double?) -> Color {
+        let c = ResourceScarcityTint.sRGB(percent: percent)
+        return Color(red: c.r, green: c.g, blue: c.b).opacity(c.a)
     }
 
     private func resourcesAccessibilityLabel(_ snap: SystemResourceSnapshot) -> String {

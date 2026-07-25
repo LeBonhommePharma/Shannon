@@ -688,17 +688,9 @@ struct PillView: View {
     @ViewBuilder
     private var constrainedResourceChip: some View {
         if let c = resources.snapshot.mostConstrained {
-            let band = SystemResourceLogic.band(for: c.percent)
-            // Load tint never uses ask-amber (warning) — reserved for approvals.
-            let tint: Color = {
-                switch SystemResourceLogic.loadChromeToken(for: band) {
-                case .tertiary: return .shannonTertiary
-                case .accent: return .shannonAccent
-                case .error: return .shannonError
-                case .warning: return .shannonAccent // map away from ask
-                case .success: return .shannonSuccess
-                }
-            }()
+            // Continuous scarcity ink — red only at critical emergency levels.
+            let s = ResourceScarcityTint.sRGB(percent: c.percent)
+            let tint = Color(red: s.r, green: s.g, blue: s.b).opacity(s.a)
             Text(c.shortLabel)
                 .font(.shannonPillMono)
                 .foregroundStyle(tint)

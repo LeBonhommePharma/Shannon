@@ -1015,18 +1015,10 @@ public enum SystemResourceGlyph {
         if template {
             return NSColor.labelColor.withAlphaComponent(0.15 + 0.85 * (percent / 100))
         }
-        // Load colors: yellow/blue-green spectrum — avoid pure systemOrange (ask-amber).
-        switch SystemResourceLogic.band(for: percent) {
-        case .calm:
-            let base = NSColor.systemGreen.withAlphaComponent(0.35 + 0.55 * (percent / 60))
-            return isPeak ? base.blended(withFraction: 0.25, of: .white) ?? base : base
-        case .elevated:
-            return NSColor.systemYellow
-        case .hot:
-            return NSColor.systemYellow.blended(withFraction: 0.35, of: .systemRed) ?? .systemYellow
-        case .critical:
-            return NSColor.systemRed
-        }
+        // Continuous scarcity spectrum — intensity ∝ load; red only at critical.
+        let s = ResourceScarcityTint.sRGB(percent: percent)
+        let base = NSColor(srgbRed: s.r, green: s.g, blue: s.b, alpha: s.a)
+        return isPeak ? (base.blended(withFraction: 0.2, of: .white) ?? base) : base
     }
 }
 #endif

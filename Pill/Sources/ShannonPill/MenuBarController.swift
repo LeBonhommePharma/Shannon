@@ -145,7 +145,7 @@ final class MenuBarController: NSObject {
             button.contentTintColor = green
         } else {
             Self.applyStatusTitle(button, text: " " + text, role: role)
-            button.contentTintColor = Self.nsColor(for: role)
+            button.contentTintColor = Self.nsColor(role: role)
         }
         flashUntil = Date().addingTimeInterval(1.8)
         lastRendered = nil   // force a real redraw once the flash expires
@@ -213,7 +213,7 @@ final class MenuBarController: NSObject {
                 text: pendingCount > 1 ? " \(pendingCount)" : "",
                 role: .ask
             )
-            button.contentTintColor = Self.nsColor(for: .ask)
+            button.contentTintColor = Self.nsColor(role: .ask)
             button.setAccessibilityLabel(
                 "Shannon: \(pendingCount) gate approval\(pendingCount > 1 ? "s" : "") pending")
             startPulse()
@@ -228,7 +228,7 @@ final class MenuBarController: NSObject {
                 text: String(format: " H %.1f", collapse.bits),
                 role: .collapse
             )
-            button.contentTintColor = Self.nsColor(for: .collapse)
+            button.contentTintColor = Self.nsColor(role: .collapse)
             button.setAccessibilityLabel(
                 String(format: "Shannon: entropy collapse, H %.1f bits (source: %@)",
                        collapse.bits, collapse.source.label))
@@ -249,8 +249,8 @@ final class MenuBarController: NSObject {
             } else {
                 titleText = ""
             }
-            let role = MenuBarTitleInk.loadRole(percent: constrained?.percent ?? snap.cpuPercent)
-            Self.applyStatusTitle(button, text: titleText, role: role)
+            let loadPct = constrained?.percent ?? snap.cpuPercent
+            Self.applyStatusTitle(button, text: titleText, loadPercent: loadPct)
             // Do not tint the multicolor glyph with title ink.
             button.contentTintColor = nil
             let names = summary.busy.prefix(3).map(\.displayName).joined(separator: ", ")
@@ -267,8 +267,7 @@ final class MenuBarController: NSObject {
                 hottest: snap.hottestCore,
                 imbalance: snap.coreImbalance
             )
-            let role = MenuBarTitleInk.loadRole(percent: constrained?.percent)
-            Self.applyStatusTitle(button, text: title, role: role)
+            Self.applyStatusTitle(button, text: title, loadPercent: constrained?.percent)
             button.contentTintColor = nil
             let connected = summary.connected.count
             var label: String
@@ -292,16 +291,29 @@ final class MenuBarController: NSObject {
 
     /// High-contrast monospaced-digit title for the status item.
     ///
-    /// Uses **absolute sRGB** from `MenuBarTitleInk` — never `NSColor.labelColor`,
-    /// which under forced `NSApp.appearance = darkAqua` becomes white@~0.85 and
-    /// vanishes on light Liquid Glass (MBP 14" wallpaper / Image #4).
+    /// Uses **absolute sRGB** from `MenuBarTitleInk` — never `NSColor.labelColor`.
+    /// Host load uses continuous scarcity intensity via `loadPercent`.
     private static func applyStatusTitle(
         _ button: NSStatusBarButton,
         text: String,
         role: MenuBarTitleInk.Role
     ) {
-        // Status item lives in the *system* menu bar — force aqua resolution for
-        // any system metrics, but paint title with absolute ink.
+        applyStatusTitle(button, text: text, color: nsColor(role: role))
+    }
+
+    private static func applyStatusTitle(
+        _ button: NSStatusBarButton,
+        text: String,
+        loadPercent: Double?
+    ) {
+        applyStatusTitle(button, text: text, color: nsColor(loadPercent: loadPercent))
+    }
+
+    private static func applyStatusTitle(
+        _ button: NSStatusBarButton,
+        text: String,
+        color: NSColor
+    ) {
         button.appearance = NSAppearance(named: .aqua)
         if text.isEmpty {
             button.title = ""
@@ -309,7 +321,6 @@ final class MenuBarController: NSObject {
             return
         }
         let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
-        let color = nsColor(for: role)
         button.attributedTitle = NSAttributedString(
             string: text,
             attributes: [
@@ -319,8 +330,13 @@ final class MenuBarController: NSObject {
         )
     }
 
-    private static func nsColor(for role: MenuBarTitleInk.Role) -> NSColor {
+    private static func nsColor(role: MenuBarTitleInk.Role) -> NSColor {
         let c = MenuBarTitleInk.sRGB(for: role)
+        return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a)
+    }
+
+    private static func nsColor(loadPercent: Double?) -> NSColor {
+        let c = MenuBarTitleInk.sRGB(loadPercent: loadPercent)
         return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a)
     }
 
@@ -349,7 +365,7 @@ final class MenuBarController: NSObject {
     /// full and dimmed amber. Runs only in the pending state — no idle CPU.
     private func startPulse() {
         guard pulseTimer == nil else { return }
-        let full = Self.nsColor(for: .ask)
+        let full = Self.nsColor(role: .ask)
         let dim = full.withAlphaComponent(0.45)
         let t = Timer(timeInterval: 0.6, repeats: true) { [weak self] _ in
             Task { @MainActor in

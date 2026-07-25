@@ -61,4 +61,20 @@ final class MenuBarTitleInkTests: XCTestCase {
         // Ask is warmer (more red-orange) than calm black.
         XCTAssertGreaterThan(ask.r, calm.r)
     }
+
+    /// Load titles scale with percent — not a full solid jump at 80/92.
+    func testLoadPercentIsProportionalNotFullBandSolid() {
+        let low = MenuBarTitleInk.sRGB(loadPercent: 20)
+        let mid = MenuBarTitleInk.sRGB(loadPercent: 70)
+        let hot = MenuBarTitleInk.sRGB(loadPercent: 88)
+        let crit = MenuBarTitleInk.sRGB(loadPercent: 97)
+        // All remain readable on light glass.
+        for ink in [low, mid, hot, crit] {
+            XCTAssertTrue(MenuBarTitleInk.isReadableOnLightGlass(ink))
+        }
+        // Critical is redder than mid (emergency lean).
+        XCTAssertGreaterThan(crit.r - max(crit.g, crit.b), mid.r - max(mid.g, mid.b) - 0.05)
+        // Low is not full emergency red.
+        XCTAssertLessThan(low.r - max(low.g, low.b), 0.2)
+    }
 }

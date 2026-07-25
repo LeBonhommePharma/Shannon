@@ -99,13 +99,63 @@ build_and_install() {
 }
 
 status_app() {
+  doctor_hub
   if is_running; then
-    ok "Running (pid $(pgrep -x ShannonPill | tr '\n' ' '))"
     [[ -x "${BIN}" ]] && info "Binary: ${BIN}"
   else
-    info "Not running"
-    [[ -x "${BIN}" ]] && info "Installed at ${APP}" || info "Not installed"
+    [[ -x "${BIN}" ]] && info "Installed at ${APP}" || info "Not installed — ./scripts/shannon app"
   fi
+}
+
+doctor_hub() {
+  # Gate / DB / bridge honesty for operators (P0.3 / P1.1).
+  # Reports: ShannonPill, gate sock, hub DB + age, pending asks, pill.sock, pets.
+  local sock="/tmp/shannon.sock"
+  local db="${HOME}/.shannon/agent_hub.db"
+  local pill="${HOME}/.shannon/pill.sock"
+
+  if is_running; then
+    ok "ShannonPill: running (pid $(pgrep -x ShannonPill | tr '\n' ' '))"
+  else
+    info "ShannonPill: not running"
+  fi
+
+  if [[ -S "${sock}" ]] || [[ -e "${sock}" ]]; then
+    ok "Gate socket: ${sock} (up)"
+  else
+    info "Gate socket: ${sock} (offline — ./scripts/shannon gate)"
+  fi
+
+  if [[ -f "${db}" ]]; then
+    local age
+    age="$(( $(date +%s) - $(stat -f %m "${db}" 2>/dev/null || stat -c %Y "${db}" 2>/dev/null || echo 0) ))"
+    ok "Hub DB: ${db} (mtime age ${age}s)"
+    local pending="?"
+    if command -v sqlite3 >/dev/null 2>&1; then
+      pending="$(sqlite3 "${db}" "SELECT COUNT(*) FROM agent_interactions WHERE status='pending';" 2>/dev/null || echo "?")"
+    else
+      pending="$(python3 -c "
+import sqlite3
+try:
+    print(sqlite3.connect('${db}').execute(
+        \"SELECT COUNT(*) FROM agent_interactions WHERE status='pending'\"
+    ).fetchone()[0])
+except Exception:
+    print('?')
+" 2>/dev/null || echo "?")"
+    fi
+    info "Pending asks: ${pending}"
+  else
+    info "Hub DB: missing (${db})"
+    info "Pending asks: ?"
+  fi
+
+  if [[ -S "${pill}" ]] || [[ -e "${pill}" ]]; then
+    ok "pill.sock: ${pill} (up)"
+  else
+    info "pill.sock: missing (${pill}) — optional live H bridge"
+  fi
+
   if [[ -d "${PETS_DIR}" ]]; then
     local n
     n="$(find "${PETS_DIR}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
@@ -116,16 +166,28 @@ status_app() {
 }
 
 probe_app() {
+  doctor_hub
+  echo
   if [[ -x "${BIN}" ]]; then
+    info "App --probe:"
     "${BIN}" --probe
     return $?
   fi
   local local_bin="${PILL}/build/ShannonPill.app/Contents/MacOS/ShannonPill"
   if [[ -x "${local_bin}" ]]; then
+    info "App --probe (local build):"
     "${local_bin}" --probe
     return $?
   fi
-  die "No binary. Run: ./scripts/shannon app"
+  warn "No ShannonPill binary for --probe. Run: ./scripts/shannon app"
+  return 0
+}
+
+# Short-lived AgentClient demo against the live gate.
+agent_demo() {
+  local demo_py="${HUB}/tools/agent_demo.py"
+  [[ -f "${demo_py}" ]] || die "Missing ${demo_py}"
+  PYTHONPATH="${HUB}${PYTHONPATH:+:$PYTHONPATH}" python3 "${demo_py}" "$@"
 }
 
 # ── Pets (always offline-safe) ────────────────────────────────────────────────
@@ -310,9 +372,11 @@ PRIMARY (first run / everyday):
 
 Also:
   ./scripts/shannon app             rebuild & restart the app only
-  ./scripts/shannon start|stop|restart|status|probe
+  ./scripts/shannon start|stop|restart|status|probe|doctor
   ./scripts/shannon pets            create default pet directories
   ./scripts/shannon gate            start agent gate daemon only
+  ./scripts/shannon agent-demo      live socket demo agent (needs gate)
+  ./scripts/shannon export          session timeline JSONL
   ./scripts/shannon help
 
 In the app:
@@ -363,6 +427,21 @@ case "${CMD}" in
     ;;
   gate)
     start_gate
+    ;;
+  agent-demo|demo)
+    agent_demo "$@"
+    ;;
+  export|session-export)
+    python3 - <<PY
+import sys
+from pathlib import Path
+sys.path.insert(0, "${HUB}")
+from session_export import write_jsonl
+db = Path.home() / ".shannon" / "agent_hub.db"
+out = Path.home() / ".shannon" / "session_export.jsonl"
+n = write_jsonl(db, out)
+print(f"wrote {n} events → {out}")
+PY
     ;;
   help|-h|--help)
     usage

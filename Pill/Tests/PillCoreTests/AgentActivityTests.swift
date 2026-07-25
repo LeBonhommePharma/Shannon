@@ -93,10 +93,83 @@ final class AgentActivityTests: XCTestCase {
         XCTAssertEqual(summary.primary?.lastTask, "refine pill UI")
         XCTAssertTrue(summary.collapsedText.contains("Claude"))
         XCTAssertTrue(summary.collapsedText.contains("refine"))
-        // …but not claimed to be working, and not counted as active.
+        // No attach_pid/bundle → observed only; not busy.
         XCTAssertEqual(summary.busyCount, 0)
         XCTAssertEqual(summary.primary?.presence, .observed)
         XCTAssertEqual(summary.primary?.status, .idle)
+    }
+
+    /// ⌘D with a still-running host app is **live** (process-attach), not busy.
+    func testProcessAttachRunningAppIsLive() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-live-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pets = root.appendingPathComponent("pets", isDirectory: true)
+        let dir = pets.appendingPathComponent("cursor", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: [
+            "status": "observed", "last_task": "Working in Cursor",
+            "updated_at": Date().timeIntervalSince1970 - 600,
+            "resumable": true, "attach_bundle": "com.todesktop.cursor",
+            "attach_pid": 0,
+        ]).write(to: dir.appendingPathComponent("state.json"))
+        try JSONSerialization.data(withJSONObject: [[
+            "id": "cursor", "display_name": "Cursor", "source": "ide",
+            "bundle": "com.todesktop.cursor",
+            "updated_at": Date().timeIntervalSince1970 - 600,
+        ]]).write(to: root.appendingPathComponent("agents.json"))
+
+        let summary = AgentActivityReader.load(
+            petsRoot: pets,
+            registryURL: root.appendingPathComponent("agents.json"),
+            gateDB: nil,
+            runningBundleIDs: ["com.todesktop.cursor"]
+        )
+        XCTAssertEqual(summary.primary?.presence, .live)
+        XCTAssertEqual(summary.primary?.status, .idle)
+        XCTAssertEqual(summary.busyCount, 0)
+        XCTAssertEqual(summary.primary?.statusLine, "live")
+        // Live attach refreshes the clock (not frozen at ⌘D − 10m).
+        XCTAssertLessThan(
+            abs(summary.primary!.updatedAt.timeIntervalSinceNow), 2
+        )
+    }
+
+    /// Gate offline + process still live → stay live (socket hung up, app open).
+    func testProcessAttachOutranksOfflineGate() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-outrank-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pets = root.appendingPathComponent("pets", isDirectory: true)
+        let dir = pets.appendingPathComponent("cursor", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: [
+            "status": "observed", "last_task": "edit",
+            "updated_at": Date().timeIntervalSince1970,
+            "attach_bundle": "com.todesktop.cursor",
+        ]).write(to: dir.appendingPathComponent("state.json"))
+        try JSONSerialization.data(withJSONObject: [[
+            "id": "cursor", "display_name": "Cursor", "source": "ide",
+            "bundle": "com.todesktop.cursor",
+            "updated_at": Date().timeIntervalSince1970,
+        ]]).write(to: root.appendingPathComponent("agents.json"))
+
+        let gateRow = AgentActivitySnapshot(
+            id: "cursor", displayName: "Cursor", status: .active,
+            lastTask: "old gate task", source: "gate",
+            updatedAt: Date().addingTimeInterval(-30),
+            resumable: true, historyCount: 3, presence: .offline
+        )
+        let summary = AgentActivityReader.load(
+            petsRoot: pets,
+            registryURL: root.appendingPathComponent("agents.json"),
+            gateDB: nil,
+            runningBundleIDs: ["com.todesktop.cursor"],
+            gateRows: [gateRow]
+        )
+        XCTAssertEqual(summary.primary?.presence, .live)
+        XCTAssertEqual(summary.primary?.status, .idle, "offline gate must not leave busy")
+        XCTAssertEqual(summary.busyCount, 0)
     }
 
     /// The app behind an observed pet has quit → say "offline", not "seen".
@@ -159,8 +232,8 @@ final class AgentActivityTests: XCTestCase {
             runningBundleIDs: ["com.microsoft.VSCode", "com.apple.finder"]
         )
         XCTAssertEqual(
-            summary.agents.first?.presence, .observed,
-            "a running mixed-case app must not be reported offline"
+            summary.agents.first?.presence, .live,
+            "a running mixed-case app must be live (process-attach)"
         )
 
         // The negative case still works: same casing, app genuinely gone.
@@ -256,7 +329,8 @@ final class AgentActivityTests: XCTestCase {
         let a = s.agents.first
         XCTAssertEqual(a?.presence, .live)
         XCTAssertEqual(a?.status, .idle, "quiet for 3h is not 'working'")
-        XCTAssertEqual(a?.statusLine, "idle")
+        // Quiet live shows "live" (attached), not "idle" — idle looked unattached.
+        XCTAssertEqual(a?.statusLine, "live")
         XCTAssertEqual(a?.relativeAge, "3h")
         XCTAssertEqual(s.busyCount, 0)
         XCTAssertEqual(s.connected.count, 1)
@@ -369,5 +443,74 @@ final class AgentActivityTests: XCTestCase {
         XCTAssertEqual(s.primary?.lastTask, "docking canary")
         XCTAssertEqual(s.primary?.status, .active)
         XCTAssertTrue(s.collapsedText.contains("Claude"))
+    }
+
+    /// Gate-only poll (skipPetsScan): must not invent pets, but when seeded with
+    /// previousAgents it preserves process-attach live while applying gate rows.
+    func testSkipPetsScanReusesPreviousAgents() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-skip-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pets = root.appendingPathComponent("pets", isDirectory: true)
+        let cursorDir = pets.appendingPathComponent("cursor", isDirectory: true)
+        try FileManager.default.createDirectory(at: cursorDir, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: [
+            "status": "observed", "last_task": "edit",
+            "updated_at": Date().timeIntervalSince1970,
+            "attach_bundle": "com.todesktop.cursor",
+        ]).write(to: cursorDir.appendingPathComponent("state.json"))
+        try JSONSerialization.data(withJSONObject: [[
+            "id": "cursor", "display_name": "Cursor", "source": "ide",
+            "bundle": "com.todesktop.cursor",
+            "updated_at": Date().timeIntervalSince1970,
+        ]]).write(to: root.appendingPathComponent("agents.json"))
+
+        // Full scan first — process-attach live.
+        let full = AgentActivityReader.load(
+            petsRoot: pets,
+            registryURL: root.appendingPathComponent("agents.json"),
+            gateDB: nil,
+            runningBundleIDs: ["com.todesktop.cursor"]
+        )
+        XCTAssertEqual(full.agents.first?.presence, .live)
+
+        // Gate-only path: empty pets scan, seed previous — still live.
+        let gateOnly = AgentActivityReader.load(
+            petsRoot: pets.appendingPathComponent("does-not-exist"),
+            registryURL: root.appendingPathComponent("missing.json"),
+            gateDB: nil,
+            runningBundleIDs: ["com.todesktop.cursor"],
+            skipPetsScan: true,
+            previousAgents: full.agents
+        )
+        XCTAssertEqual(gateOnly.agents.count, 1)
+        XCTAssertEqual(gateOnly.agents.first?.id, "cursor")
+        XCTAssertEqual(gateOnly.agents.first?.presence, .live)
+
+        // Without previousAgents, skipPetsScan yields empty pets.
+        let empty = AgentActivityReader.load(
+            petsRoot: pets,
+            registryURL: root.appendingPathComponent("agents.json"),
+            gateDB: nil,
+            skipPetsScan: true,
+            previousAgents: nil
+        )
+        XCTAssertEqual(empty.agents.count, 0)
+
+        // loadFull(skipPetsScan:) wires the flag through.
+        let fullSnap = AgentActivityReader.loadFull(
+            petsRoot: pets,
+            registryURL: root.appendingPathComponent("agents.json"),
+            gateDB: nil,
+            skipPetsScan: true,
+            previousAgents: full.agents
+        )
+        XCTAssertEqual(fullSnap.summary.agents.first?.presence, .live)
+    }
+
+    func testFullScanIntervalIsInRange() {
+        // Pets+registry scan cadence: 15–30 s (P1.9).
+        XCTAssertGreaterThanOrEqual(AgentActivityMonitor.fullScanInterval, 15)
+        XCTAssertLessThanOrEqual(AgentActivityMonitor.fullScanInterval, 30)
     }
 }

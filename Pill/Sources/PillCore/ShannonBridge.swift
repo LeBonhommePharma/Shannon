@@ -265,6 +265,11 @@ public final class UnixSocketClient {
 /// Polls the Python coordination layer and republishes to SwiftUI.
 /// A missing socket is normal (agent not running) and shows as `connected == false`
 /// rather than an error banner.
+///
+/// Connection is reused across polls when the peer stays up (connect once, request
+/// repeatedly). On MainActor, `status` / `connected` are only reassigned when the
+/// value actually changes — equality-gated so SwiftUI does not thrash on identical
+/// frames.
 @MainActor
 public final class ShannonBridge: ObservableObject {
     @Published public private(set) var status: ShannonStatus?
@@ -274,6 +279,13 @@ public final class ShannonBridge: ObservableObject {
     private let interval: TimeInterval
     private var timer: Timer?
     private let queue = DispatchQueue(label: "com.lebonhomme.shannon.pill.bridge")
+    /// Persistent client, owned exclusively by `queue`. Reused while the socket
+    /// is up so each poll is a request, not a connect/close round-trip.
+    /// `@unchecked Sendable` box: only ever touched on `queue`.
+    private final class ClientBox: @unchecked Sendable {
+        var client = UnixSocketClient()
+    }
+    private let clientBox = ClientBox()
 
     /// `nonisolated` so it can serve as a default argument to `init`, which
     /// callers may construct off the main actor.
@@ -302,25 +314,34 @@ public final class ShannonBridge: ObservableObject {
     public func stop() {
         timer?.invalidate()
         timer = nil
+        let box = clientBox
+        queue.async {
+            box.client.close()
+        }
     }
 
     public func poll() {
         let path = socketPath
-        queue.async {
-            let client = UnixSocketClient()
+        let box = clientBox
+        queue.async { [weak self] in
             let result: ShannonStatus? = {
                 do {
-                    try client.connect(to: path)
-                    defer { client.close() }
-                    return try client.request(BridgeRequest(command: "status"))
+                    if !box.client.isConnected {
+                        try box.client.connect(to: path)
+                    }
+                    return try box.client.request(BridgeRequest(command: "status"))
                 } catch {
+                    // Drop a dead socket so the next poll reconnects cleanly.
+                    box.client.close()
                     return nil
                 }
             }()
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.status = result
-                self.connected = (result != nil)
+                // Equality-gated publish: avoid SwiftUI churn when quiet.
+                let up = (result != nil)
+                if self.connected != up { self.connected = up }
+                if self.status != result { self.status = result }
             }
         }
     }

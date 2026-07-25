@@ -2,27 +2,31 @@ import Foundation
 #if canImport(AppKit)
 import AppKit
 #endif
+#if canImport(Darwin)
+import Darwin
+#endif
 
 // MARK: - Snapshot models
 
 /// How much we actually *know* about an agent, as opposed to what a file says.
 ///
-/// The pill has two wildly different sources and used to treat them as equals:
+/// Two independent paths can make an agent **live**:
 ///
-///   * the hub gate DB — a process opened `/tmp/shannon.sock` and spoke. Real.
-///   * `~/.shannon/pets/*/state.json` + `agents.json` — written by ⌘D from the
-///     *frontmost macOS app*. "Working in Ghostty" is a statement about window
-///     focus, not about an agent doing work, and nothing ever clears it.
+///   * **Gate socket** — a process opened `/tmp/shannon.sock` and spoke.
+///   * **Process attach** — ⌘D stored an `attach_pid` / `attach_bundle` and
+///     that process/app is still running right now (re-checked every poll).
 ///
-/// Only `.live` may be reported as busy. Anything else renders honestly as
-/// idle/offline with a "last seen" age.
+/// Only `.live` may be reported busy, and process-attach never invents busy
+/// work on its own (status stays `.idle` until the gate reports activity).
+/// Dead process / hung-up gate → `.offline`. Capture without process evidence
+/// (legacy pets) stays `.observed` ("seen").
 public enum AgentPresence: String, Sendable, Equatable, CaseIterable {
-    /// Gate telemetry, connection open, heard from inside the liveness window.
+    /// Attached and proven present: open gate socket **or** still-running
+    /// process from ⌘D attach.
     case live
-    /// Gate telemetry says the agent hung up, or the app behind an observed
-    /// pet is no longer running. We know it is *not* working.
+    /// Gate hung up, or the attached process/app is no longer running.
     case offline
-    /// Foreground observation only. Fine as a label, never proof of work.
+    /// Foreground observation only — no process evidence to re-check.
     case observed
 
     public var label: String {
@@ -33,8 +37,60 @@ public enum AgentPresence: String, Sendable, Equatable, CaseIterable {
         }
     }
 
-    /// Only real telemetry is allowed to light the pill up.
+    /// Live agents may be busy (gate activity). Process-attach live stays idle
+    /// until the gate says otherwise.
     public var canBeBusy: Bool { self == .live }
+}
+
+// MARK: - Process attach (⌘D → live)
+
+/// Re-check whether a ⌘D-attached process/app is still around.
+///
+/// When evidence says yes → **`.live`** (attached). When evidence says no →
+/// **`.offline`**. When there is no evidence at all → **`.observed`** (legacy
+/// "seen" capture). Pure and injectable for tests.
+public enum ProcessAttach: Sendable {
+    /// Signal 0 existence probe. `EPERM` still means the process exists
+    /// (we just cannot signal it).
+    public static func isProcessAlive(pid: Int32) -> Bool {
+        guard pid > 0 else { return false }
+        #if canImport(Darwin)
+        let rc = kill(pid, 0)
+        if rc == 0 { return true }
+        return errno == EPERM
+        #else
+        return false
+        #endif
+    }
+
+    /// Presence for a ⌘D attachment given optional process evidence.
+    ///
+    /// - Parameters:
+    ///   - attachPid: stored pid from capture (0 / nil = unknown).
+    ///   - attachBundle: host app bundle id.
+    ///   - runningBundleIDs: lowercased set of currently running apps, or nil
+    ///     to skip the bundle check.
+    ///   - pidAlive: injectable pid check (tests).
+    /// - Returns:
+    ///   - `.live` when pid is alive or host bundle is running
+    ///   - `.offline` when evidence proves the process/app is gone
+    ///   - `.observed` when we have no process evidence to re-check
+    public static func presence(
+        attachPid: Int32?,
+        attachBundle: String?,
+        runningBundleIDs: Set<String>?,
+        pidAlive: (Int32) -> Bool = ProcessAttach.isProcessAlive
+    ) -> AgentPresence {
+        if let pid = attachPid, pid > 0 {
+            return pidAlive(pid) ? .live : .offline
+        }
+        if let running = runningBundleIDs,
+           let bundle = attachBundle?.lowercased(), !bundle.isEmpty {
+            return running.contains(bundle) ? .live : .offline
+        }
+        // No process evidence — cannot claim live or offline.
+        return .observed
+    }
 }
 
 public enum AgentRunStatus: String, Sendable, Equatable {
@@ -150,16 +206,18 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
 
     /// Honest one-liner for a status column: never claims work we cannot prove.
     ///
-    ///   live + working  → "working"
-    ///   live + quiet    → "idle"
-    ///   gate, hung up   → "offline · last seen 2d"
-    ///   ⌘D observation  → "seen 13m ago"
+    ///   live + working  → "working" / "active" / …
+    ///   live + quiet    → "live" (attached; process or socket, not inventing work)
+    ///   offline         → "offline · last seen 2d"
+    ///   observed only   → "seen 13m ago" (no process evidence)
     public var statusLine: String { statusLine(at: Date()) }
 
     public func statusLine(at now: Date) -> String {
         switch presence {
         case .live:
-            return status.label
+            // Quiet attach: say "live", not "idle" — idle looked like "not
+            // attached" after ⌘D. Busy gate statuses keep their real labels.
+            return status.isBusy ? status.label : "live"
         case .offline:
             return "offline · last seen \(relativeAge(at: now))"
         case .observed:
@@ -350,7 +408,12 @@ public enum AgentActivityReader {
         liveWindow: TimeInterval = 5 * 60,
         heartbeatWindow: TimeInterval = defaultHeartbeatWindow,
         runningBundleIDs: Set<String>? = nil,
-        gateRows: [AgentActivitySnapshot]? = nil
+        gateRows: [AgentActivitySnapshot]? = nil,
+        /// When true, skip pets directory + registry disk scan. Seed from
+        /// `previousAgents` (if any) so process-attach liveness from the last
+        /// full scan is preserved while the gate path still refreshes every tick.
+        skipPetsScan: Bool = false,
+        previousAgents: [AgentActivitySnapshot]? = nil
     ) -> AgentActivitySummary {
         let fm = FileManager.default
         var byID: [String: AgentActivitySnapshot] = [:]
@@ -363,92 +426,114 @@ public enum AgentActivityReader {
         // it was running. Fold both sides once, here.
         let runningLower = runningBundleIDs.map { Set($0.map { $0.lowercased() }) }
 
-        // 1) Registry first (display names / sources from ⌘D).
-        if let data = try? Data(contentsOf: registryURL),
-           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            for entry in arr {
-                guard let id = entry["id"] as? String, !id.isEmpty else { continue }
-                let name = (entry["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id
-                let source = entry["source"] as? String ?? "other"
-                let taskRaw = entry["last_task"] as? String ?? ""
-                let task = AgentActivitySnapshot.looksLikeSecretOrJunk(taskRaw) ? "" : taskRaw
-                let ts = entry["updated_at"] as? Double ?? 0
-                let updated = ts > 0 ? Date(timeIntervalSince1970: ts) : .distantPast
-                if let bundle = entry["bundle"] as? String, !bundle.isEmpty {
-                    bundleByID[id] = bundle
+        if skipPetsScan {
+            // Gate-only path: keep last full-scan agents as base (process-attach
+            // stays live until the next full pets+registry scan).
+            if let previousAgents {
+                for a in previousAgents {
+                    byID[a.id] = a
                 }
-                byID[id] = AgentActivitySnapshot(
-                    id: id,
-                    displayName: name,
-                    status: .idle,
-                    lastTask: AgentActivitySnapshot.shorten(task, max: 120),
-                    source: source,
-                    updatedAt: updated,
-                    resumable: false,
-                    historyCount: 0,
-                    presence: .observed
-                )
+            }
+        } else {
+            // 1) Registry first (display names / sources from ⌘D).
+            if let data = try? Data(contentsOf: registryURL),
+               let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                for entry in arr {
+                    guard let id = entry["id"] as? String, !id.isEmpty else { continue }
+                    let name = (entry["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id
+                    let source = entry["source"] as? String ?? "other"
+                    let taskRaw = entry["last_task"] as? String ?? ""
+                    let task = AgentActivitySnapshot.looksLikeSecretOrJunk(taskRaw) ? "" : taskRaw
+                    let ts = entry["updated_at"] as? Double ?? 0
+                    let updated = ts > 0 ? Date(timeIntervalSince1970: ts) : .distantPast
+                    let bundle = (entry["bundle"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                    if let bundle { bundleByID[id] = bundle }
+                    let presence = ProcessAttach.presence(
+                        attachPid: nil,
+                        attachBundle: bundle,
+                        runningBundleIDs: runningLower
+                    )
+                    byID[id] = AgentActivitySnapshot(
+                        id: id,
+                        displayName: name,
+                        status: .idle,
+                        lastTask: AgentActivitySnapshot.shorten(task, max: 120),
+                        source: source,
+                        // Live process-attach is current; refresh the clock so ages
+                        // do not freeze at the original ⌘D timestamp.
+                        updatedAt: presence == .live ? now : updated,
+                        resumable: false,
+                        historyCount: 0,
+                        presence: presence
+                    )
+                }
+            }
+
+            // 2) Pets override with live state.json (offline path).
+            if let kids = try? fm.contentsOfDirectory(
+                at: petsRoot,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for dir in kids {
+                    var isDir: ObjCBool = false
+                    guard fm.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { continue }
+                    let id = dir.lastPathComponent
+                    let stateURL = dir.appendingPathComponent("state.json")
+                    guard let data = try? Data(contentsOf: stateURL),
+                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        continue
+                    }
+
+                    let taskRaw = obj["last_task"] as? String ?? ""
+                    let task = AgentActivitySnapshot.looksLikeSecretOrJunk(taskRaw)
+                        ? ""
+                        : AgentActivitySnapshot.shorten(taskRaw, max: 120)
+                    let ts = obj["updated_at"] as? Double ?? 0
+                    let updated = ts > 0 ? Date(timeIntervalSince1970: ts) : .distantPast
+                    let resumable = obj["resumable"] as? Bool ?? false
+                    let hist = obj["history_count"] as? Int ?? 0
+
+                    let existing = byID[id]
+                    let display = existing?.displayName
+                        ?? displayName(for: id, config: dir.appendingPathComponent("config.json"))
+                    let source = existing?.source ?? guessSource(id)
+
+                    // Process-attach re-check: attach_pid (terminal CLI / host app)
+                    // wins, then attach_bundle / registry bundle. Alive → **live**;
+                    // dead → offline. Status stays idle (no invented busy work).
+                    let statePid = (obj["attach_pid"] as? Int).map { Int32($0) }
+                        ?? (obj["attach_pid"] as? Int32)
+                    let stateBundle = (obj["attach_bundle"] as? String)
+                        .flatMap { $0.isEmpty ? nil : $0 }
+                        ?? bundleByID[id]
+                    if let b = stateBundle { bundleByID[id] = b }
+
+                    let presence = ProcessAttach.presence(
+                        attachPid: statePid,
+                        attachBundle: stateBundle,
+                        runningBundleIDs: runningLower
+                    )
+                    let trackingUpdated: Date = presence == .live ? now : updated
+
+                    byID[id] = AgentActivitySnapshot(
+                        id: id,
+                        displayName: display,
+                        status: .idle,
+                        lastTask: task.isEmpty ? (existing?.lastTask ?? "") : task,
+                        source: source,
+                        updatedAt: trackingUpdated,
+                        resumable: resumable,
+                        historyCount: hist,
+                        presence: presence
+                    )
+                }
             }
         }
 
-        // 2) Pets override with live state.json (offline path).
-        if let kids = try? fm.contentsOfDirectory(
-            at: petsRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            for dir in kids {
-                var isDir: ObjCBool = false
-                guard fm.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { continue }
-                let id = dir.lastPathComponent
-                let stateURL = dir.appendingPathComponent("state.json")
-                guard let data = try? Data(contentsOf: stateURL),
-                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    continue
-                }
-
-                let taskRaw = obj["last_task"] as? String ?? ""
-                let task = AgentActivitySnapshot.looksLikeSecretOrJunk(taskRaw)
-                    ? ""
-                    : AgentActivitySnapshot.shorten(taskRaw, max: 120)
-                let ts = obj["updated_at"] as? Double ?? 0
-                let updated = ts > 0 ? Date(timeIntervalSince1970: ts) : .distantPast
-                let resumable = obj["resumable"] as? Bool ?? false
-                let hist = obj["history_count"] as? Int ?? 0
-
-                let existing = byID[id]
-                let display = existing?.displayName
-                    ?? displayName(for: id, config: dir.appendingPathComponent("config.json"))
-                let source = existing?.source ?? guessSource(id)
-
-                // `state.json` "status" is written by ⌘D as `hasTask ? active : idle`
-                // (AgentIngest.bootstrapPet) and is never written back — it says
-                // nothing about whether an agent is running. Treat it as a label
-                // only: presence `.observed`, status `.idle`. If we can see the
-                // app it was captured from is gone, say so outright.
-                var presence: AgentPresence = .observed
-                if let runningLower,
-                   let bundle = bundleByID[id],
-                   !runningLower.contains(bundle.lowercased()) {
-                    presence = .offline
-                }
-
-                byID[id] = AgentActivitySnapshot(
-                    id: id,
-                    displayName: display,
-                    status: .idle,
-                    lastTask: task.isEmpty ? (existing?.lastTask ?? "") : task,
-                    source: source,
-                    updatedAt: updated,
-                    resumable: resumable,
-                    historyCount: hist,
-                    presence: presence
-                )
-            }
-        }
-
-        // 3) Hub gate DB — the only real telemetry. Authoritative for every
-        //    agent it knows about, regardless of how fresh the pet file looks.
+        // 3) Hub gate DB — authoritative for busy/status when the socket is
+        //    live. Process-attach liveness is preserved when the gate row is
+        //    offline (socket hung up but Cursor is still open).
         let rows = gateRows ?? gateDB.map { loadGateAgents(dbURL: $0) }
         if let rows {
             for row in rows {
@@ -475,11 +560,13 @@ public enum AgentActivityReader {
         return AgentActivitySummary(agents: sortForDisplay(byID.values), scannedAt: now)
     }
 
-    /// Gate row + optional local knowledge → one truthful snapshot.
+    /// Gate row + optional local process-attach knowledge → one truthful snapshot.
     ///
-    /// The gate wins on everything it can prove (status, presence, last seen,
-    /// message count); the local entry only fills gaps (display name, source,
-    /// a task label when the gate has none).
+    /// - Gate **live** (fresh heartbeat) wins for presence, busy status, task.
+    /// - Gate **offline** / stale does **not** demote a process-attach that is
+    ///   still live (⌘D + Cursor still open after the socket closed).
+    /// - Process-attach never supplies busy on its own — status stays idle
+    ///   unless the gate itself is live and busy.
     private static func reconcile(
         gate row: AgentActivitySnapshot,
         with existing: AgentActivitySnapshot?,
@@ -494,22 +581,45 @@ public enum AgentActivityReader {
         // `.observed` from the gate means a legacy schema with no
         // `disconnected_at` — unproven, so it may not be reported busy either.
         var presence = row.presence
+        var gateStillLive = false
         if presence == .live {
             if let beat = row.heartbeatAt {
                 // The gate stamps this while the connection is open, so silence
                 // is not evidence of death: an agent that has said nothing for
                 // an hour is still live if the hub saw it 5 s ago. Only a stale
                 // beat — hub killed, machine slept — means offline.
-                if now.timeIntervalSince(beat) > heartbeatWindow { presence = .offline }
+                if now.timeIntervalSince(beat) > heartbeatWindow {
+                    presence = .offline
+                } else {
+                    gateStillLive = true
+                }
             } else if age > liveWindow {
                 // No heartbeat evidence at all (pre-migration hub DB): the best
                 // available signal is still the age of the last message.
                 presence = .offline
+            } else {
+                gateStillLive = true
             }
         }
 
+        // Process-attach outranks a hung-up gate socket.
+        if !gateStillLive, let existing, existing.presence == .live {
+            presence = .live
+        }
+
         var status = row.status
-        if status.isBusy, presence != .live || age > staleAfter { status = .idle }
+        if !gateStillLive {
+            // Only a live gate may claim busy; process-attach is quiet-live.
+            status = .idle
+        } else if status.isBusy, age > staleAfter {
+            status = .idle
+        }
+
+        let updatedAt: Date = {
+            if gateStillLive { return row.updatedAt }
+            if presence == .live { return existing?.updatedAt ?? now }
+            return row.updatedAt
+        }()
 
         return AgentActivitySnapshot(
             id: row.id,
@@ -517,11 +627,11 @@ public enum AgentActivityReader {
             status: status,
             lastTask: row.lastTask.isEmpty ? (existing?.lastTask ?? "") : row.lastTask,
             source: existing?.source ?? fallbackSource(),
-            updatedAt: row.updatedAt,
+            updatedAt: updatedAt,
             resumable: status.isBusy || (existing?.resumable ?? false),
             historyCount: max(existing?.historyCount ?? 0, row.historyCount),
             presence: presence,
-            heartbeatAt: row.heartbeatAt
+            heartbeatAt: gateStillLive ? row.heartbeatAt : existing?.heartbeatAt
         )
     }
 
@@ -625,6 +735,11 @@ public enum AgentActivityReader {
         }
     }
 
+    /// - Parameter skipPetsScan: When true, do not walk `~/.shannon/pets` or
+    ///   the registry — only open the gate DB (asks / entropy / agents). Seed
+    ///   from `previousAgents` so process-attach rows from the last full scan
+    ///   survive. The monitor uses this every 1.5 s tick; full pets+registry
+    ///   scans run on a longer interval (see `fullScanInterval`).
     public static func loadFull(
         petsRoot: URL = PetBootstrap.petsRoot,
         registryURL: URL = PetBootstrap.registryURL,
@@ -633,7 +748,9 @@ public enum AgentActivityReader {
         staleAfter: TimeInterval = defaultStaleAfter,
         liveWindow: TimeInterval = 5 * 60,
         heartbeatWindow: TimeInterval = defaultHeartbeatWindow,
-        runningBundleIDs: Set<String>? = nil
+        runningBundleIDs: Set<String>? = nil,
+        skipPetsScan: Bool = false,
+        previousAgents: [AgentActivitySnapshot]? = nil
     ) -> FullSnapshot {
         let gate = gateDB.map { GateDBReader.readSnapshot(path: $0.path, now: now) }
         let summary = load(
@@ -645,7 +762,9 @@ public enum AgentActivityReader {
             liveWindow: liveWindow,
             heartbeatWindow: heartbeatWindow,
             runningBundleIDs: runningBundleIDs,
-            gateRows: gate?.agents
+            gateRows: gate?.agents,
+            skipPetsScan: skipPetsScan,
+            previousAgents: previousAgents
         )
         return FullSnapshot(
             summary: summary,
@@ -739,6 +858,14 @@ public final class AgentActivityMonitor: ObservableObject {
     private var runningBundleIDs: Set<String> = []
     private var runningBundleIDsAt: Date = .distantPast
     private let runningBundleTTL: TimeInterval = 5
+    /// Full pets+registry disk scan cadence (gate DB / asks still every tick).
+    public static let fullScanInterval: TimeInterval = 20
+    private var lastFullScanAt: Date = .distantPast
+    /// Last seen mtime of `agent_hub.db`. When it advances we force a full
+    /// apply so pending asks surface without waiting for the pets interval.
+    private var lastDBMtime: Date?
+    /// Previous pending-ask count — notifications fire only on increases.
+    private var lastPendingCount = 0
 
     public init(interval: TimeInterval = 1.5) {
         self.interval = interval
@@ -770,24 +897,49 @@ public final class AgentActivityMonitor: ObservableObject {
 
     /// Poll disk + hub DB off the main thread and publish only what changed.
     ///
-    /// Previously this ran a pets directory scan, a dozen JSON parses and three
-    /// separate SQLite opens *synchronously on the main thread* every 1.5 s, and
-    /// reassigned every `@Published` property whether or not the value differed
-    /// — so SwiftUI re-rendered the pill 40 times a minute over identical data.
-    /// Now: one DB open, background thread, and assignments guarded by equality.
+    /// Poll split (P1.9 / P0.6):
+    /// - **Every tick (1.5 s):** gate DB — agents, pending asks, entropy.
+    /// - **Every `fullScanInterval` (20 s):** pets + registry disk scan +
+    ///   process-attach re-check.
+    /// - **DB mtime change:** force a full scan so asks appear immediately when
+    ///   the gate writes, without waiting for the pets interval.
+    ///
+    /// Assignments stay equality-gated so SwiftUI does not thrash on identical data.
     public func refresh() {
         guard !isPaused, !refreshing else { return }
         refreshing = true
 
         let socket = gateSocketPath
         let bundles = currentRunningBundleIDs()
+        let now = Date()
+        let dbURL = AgentActivityReader.defaultGateDB
+        let mtime = Self.modificationDate(of: dbURL)
+        let mtimeChanged = mtime != nil && mtime != lastDBMtime
+        if let mtime { lastDBMtime = mtime }
+
+        let dueFull = now.timeIntervalSince(lastFullScanAt) >= Self.fullScanInterval
+        let doFull = dueFull || mtimeChanged || lastFullScanAt == .distantPast
+        if doFull { lastFullScanAt = now }
+
+        let skipPets = !doFull
+        let previous = skipPets ? summary.agents : nil
+
         Task.detached(priority: .utility) {
-            let full = AgentActivityReader.loadFull(runningBundleIDs: bundles)
+            let full = AgentActivityReader.loadFull(
+                runningBundleIDs: bundles,
+                skipPetsScan: skipPets,
+                previousAgents: previous
+            )
             let socketUp = FileManager.default.fileExists(atPath: socket)
             await MainActor.run { [weak self] in
                 self?.apply(full, socketUp: socketUp)
             }
         }
+    }
+
+    private static func modificationDate(of url: URL) -> Date? {
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+        return values?.contentModificationDate
     }
 
     private func apply(_ full: AgentActivityReader.FullSnapshot, socketUp: Bool) {
@@ -817,6 +969,14 @@ public final class AgentActivityMonitor: ObservableObject {
         // Drop stale in-flight state for asks the gate has since cleared.
         let live = Set(full.pendingAsks.map(\.interactionId))
         if !resolving.isSubset(of: live) { resolving.formIntersection(live) }
+
+        // Notify only when the open-ask count *increases* (a newly arrived ask),
+        // not on every poll while the same card sits open.
+        let newCount = full.pendingAsks.count
+        if newCount > lastPendingCount, let newest = full.pendingAsks.first {
+            ShannonNotifier.notifyAsk(prompt: newest.prompt, agentId: newest.agentId)
+        }
+        lastPendingCount = newCount
     }
 
     private func currentRunningBundleIDs() -> Set<String> {

@@ -207,11 +207,11 @@ public final class KeepAwakeMonitor: ObservableObject {
         }
         if session.isActive, let start = startedAt, let dur = duration, dur > 0 {
             let left = KeepAwakeLogic.secondsRemaining(startedAt: start, duration: dur)
-            // Bucket to whole minutes for publish (format shows "m s" otherwise).
-            // Second-level session updates invalidated the menu-bar popover.
-            let prevBucket = session.secondsRemaining.map { $0 / 60 }
-            let nextBucket = left.map { $0 / 60 }
-            if prevBucket != nextBucket {
+            // Publish every second-boundary change so shortLabel (formatDuration
+            // with "m s") stays honest through the last minute. Layout thrash is
+            // suppressed in the popover/pill transaction layer — do not freeze
+            // the countdown here (minute bucketing left e.g. "1m 30s" stuck at 61s).
+            if session.secondsRemaining != left {
                 session.secondsRemaining = left
             }
         }

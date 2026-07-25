@@ -152,16 +152,35 @@ public enum DevServerDiscovery {
         URL(string: server.url)
     }
 
+    /// Identity passed into `ProcessKillSafety` for a discovered server.
+    ///
+    /// Live `lsof` rows typically only set `commandLine` (the COMMAND column).
+    /// That string must be the primary name — not only `runtime`/`framework` —
+    /// so protected processes are still refused when labels are missing or wrong.
+    public static func stopIdentity(
+        for server: DevServer,
+        name: String? = nil,
+        path: String? = nil
+    ) -> (name: String?, path: String?) {
+        let resolvedName = name
+            ?? server.commandLine
+            ?? server.runtime
+            ?? server.framework
+        let resolvedPath = path ?? server.commandLine
+        return (resolvedName, resolvedPath)
+    }
+
     /// Stop after ProcessKillSafety check.
     public static func stop(
         _ server: DevServer,
         name: String? = nil,
         path: String? = nil
     ) -> Result<Void, ProcessStopRefusal> {
-        ProcessKillSafety.requestStop(
+        let id = stopIdentity(for: server, name: name, path: path)
+        return ProcessKillSafety.requestStop(
             pid: server.pid,
-            name: name ?? server.runtime ?? server.framework,
-            path: path ?? server.commandLine
+            name: id.name,
+            path: id.path
         )
     }
 

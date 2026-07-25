@@ -113,4 +113,18 @@ public enum QuickRouteCatalog {
     ) -> [QuickRoute] {
         agentIds.flatMap { routes(for: $0, home: home, fileExists: fileExists) }
     }
+
+    /// Panel list: **present first, then missing** — missing routes stay in the
+    /// list so the UI can render them dimmed/disabled (never auto-created).
+    public static func panelRoutes(
+        home: String,
+        agentIds: [String] = defaultAgentIds,
+        limit: Int = 24,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> [QuickRoute] {
+        let all = allRoutes(home: home, agentIds: agentIds, fileExists: fileExists)
+        let present = all.filter(\.exists)
+        let missing = all.filter { !$0.exists }
+        return Array((present + missing).prefix(max(0, limit)))
+    }
 }

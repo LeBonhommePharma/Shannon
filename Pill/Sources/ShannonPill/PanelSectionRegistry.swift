@@ -71,10 +71,9 @@ final class ParityPanelModel: ObservableObject {
         servers = Array(DevServerDiscovery.discoverLive().prefix(8))
 
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        routes = QuickRouteCatalog.allRoutes(home: home)
-            .filter(\.exists)
-            .prefix(10)
-            .map { $0 }
+        // Keep missing catalog paths so QuickRoutesSection can dim/disable them.
+        // Never filter(\.exists) — that would hide AC3 "disabled when absent".
+        routes = QuickRouteCatalog.panelRoutes(home: home, limit: 24)
     }
 
     func runAction(_ action: FastAction) {

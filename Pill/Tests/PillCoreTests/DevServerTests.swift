@@ -61,7 +61,7 @@ final class DevServerTests: XCTestCase {
     }
 
     func testStopRefusesProtectedAndInvalid() {
-        // Invalid pid
+        // Invalid pid — shipped stop() entry point
         let bad = DevServerDiscovery.stop(DevServer(port: 3000, pid: 0))
         if case .failure(let reason) = bad {
             XCTAssertEqual(reason, .invalidPid)
@@ -104,6 +104,82 @@ final class DevServerTests: XCTestCase {
             // ok
         } else {
             XCTFail("node should be stoppable under policy")
+        }
+    }
+
+    /// Live lsof rows only fill `commandLine` (COMMAND). stop() must feed that
+    /// into ProcessKillSafety — not only runtime/framework labels.
+    func testStopIdentityUsesLsofCommandLine() {
+        let lsofShaped = DevServer(
+            port: 3000,
+            pid: 4242,
+            framework: "Next.js",
+            runtime: "Node",
+            commandLine: "WindowServer"
+        )
+        let id = DevServerDiscovery.stopIdentity(for: lsofShaped)
+        XCTAssertEqual(id.name, "WindowServer")
+        XCTAssertEqual(id.path, "WindowServer")
+
+        // Policy sees the COMMAND even when "name" looks like a harmless runtime.
+        let refused = ProcessKillSafety.canStop(
+            pid: 999_010,
+            name: id.name,
+            path: id.path,
+            isAlive: { _ in true }
+        )
+        if case .failure(let reason) = refused {
+            XCTAssertEqual(reason, .protectedSystem)
+        } else {
+            XCTFail("lsof-shaped WindowServer must be refused")
+        }
+
+        // commandLine-only (no runtime/framework) — typical bare lsof parse.
+        let bare = DevServer(port: 5173, pid: 99, commandLine: "launchd")
+        let bareId = DevServerDiscovery.stopIdentity(for: bare)
+        XCTAssertEqual(bareId.name, "launchd")
+        let bareRefused = ProcessKillSafety.canStop(
+            pid: 999_011,
+            name: bareId.name,
+            path: bareId.path,
+            isAlive: { _ in true }
+        )
+        if case .failure(let reason) = bareRefused {
+            XCTAssertEqual(reason, .protectedSystem)
+        } else {
+            XCTFail("launchd commandLine must be refused")
+        }
+
+        // Path-only protected (name empty / wrong) — fragments scan both args.
+        let pathOnly = ProcessKillSafety.canStop(
+            pid: 999_012,
+            name: "Node",
+            path: "WindowServer",
+            isAlive: { _ in true }
+        )
+        if case .failure(let reason) = pathOnly {
+            XCTAssertEqual(reason, .protectedSystem)
+        } else {
+            XCTFail("protected COMMAND in path must be refused even if name is Node")
+        }
+    }
+
+    func testStopOnLsofShapedProtectedDoesNotSignal() {
+        // Full stop() entry with invalid-alive would still policy-fail first
+        // for pid<=1; for a protected name with dead pid we get notRunning OR
+        // protected — either is fail-closed. Use canStop path via identity.
+        let server = DevServer(port: 3000, pid: 2, commandLine: "ShannonPill")
+        let id = DevServerDiscovery.stopIdentity(for: server)
+        let result = ProcessKillSafety.canStop(
+            pid: server.pid,
+            name: id.name,
+            path: id.path,
+            isAlive: { _ in true }
+        )
+        if case .failure(let reason) = result {
+            XCTAssertEqual(reason, .protectedShannon)
+        } else {
+            XCTFail("ShannonPill lsof COMMAND must refuse via stopIdentity")
         }
     }
 }

@@ -104,6 +104,10 @@ public enum ProcessKillSafety {
     ]
 
     /// Pure policy check — injectable evidence for unit tests.
+    ///
+    /// `name` and `path` are both scanned: live `lsof` rows often only fill
+    /// `commandLine` (mapped into path and/or name), so checking `name` alone
+    /// would miss `WindowServer` / `launchd` when they appear only in path.
     public static func canStop(
         pid: Int32,
         name: String? = nil,
@@ -113,23 +117,46 @@ public enum ProcessKillSafety {
         guard pid > 1 else { return .failure(.invalidPid) }
         if !isAlive(pid) { return .failure(.notRunning) }
 
-        let lowerName = (name ?? "").lowercased()
-        let lowerPath = (path ?? "").lowercased()
-        if lowerName.contains("shannon") || lowerPath.contains("shannonpill")
-            || lowerPath.contains("/shannon") {
+        let tokens = identityTokens(name: name, path: path)
+        if tokens.contains(where: { $0.contains("shannon") }) {
             return .failure(.protectedShannon)
         }
         for frag in protectedNameFragments {
-            if lowerName == frag.lowercased() {
-                return .failure(.protectedSystem)
+            let f = frag.lowercased()
+            if tokens.contains(f) {
+                return f == "shannon" ? .failure(.protectedShannon) : .failure(.protectedSystem)
             }
         }
         if let path, protectedPathPrefixes.contains(where: { path.hasPrefix($0) }) {
             return .failure(.protectedSystem)
         }
+        // Also refuse absolute paths under system prefixes when path is a full argv.
+        for token in tokens where token.hasPrefix("/") {
+            if protectedPathPrefixes.contains(where: { token.hasPrefix($0.lowercased()) }) {
+                return .failure(.protectedSystem)
+            }
+        }
         // pid 0 / 1 already rejected; never SIGTERM ourselves.
         if pid == getpid() { return .failure(.protectedShannon) }
         return .success(())
+    }
+
+    /// Basename / first-argv tokens from name and path (commandLine).
+    /// Used so `lsof` COMMAND-only rows still hit protected-name policy.
+    public static func identityTokens(name: String?, path: String?) -> Set<String> {
+        var tokens = Set<String>()
+        for raw in [name, path].compactMap({ $0 }) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            tokens.insert(trimmed.lowercased())
+            tokens.insert((trimmed as NSString).lastPathComponent.lowercased())
+            if let first = trimmed.split(whereSeparator: \.isWhitespace).first {
+                let word = String(first)
+                tokens.insert(word.lowercased())
+                tokens.insert((word as NSString).lastPathComponent.lowercased())
+            }
+        }
+        return tokens
     }
 
     /// Send SIGTERM after policy check. Returns the refusal without signaling.

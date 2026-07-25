@@ -37,6 +37,37 @@ final class QuickRoutesAndFastActionsTests: XCTestCase {
         XCTAssertTrue(routes.allSatisfy { !$0.exists && !$0.isOpenable })
     }
 
+    /// AC3: panel list must keep missing routes (dimmed/disabled), not drop them.
+    func testPanelRoutesKeepsMissingForDisabledRendering() {
+        let exists: (String) -> Bool = { path in
+            path.hasSuffix(".claude/skills") || path.hasSuffix(".codex/sessions")
+        }
+        let panel = QuickRouteCatalog.panelRoutes(
+            home: "/Users/test",
+            agentIds: ["claude_code", "codex"],
+            limit: 40,
+            fileExists: exists
+        )
+        XCTAssertFalse(panel.isEmpty)
+        let present = panel.filter(\.exists)
+        let missing = panel.filter { !$0.exists }
+        XCTAssertFalse(present.isEmpty, "at least skills/sessions should exist in fixture map")
+        XCTAssertFalse(missing.isEmpty, "missing catalog paths must remain for dimmed UI")
+        XCTAssertTrue(missing.allSatisfy { !$0.isOpenable })
+        XCTAssertTrue(present.allSatisfy(\.isOpenable))
+        // Present first, then missing (stable UI order for the section).
+        XCTAssertEqual(
+            panel.prefix(while: \.exists).count,
+            present.count,
+            "present routes must sort before missing so the panel can dim the rest"
+        )
+        // Critical: must not be the old .filter(\.exists) behavior.
+        XCTAssertTrue(
+            panel.contains { $0.label == "Settings" && !$0.exists },
+            "Settings missing path must still be listed for disabled rendering"
+        )
+    }
+
     func testFastActionSuccessAndFailureStatus() {
         let okRunner = FastActionRunner(home: "/tmp") { cmd, home in
             XCTAssertEqual(home, "/tmp")

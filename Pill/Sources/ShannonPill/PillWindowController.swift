@@ -211,8 +211,9 @@ final class PillWindowController {
         let originDelta = abs(frame.origin.x - panel.frame.origin.x)
             + abs(frame.origin.y - panel.frame.origin.y)
         let delta = abs(frame.height - panel.frame.height)
-        guard delta > 8.0 || originDelta > 2.0 else { return }
-        if delta > 28 || originDelta > 12 {
+        // Higher hysteresis: telemetry text reflow must not micro-morph the panel.
+        guard delta > 14.0 || originDelta > 4.0 else { return }
+        if delta > 32 || originDelta > 16 {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = ShannonMotion.panelMorphDuration
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -220,7 +221,11 @@ final class PillWindowController {
                 panel.animator().setFrame(frame, display: true)
             }
         } else {
+            // Silent snap — no Core Animation implicit actions on the frame.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             panel.setFrame(frame, display: false)
+            CATransaction.commit()
             panel.contentView?.needsDisplay = true
         }
     }
@@ -304,7 +309,8 @@ private struct PillHost: View {
             // Hysteresis of 6 pt: live H/resource text reflow used to report
             // ±1–3 pt every sample and morph the notch window ("pop" on refresh).
             let wanted = max(PillMetrics.expandedHeight, size.height.rounded(.up))
-            guard abs(wanted - hostHeight) > 6 else { return }
+            // 12 pt hysteresis — live H/resource text must not re-anchor the panel.
+            guard abs(wanted - hostHeight) > 12 else { return }
             hostHeight = wanted
             onContentHeight(wanted)
         }

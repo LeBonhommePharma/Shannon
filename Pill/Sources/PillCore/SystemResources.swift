@@ -380,6 +380,86 @@ public enum SystemResourceLogic {
         return Int(v.rounded())
     }
 
+    // MARK: Smooth display (iStat-style ease, pure)
+
+    /// Default blend toward a new sample (0 = hold, 1 = snap).
+    public static let defaultSmoothAlpha: Double = 0.52
+
+    /// Exponential smooth one optional percent toward a target.
+    ///
+    /// First non-nil target snaps; missing target holds previous; both present
+    /// blends. Keeps HUD frames from hard-jumping when host_processor_info
+    /// swings 10–20 pp between 0.5 s samples.
+    public static func smoothPercent(
+        previous: Double?,
+        target: Double?,
+        alpha: Double = defaultSmoothAlpha
+    ) -> Double? {
+        let a = min(1, max(0, alpha))
+        switch (previous.flatMap({ clampPct($0) }), target.flatMap({ clampPct($0) })) {
+        case (nil, let t?):
+            return t
+        case (let p?, nil):
+            return p
+        case (let p?, let t?):
+            if a >= 1 { return t }
+            if a <= 0 { return p }
+            // Snap the last fraction of a percent so we settle cleanly.
+            if abs(t - p) < 0.35 { return t }
+            return clampPct(p + (t - p) * a)
+        default:
+            return nil
+        }
+    }
+
+    /// Smooth per-core loads by index, then re-annotate ranks/deltas.
+    public static func smoothCores(
+        previous: [CPUCoreLoad],
+        target: [CPUCoreLoad],
+        alpha: Double = defaultSmoothAlpha
+    ) -> [CPUCoreLoad] {
+        if target.isEmpty { return previous.isEmpty ? [] : previous }
+        if previous.isEmpty { return target }
+        let n = target.count
+        var percents: [Double] = []
+        percents.reserveCapacity(n)
+        for i in 0..<n {
+            let prev = i < previous.count ? previous[i].percent : nil
+            let tgt = target[i].percent
+            percents.append(smoothPercent(previous: prev, target: tgt, alpha: alpha) ?? tgt)
+        }
+        return annotateCores(percents)
+    }
+
+    /// Blend `previous` display snapshot toward a fresh sample.
+    ///
+    /// Thermal ladder snaps (discrete). Wall clock follows the target sample.
+    public static func smoothSnapshot(
+        previous: SystemResourceSnapshot,
+        target: SystemResourceSnapshot,
+        alpha: Double = defaultSmoothAlpha
+    ) -> SystemResourceSnapshot {
+        SystemResourceSnapshot(
+            cpuPercent: smoothPercent(previous: previous.cpuPercent, target: target.cpuPercent, alpha: alpha),
+            cpuCores: smoothCores(previous: previous.cpuCores, target: target.cpuCores, alpha: alpha),
+            gpuPercent: smoothPercent(previous: previous.gpuPercent, target: target.gpuPercent, alpha: alpha),
+            ramPercent: smoothPercent(previous: previous.ramPercent, target: target.ramPercent, alpha: alpha),
+            ramUsedGB: smoothPercent(previous: previous.ramUsedGB, target: target.ramUsedGB, alpha: alpha),
+            ramTotalGB: target.ramTotalGB ?? previous.ramTotalGB,
+            diskPercent: smoothPercent(previous: previous.diskPercent, target: target.diskPercent, alpha: alpha),
+            diskUsedGB: smoothPercent(previous: previous.diskUsedGB, target: target.diskUsedGB, alpha: alpha),
+            diskTotalGB: target.diskTotalGB ?? previous.diskTotalGB,
+            diskFreeGB: smoothPercent(previous: previous.diskFreeGB, target: target.diskFreeGB, alpha: alpha),
+            thermal: target.thermal ?? previous.thermal,
+            temperatureCelsius: smoothPercent(
+                previous: previous.temperatureCelsius,
+                target: target.temperatureCelsius,
+                alpha: alpha
+            ),
+            sampledAt: target.sampledAt
+        )
+    }
+
     private static func approxEq(_ a: Double?, _ b: Double?, eps: Double = 1e-9) -> Bool {
         switch (a, b) {
         case (nil, nil): return true
@@ -771,8 +851,8 @@ public enum SystemResourceSampler {
 
 /// Polls `SystemResourceSampler` for the menu bar and pill.
 ///
-/// Default interval is ~0.75s — frequent enough for iStat-style motion without
-/// thrashing `host_processor_info`. History feeds popover sparklines.
+/// Default interval is ~0.55s with exponential smooth toward the raw sample so
+/// gauges crawl instead of hard-jumping. History still records **raw** samples.
 @MainActor
 public final class SystemResourceMonitor: ObservableObject {
     @Published public private(set) var snapshot = SystemResourceSnapshot()
@@ -780,11 +860,21 @@ public final class SystemResourceMonitor: ObservableObject {
 
     private var timer: Timer?
     private let interval: TimeInterval
+    private let smoothAlpha: Double
     private var warmed = false
+    /// Last raw sample appended to history (for sparkline gating).
+    private var lastHistoryRaw = SystemResourceSnapshot()
 
-    /// - Parameter interval: poll period in seconds. Prefer 0.5…1.0 for HUD feel.
-    public init(interval: TimeInterval = 0.75, historyCapacity: Int = 48) {
+    /// - Parameters:
+    ///   - interval: poll period in seconds. Prefer 0.45…0.75 for smooth HUD feel.
+    ///   - smoothAlpha: blend toward each raw sample (see `SystemResourceLogic.smoothSnapshot`).
+    public init(
+        interval: TimeInterval = 0.55,
+        historyCapacity: Int = 48,
+        smoothAlpha: Double = SystemResourceLogic.defaultSmoothAlpha
+    ) {
         self.interval = max(0.25, interval)
+        self.smoothAlpha = min(1, max(0.15, smoothAlpha))
         self.history = SystemResourceHistory(capacity: historyCapacity)
     }
 
@@ -804,7 +894,8 @@ public final class SystemResourceMonitor: ObservableObject {
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        t.tolerance = min(0.15, interval * 0.2)
+        // Generous tolerance — run loop coalesces with other main-thread work.
+        t.tolerance = min(0.2, interval * 0.35)
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
@@ -824,15 +915,31 @@ public final class SystemResourceMonitor: ObservableObject {
     }
 
     private func apply(_ snap: SystemResourceSnapshot) {
-        // Coarse publish gate: 1 pp aggregate + core signature. Stops the
-        // popover/pill thrashing on sub-percent host_processor_info noise.
-        guard SystemResourceLogic.shouldPublishSnapshot(previous: snapshot, next: snap) else {
+        // Always ease the published HUD toward the latest raw sample so bars
+        // don't jump 15 pp in one frame. Intermediate smooth steps still pass
+        // the 1 pp display gate, which is what makes motion feel continuous.
+        let smoothed = SystemResourceLogic.smoothSnapshot(
+            previous: snapshot,
+            target: snap,
+            alpha: smoothAlpha
+        )
+        let thermalChanged = snap.thermal != snapshot.thermal
+        guard thermalChanged
+            || SystemResourceLogic.shouldPublishSnapshot(previous: snapshot, next: smoothed)
+            || SystemResourceLogic.shouldPublishSnapshot(previous: snapshot, next: snap)
+        else {
             return
         }
+        // History tracks raw (true host path), not the eased display values.
         if snap.cpuPercent != nil || snap.ramPercent != nil || snap.diskPercent != nil {
-            history.append(snap)
+            if history.cpu.isEmpty
+                || SystemResourceLogic.shouldPublishSnapshot(previous: lastHistoryRaw, next: snap)
+            {
+                history.append(snap)
+                lastHistoryRaw = snap
+            }
         }
-        snapshot = snap
+        snapshot = smoothed
     }
 
     /// Optional sink for menu-bar paint alignment (sample-driven refresh).
@@ -841,7 +948,7 @@ public final class SystemResourceMonitor: ObservableObject {
     private func applyAndNotify(_ snap: SystemResourceSnapshot) {
         let before = snapshot
         apply(snap)
-        // Only notify when the published snapshot actually changed.
+        // Only notify when the published (smoothed) snapshot actually moved.
         if !SystemResourceLogic.displayEqual(before, snapshot) {
             onSnapshotPublished?()
         }

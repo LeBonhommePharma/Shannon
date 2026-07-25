@@ -48,6 +48,63 @@ final class SystemResourcesTests: XCTestCase {
         XCTAssertFalse(SystemResourceLogic.shouldPublishSnapshot(previous: a, next: b))
     }
 
+    // MARK: Smooth display (frame-to-frame ease)
+
+    func testSmoothPercentBlendsTowardTarget() {
+        let mid = SystemResourceLogic.smoothPercent(previous: 0, target: 100, alpha: 0.5)
+        XCTAssertEqual(mid ?? -1, 50, accuracy: 1e-9)
+        let closer = SystemResourceLogic.smoothPercent(previous: 50, target: 100, alpha: 0.5)
+        XCTAssertEqual(closer ?? -1, 75, accuracy: 1e-9)
+    }
+
+    func testSmoothPercentSnapsFirstSampleAndHoldsMissing() {
+        XCTAssertEqual(
+            SystemResourceLogic.smoothPercent(previous: nil, target: 42, alpha: 0.5) ?? -1,
+            42, accuracy: 1e-9
+        )
+        XCTAssertEqual(
+            SystemResourceLogic.smoothPercent(previous: 33, target: nil, alpha: 0.5) ?? -1,
+            33, accuracy: 1e-9
+        )
+    }
+
+    func testSmoothPercentSettlesWithinEpsilon() {
+        // Sub-0.35 pp gap snaps to target so bars don't crawl forever.
+        let settled = SystemResourceLogic.smoothPercent(previous: 50.1, target: 50.0, alpha: 0.5)
+        XCTAssertEqual(settled ?? -1, 50.0, accuracy: 1e-9)
+    }
+
+    func testSmoothSnapshotEasesAggregatesAndSnapsThermal() {
+        let prev = SystemResourceSnapshot(cpuPercent: 10, ramPercent: 20, thermal: .nominal)
+        let next = SystemResourceSnapshot(cpuPercent: 90, ramPercent: 80, thermal: .critical)
+        let mid = SystemResourceLogic.smoothSnapshot(previous: prev, target: next, alpha: 0.5)
+        XCTAssertEqual(mid.cpuPercent ?? -1, 50, accuracy: 1e-6)
+        XCTAssertEqual(mid.ramPercent ?? -1, 50, accuracy: 1e-6)
+        // Thermal is discrete — always take the latest ladder step.
+        XCTAssertEqual(mid.thermal, .critical)
+    }
+
+    func testSmoothCoresPreservesCountAndEases() {
+        let prev = SystemResourceLogic.annotateCores([10, 20, 30])
+        let tgt = SystemResourceLogic.annotateCores([90, 80, 70])
+        let mid = SystemResourceLogic.smoothCores(previous: prev, target: tgt, alpha: 0.5)
+        XCTAssertEqual(mid.count, 3)
+        XCTAssertEqual(mid[0].percent, 50, accuracy: 1e-6)
+        XCTAssertEqual(mid[1].percent, 50, accuracy: 1e-6)
+        XCTAssertEqual(mid[2].percent, 50, accuracy: 1e-6)
+    }
+
+    /// Several ease steps never overshoot the raw target (stable HUD).
+    func testSmoothPercentDoesNotOvershoot() {
+        var p: Double? = 0
+        for _ in 0..<20 {
+            p = SystemResourceLogic.smoothPercent(previous: p, target: 40, alpha: 0.5)
+            XCTAssertLessThanOrEqual(p ?? 999, 40 + 1e-9)
+            XCTAssertGreaterThanOrEqual(p ?? -1, 0)
+        }
+        XCTAssertEqual(p ?? -1, 40, accuracy: 0.5)
+    }
+
     func testBucketPct() {
         XCTAssertEqual(SystemResourceLogic.bucketPct(41.4), 41)
         XCTAssertEqual(SystemResourceLogic.bucketPct(41.6), 42)

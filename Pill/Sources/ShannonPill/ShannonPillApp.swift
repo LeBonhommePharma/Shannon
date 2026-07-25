@@ -57,8 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ingestSvc = AgentIngestService()
         let activityMon = AgentActivityMonitor()
         let confirm = ConfirmationController(provider: motion, feedback: SystemConfirmationFeedback())
-        // ~0.75s matches iStat-style menu-bar motion without thrashing host_processor_info.
-        let sysRes = SystemResourceMonitor(interval: 0.75)
+        // ~0.55s + exponential smooth → continuous gauges without layout thrash.
+        let sysRes = SystemResourceMonitor(interval: 0.55)
+
         // Native keep-awake (caffeinate-class IOPMAssertion) — no Amphetamine.
         let keep = KeepAwakeMonitor()
         // Focus / DND best-effort (BLOCKED.md §2) — fail-closed to unknown.

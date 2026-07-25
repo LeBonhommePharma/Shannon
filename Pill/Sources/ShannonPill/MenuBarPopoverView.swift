@@ -484,15 +484,13 @@ struct MenuBarPopoverView: View {
                 .font(.shannonMenuMono)
                 .foregroundStyle(Color.shannonSecondary)
                 .frame(width: 36, alignment: .leading)
-            // Horizontal load bar — width snaps; no layout animation (avoids pop).
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.shannonNeutral.opacity(0.22))
-                    Capsule()
-                        .fill(tint.opacity(percent == nil ? 0.12 : 0.9))
-                        .frame(width: max(3, geo.size.width * CGFloat(pct / 100)))
-                }
-            }
+            // Smooth fill only — fixed row height; parent layout stays put.
+            SmoothLoadBar(
+                percent: pct,
+                tint: tint,
+                isPlaceholder: percent == nil,
+                reduceMotion: reduceMotion
+            )
             .frame(height: 7)
             // Always reserve sparkline slot so history growth never shifts rows.
             Group {
@@ -557,24 +555,23 @@ struct MenuBarPopoverView: View {
                     ForEach(cores) { core in
                         let band = SystemResourceLogic.band(for: core.percent)
                         let tint = resourceTint(band)
-                        let h = max(2, geo.size.height * CGFloat(core.percent / 100))
-                        RoundedRectangle(cornerRadius: 1.2, style: .continuous)
-                            .fill(tint.opacity(core.isHotRelative ? 1.0 : 0.75))
-                            .frame(width: barW, height: h)
-                            .overlay(alignment: .top) {
-                                if core.isBusiest && core.percent >= 15 {
-                                    Circle()
-                                        .fill(Color.white.opacity(0.7))
-                                        .frame(width: 2.5, height: 2.5)
-                                        .offset(y: -3)
-                                }
-                            }
-                            .help(coreHelp(core))
+                        SmoothCoreBar(
+                            percent: core.percent,
+                            tint: tint,
+                            hot: core.isHotRelative,
+                            busiest: core.isBusiest && core.percent >= 15,
+                            width: barW,
+                            maxHeight: geo.size.height,
+                            reduceMotion: reduceMotion
+                        )
+                        .help(coreHelp(core))
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
             .frame(height: tall)
+            // Flatten core strip into one layer — fewer frame tears on 120 Hz.
+            .compositingGroup()
             .padding(.horizontal, 2)
             .padding(.vertical, 3)
             .background(
@@ -1032,6 +1029,62 @@ private struct ShannonQuietButtonStyle: ButtonStyle {
     }
 }
 
+// MARK: - Smooth gauges (local fill motion only)
+
+/// Horizontal load bar whose **width** eases without reflowing the popover.
+private struct SmoothLoadBar: View {
+    var percent: Double
+    var tint: Color
+    var isPlaceholder: Bool
+    var reduceMotion: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = max(3, geo.size.width * CGFloat(min(100, max(0, percent)) / 100))
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.shannonNeutral.opacity(0.22))
+                Capsule()
+                    .fill(tint.opacity(isPlaceholder ? 0.12 : 0.9))
+                    .frame(width: w)
+                    // Scoped liquid ease — parent transaction kills layout morphs.
+                    .transaction { txn in
+                        txn.animation = reduceMotion ? nil : .shannonLiquid
+                    }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// One per-core column; height eases independently of popover chrome.
+private struct SmoothCoreBar: View {
+    var percent: Double
+    var tint: Color
+    var hot: Bool
+    var busiest: Bool
+    var width: CGFloat
+    var maxHeight: CGFloat
+    var reduceMotion: Bool
+
+    var body: some View {
+        let h = max(2, maxHeight * CGFloat(min(100, max(0, percent)) / 100))
+        RoundedRectangle(cornerRadius: 1.2, style: .continuous)
+            .fill(tint.opacity(hot ? 1.0 : 0.75))
+            .frame(width: width, height: h)
+            .overlay(alignment: .top) {
+                if busiest {
+                    Circle()
+                        .fill(Color.white.opacity(0.7))
+                        .frame(width: 2.5, height: 2.5)
+                        .offset(y: -3)
+                }
+            }
+            .transaction { txn in
+                txn.animation = reduceMotion ? nil : .shannonLiquid
+            }
+    }
+}
+
 // MARK: - Sparkline
 
 /// Tiny line chart for recent utilisation history (iStat-style).
@@ -1048,6 +1101,7 @@ private struct SparklineView: View {
                     for p in pts.dropFirst() { path.addLine(to: p) }
                 }
                 .stroke(tint.opacity(0.9), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                .animation(nil, value: values.count)
             }
         }
         .accessibilityHidden(true)

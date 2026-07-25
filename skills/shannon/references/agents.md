@@ -10,7 +10,7 @@ Canonical ids live in `hub/agent_identity.py` (`HANDRAIL_AGENT_IDS` + `IDENTITIE
 | science | Claude Science | local | owl | Claude Science / Fable |
 | cowork | Cowork | local | beaver | Claude Cowork |
 | dispatch | Dispatch | local | wolf | Claude Dispatch |
-| design | Design | local | peacock | Design agents |
+| design | Claude Design | local | peacock | Claude Design app / design CLI / artifacts canvas |
 | opencode | OpenCode | local | octopus | OpenCode TUI |
 
 ## Aliases (`agent_manager.normalize_agent_id`)
@@ -20,6 +20,7 @@ Canonical ids live in `hub/agent_identity.py` (`HANDRAIL_AGENT_IDS` + `IDENTITIE
 - sci, claude_science → science
 - claude_cowork → cowork
 - claude_dispatch → dispatch
+- design, claude_design, claudedesign, des → design
 - oc, open_code → opencode
 - dr, dataset → dataset_runner
 

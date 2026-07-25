@@ -297,6 +297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let defaults = [
             ("science", "Claude Science"),
             ("claude_code", "Claude"),
+            ("design", "Claude Design"),
             ("codex", "Codex"),
             ("chatgpt", "ChatGPT"),
             ("grok_build", "Grok Build"),

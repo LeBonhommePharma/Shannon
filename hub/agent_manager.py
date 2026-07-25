@@ -88,6 +88,8 @@ def normalize_agent_id(raw: str) -> str:
         "codex": "codex",
         "design": "design",
         "claude_design": "design",
+        "claudedesign": "design",
+        "des": "design",
         "opencode": "opencode",
         "open_code": "opencode",
         "oc": "opencode",

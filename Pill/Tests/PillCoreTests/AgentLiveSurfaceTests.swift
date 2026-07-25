@@ -189,6 +189,136 @@ final class AgentLiveSurfaceTests: XCTestCase {
         XCTAssertEqual(line, "Needs you · Claude Code")
     }
 
+    func testPrimaryFocusIdleDoesNotSuppressHubScanLine() {
+        // Quiet live agents must not own the collapsed subtitle — HubScanLine
+        // ("Hub ready · …") stays visible when nothing actionable is happening.
+        let a = agent(status: .idle, presence: .live, task: "idle task", secondsAgo: 5)
+        let line = AgentLiveSurfaceLogic.primaryFocus(
+            agents: [a],
+            activity: [],
+            now: now
+        )
+        XCTAssertNil(line)
+    }
+
+    func testTaskCompleteBeatsStaleMidTaskBusy() {
+        // Gate left status=midTask but latest event is task_complete → finished.
+        let a = agent(status: .midTask, presence: .live, task: "still showing busy")
+        let surface = AgentLiveSurfaceLogic.resolve(
+            agent: a,
+            activity: [event(type: "task_complete", label: "13 passed — ready for review", secondsAgo: 5)],
+            now: now
+        )
+        XCTAssertEqual(surface.attention, .finished)
+        XCTAssertTrue(surface.isFinished)
+        XCTAssertFalse(surface.needsYou)
+    }
+
+    func testLiveWorkLineStripsDoubleVerbPrefix() {
+        let a = agent()
+        let surface = AgentLiveSurfaceLogic.resolve(
+            agent: a,
+            activity: [event(type: "tool_call", label: "Edited lib/license/store.ts")],
+            now: now
+        )
+        XCTAssertEqual(surface.attention, .working)
+        XCTAssertEqual(surface.toolKind, .edit)
+        // Must be "Editing …store.ts", never "Editing Edited …".
+        XCTAssertFalse(
+            surface.activityLine.lowercased().contains("editing edited"),
+            surface.activityLine
+        )
+        XCTAssertTrue(surface.activityLine.hasPrefix("Editing "), surface.activityLine)
+        XCTAssertTrue(surface.activityLine.contains("store.ts"), surface.activityLine)
+    }
+
+    func testStripLeadingToolVerb() {
+        XCTAssertEqual(
+            AgentLiveSurfaceLogic.stripLeadingToolVerb("Edited store.ts"),
+            "store.ts"
+        )
+        XCTAssertEqual(
+            AgentLiveSurfaceLogic.stripLeadingToolVerb("Reading Package.swift"),
+            "Package.swift"
+        )
+        XCTAssertEqual(
+            AgentLiveSurfaceLogic.stripLeadingToolVerb("store.ts"),
+            "store.ts"
+        )
+    }
+
+    // MARK: Claude Design first-class identity
+
+    func testClaudeDesignNeedsYouAndWorkingSurface() {
+        let design = agent(
+            id: "design",
+            name: "Claude Design",
+            status: .midTask,
+            presence: .live,
+            task: "Artboard polish"
+        )
+        let ask = GateDBReader.PendingAsk(
+            interactionId: "d1",
+            agentId: "design",
+            prompt: "Export canvas as PDF?",
+            createdAt: now.addingTimeInterval(-3)
+        )
+        let needs = AgentLiveSurfaceLogic.resolve(
+            agent: design,
+            pendingAsks: [ask],
+            activity: [event(id: 9, agent: "design", type: "tool_call", label: "Edited poster.svg")],
+            now: now
+        )
+        XCTAssertEqual(needs.agentId, "design")
+        XCTAssertEqual(needs.displayName, "Claude Design")
+        XCTAssertEqual(needs.attention, .needsYou)
+        XCTAssertEqual(
+            AgentLiveSurfaceLogic.primaryFocus(
+                agents: [design],
+                pendingAsks: [ask],
+                activity: [event(id: 9, agent: "design", type: "tool_call", label: "Edited poster.svg")],
+                now: now
+            ),
+            "Needs you · Claude Design"
+        )
+
+        let working = AgentLiveSurfaceLogic.resolve(
+            agent: design,
+            activity: [event(id: 10, agent: "design", type: "tool_call", label: "Edited poster.svg")],
+            now: now
+        )
+        XCTAssertEqual(working.attention, .working)
+        XCTAssertEqual(working.toolKind, .edit)
+        XCTAssertTrue(working.activityLine.hasPrefix("Editing "), working.activityLine)
+        XCTAssertFalse(working.activityLine.lowercased().contains("editing edited"))
+    }
+
+    func testFleetKeepsClaudeDesignDistinctFromClaudeCode() {
+        let code = agent(id: "claude_code", name: "Claude Code", status: .midTask)
+        let design = agent(
+            id: "design", name: "Claude Design", status: .idle, presence: .live, task: ""
+        )
+        let fleet = AgentLiveSurfaceLogic.fleet(
+            agents: [code, design],
+            activity: [
+                event(id: 1, agent: "design", type: "task_complete",
+                      label: "mockups ready for review", secondsAgo: 4),
+                event(id: 2, agent: "claude_code", type: "tool_call",
+                      label: "Edited main.swift", secondsAgo: 2),
+            ],
+            now: now,
+            limit: 4
+        )
+        XCTAssertEqual(fleet.count, 2)
+        // Working Code ranks above finished Design.
+        XCTAssertEqual(fleet[0].agentId, "claude_code")
+        XCTAssertEqual(fleet[0].attention, .working)
+        XCTAssertEqual(fleet[1].agentId, "design")
+        XCTAssertEqual(fleet[1].attention, .finished)
+        XCTAssertEqual(fleet[1].displayName, "Claude Design")
+        XCTAssertNotEqual(fleet[0].agentId, fleet[1].agentId)
+    }
+
     func testStaleActivityDoesNotForceWorkingWithoutBusy() {
         let a = agent(status: .idle, presence: .live, task: "old", secondsAgo: 5)
         let surface = AgentLiveSurfaceLogic.resolve(

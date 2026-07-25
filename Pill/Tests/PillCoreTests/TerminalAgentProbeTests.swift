@@ -54,12 +54,16 @@ final class TerminalAgentProbeTests: XCTestCase {
         XCTAssertEqual(TerminalAgentProbe.classify(executable: "claude")?.agentID, "claude_code")
         XCTAssertEqual(TerminalAgentProbe.classify(executable: "claude-code")?.agentID, "claude_code")
         XCTAssertEqual(TerminalAgentProbe.classify(executable: "claude-science")?.agentID, "science")
+        XCTAssertEqual(TerminalAgentProbe.classify(executable: "claude-design")?.agentID, "design")
+        XCTAssertEqual(TerminalAgentProbe.classify(executable: "claudedesign")?.agentID, "design")
+        XCTAssertEqual(TerminalAgentProbe.classify(executable: "claude_design")?.agentID, "design")
         XCTAssertEqual(TerminalAgentProbe.classify(executable: "codex")?.agentID, "codex")
         XCTAssertEqual(TerminalAgentProbe.classify(executable: "grok")?.agentID, "grok_build")
         XCTAssertEqual(TerminalAgentProbe.classify(executable: "cowork")?.agentID, "cowork")
         XCTAssertEqual(TerminalAgentProbe.classify(executable: "dispatch")?.agentID, "dispatch")
-        // Most specific first: claude-science must not be swallowed by claude.
+        // Most specific first: claude-science / claude-design must not be swallowed by claude.
         XCTAssertNotEqual(TerminalAgentProbe.classify(executable: "claude-science")?.agentID, "claude_code")
+        XCTAssertNotEqual(TerminalAgentProbe.classify(executable: "claude-design")?.agentID, "claude_code")
     }
 
     func testClassifyRejectsShellsAndLookalikes() {

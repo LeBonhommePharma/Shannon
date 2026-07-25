@@ -51,7 +51,7 @@ killable from one place (pill + gate + this skill).
 | `opencode` | OpenCode | OpenCode TUI |
 | `dataset_runner` | DatasetRunner | FlexAIDdS bridge |
 
-Aliases accepted by the CLI: `grok`→`grok_build`, `claude`→`claude_code`, `sci`→`science`, `oc`→`opencode`, …
+Aliases accepted by the CLI: `grok`→`grok_build`, `claude`→`claude_code`, `sci`→`science`, `claude_design`/`des`→`design`, `oc`→`opencode`, …
 
 Full roster: `references/agents.md`.
 

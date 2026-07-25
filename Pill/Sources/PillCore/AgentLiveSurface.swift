@@ -162,7 +162,9 @@ public enum AgentLiveSurfaceLogic {
             now.timeIntervalSince($0.at) <= activityFreshSeconds
         } ?? false
 
-        // ── Attention priority: needs you > working > finished > idle/unknown
+        // ── Attention priority: needs you > finished > working > idle/unknown
+        // Finished is checked before workingBusy so a fresh `task_complete`
+        // beats a stale mid_task / busy status left on the agent row.
         if needs {
             let prompt = pendingAsks.first(where: { $0.agentId == agent.id })?.prompt ?? ""
             let short = AgentActivitySnapshot.shorten(prompt, max: 40)
@@ -174,25 +176,6 @@ public enum AgentLiveSurfaceLogic {
                 activityLine: short.isEmpty ? "Waiting for approval" : short,
                 usage: usageIfReal(usage),
                 needsYou: true,
-                isFinished: false
-            )
-        }
-
-        if workingBusy || (activityFresh && tool != .none && !finished) {
-            let line = liveWorkLine(
-                tool: tool,
-                event: latest,
-                lastTask: agent.lastTask,
-                activityFresh: activityFresh
-            )
-            return AgentLiveSurface(
-                agentId: agent.id,
-                displayName: name,
-                attention: .working,
-                toolKind: activityFresh ? tool : .other,
-                activityLine: line,
-                usage: usageIfReal(usage),
-                needsYou: false,
                 isFinished: false
             )
         }
@@ -209,6 +192,25 @@ public enum AgentLiveSurfaceLogic {
                 usage: usageIfReal(usage),
                 needsYou: false,
                 isFinished: true
+            )
+        }
+
+        if workingBusy || (activityFresh && tool != .none) {
+            let line = liveWorkLine(
+                tool: tool,
+                event: latest,
+                lastTask: agent.lastTask,
+                activityFresh: activityFresh
+            )
+            return AgentLiveSurface(
+                agentId: agent.id,
+                displayName: name,
+                attention: .working,
+                toolKind: activityFresh ? tool : .other,
+                activityLine: line,
+                usage: usageIfReal(usage),
+                needsYou: false,
+                isFinished: false
             )
         }
 
@@ -287,7 +289,11 @@ public enum AgentLiveSurfaceLogic {
         return Array(useful.prefix(max(0, limit)))
     }
 
-    /// Best single focus line for the collapsed island.
+    /// Best single focus line for the collapsed island / menubar scan.
+    ///
+    /// Only **actionable** attention states — needs-you, working, finished.
+    /// Idle / unknown must return `nil` so HubScanLine / host load can still
+    /// own the quiet collapsed subtitle (never suppress "Hub ready").
     public static func primaryFocus(
         agents: [AgentActivitySnapshot],
         pendingAsks: [GateDBReader.PendingAsk] = [],
@@ -301,10 +307,14 @@ public enum AgentLiveSurfaceLogic {
             activity: activity,
             usageByAgent: usageByAgent,
             now: now,
-            limit: 1
+            limit: 4
         )
-        guard let top = f.first else { return nil }
-        if top.attention == .unknown, top.activityLine.isEmpty { return nil }
+        guard let top = f.first(where: {
+            switch $0.attention {
+            case .needsYou, .working, .finished: return true
+            case .idle, .unknown: return false
+            }
+        }) else { return nil }
         return top.collapsedFocus
     }
 
@@ -414,16 +424,45 @@ public enum AgentLiveSurfaceLogic {
         activityFresh: Bool
     ) -> String {
         if activityFresh, let event {
-            let target = AgentActivitySnapshot.shorten(event.line, max: 36)
+            let raw = AgentActivitySnapshot.shorten(event.line, max: 36)
             if tool != .none, !tool.verb.isEmpty {
+                if raw.isEmpty { return tool.verb }
+                // Labels often already carry a past-tense verb ("Edited store.ts").
+                // Strip it so we never emit "Editing Edited store.ts".
+                let target = stripLeadingToolVerb(raw)
                 if target.isEmpty { return tool.verb }
-                // "Editing store.ts" style
                 return "\(tool.verb) \(target)"
             }
-            if !target.isEmpty { return target }
+            if !raw.isEmpty { return raw }
         }
         let task = AgentActivitySnapshot.shorten(lastTask, max: 42)
         if !task.isEmpty { return task }
         return tool != .none ? tool.verb : "working"
+    }
+
+    /// Drop a leading tool verb from an activity label so the live line can
+    /// re-prefix with the present-tense `AgentToolKind.verb` once.
+    static func stripLeadingToolVerb(_ line: String) -> String {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        let lower = trimmed.lowercased()
+        // Longest-first so "editing " wins over "edit ".
+        let prefixes = [
+            "editing ", "edited ", "edit ",
+            "reading ", "read ",
+            "running ", "ran ", "run ",
+            "testing ", "tested ", "test ",
+            "browsing ", "browsed ", "browse ",
+            "writing ", "wrote ", "write ",
+            "working on ", "working ", "worked ",
+            "applying ", "applied ",
+            "creating ", "created ", "create ",
+            "updating ", "updated ", "update ",
+        ]
+        for p in prefixes where lower.hasPrefix(p) {
+            return String(trimmed.dropFirst(p.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
     }
 }

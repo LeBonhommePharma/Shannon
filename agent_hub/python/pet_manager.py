@@ -49,7 +49,7 @@ PETS_DIR: Path    = SHANNON_DIR / "pets"
 DB_PATH:  Path    = SHANNON_DIR / "agent_hub.db"
 
 ALL_AGENTS = [
-    "claude_code", "cowork", "dispatch", "science",
+    "claude_code", "cowork", "dispatch", "science", "design",
     "grok_build", "codex", "dataset_runner",
 ]
 

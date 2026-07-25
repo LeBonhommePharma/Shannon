@@ -1,0 +1,202 @@
+import XCTest
+@testable import PillCore
+
+/// Clean-room AgentNotch-class live surface — pure classification only.
+final class AgentLiveSurfaceTests: XCTestCase {
+
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private func agent(
+        id: String = "claude_code",
+        name: String = "Claude Code",
+        status: AgentRunStatus = .midTask,
+        presence: AgentPresence = .live,
+        task: String = "Wiring license claim",
+        secondsAgo: TimeInterval = 5
+    ) -> AgentActivitySnapshot {
+        AgentActivitySnapshot(
+            id: id,
+            displayName: name,
+            status: status,
+            lastTask: task,
+            source: "gate",
+            updatedAt: now.addingTimeInterval(-secondsAgo),
+            resumable: true,
+            historyCount: 1,
+            presence: presence
+        )
+    }
+
+    private func event(
+        id: Int64 = 1,
+        agent: String = "claude_code",
+        type: String,
+        label: String,
+        secondsAgo: TimeInterval = 2
+    ) -> GateDBReader.ActivityEvent {
+        GateDBReader.ActivityEvent(
+            id: id,
+            agentId: agent,
+            at: now.addingTimeInterval(-secondsAgo),
+            type: type,
+            label: label,
+            output: ""
+        )
+    }
+
+    // MARK: Needs you
+
+    func testNeedsYouBeatsWorking() {
+        let a = agent(status: .midTask)
+        let ask = GateDBReader.PendingAsk(
+            interactionId: "i1",
+            agentId: "claude_code",
+            prompt: "Run npm run db:migrate?",
+            createdAt: now.addingTimeInterval(-10)
+        )
+        let surface = AgentLiveSurfaceLogic.resolve(
+            agent: a,
+            pendingAsks: [ask],
+            activity: [event(type: "tool_call", label: "Edited store.ts")],
+            now: now
+        )
+        XCTAssertEqual(surface.attention, AgentLiveAttention.needsYou)
+        XCTAssertTrue(surface.needsYou)
+        XCTAssertTrue(surface.activityLine.contains("migrate") || surface.activityLine.contains("Waiting"))
+        XCTAssertTrue(surface.collapsedFocus.hasPrefix("Needs you"))
+    }
+
+    // MARK: Working / tools
+
+    func testWorkingEditToolLine() {
+        let a = agent()
+        let surface = AgentLiveSurfaceLogic.resolve(
+            agent: a,
+            activity: [event(type: "tool_call", label: "Edited lib/license/store.ts")],
+            now: now
+        )
+        XCTAssertEqual(surface.attention, .working)
+        XCTAssertEqual(surface.toolKind, .edit)
+        XCTAssertTrue(surface.activityLine.lowercased().contains("edit"), surface.activityLine)
+    }
+
+    func testWorkingReadAndShellClassification() {
+        XCTAssertEqual(
+            AgentLiveSurfaceLogic.toolKindFromBlob("read Package.swift"),
+            .read
+        )
+        XCTAssertEqual(
+            AgentLiveSurfaceLogic.toolKindFromBlob("Ran npm test (42 passed)"),
+            .test
+        )
+        XCTAssertEqual(
+            AgentLiveSurfaceLogic.toolKindFromBlob("bash cargo build"),
+            .shell
+        )
+    }
+
+    func testFailClosedWhenNoLiveSignal() {
+        let a = agent(
+            status: .idle,
+            presence: .offline,
+            task: "",
+            secondsAgo: 3600
+        )
+        let surface = AgentLiveSurfaceLogic.resolve(agent: a, now: now)
+        XCTAssertEqual(surface.attention, .unknown)
+        XCTAssertEqual(surface.toolKind, .none)
+        XCTAssertTrue(surface.activityLine.isEmpty)
+        XCTAssertNil(surface.usage)
+    }
+
+    // MARK: Completion
+
+    func testFinishedFromTaskCompleteEvent() {
+        let a = agent(status: .idle, presence: .live, task: "", secondsAgo: 30)
+        let surface = AgentLiveSurfaceLogic.resolve(
+            agent: a,
+            activity: [event(type: "task_complete", label: "13 passed — ready for review", secondsAgo: 10)],
+            now: now
+        )
+        XCTAssertEqual(surface.attention, .finished)
+        XCTAssertTrue(surface.isFinished)
+    }
+
+    // MARK: Fleet multi-agent identity
+
+    func testFleetKeepsClaudeAndCodexDistinctAndOrdersNeedsYouFirst() {
+        let claude = agent(id: "claude_code", name: "Claude Code", status: .midTask)
+        let codex = agent(id: "codex", name: "Codex", status: .idle, presence: .live, task: "")
+        let ask = GateDBReader.PendingAsk(
+            interactionId: "ask1",
+            agentId: "claude_code",
+            prompt: "Approve deploy?",
+            createdAt: now
+        )
+        let fleet = AgentLiveSurfaceLogic.fleet(
+            agents: [codex, claude],
+            pendingAsks: [ask],
+            activity: [
+                event(id: 2, agent: "codex", type: "task_complete", label: "ready for review", secondsAgo: 5),
+            ],
+            now: now,
+            limit: 4
+        )
+        XCTAssertEqual(fleet.count, 2)
+        XCTAssertEqual(fleet[0].agentId, "claude_code")
+        XCTAssertEqual(fleet[0].attention, AgentLiveAttention.needsYou)
+        XCTAssertEqual(fleet[1].agentId, "codex")
+        XCTAssertNotEqual(fleet[0].agentId, fleet[1].agentId)
+    }
+
+    // MARK: Usage fail-closed
+
+    func testUsageHiddenWhenEmpty() {
+        let a = agent()
+        let empty = AgentUsageSnapshot()
+        let surface = AgentLiveSurfaceLogic.resolve(
+            agent: a,
+            usage: empty,
+            now: now
+        )
+        XCTAssertNil(surface.usage)
+        XCTAssertNil(AgentLiveSurfaceLogic.usageIfReal(empty))
+    }
+
+    func testUsageShownWhenReal() {
+        let usage = AgentUsageSnapshot(tokensUsed: 1200, tokensLimit: 200_000, contextPercent: 22)
+        XCTAssertTrue(usage.hasAny)
+        XCTAssertEqual(usage.shortLabel, "ctx 22%")
+        let a = agent()
+        let surface = AgentLiveSurfaceLogic.resolve(agent: a, usage: usage, now: now)
+        XCTAssertNotNil(surface.usage)
+        XCTAssertEqual(surface.usage?.contextPercent, 22)
+    }
+
+    func testPrimaryFocusNeedsYou() {
+        let a = agent()
+        let ask = GateDBReader.PendingAsk(
+            interactionId: "x",
+            agentId: "claude_code",
+            prompt: "Run migrate?",
+            createdAt: now
+        )
+        let line = AgentLiveSurfaceLogic.primaryFocus(
+            agents: [a],
+            pendingAsks: [ask],
+            now: now
+        )
+        XCTAssertEqual(line, "Needs you · Claude Code")
+    }
+
+    func testStaleActivityDoesNotForceWorkingWithoutBusy() {
+        let a = agent(status: .idle, presence: .live, task: "old", secondsAgo: 5)
+        let surface = AgentLiveSurfaceLogic.resolve(
+            agent: a,
+            activity: [event(type: "tool_call", label: "Edited foo", secondsAgo: 500)],
+            now: now
+        )
+        // Live idle, not working on stale edit.
+        XCTAssertEqual(surface.attention, .idle)
+    }
+}

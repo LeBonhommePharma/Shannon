@@ -659,10 +659,17 @@ struct PillView: View {
         return .shannonTertiary
     }
 
-    /// Priority: busy agents → fresh ingest → media → most-constrained host
-    /// resource → quiet. When idle, the pill shows only the tightest gauge
-    /// (CPU / GPU / RAM) so it stays notch-sized but still informative.
+    /// Priority: live agent focus (needs-you / tool activity) → busy roster →
+    /// ingest → media → host load → quiet. Fail-closed when no live signal.
     private var collapsedText: String {
+        // AgentNotch-class focus: needs-you and live tool lines first.
+        if let focus = AgentLiveSurfaceLogic.primaryFocus(
+            agents: summary.agents,
+            pendingAsks: activity.pendingAsks,
+            activity: activity.recentActivity
+        ) {
+            return focus
+        }
         if !busy.isEmpty { return summary.collapsedText }
         if ingest.isHighlighting, let last = ingest.lastResult {
             // `pillLabel` is "⊘ not an agent" for a refused capture — the pill
@@ -974,21 +981,27 @@ struct PillView: View {
                     Text("\(style(for: a).emoji) \(style(for: a).displayName)")
                         .font(.shannonMenuBody)
                         .foregroundStyle(ink(for: a))
-                    Text(a.statusLine)
+                    Text(liveBadge(for: a))
                         .font(.shannonMenuSection)
-                        .foregroundStyle(ink(for: a))
+                        .foregroundStyle(liveAttentionColor(for: a))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Capsule().fill(style(for: a).palette.wash))
                         .overlay(Capsule().strokeBorder(style(for: a).palette.edge, lineWidth: 1))
+                    if let usage = liveSurface(for: a).usage?.shortLabel {
+                        Text(usage)
+                            .font(.shannonPillMono)
+                            .foregroundStyle(Color.shannonTertiary)
+                    }
                     Spacer(minLength: 0)
                     agentEntropyBadge(reading)
                     Text(a.relativeAge)
                         .font(.shannonPillMono)
                         .foregroundStyle(Color.shannonSecondary)
                 }
-                if !a.lastTask.isEmpty {
-                    Text(a.lastTask)
+                // Live tool line (read/edit/shell) when present; else last task.
+                if !liveDetailLine(for: a).isEmpty {
+                    Text(liveDetailLine(for: a))
                         .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonSecondary)
                         .lineLimit(1)
@@ -1284,6 +1297,46 @@ struct PillView: View {
 
     private func iconName(for a: AgentActivitySnapshot) -> String {
         style(for: a).systemImage
+    }
+
+    // MARK: Live agent surface (clean-room AgentNotch-class)
+
+    private func liveSurface(for a: AgentActivitySnapshot) -> AgentLiveSurface {
+        AgentLiveSurfaceLogic.resolve(
+            agent: a,
+            pendingAsks: activity.pendingAsks,
+            activity: activity.recentActivity
+        )
+    }
+
+    /// Capsule badge: needs you / working / done / live.
+    private func liveBadge(for a: AgentActivitySnapshot) -> String {
+        let s = liveSurface(for: a)
+        switch s.attention {
+        case .needsYou: return "needs you"
+        case .working: return s.toolKind == .none ? "working" : s.toolKind.rawValue
+        case .finished: return "done"
+        case .idle: return "live"
+        case .unknown: return a.statusLine
+        }
+    }
+
+    private func liveDetailLine(for a: AgentActivitySnapshot) -> String {
+        let s = liveSurface(for: a)
+        if s.attention == .working || s.attention == .needsYou || s.attention == .finished {
+            return s.activityLine
+        }
+        if !a.lastTask.isEmpty { return a.lastTask }
+        return s.activityLine
+    }
+
+    private func liveAttentionColor(for a: AgentActivitySnapshot) -> Color {
+        switch liveSurface(for: a).attention {
+        case .needsYou: return .shannonWarning
+        case .working: return style(for: a).palette.ink
+        case .finished: return .shannonSuccess
+        case .idle, .unknown: return ink(for: a)
+        }
     }
 
     /// Brand tint for non-text marks — dots, icons, arcs — modulated by status.

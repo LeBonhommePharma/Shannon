@@ -194,7 +194,15 @@ struct MenuBarPopoverView: View {
 
     /// One-line founder scan: collapse > busy agents > live FlexAIDdS run > hub state.
     private var headerSubtitle: String {
-        HubScanLine.resolve(
+        // Prefer live AgentNotch-class focus (needs-you / tool activity).
+        if let focus = AgentLiveSurfaceLogic.primaryFocus(
+            agents: summary.agents,
+            pendingAsks: activity.pendingAsks,
+            activity: activity.recentActivity
+        ) {
+            return focus
+        }
+        return HubScanLine.resolve(
             collapseBits: collapseAlarm ? reading.measurement?.bits : nil,
             collapseDelta: collapseAlarm ? reading.measurement?.deltaH : nil,
             busyNames: busy.map(\.displayName),
@@ -720,14 +728,19 @@ struct MenuBarPopoverView: View {
             // `statusLine`, not `status.label`: an agent that vanished two days
             // ago used to render the bare word "idle", which reads as "present
             // and waiting". This says "offline · last seen 2d".
-            Text(a.statusLine)
+            Text(liveBadge(for: a))
                 .font(.shannonMenuSection)
-                .foregroundStyle(style.palette.ink)
+                .foregroundStyle(liveAttentionColor(for: a, style: style))
                 .lineLimit(1)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 1)
                 .background(Capsule().fill(style.palette.wash))
             Spacer(minLength: 4)
+            if let usage = liveSurface(for: a).usage?.shortLabel {
+                Text(usage)
+                    .font(.shannonMenuMono)
+                    .foregroundStyle(Color.shannonTertiary)
+            }
             agentEntropyLabel(agentReading)
             Text(a.relativeAge)
                 .font(.shannonMenuMono)
@@ -737,8 +750,36 @@ struct MenuBarPopoverView: View {
         .frame(height: 18)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(style.displayName), \(a.statusLine), \(agentReading.explain(at: Date())), \(a.relativeAge)"
+            "\(style.displayName), \(liveBadge(for: a)), \(liveSurface(for: a).activityLine), \(agentReading.explain(at: Date())), \(a.relativeAge)"
         )
+    }
+
+    private func liveSurface(for a: AgentActivitySnapshot) -> AgentLiveSurface {
+        AgentLiveSurfaceLogic.resolve(
+            agent: a,
+            pendingAsks: activity.pendingAsks,
+            activity: activity.recentActivity
+        )
+    }
+
+    private func liveBadge(for a: AgentActivitySnapshot) -> String {
+        let s = liveSurface(for: a)
+        switch s.attention {
+        case .needsYou: return "needs you"
+        case .working: return s.toolKind == .none ? "working" : s.toolKind.rawValue
+        case .finished: return "done"
+        case .idle: return "live"
+        case .unknown: return a.statusLine
+        }
+    }
+
+    private func liveAttentionColor(for a: AgentActivitySnapshot, style: AgentStyle) -> Color {
+        switch liveSurface(for: a).attention {
+        case .needsYou: return .shannonWarning
+        case .working: return style.palette.ink
+        case .finished: return .shannonSuccess
+        case .idle, .unknown: return style.palette.ink
+        }
     }
 
     @ViewBuilder

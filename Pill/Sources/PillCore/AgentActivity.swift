@@ -877,6 +877,11 @@ public final class AgentActivityMonitor: ObservableObject {
     /// directly; the resolver is what decides whether a value is current.
     @Published public private(set) var agentEntropy: [EntropyMeasurement] = []
 
+    /// Rolling multi-agent entropy series (independent per agent id).
+    /// Updating one agent never clears another. Offline samples stay as
+    /// history but are not claimed current — see `AgentEntropyMemory`.
+    @Published public private(set) var entropyMemory = AgentEntropyMemory()
+
     /// Latest FlexAIDdS / DatasetRunner benchmark progress from the gate (nil if none).
     @Published public private(set) var benchmark: BenchmarkRunSnapshot?
 
@@ -1017,6 +1022,13 @@ public final class AgentActivityMonitor: ObservableObject {
         if gateDBAvailable != full.gateDBAvailable { gateDBAvailable = full.gateDBAvailable }
         if gateAvailable != socketUp { gateAvailable = socketUp }
         if agentEntropy != full.agentEntropy { agentEntropy = full.agentEntropy }
+        // Retain simultaneous per-agent series from this poll’s measurements.
+        // Ingest only mutates agents present in the batch — never wipes others.
+        if !full.agentEntropy.isEmpty {
+            var mem = entropyMemory
+            mem.ingest(full.agentEntropy, now: full.summary.scannedAt)
+            if mem != entropyMemory { entropyMemory = mem }
+        }
         if benchmark != full.benchmark { benchmark = full.benchmark }
         // Drop stale in-flight state for asks the gate has since cleared.
         let live = Set(full.pendingAsks.map(\.interactionId))

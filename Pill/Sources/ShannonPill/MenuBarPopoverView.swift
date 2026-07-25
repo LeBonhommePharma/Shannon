@@ -752,46 +752,68 @@ struct MenuBarPopoverView: View {
 
     private func agentRow(_ a: AgentActivitySnapshot) -> some View {
         let style = AgentStyleCatalog.style(for: a.id)
-        let agentReading = agentReadings[a.id]
-            ?? EntropyProvenance.resolveForAgent(
-                agentId: a.id,
-                bridgeConnected: bridge.connected,
-                bridgeStatus: bridge.status,
-                gate: activity.agentEntropy,
-                gateDBAvailable: activity.gateDBAvailable
-            )
-        return HStack(spacing: 7) {
-            Text(style.emoji).font(.shannonMenuBody)
-            Text(style.displayName)
-                .font(.shannonMenuBody)
-                .foregroundStyle(style.palette.ink)
-                .lineLimit(1)
-            // `statusLine`, not `status.label`: an agent that vanished two days
-            // ago used to render the bare word "idle", which reads as "present
-            // and waiting". This says "offline · last seen 2d".
-            Text(liveBadge(for: a))
-                .font(.shannonMenuSection)
-                .foregroundStyle(liveAttentionColor(for: a, style: style))
-                .lineLimit(1)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(style.palette.wash))
-            Spacer(minLength: 4)
-            if let usage = liveSurface(for: a).usage?.shortLabel {
-                Text(usage)
+        // Prefer memory-backed reading when series exist so concurrent agents
+        // keep independent H without overwriting each other across polls.
+        let agentReading: EntropyReading = {
+            if activity.entropyMemory.latest(for: a.id) != nil {
+                return activity.entropyMemory.reading(
+                    for: a.id,
+                    gateDBAvailable: activity.gateDBAvailable
+                )
+            }
+            return agentReadings[a.id]
+                ?? EntropyProvenance.resolveForAgent(
+                    agentId: a.id,
+                    bridgeConnected: bridge.connected,
+                    bridgeStatus: bridge.status,
+                    gate: activity.agentEntropy,
+                    gateDBAvailable: activity.gateDBAvailable
+                )
+        }()
+        let surface = liveSurface(for: a)
+        let replay = surface.activityLine
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 7) {
+                Text(style.emoji).font(.shannonMenuBody)
+                Text(style.displayName)
+                    .font(.shannonMenuBody)
+                    .foregroundStyle(style.palette.ink)
+                    .lineLimit(1)
+                // `statusLine`, not `status.label`: an agent that vanished two days
+                // ago used to render the bare word "idle", which reads as "present
+                // and waiting". This says "offline · last seen 2d".
+                Text(liveBadge(for: a))
+                    .font(.shannonMenuSection)
+                    .foregroundStyle(liveAttentionColor(for: a, style: style))
+                    .lineLimit(1)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(style.palette.wash))
+                Spacer(minLength: 4)
+                if let usage = surface.usage?.shortLabel {
+                    Text(usage)
+                        .font(.shannonMenuMono)
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+                agentEntropyLabel(agentReading)
+                Text(a.relativeAge)
                     .font(.shannonMenuMono)
                     .foregroundStyle(Color.shannonTertiary)
+                    .frame(minWidth: 28, alignment: .trailing)
             }
-            agentEntropyLabel(agentReading)
-            Text(a.relativeAge)
-                .font(.shannonMenuMono)
-                .foregroundStyle(Color.shannonTertiary)
-                .frame(minWidth: 28, alignment: .trailing)
+            // Replay last AI work line under concurrent agents (stable height).
+            if !replay.isEmpty, surface.attention != .unknown {
+                Text(replay)
+                    .font(.shannonMenuFootnote)
+                    .foregroundStyle(Color.shannonSecondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .frame(height: 18)
+        .frame(minHeight: 18, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(style.displayName), \(liveBadge(for: a)), \(liveSurface(for: a).activityLine), \(agentReading.explain(at: Date())), \(a.relativeAge)"
+            "\(style.displayName), \(liveBadge(for: a)), \(replay), \(agentReading.explain(at: Date())), \(a.relativeAge)"
         )
     }
 

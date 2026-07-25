@@ -1111,8 +1111,27 @@ struct PillView: View {
 
     private func agentEntropyRow(agent: AgentActivitySnapshot, reading: EntropyReading) -> some View {
         let style = style(for: agent)
-        let display = reading.display(at: Date())
-        let attached = hasAttachedAgent || agent.presence == .live
+        // Memory series: simultaneous H history; currency from presence+age.
+        let memReading = activity.entropyMemory.latest(for: agent.id) != nil
+            ? activity.entropyMemory.reading(
+                for: agent.id,
+                gateDBAvailable: activity.gateDBAvailable
+            )
+            : reading
+        let display = memReading.display(at: Date())
+        let attached = agent.presence == .live
+            || AgentEntropyMemory.shouldKeepTracking(
+                presence: agent.presence,
+                latest: activity.entropyMemory.latest(for: agent.id)?.measurement
+            )
+        let current = activity.entropyMemory.isCurrent(agentId: agent.id)
+            || (memReading.isMeasured && agent.presence == .live)
+        let series = activity.entropyMemory.series(for: agent.id).bitSeries
+        let surface = AgentLiveSurfaceLogic.resolve(
+            agent: agent,
+            pendingAsks: activity.pendingAsks,
+            activity: activity.recentActivity
+        )
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
                 Text(style.displayName)
@@ -1120,13 +1139,14 @@ struct PillView: View {
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if let display {
+                if let display, current || memReading.isStale {
                     Text(display.shortLabel)
                         .font(.shannonPillMono)
                         .foregroundStyle(Self.color(from: display.gaugeColorRGB()))
                         .contentTransition(.identity)
+                        .opacity(current ? 1 : 0.55)
                 } else {
-                    Text(reading.isStale ? "stale" : "no H")
+                    Text(memReading.isStale ? "stale" : "no H")
                         .font(.shannonPillMono)
                         .foregroundStyle(Color.shannonNeutral)
                 }
@@ -1136,15 +1156,28 @@ struct PillView: View {
                     .lineLimit(1)
             }
             FluidEntropyRail(
-                display: display,
+                display: current ? display : nil,
                 agentAttached: attached,
                 reduceMotion: reduceMotion
             )
             .frame(height: 6)
+            if series.count >= 2 {
+                // Multi-sample memory trail — fixed height, no layout thrash.
+                EntropySeriesSparkline(values: series, tint: style.palette.tint)
+                    .frame(height: 10)
+            }
+            if surface.needsYou || surface.attention == .working || surface.attention == .finished {
+                Text(surface.collapsedFocus)
+                    .font(.shannonMenuFootnote)
+                    .foregroundStyle(
+                        surface.needsYou ? Color.shannonWarning : Color.shannonSecondary
+                    )
+                    .lineLimit(1)
+            }
         }
-        .help(reading.explain(at: Date()))
+        .help(memReading.explain(at: Date()))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(style.displayName) entropy. \(reading.explain(at: Date()))")
+        .accessibilityLabel("\(style.displayName) entropy. \(memReading.explain(at: Date())). \(surface.activityLine)")
     }
 
     private func fleetEntropyRow(_ reading: EntropyReading) -> some View {
@@ -1476,6 +1509,42 @@ struct BatteryRing: View {
         .onAppear { pulsing = snapshot.alertLevel != .normal }
         .onChange(of: snapshot.alertLevel) { level in
             pulsing = level != .normal
+        }
+    }
+}
+
+// MARK: - Multi-agent entropy series sparkline
+
+/// Compact series trail from `AgentEntropyMemory` — fixed height, no thrash.
+private struct EntropySeriesSparkline: View {
+    let values: [Double]
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = max(geo.size.width, 1)
+            let h = max(geo.size.height, 1)
+            let pts = Self.points(values: values, in: CGSize(width: w, height: h))
+            Path { path in
+                guard let first = pts.first else { return }
+                path.move(to: first)
+                for p in pts.dropFirst() { path.addLine(to: p) }
+            }
+            .stroke(tint.opacity(0.85), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+        }
+        .accessibilityHidden(true)
+    }
+
+    private static func points(values: [Double], in size: CGSize) -> [CGPoint] {
+        guard values.count >= 2 else { return [] }
+        let lo = values.min() ?? 0
+        let hi = values.max() ?? 1
+        let span = max(hi - lo, 1e-6)
+        let n = values.count
+        return values.enumerated().map { i, v in
+            let x = CGFloat(i) / CGFloat(n - 1) * size.width
+            let y = size.height - CGFloat((v - lo) / span) * size.height
+            return CGPoint(x: x, y: y)
         }
     }
 }

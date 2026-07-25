@@ -247,19 +247,62 @@ def _token_entropy(text: str) -> float:
     return round(-sum((c / n) * math.log2(c / n) for c in counts.values()), 4)
 
 
+# One extraction function, both sides, computed over exactly the bytes the
+# gate will score. A divergence metric is only meaningful if both terms measure
+# the same thing — and this client used to guarantee they did not: every
+# send_* helper computed H over a SUBSTRING of what it actually shipped
+# (send_status over `message` while `details` rode along, send_alert over
+# `message` while payload['details'] carried arbitrary nested content,
+# send_benchmark_update hardcoded 0.0). Honest clients therefore generated
+# mismatch noise by construction, which both fired false positives and gave a
+# real liar cover to hide in.
+try:
+    from shannon_gate import ShannonAnalyzer as _GateAnalyzer
+except ImportError:  # package-relative when imported as hub.agent_protocol
+    try:
+        from hub.shannon_gate import ShannonAnalyzer as _GateAnalyzer  # type: ignore
+    except ImportError:
+        _GateAnalyzer = None  # type: ignore[assignment]
+
+
 def _payload_entropy(payload: dict[str, Any]) -> float:
-    """Aggregate token entropy across all string/numeric values in payload."""
-    parts: list[str] = []
-    for key in ("text", "content", "output", "message", "code",
-                "analysis", "rationale", "suggested_code"):
-        val = payload.get(key)
-        if isinstance(val, str):
-            parts.append(val)
-    # Fall back to serialised JSON values if no known text keys
-    if not parts:
-        parts = [str(v) for v in payload.values()
-                 if isinstance(v, (str, int, float))]
-    return _token_entropy(" ".join(parts))
+    """Token entropy of every string the gate will score in this payload.
+
+    Falls back to a local recursive walk when shannon_gate is not importable
+    (a client installed without the daemon), keeping the same semantics.
+    """
+    if _GateAnalyzer is not None:
+        return round(_GateAnalyzer.token_entropy(_GateAnalyzer.scored_text(payload)), 4)
+
+    metadata = {
+        "agent_id", "task_id", "message_id", "interaction_id", "timestamp",
+        "timestamp_ns", "id", "uuid", "kind", "type", "message_type", "status",
+        "step", "source", "event", "event_type", "target_id", "pose_file",
+        "shannon_h", "confidence", "approved", "approval_needed",
+        "require_approval", "ui_status", "severity", "version", "hash", "sha",
+    }
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def walk(node: Any, key: Optional[str], depth: int) -> None:
+        if depth > 12 or len(out) >= 5000:
+            return
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, str(k).lower(), depth + 1)
+        elif isinstance(node, (list, tuple)):
+            for v in node:
+                walk(v, key, depth + 1)
+        elif isinstance(node, str):
+            if key is not None and (key in metadata or key.endswith("_id")):
+                return
+            s = node.strip()
+            if s and s not in seen:
+                seen.add(s)
+                out.append(s)
+
+    walk(payload, None, 0)
+    return _token_entropy(" ".join(out))
 
 
 # ── AgentClient ───────────────────────────────────────────────────────────────
@@ -447,7 +490,8 @@ class AgentClient:
         payload: dict[str, Any] = {"message": message}
         if details:
             payload.update(details)
-        H = _token_entropy(message) if self.auto_entropy else 0.0
+        # Over the FULL payload, not just `message` — `details` ships too.
+        H = _payload_entropy(payload) if self.auto_entropy else 0.0
         return self._send("status", payload, confidence, H)
 
     def send_benchmark_update(
@@ -470,7 +514,10 @@ class AgentClient:
             "active_target": active_target,
             "task_id": self.task_id,
         }
-        return self._send("benchmark_update", payload, 1.0, 0.0)
+        # Was hardcoded shannon_H=0.0, confidence=1.0 — a maximally confident
+        # claim of zero entropy, made on the caller's behalf, on every message.
+        H = _payload_entropy(payload) if self.auto_entropy else 0.0
+        return self._send("benchmark_update", payload, 1.0, H)
 
     def send_code_suggestion(
         self,
@@ -507,8 +554,7 @@ class AgentClient:
             "rationale": rationale,
             "requires_lp_approval": True,
         }
-        combined = f"{suggested_code}\n{rationale}"
-        H = _token_entropy(combined) if self.auto_entropy else 0.0
+        H = _payload_entropy(payload) if self.auto_entropy else 0.0
         return self._send("code_suggestion", payload, confidence, H)
 
     def send_approval_needed(
@@ -534,7 +580,7 @@ class AgentClient:
             payload["interaction_id"] = interaction_id
         if details:
             payload.update(details)
-        H = _token_entropy(prompt) if self.auto_entropy else 0.0
+        H = _payload_entropy(payload) if self.auto_entropy else 0.0
         return self._send("approval_needed", payload, confidence, H)
 
     def send_alert(
@@ -553,7 +599,9 @@ class AgentClient:
         }
         if details:
             payload["details"] = details
-        H = _token_entropy(message) if self.auto_entropy else 0.0
+        # Over the FULL payload — payload["details"] carries arbitrary nested
+        # content the old self-report never saw.
+        H = _payload_entropy(payload) if self.auto_entropy else 0.0
         return self._send("alert", payload, 1.0, H)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -656,7 +704,7 @@ class AgentClient:
         payload: dict[str, Any] = {"message": message}
         if details:
             payload.update(details)
-        H = _token_entropy(message) if self.auto_entropy else 0.0
+        H = _payload_entropy(payload) if self.auto_entropy else 0.0
         return await self._async_send("status", payload, confidence, H)
 
     async def async_query_benchmark_state(self) -> dict[str, Any]:
@@ -921,10 +969,13 @@ def paste_bridge(agent_id: str, task_id: str) -> None:
         payload = {"output": text, "source": "paste_bridge"}
         try:
             decision = client.send_result(payload, confidence=conf)
-            print(f"\nGate decision: {decision.get('decision','?').upper()}")
-            print(f"  gate_H = {decision.get('gate_H', '?'):.3f} bits")
-            if decision.get("reasons"):
-                print(f"  reasons = {decision['reasons']}")
+            # The gate no longer returns its measurement, its thresholds or its
+            # reasons to the measured party — those are in ~/.shannon/gate.log
+            # and the audit DB, which is where a human reads them.
+            verdict = decision.get("decision")
+            if verdict is None:
+                verdict = "accepted" if decision.get("accepted") else "rejected"
+            print(f"\nGate decision: {str(verdict).upper()}")
         except Exception as exc:
             print(f"Send error: {exc}")
 

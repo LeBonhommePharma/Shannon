@@ -33,5 +33,11 @@ let package = Package(
             ]
         ),
         .testTarget(name: "PillCoreTests", dependencies: ["PillCore"]),
+        // Covers the app target's own wiring. PillCoreTests can only reach the
+        // extracted policy types (`EntropyProvenance`, `PillPanelHeight`,
+        // `ConfirmationCreatedAtResolver`); every defect those types were
+        // extracted for actually lived at a CALL SITE in ShannonPill, and a
+        // call site that stops calling them still leaves PillCoreTests green.
+        .testTarget(name: "ShannonPillTests", dependencies: ["ShannonPill"]),
     ]
 )

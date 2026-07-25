@@ -96,7 +96,8 @@ final class PillWindowController {
         let geometry = NotchGeometry(screen: screen)
         let frame = geometry.windowFrame(
             contentSize: CGSize(width: PillMetrics.expandedWidth,
-                                height: PillMetrics.expandedHeight)
+                                height: PillMetrics.expandedHeight),
+            hangBelowMenuBar: hangBelowMenuBar
         )
 
         let panel: PillPanel
@@ -134,6 +135,15 @@ final class PillWindowController {
             NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
                 .sink { [weak self] _ in self?.reassertVisibility() }
                 .store(in: &cancellables)
+
+            // Expand/collapse: move board below the menu bar so "Shannon" is not
+            // clipped by the physical notch / menu-bar glass.
+            presentation.$isExpanded
+                .removeDuplicates()
+                .sink { [weak self] _ in
+                    Task { @MainActor in self?.applyFrameForCurrentPresentation() }
+                }
+                .store(in: &cancellables)
         }
 
         reassertVisibility()
@@ -154,6 +164,12 @@ final class PillWindowController {
         reassertTimer = t
     }
 
+    /// Expanded board on a physical notch hangs fully below the menu-bar band.
+    private var hangBelowMenuBar: Bool {
+        presentation.isExpanded
+            && NotchGeometry(screen: NotchGeometry.preferredScreen()).hasNotch
+    }
+
     /// Force the panel on-screen. Safe to call repeatedly (menu-bar action).
     func reassertVisibility() {
         guard let panel else {
@@ -169,38 +185,15 @@ final class PillWindowController {
     }
 
     func reposition() {
-        guard let panel else { return }
-        let geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
-        // Keep whatever height the content has grown to — recomputing from
-        // PillMetrics.expandedHeight here would shrink the panel back to the
-        // floor on every screen-parameter change, which fires on resolution
-        // switches, exactly when the board needs to keep its room — but re-clamp
-        // it against the screen we just landed on. Same clamp as
-        // `resizeToContent`, deliberately via the same function.
-        let height = PillPanelHeight.onScreenChange(
-            currentHeight: panel.frame.height,
-            floor: PillMetrics.expandedHeight,
-            screenHeight: geometry.screenFrame.height,
-            maxFraction: PillMetrics.maxHeightFraction
-        )
-        panel.setFrame(
-            geometry.windowFrame(contentSize: CGSize(width: PillMetrics.expandedWidth,
-                                                     height: height)),
-            display: true
-        )
+        applyFrameForCurrentPresentation(force: true)
         reassertVisibility()
     }
 
     /// Match the panel to the pill's laid-out height.
     ///
-    /// The panel is top-anchored — its top edge sits on `screen.frame.maxY` — so
-    /// a window shorter than its content does not scroll or clip gracefully: the
-    /// surplus is drawn past the top of the display and lost, which is what
-    /// sliced the header icon and the battery ring in half. Following the
-    /// measured height keeps the whole board on-screen at every display mode
-    /// (the usable menu-bar width either side of the notch ranges from ~117 pt
-    /// to ~370 pt across the resolutions a 14" MacBook Pro offers), and the
-    /// clamp stops a long agent list from growing the panel past the display.
+    /// Collapsed: top-anchored into the notch cutout.
+    /// Expanded on physical notch: top sits on the **bottom** of the menu-bar
+    /// band so the header ("Shannon") is never sliced by the camera hole.
     func resizeToContent(height: CGFloat) {
         guard let panel else { return }
         let geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
@@ -211,15 +204,15 @@ final class PillWindowController {
             maxFraction: PillMetrics.maxHeightFraction
         )
         let frame = geometry.windowFrame(
-            contentSize: CGSize(width: PillMetrics.expandedWidth, height: clamped)
+            contentSize: CGSize(width: PillMetrics.expandedWidth, height: clamped),
+            hangBelowMenuBar: hangBelowMenuBar
         )
-        // Ignore content jitter from live H/resource ticks (text reflow).
-        // Threshold matches PillHost preference hysteresis (~6–8 pt).
+        // Also re-anchor when expand toggles even if height is unchanged.
+        let originDelta = abs(frame.origin.x - panel.frame.origin.x)
+            + abs(frame.origin.y - panel.frame.origin.y)
         let delta = abs(frame.height - panel.frame.height)
-        guard delta > 8.0 else { return }
-        // Large morph (expand/collapse board): spring. Small reflow: silent snap
-        // without display:true repaint thrash when possible.
-        if delta > 28 {
+        guard delta > 8.0 || originDelta > 2.0 else { return }
+        if delta > 28 || originDelta > 12 {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = ShannonMotion.panelMorphDuration
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -227,14 +220,42 @@ final class PillWindowController {
                 panel.animator().setFrame(frame, display: true)
             }
         } else {
-            // display:false avoids an extra screen flash on small reflows.
             panel.setFrame(frame, display: false)
             panel.contentView?.needsDisplay = true
         }
     }
 
+    /// Apply height + hang-below-menu-bar origin for current expand state.
+    func applyFrameForCurrentPresentation(force: Bool = false) {
+        guard let panel else { return }
+        let geometry = NotchGeometry(screen: NotchGeometry.preferredScreen())
+        let height = PillPanelHeight.onScreenChange(
+            currentHeight: max(panel.frame.height, PillMetrics.expandedHeight),
+            floor: PillMetrics.expandedHeight,
+            screenHeight: geometry.screenFrame.height,
+            maxFraction: PillMetrics.maxHeightFraction
+        )
+        let frame = geometry.windowFrame(
+            contentSize: CGSize(width: PillMetrics.expandedWidth, height: height),
+            hangBelowMenuBar: hangBelowMenuBar
+        )
+        if !force {
+            let same = abs(frame.height - panel.frame.height) < 1
+                && abs(frame.origin.y - panel.frame.origin.y) < 1
+                && abs(frame.origin.x - panel.frame.origin.x) < 1
+            if same { return }
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = ShannonMotion.panelMorphDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ctx.allowsImplicitAnimation = true
+            panel.animator().setFrame(frame, display: true)
+        }
+    }
+
     func expand() {
         presentation.isExpanded = true
+        applyFrameForCurrentPresentation(force: true)
         reassertVisibility()
     }
 }

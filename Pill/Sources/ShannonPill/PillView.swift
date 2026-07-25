@@ -844,10 +844,15 @@ struct PillView: View {
                     .font(.shannonMenuTitle)
                     .foregroundStyle(Color.shannonPrimary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    // Keep "Shannon" fully readable — never collapse to "Sha…".
+                    .layoutPriority(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(headerSubtitle)
                     .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(2)
+                    .layoutPriority(1)
             }
 
             Spacer(minLength: 4)

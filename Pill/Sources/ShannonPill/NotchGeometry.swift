@@ -123,13 +123,17 @@ public struct NotchGeometry {
 
     /// Window frame for the pill at a given content size, centred on the notch
     /// and clamped so it never runs off either edge of the display.
-    public func windowFrame(contentSize: CGSize) -> CGRect {
-        // Pure helper (ShannonLayout) so unit tests cover top-anchor math without AppKit.
+    ///
+    /// - Parameter hangBelowMenuBar: when true (expanded board on a physical
+    ///   notch), the panel top sits on the bottom of the menu-bar band so the
+    ///   header is not clipped by the camera cutout.
+    public func windowFrame(contentSize: CGSize, hangBelowMenuBar: Bool = false) -> CGRect {
         ShannonLayout.Pill.windowFrame(
             contentSize: contentSize,
             notchRect: notchRect,
             screenFrame: screenFrame,
-            hasNotch: hasNotch
+            hasNotch: hasNotch,
+            hangBelowMenuBar: hangBelowMenuBar
         )
     }
 

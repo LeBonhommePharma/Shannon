@@ -133,7 +133,7 @@ final class PillNotchMetricsTests: XCTestCase {
         )
     }
 
-    /// Top-anchored window frame: top edge on screen maxY / notch maxY.
+    /// Collapsed: top-anchored into the notch cutout (screen maxY / notch maxY).
     func testWindowFrameTopAnchorsToNotch() {
         let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
         let notch = CGRect(x: 790, y: 1169 - 38, width: 220, height: 38)
@@ -142,7 +142,8 @@ final class PillNotchMetricsTests: XCTestCase {
             contentSize: content,
             notchRect: notch,
             screenFrame: screen,
-            hasNotch: true
+            hasNotch: true,
+            hangBelowMenuBar: false
         )
         XCTAssertEqual(frame.maxY, screen.maxY, accuracy: 0.01)
         XCTAssertEqual(frame.midX, notch.midX, accuracy: 0.01)
@@ -150,6 +151,52 @@ final class PillNotchMetricsTests: XCTestCase {
         XCTAssertEqual(frame.height, 48, accuracy: 0.01)
         // Grows downward: minY below notch band
         XCTAssertLessThan(frame.minY, notch.minY + 1)
+    }
+
+    /// Expanded board on physical notch: hangs fully below the menu-bar band
+    /// so "Shannon" is never clipped by the camera cutout (MBP 14" live photo).
+    func testExpandedWindowFrameHangsBelowMenuBarBand() {
+        let screen = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+        // Notch band: y = 1131…1169 (38 pt), bottom edge = 1131.
+        let notch = CGRect(x: 790, y: 1169 - 38, width: 220, height: 38)
+        let content = CGSize(width: 400, height: 280)
+        let frame = ShannonLayout.Pill.windowFrame(
+            contentSize: content,
+            notchRect: notch,
+            screenFrame: screen,
+            hasNotch: true,
+            hangBelowMenuBar: true
+        )
+        // Top of expanded board = bottom of menu bar (notch.minY), not screen top.
+        XCTAssertEqual(frame.maxY, notch.minY, accuracy: 0.01)
+        XCTAssertEqual(frame.maxY, 1131, accuracy: 0.01)
+        XCTAssertEqual(frame.midX, notch.midX, accuracy: 0.01)
+        XCTAssertEqual(frame.height, 280, accuracy: 0.01)
+        // Entire board below the cutout — header fully visible.
+        XCTAssertLessThanOrEqual(frame.maxY, notch.minY + 0.01)
+        XCTAssertGreaterThan(frame.minY, screen.minY)
+    }
+
+    /// Without a notch, hangBelow has no effect — still top of screen.
+    func testHangBelowIgnoredWithoutNotch() {
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let synthetic = CGRect(x: 860, y: 1048, width: 200, height: 32)
+        let a = ShannonLayout.Pill.windowFrame(
+            contentSize: CGSize(width: 400, height: 220),
+            notchRect: synthetic,
+            screenFrame: screen,
+            hasNotch: false,
+            hangBelowMenuBar: true
+        )
+        let b = ShannonLayout.Pill.windowFrame(
+            contentSize: CGSize(width: 400, height: 220),
+            notchRect: synthetic,
+            screenFrame: screen,
+            hasNotch: false,
+            hangBelowMenuBar: false
+        )
+        XCTAssertEqual(a.maxY, screen.maxY, accuracy: 0.01)
+        XCTAssertEqual(a, b)
     }
 
     func testPanelHeightClamp() {

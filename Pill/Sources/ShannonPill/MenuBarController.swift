@@ -188,7 +188,11 @@ final class MenuBarController: NSObject {
         if pendingCount > 0 {
             // Gate pending trumps everything — this is the state that needs LP.
             button.image = Self.symbolImage("questionmark.bubble.fill", template: false)
-            button.title = pendingCount > 1 ? " \(pendingCount)" : ""
+            Self.applyStatusTitle(
+                button,
+                text: pendingCount > 1 ? " \(pendingCount)" : "",
+                color: .systemOrange
+            )
             button.contentTintColor = .systemOrange
             button.setAccessibilityLabel(
                 "Shannon: \(pendingCount) gate approval\(pendingCount > 1 ? "s" : "") pending")
@@ -199,7 +203,11 @@ final class MenuBarController: NSObject {
 
         if let collapse {
             button.image = Self.symbolImage("exclamationmark.triangle.fill", template: false)
-            button.title = String(format: " H %.1f", collapse.bits)
+            Self.applyStatusTitle(
+                button,
+                text: String(format: " H %.1f", collapse.bits),
+                color: .systemRed
+            )
             button.contentTintColor = .systemRed
             button.setAccessibilityLabel(
                 String(format: "Shannon: entropy collapse, H %.1f bits (source: %@)",
@@ -211,15 +219,18 @@ final class MenuBarController: NSObject {
                 aggregate: snap.cpuPercent,
                 template: false
             )
+            let titleText: String
             if summary.busy.count > 1 {
-                button.title = " \(summary.busy.count)"
+                titleText = " \(summary.busy.count)"
             } else if let c = constrained, c.percent >= 80 {
-                button.title = " \(c.shortLabel)"
+                titleText = " \(c.shortLabel)"
             } else if let cpu = snap.cpuPercent {
-                button.title = String(format: " %.0f%%", cpu)
+                titleText = String(format: " %.0f%%", cpu)
             } else {
-                button.title = ""
+                titleText = ""
             }
+            // High-contrast title on Liquid Glass menu bar (labelColor adapts).
+            Self.applyStatusTitle(button, text: titleText, color: .labelColor)
             button.contentTintColor = nil
             let names = summary.busy.prefix(3).map(\.displayName).joined(separator: ", ")
             button.setAccessibilityLabel("Shannon: \(summary.busy.count) agents active — \(names)")
@@ -235,15 +246,18 @@ final class MenuBarController: NSObject {
                 hottest: snap.hottestCore,
                 imbalance: snap.coreImbalance
             )
-            button.title = title
-            // Load stress uses yellow/red — not ask-orange (amber reserved for gates).
+            // Load stress: strong semantic colors. Calm: system label (readable
+            // on both light and dark menu-bar glass — nil tint looked broken).
+            let titleColor: NSColor
             if let c = constrained, c.percent >= 92 {
-                button.contentTintColor = .systemRed
+                titleColor = .systemRed
             } else if let c = constrained, c.percent >= 80 {
-                button.contentTintColor = .systemYellow
+                titleColor = .systemYellow
             } else {
-                button.contentTintColor = nil
+                titleColor = .labelColor
             }
+            Self.applyStatusTitle(button, text: title, color: titleColor)
+            button.contentTintColor = nil
             let connected = summary.connected.count
             var label: String
             if connected > 0 {
@@ -262,6 +276,27 @@ final class MenuBarController: NSObject {
             button.setAccessibilityLabel(label)
             button.toolTip = Self.resourceTooltip(snap: snap, agents: summary)
         }
+    }
+
+    /// High-contrast monospaced-digit title for the status item.
+    ///
+    /// Plain `button.title` + nil `contentTintColor` washes out on macOS 27
+    /// Liquid Glass menu bars (light wallpaper / translucent bar). Attributed
+    /// titles with `.labelColor` stay readable.
+    private static func applyStatusTitle(_ button: NSStatusBarButton, text: String, color: NSColor) {
+        if text.isEmpty {
+            button.title = ""
+            button.attributedTitle = NSAttributedString(string: "")
+            return
+        }
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        button.attributedTitle = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .foregroundColor: color,
+            ]
+        )
     }
 
     private static func resourceTooltip(snap: SystemResourceSnapshot, agents: AgentActivitySummary) -> String {

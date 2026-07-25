@@ -82,22 +82,40 @@ public enum ShannonLayout {
             min(max(height * 0.28, 11), 16)
         }
 
-        /// Pure window frame: content centred on the notch, top-anchored to the
-        /// screen (or notch) top so the panel grows downward — never clipped by
-        /// the physical top edge.
+        /// Pure window frame: content centred on the notch.
+        ///
+        /// - Collapsed (`hangBelowMenuBar: false`): top-anchored to the screen /
+        ///   notch top so the island paints the hardware cutout.
+        /// - Expanded on a physical notch (`hangBelowMenuBar: true`): top of the
+        ///   board is the **bottom** of the menu-bar band (`notchRect.minY`) so
+        ///   the header ("Shannon") is never clipped by the camera hole or the
+        ///   translucent menu bar (MBP 14" live bug: title showed as "Sha…").
         public static func windowFrame(
             contentSize: CGSize,
             notchRect: CGRect,
             screenFrame: CGRect,
-            hasNotch: Bool
+            hasNotch: Bool,
+            hangBelowMenuBar: Bool = false
         ) -> CGRect {
             let width = max(contentSize.width, 1)
             let height = max(contentSize.height, 1)
             let x = notchRect.midX - width / 2
             let clampedX = min(max(x, screenFrame.minX + 4),
                                screenFrame.maxX - width - 4)
-            let top = hasNotch ? max(screenFrame.maxY, notchRect.maxY) : screenFrame.maxY
-            let y = top - height
+            let top: CGFloat
+            if hasNotch, hangBelowMenuBar {
+                // Bottom of the menu-bar / notch band — board hangs fully below.
+                top = notchRect.minY
+            } else if hasNotch {
+                top = max(screenFrame.maxY, notchRect.maxY)
+            } else {
+                top = screenFrame.maxY
+            }
+            // Keep the board on-screen if it would extend past the bottom.
+            var y = top - height
+            if y < screenFrame.minY + 4 {
+                y = screenFrame.minY + 4
+            }
             return CGRect(x: clampedX, y: y, width: width, height: height)
         }
 

@@ -79,4 +79,65 @@ final class HubScanLineTests: XCTestCase {
         XCTAssertFalse(s.contains("%"))
         XCTAssertFalse(s.contains("success"))
     }
+
+    /// Call-site policy: bridge up does not make hub ready when gate socket is down.
+    /// Matches GateHealthResolver "hub offline" badge (socketUp only).
+    func testIsHubReadyIgnoresBridgeAlone() {
+        XCTAssertFalse(
+            HubScanLine.isHubReady(gateSocketUp: false, bridgeConnected: true),
+            "bridge-only must not claim hub ready (FlexAIDdS/approvals need gate)"
+        )
+        XCTAssertTrue(HubScanLine.isHubReady(gateSocketUp: true, bridgeConnected: false))
+        XCTAssertTrue(HubScanLine.isHubReady(gateSocketUp: true, bridgeConnected: true))
+        XCTAssertFalse(HubScanLine.isHubReady(gateSocketUp: false, bridgeConnected: false))
+    }
+
+    /// End-to-end pure path used by MenuBarPopoverView + PillView wiring.
+    func testGateDownBridgeUpScanLineMatchesOfflineBadge() {
+        let r = HubScanLine.resolveAlignedWithGateBadge(
+            gateSocketUp: false,
+            bridgeConnected: true
+        )
+        XCTAssertTrue(r.consistentOffline)
+        XCTAssertEqual(r.badgeLabel, "hub offline")
+        XCTAssertTrue(r.scanLine.contains("offline"), r.scanLine)
+        XCTAssertFalse(r.scanLine.lowercased().contains("hub ready"), r.scanLine)
+
+        // Gate up + bridge down still ready (approvals path is the socket).
+        let up = HubScanLine.resolveAlignedWithGateBadge(
+            gateSocketUp: true,
+            bridgeConnected: false
+        )
+        XCTAssertTrue(up.scanLine.contains("Hub ready"), up.scanLine)
+        XCTAssertNotEqual(up.badgeLabel, "hub offline")
+    }
+
+    /// Shipped call-site pattern: isHubReady → resolve (no bare OR of bridge).
+    func testShippedCallSitePatternGateDownIsOffline() {
+        let gateAvailable = false
+        let bridgeConnected = true
+        let hubReady = HubScanLine.isHubReady(
+            gateSocketUp: gateAvailable,
+            bridgeConnected: bridgeConnected
+        )
+        let line = HubScanLine.resolve(
+            collapseBits: nil,
+            busyNames: [],
+            busyStatus: nil,
+            benchmarkTitle: nil,
+            hubReady: hubReady
+        )
+        XCTAssertEqual(line, "Hub offline · start gate for FlexAIDdS")
+        // Old bug: gateAvailable || bridgeConnected → true → "Hub ready"
+        let buggy = gateAvailable || bridgeConnected
+        XCTAssertTrue(buggy, "precondition: OR would have been true")
+        XCTAssertNotEqual(
+            HubScanLine.resolve(
+                collapseBits: nil, busyNames: [], busyStatus: nil,
+                benchmarkTitle: nil, hubReady: buggy
+            ),
+            line,
+            "OR of bridge must not equal gate-socket policy line"
+        )
+    }
 }

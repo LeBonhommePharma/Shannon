@@ -912,7 +912,11 @@ struct PillView: View {
             busyNames: busy.map(\.displayName),
             busyStatus: taskHint,
             benchmarkTitle: BenchmarkRunLogic.collapsedTitle(activity.benchmark),
-            hubReady: activity.gateAvailable || bridge.connected
+            // Gate socket only — same as menubar badge (not bridge alone).
+            hubReady: HubScanLine.isHubReady(
+                gateSocketUp: activity.gateAvailable,
+                bridgeConnected: bridge.connected
+            )
         )
     }
 

@@ -200,13 +200,13 @@ struct MenuBarPopoverView: View {
             busyNames: busy.map(\.displayName),
             busyStatus: busy.first.map(\.statusLine),
             benchmarkTitle: BenchmarkRunLogic.collapsedTitle(activity.benchmark),
-            hubReady: activity.gateAvailable || bridge.connected
+            // Gate socket only — matches hubStatusBadge / GateHealth.socketUp.
+            hubReady: HubScanLine.isHubReady(
+                gateSocketUp: activity.gateAvailable,
+                bridgeConnected: bridge.connected
+            )
         )
     }
-
-    /// Hub = gate socket + bridge. The socket is what approvals travel over,
-    /// so its presence is the honest "can I actually answer gates" signal.
-    private var hubConnected: Bool { activity.gateAvailable || bridge.connected }
 
     private var hubStatusText: String { gateHealth.label }
 

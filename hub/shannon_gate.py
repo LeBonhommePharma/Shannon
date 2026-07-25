@@ -49,13 +49,29 @@ of enforcing is measurable BEFORE you enforce.
       Self-report divergence.  See the block at "Self-report attestation".
 
   SHANNON_VOLUME=off|observe|enforce         (default enforce)
-      Total information content (compressed size) + padding detection.
+      Total information content (compressed size) + padding detection, over
+      EVERY carrier: scored strings, strings skipped as labels, and non-string
+      leaves (numeric arrays, byte lists) packed to canonical bytes.
       Tunables: SHANNON_VOLUME_MIN_BYTES (512), SHANNON_VOLUME_FLAG_BITS
       (65536), SHANNON_VOLUME_BLOCK_BITS (262144),
-      SHANNON_VOLUME_REDUNDANCY_FLOOR (0.15).
-      Symptom of a bad fit: legitimate large code/log payloads flagged.
-      Response: raise SHANNON_VOLUME_FLAG_BITS, or run `observe` for a week
-      and read the `information_volume` rows.
+      SHANNON_VOLUME_REDUNDANCY_FLOOR (0.15),
+      SHANNON_LABEL_BUDGET_BYTES (4096), SHANNON_LABEL_BUDGET_COUNT (64),
+      SHANNON_NUMERIC_LEAF_MAX_BYTES (8192).
+      Symptom of a bad fit: legitimate large code/log payloads flagged, or an
+      id-heavy client always carrying `label_aggregate`.
+      Response: raise SHANNON_VOLUME_FLAG_BITS / SHANNON_LABEL_BUDGET_COUNT,
+      or run `observe` for a week and read the `information_volume` rows.
+
+  SHANNON_METADATA_MAX_LEN=128
+      Per-string bound on a value skipped as a label.  It has an AGGREGATE
+      companion (SHANNON_LABEL_BUDGET_*) because 500 legal 128-byte labels are
+      one 64 kB payload; see the R1 block at "the per-string bound".
+
+  SHANNON_WALK_MAX_DEPTH=12 / SHANNON_WALK_MAX_STRINGS=5000
+  SHANNON_WALK_MAX_TOTAL_BYTES=524288
+      Walk bounds.  Exceeding ANY of them stops the walk and records
+      `unscored_truncated`, which can never be `pass`.  The last is the
+      aggregate one: it is what a chunker has to beat.
 
   SHANNON_UNSCORED=off|observe|flag|block    (default flag)
       Messages carrying content the gate could not see (file paths, URLs,
@@ -88,6 +104,7 @@ import re
 import secrets
 import signal
 import sqlite3
+import struct
 import sys
 import time
 import statistics
@@ -331,17 +348,54 @@ POINTER_KEYS: frozenset[str] = frozenset({
     "path", "url", "uri", "href", "src", "link", "file", "filename", "filepath",
     "location", "artifact", "blob", "attachment", "download", "pose_file",
     "ref", "reference", "s3_key", "object_key", "gs_path",
+    # R3 widening.  Plurals and container forms first: a list of references is
+    # still a set of references, and `paths`/`urls` were reachable only through
+    # the *value* regex before, i.e. not at all for an opaque id.
+    "paths", "urls", "uris", "refs", "links", "files", "filenames",
+    "filepaths", "locations", "artifacts", "attachments", "references",
+    # Words a client reaches for when it means "the content is over there".
+    "dest", "destination", "dir", "directory", "folder", "bucket", "manifest",
+    "outfile", "infile", "symlink", "resource", "endpoint", "object_path",
+    "gs_uri", "s3_uri", "s3_url", "container", "share", "mount",
 })
 POINTER_KEY_SUFFIXES: tuple[str, ...] = (
     "_path", "_url", "_uri", "_file", "_ref", "_href", "_location",
     "_artifact", "_blob", "_attachment", "_key",
+    # R3 widening — plural/container and filesystem-shaped suffixes.
+    "_paths", "_urls", "_uris", "_files", "_refs", "_links", "_locations",
+    "_src", "_dir", "_dest", "_bucket", "_object", "_filename", "_filepath",
+    "_manifest", "_endpoint",
 )
-# scheme://... anywhere, or a token that starts a filesystem path.  Anchoring
-# the path branch to start-of-string-or-whitespace is what keeps "and/or",
-# "24/7" and "I/O" out of it.
+# ── Pointer VALUE shapes ──────────────────────────────────────────────────────
+# HONEST LIMIT, STATED UP FRONT: this is a HEURISTIC, not a decision procedure.
+# It recognises the shapes below and nothing else; see is_pointer.__doc__ for
+# the enumerated blind spots.  Every branch is anchored to
+# start-of-string-or-a-separator, which is what keeps "and/or", "24/7", "I/O"
+# and "3/4" out of it — a path rule that matches every slash in English prose
+# misfires on every message and gets switched off within a day.
+_PTR_LEFT = r"(?:^|[\s\"'(\[<,;])"
 _POINTER_VALUE_RE = re.compile(
+    # 1. scheme://rest — http, https, file, s3, gs, ftp, ssh, ipfs, …
     r"[a-zA-Z][a-zA-Z0-9+.\-]{1,15}://\S+"
-    r"|(?:^|\s)(?:~|\.{0,2})/[^\s\"']{2,}"
+    # 2. data: URIs.  No "//", so branch 1 cannot see them.  The comma is
+    #    required so ordinary prose ("data: 42 rows") does not match.
+    r"|\bdata:[^\s,\"']{0,96},[^\s\"']{2,}"
+    # 3. other opaque, non-slash schemes that name content held elsewhere.
+    r"|\b(?:blob|cid|magnet):[^\s\"']{4,}"
+    # 4. Windows drive paths — C:\Users\me\x.txt and C:/temp/x.txt.
+    rf"|{_PTR_LEFT}[A-Za-z]:[\\/][^\s\"']{{2,}}"
+    # 5. UNC / SMB — \\server\share\file.
+    rf"|{_PTR_LEFT}\\\\[^\s\"']{{2,}}"
+    # 6. rooted / home / explicitly-relative POSIX paths — /tmp/x, ./x, ../x, ~/x
+    rf"|{_PTR_LEFT}(?:~|\.{{0,2}})/[^\s\"']{{2,}}"
+    # 7. BARE relative paths with no leading slash — reports/final.md.
+    #    Guards that keep prose out: at least one "/", a first segment that is
+    #    not purely numeric ("3/4", "24/7"), and a trailing LOWERCASE
+    #    alphabetic-initial extension ("km/h. Then" has no such extension,
+    #    "1/2.5" has a numeric one).  Cost of those guards is stated in
+    #    is_pointer.__doc__ under BLIND SPOTS.
+    rf"|{_PTR_LEFT}(?![0-9]+/)[\w.\-]{{1,64}}(?:/[\w.\-]{{1,64}})+"
+    r"\.[a-z][a-z0-9]{0,7}(?![\w/])"
 )
 # How many pointer strings to keep for the log line.  The verdict only needs
 # to know whether the count is zero.
@@ -353,10 +407,77 @@ POINTER_SAMPLE_MAX: int = 8
 # is the very allowlist-in-disguise it was written to remove, because
 # {"hash": "<80 000 chars>"} is excluded from scoring at every depth.
 METADATA_MAX_LEN: int = int(os.environ.get("SHANNON_METADATA_MAX_LEN", "128"))
-# Recursive-walk bounds.  Exceeding either is recorded as `unscored_truncated`
-# and fails closed rather than returning a partial measurement as if complete.
+
+# ── R1: the per-string bound has no aggregate, so CHUNKING defeats it ─────────
+# ONE SENTENCE FOR THE OPERATOR:
+#   500 metadata fields of 128 characters each are 500 legal labels and one
+#   64 kB payload, and only the aggregate can tell them apart.
+#
+# METADATA_MAX_LEN bounds each string ON ITS OWN.  Nothing bounded the SUM, so
+# the label skip was a per-hop decision with no memory:
+#
+#     {"chunk000_id": "<128 chars>", … , "chunk499_id": "<128 chars>"}
+#         -> every field is <= METADATA_MAX_LEN  -> skipped as a label
+#         -> scored_text == ""                   -> n_bytes == 0
+#         -> the volume rule never runs at all   -> bits_total == 0
+#
+# 64 kB reassembles at the consumer and the gate measured none of it.  Two
+# independent closures, because either alone is evadable:
+#
+#   (a) ACCOUNTING (always on, load-bearing).  Every byte skipped as a label is
+#       still charged to the VOLUME measurement — see ScoredContent.volume_extra
+#       and information_volume(text, extra).  Chunking now costs the sender
+#       exactly what shipping the same bytes inline costs, so it buys nothing.
+#       Labels are deduplicated first, because 500 copies of one string is one
+#       string's worth of information, not 500.
+#       Deliberately NOT folded into the token-entropy text: promoting 100 short
+#       identifiers into the scored stream would push H_token past
+#       H_BLOCK_THRESHOLD on ordinary id-heavy payloads.  Volume is the
+#       extensive statistic and it is the right place for an aggregate.
+#
+#   (b) BUDGETS (visible below the volume thresholds).  Crossing either bound
+#       records `label_aggregate` on the audit row and, under
+#       SHANNON_VOLUME=enforce, costs the message its `pass` — never a direct
+#       block, because a chatty-but-honest client should be seen, not stopped.
+#       Headroom against the operator's real traffic (max 3 label fields, 26
+#       bytes) is ~20x on count and ~150x on bytes.
+LABEL_BUDGET_BYTES: int = int(os.environ.get("SHANNON_LABEL_BUDGET_BYTES", "4096"))
+LABEL_BUDGET_COUNT: int = int(os.environ.get("SHANNON_LABEL_BUDGET_COUNT", "64"))
+
+# ── R2: non-string leaves carry information too ───────────────────────────────
+# The walk collected `str` leaves ONLY, so every non-string carrier was a free
+# ride: a list of 40 000 ints in 0..255 is a 40 kB file with the quotes taken
+# off, and it scored nothing.  Each non-string leaf is now packed into a
+# canonical, deterministic byte form and charged to the volume measurement.
+#
+# PACKED, NOT DECODED.  The gate does not try to interpret the array as text,
+# bytes, an image or anything else — interpreting attacker-chosen bytes is a
+# parser, and a parser is an attack surface.  It counts INFORMATION CONTENT:
+# the packed bytes go through the same zlib estimator as the strings, so
+# 200 000 zeros stay near-free (they compress away) while 40 000 unpredictable
+# values cost their full length.  That is the property that makes the bound
+# hard to evade and easy on honest numeric payloads.
+#   int   -> minimal-width two's-complement big-endian, capped
+#   float -> IEEE-754 little-endian double (8 bytes)
+#   bool  -> 1 byte      None -> 1 byte      bytes -> as-is, capped
+NUMERIC_LEAF_MAX_BYTES: int = int(
+    os.environ.get("SHANNON_NUMERIC_LEAF_MAX_BYTES", "8192")
+)
+
+# Recursive-walk bounds.  Exceeding any of them is recorded as
+# `unscored_truncated` and fails closed rather than returning a partial
+# measurement as if it were complete.
 WALK_MAX_DEPTH: int = int(os.environ.get("SHANNON_WALK_MAX_DEPTH", "12"))
 WALK_MAX_STRINGS: int = int(os.environ.get("SHANNON_WALK_MAX_STRINGS", "5000"))
+# AGGREGATE leaf-byte bound over the WHOLE walk — strings scored, strings
+# skipped as labels, and packed non-string leaves alike.  This is the bound no
+# per-string rule can substitute for: it is what a chunker actually has to beat.
+# 512 KiB, i.e. half the 1 MB ingest bound, so a payload that passes ingest can
+# still be refused here on aggregate.  When it trips the walk STOPS, which is
+# why `truncated` is the honest flag: strings really do go unmeasured.
+WALK_MAX_TOTAL_BYTES: int = int(
+    os.environ.get("SHANNON_WALK_MAX_TOTAL_BYTES", "524288")
+)
 
 # Divergence d = log2(gate_token_H / self_reported_H), in bits.
 #   d = 0.00 -> perfect agreement       d = 1.00 -> agent under-reported 2x
@@ -526,9 +647,22 @@ class ScoredContent:
     reports a number always loses.
     """
     text: str = ""
-    truncated: bool = False        # walk hit WALK_MAX_DEPTH / WALK_MAX_STRINGS
+    truncated: bool = False        # walk hit a WALK_MAX_* bound
     oversized_meta: tuple[str, ...] = ()  # metadata keys that held real payload
     pointers: tuple[str, ...] = ()        # pointer-shaped values, any depth
+    # ── Aggregate accounting (R1/R2) ──────────────────────────────────────
+    # ``volume_extra`` is everything the token scorer does not see but that
+    # still carries information: strings skipped as labels, and non-string
+    # leaves packed to canonical bytes.  It is charged to the VOLUME
+    # measurement, which is the only statistic an aggregate belongs in.
+    volume_extra: bytes = b""
+    label_bytes: int = 0           # total bytes skipped as labels (deduped)
+    label_count: int = 0           # total strings skipped as labels (deduped)
+    label_overflow: bool = False   # crossed LABEL_BUDGET_BYTES / _COUNT
+    nonstring_bytes: int = 0       # packed width of non-string leaves
+    scored_bytes: int = 0          # total bytes of strings actually scored
+    n_strings: int = 0             # total distinct strings seen (any disposition)
+    total_bytes: int = 0           # aggregate leaf bytes charged to the walk
 
 
 # ── Shannon Entropy Analyzer ──────────────────────────────────────────────────
@@ -612,19 +746,46 @@ class ShannonAnalyzer:
 
     @staticmethod
     def is_pointer(key: Optional[str], value: str) -> bool:
-        """True when this string is a REFERENCE to content held elsewhere.
+        """HEURISTIC: this string LOOKS LIKE a reference to content elsewhere.
 
-        Two independent tests, either sufficient:
-          * the KEY says so   — `artifact_path`, `url`, `pose_file`, `*_ref`…
-          * the VALUE says so — `scheme://…` anywhere in the string, or a token
-            that begins a filesystem path (`/tmp/x`, `./x`, `../x`, `~/x`).
+        Read the first word literally.  This is a pattern matcher over key
+        names and value shapes.  It is NOT a decision procedure for "does this
+        message hand the consumer out-of-band content", it cannot be one, and
+        an earlier revision of this docstring overclaimed by describing the two
+        tests without naming what they miss.  What it recognises:
 
-        Key-based detection is what makes an opaque id (`"a7f3c9"` under
-        `artifact_id`) count, and value-based detection is what stops the key
-        list from being the same allowlist-in-disguise as the old scored-key
-        list.  Nothing here dereferences anything — see the SHANNON_UNSCORED
-        block at module scope for why that is a deliberate refusal rather than
-        a missing feature.
+          * the KEY says so   — POINTER_KEYS (`url`, `pose_file`, `location`,
+            `ref`, `src`, `href`, `uri`, plurals such as `paths`/`urls`…),
+            POINTER_KEY_SUFFIXES (`*_path`, `*_ref`, `*_dir`, `*_bucket`…), or
+            a pointer key wearing the `*_id` suffix (`artifact_id`).
+          * the VALUE says so — `scheme://…`; a `data:…,…` URI; `blob:`/`cid:`/
+            `magnet:`; a Windows drive path (`C:\\x\\y.txt`, `C:/x/y.txt`); a
+            UNC path (`\\\\server\\share\\f`); a rooted/home/explicitly-relative
+            POSIX path (`/tmp/x`, `./x`, `../x`, `~/x`); or a BARE relative path
+            carrying a lowercase extension (`reports/final.md`).
+
+        BLIND SPOTS — the honest limit, enumerated so nobody has to rediscover
+        them by being breached:
+          * a bare EXTENSIONLESS relative path (`var/log/run42`, `data/shard0`)
+            is NOT matched.  Matching it would also match "and/or", "24/7",
+            "I/O" and "3/4", and a rule that fires on ordinary English gets the
+            whole gate switched off.  The extension is the only cheap
+            discriminator, so its absence is a hole, on purpose.
+          * an UPPERCASE extension on a bare relative path (`docs/READ.ME`) is
+            not matched, for the same reason (`km/h. Then` would be).
+          * an opaque identifier under a key this list does not know
+            (`{"widget": "a7f3c9"}`) is indistinguishable from a short label.
+          * any ENCODED or obfuscated reference — base64 of a URL, a template
+            (`{{base}}/f.bin`), a split path reassembled by the consumer, or
+            plain natural language ("it is in the usual bucket").
+          * a reference the CONSUMER invents from context the gate never saw.
+        Those cases are covered, if at all, by the aggregate volume rules
+        (R1/R2) and by SHANNON_UNSCORED — not by this function.
+
+        Nothing here dereferences anything, and nothing ever will — see the
+        SHANNON_UNSCORED block at module scope for why that is a deliberate
+        refusal rather than a missing feature, and
+        test_the_gate_never_dereferences_anything for the enforcement.
         """
         if key:
             k = key.lower()
@@ -651,15 +812,65 @@ class ShannonAnalyzer:
                                  METADATA_MAX_LEN characters, so it was scored
                                  as content rather than skipped as a label;
           * ``pointers``       — references to content the gate cannot see.
+
+        …and, since R1/R2, the aggregate accounting that no per-string bound
+        can provide: ``volume_extra`` (label bytes + packed non-string leaves),
+        ``label_bytes`` / ``label_count`` / ``label_overflow``, and the
+        ``total_bytes`` running sum that stops the walk when it is exceeded.
+
+        Deterministic: identical input yields identical output, byte for byte,
+        on any machine.  Nothing here reads a clock, a file, or a socket.
         """
         out: list[str] = []
         seen: set[str] = set()
         pointers: list[str] = []
         oversized: list[str] = []
-        state = {"truncated": False}
+        labels: list[str] = []
+        label_seen: set[str] = set()
+        extra = bytearray()
+        state = {
+            "truncated": False, "total": 0, "label_bytes": 0, "scored_bytes": 0,
+            "nonstring_bytes": 0,
+        }
+
+        def charge(n: int) -> bool:
+            """Charge ``n`` leaf bytes to the aggregate budget.
+
+            False once WALK_MAX_TOTAL_BYTES is exceeded, at which point the
+            walk stops and the measurement is marked incomplete — FAIL CLOSED,
+            exactly like the depth and count bounds.
+            """
+            state["total"] += n
+            if state["total"] > WALK_MAX_TOTAL_BYTES:
+                state["truncated"] = True
+                return False
+            return True
+
+        def pack(node: Any) -> bytes:
+            """Canonical bytes for a non-string leaf.  Never decodes anything."""
+            if isinstance(node, bool):
+                return b"\x01" if node else b"\x00"
+            if node is None:
+                return b"\xff"
+            if isinstance(node, int):
+                width = min(max(1, (node.bit_length() + 8) // 8),
+                            NUMERIC_LEAF_MAX_BYTES)
+                return (node & ((1 << (8 * width)) - 1)).to_bytes(width, "big")
+            if isinstance(node, float):
+                try:
+                    return struct.pack("<d", node)
+                except (OverflowError, ValueError):        # pragma: no cover
+                    return b"\xfe" * 8
+            if isinstance(node, (bytes, bytearray, memoryview)):
+                return bytes(node)[:NUMERIC_LEAF_MAX_BYTES]
+            # Anything else (Decimal, a dataclass, an arbitrary object) is
+            # charged by its repr length rather than trusted to be free.
+            return repr(node).encode("utf-8", "replace")[:NUMERIC_LEAF_MAX_BYTES]
 
         def walk(node: Any, key: Optional[str], depth: int) -> None:
-            if depth > WALK_MAX_DEPTH or len(out) >= WALK_MAX_STRINGS:
+            if (depth > WALK_MAX_DEPTH
+                    or len(out) >= WALK_MAX_STRINGS
+                    or state["truncated"]):
                 # FAIL CLOSED: record that the measurement is incomplete
                 # instead of returning a partial one as if it were whole.
                 state["truncated"] = True
@@ -667,7 +878,7 @@ class ShannonAnalyzer:
             if isinstance(node, dict):
                 for k, v in node.items():
                     walk(v, str(k).lower(), depth + 1)
-            elif isinstance(node, (list, tuple)):
+            elif isinstance(node, (list, tuple, set, frozenset)):
                 for v in node:
                     walk(v, key, depth + 1)
             elif isinstance(node, str):
@@ -679,39 +890,91 @@ class ShannonAnalyzer:
                 # reference, and those are exactly the keys it would hide in.
                 if len(pointers) < POINTER_SAMPLE_MAX and cls.is_pointer(key, s):
                     pointers.append(s[:200])
+                n_bytes = len(s.encode("utf-8", "replace"))
                 if key is not None and (key in METADATA_KEYS or key.endswith("_id")):
                     if len(s) <= METADATA_MAX_LEN:
-                        return          # a genuine label — not content
+                        # A genuine label — not scored as content.  But it is
+                        # NOT free: R1.  Its bytes are charged to the aggregate
+                        # and to the volume measurement, deduplicated, so that
+                        # chunking a payload across many short label fields
+                        # costs exactly what shipping it inline costs.
+                        if s in label_seen:
+                            return
+                        if not charge(n_bytes):
+                            return
+                        label_seen.add(s)
+                        labels.append(s)
+                        state["label_bytes"] += n_bytes
+                        return
                     oversized.append(key)   # too long to be a label: score it
-                if s not in seen:
-                    seen.add(s)
-                    out.append(s)
+                if s in seen:
+                    return
+                if not charge(n_bytes):
+                    return
+                seen.add(s)
+                out.append(s)
+                state["scored_bytes"] += n_bytes
+            else:
+                # R2: non-string leaves are information too.  Packed, never
+                # decoded, and charged to the volume measurement.
+                chunk = pack(node)
+                if not charge(len(chunk)):
+                    return
+                extra.extend(chunk)
+                state["nonstring_bytes"] += len(chunk)
 
         walk(payload, None, 0)
+
+        label_bytes = state["label_bytes"]
+        label_count = len(labels)
+        # (a) ACCOUNTING — always on.  Label bytes precede the packed
+        # non-string bytes so the buffer is a deterministic function of the
+        # payload's own iteration order.
+        for s in labels:
+            extra.extend(s.encode("utf-8", "replace"))
+        # (b) BUDGETS — visible below the volume thresholds.
+        overflow = (label_bytes > LABEL_BUDGET_BYTES
+                    or label_count > LABEL_BUDGET_COUNT)
+
         return ScoredContent(
             text=" ".join(out),
             truncated=state["truncated"],
             oversized_meta=tuple(dict.fromkeys(oversized)),
             pointers=tuple(pointers),
+            volume_extra=bytes(extra),
+            label_bytes=label_bytes,
+            label_count=label_count,
+            label_overflow=overflow,
+            nonstring_bytes=state["nonstring_bytes"],
+            scored_bytes=state["scored_bytes"],
+            n_strings=len(out) + label_count,
+            total_bytes=state["total"],
         )
 
     @staticmethod
-    def information_volume(text: str) -> tuple[float, float, int]:
-        """``(bits_total, redundancy, n_bytes)`` for one scored string.
+    def information_volume(
+        text: str, extra: bytes = b""
+    ) -> tuple[float, float, int]:
+        """``(bits_total, redundancy, n_bytes)`` for one message's content.
 
-        ``bits_total``  8 * len(zlib.compress(utf-8 bytes)) — a deterministic
-                        upper bound on the information the message carries,
-                        independent of where the whitespace is.  This is the
-                        EXTENSIVE statistic: appending free padding leaves it
-                        essentially unchanged, whereas it drives the per-token
-                        mean toward zero.
+        ``bits_total``  8 * len(zlib.compress(utf-8 bytes + extra)) — a
+                        deterministic upper bound on the information the
+                        message carries, independent of where the whitespace
+                        is.  This is the EXTENSIVE statistic: appending free
+                        padding leaves it essentially unchanged, whereas it
+                        drives the per-token mean toward zero.
         ``redundancy``  compressed/raw.  Near 0 means padding; near 1 means
                         incompressible content (encrypted, base64, random).
+        ``extra``       bytes that carry information but are not token-scored:
+                        strings skipped as labels (R1) and packed non-string
+                        leaves (R2).  Compressed TOGETHER with the text, so a
+                        payload split between the two channels is charged
+                        exactly what the same payload costs in one of them.
 
-        Both are 0 for an empty string.  zlib is deterministic for a fixed
+        All three are 0 for empty input.  zlib is deterministic for a fixed
         level, so this value is reproducible across machines and runs.
         """
-        raw = text.encode("utf-8", "replace")
+        raw = text.encode("utf-8", "replace") + extra
         n = len(raw)
         if n == 0:
             return 0.0, 0.0, 0
@@ -2014,8 +2277,20 @@ class ShannonGate:
         # bits_total is taken from the compressed length, so padding (free to
         # send, free to compress) cannot move it, and a whitespace-free blob —
         # one token, H_token == 0 — is measured for what it actually is.
-        bits_total, redundancy, n_bytes = self.analyzer.information_volume(scored_text)
+        #
+        # R1/R2: `volume_extra` is the aggregate channel — every byte skipped
+        # as a label plus every packed non-string leaf.  Both are compressed
+        # WITH the scored text, so splitting a payload across 500 short
+        # metadata fields, or shipping it as a list of ints, is charged exactly
+        # what shipping it inline is charged.  Without it, both routes measured
+        # zero bytes and the whole rule below never ran.
+        bits_total, redundancy, n_bytes = self.analyzer.information_volume(
+            scored_text, content.volume_extra
+        )
         vol_flag = vol_block = False
+        if VOLUME_MODE != "off" and content.label_overflow:
+            # Chunking is visible even when it stays under the volume bounds.
+            reasons.append("label_aggregate")
         if VOLUME_MODE != "off" and n_bytes >= VOLUME_MIN_BYTES:
             if bits_total >= VOLUME_BLOCK_BITS:
                 reasons.append("information_volume_block")
@@ -2121,7 +2396,11 @@ class ShannonGate:
         if VOLUME_MODE == "enforce":
             if vol_block:
                 decision = "blocked"
-            elif (vol_flag or diluted) and decision == "pass":
+            elif (vol_flag or diluted or content.label_overflow) and decision == "pass":
+                # label_overflow escalates to `flagged` only, never straight to
+                # `blocked`: a chatty-but-honest client that ships 100 short
+                # ids should be SEEN, not stopped. If the chunks actually
+                # aggregate to a payload, vol_block above already caught it.
                 decision = "flagged"
 
         # ── 6d. Unscored content ──────────────────────────────────────────────

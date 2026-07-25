@@ -1149,6 +1149,316 @@ class TestNothingEscapesScoring:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# R1 — CHUNKING DEFEATS A PER-STRING BOUND
+#
+# METADATA_MAX_LEN bounds each string ON ITS OWN and nothing bounded the sum,
+# so 500 metadata-keyed fields of 128 legal characters were 500 legal labels
+# and one 64 kB payload. Every hop skipped its own field as "obviously a
+# label"; scored_text came back EMPTY; n_bytes was 0; the volume rule — the one
+# statistic that exists precisely to be extensive — never ran at all. The
+# content reassembles at the consumer and the audit row says bits_total = 0.
+#
+# The closure is an AGGREGATE: label bytes are charged to the volume
+# measurement (always), and crossing SHANNON_LABEL_BUDGET_BYTES (4096) or
+# SHANNON_LABEL_BUDGET_COUNT (64) is recorded and costs the message its pass.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _chunked(n_fields: int = 500, chunk_len: int = 128,
+             alphabet: str = "") -> dict:
+    """`n_fields` metadata-keyed fields, each individually a LEGAL label.
+
+    Every value is <= METADATA_MAX_LEN, so the per-string rule has no
+    objection to any of them. Deterministic: seeded RNG, no wall clock.
+    """
+    rng = random.Random(20260724)
+    alphabet = alphabet or (string.ascii_letters + string.digits + "+/")
+    return {
+        f"chunk{i:03d}_id": "".join(rng.choice(alphabet) for _ in range(chunk_len))
+        for i in range(n_fields)
+    }
+
+
+def _prose_chunked(n_fields: int = 500, chunk_len: int = 128) -> dict:
+    """Same shape, but ordinary compressible prose rather than a random blob.
+
+    This is the harder case: prose compresses, so it cannot lean on the block
+    threshold. It exists to pin the primitive fact the residual named — the
+    gate MEASURED NOTHING — independently of any threshold.
+    """
+    rng = random.Random(20260725)
+    words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
+             "golf", "hotel", "india", "juliet"]
+    out = {}
+    for i in range(n_fields):
+        s = ""
+        while len(s) < chunk_len:
+            s += rng.choice(words) + " "
+        out[f"shard{i:03d}_id"] = s[:chunk_len]
+    return out
+
+
+class TestChunkingCannotDefeatThePerStringBound:
+    def test_the_aggregate_of_legal_labels_is_measured_at_all(self, gate):
+        """THE RESIDUAL, in its most primitive form.
+
+        Observed before the fix, on this exact payload:
+
+            500 x 128 legal-label chars  ->  scored_text == ""
+                                         ->  bits_total  == 0.0
+                                         ->  reasons carried no volume rule
+
+        64 kB reassembles at the consumer and the audit row records that the
+        gate measured ZERO bits. Every threshold argument downstream is moot
+        while the measurement itself is empty, so this test asserts on the
+        measurement, not on a verdict.
+        """
+        payload = _prose_chunked()
+        content = sg.ShannonAnalyzer.scan(payload)
+
+        assert content.text == "", "each field is still individually a label"
+        assert content.label_count == 500
+        assert content.label_bytes >= 60_000
+
+        d = gate.evaluate(_msg(payload=payload))
+        assert d.bits_total > 0.0, "the gate measured nothing at all"
+        assert "label_aggregate" in d.reasons
+        assert any(r.startswith("information_volume") for r in d.reasons), d.reasons
+        assert d.decision != "pass"
+
+    def test_chunked_high_information_content_is_blocked(self, gate):
+        """The same move with content that does not compress: 64 kB of
+        incompressible payload, split into 500 individually-legal labels, is
+        the byte-for-byte equivalent of the blob in
+        test_whitespace_free_blob_cannot_score_zero — and must land in the
+        same place."""
+        d = gate.evaluate(_msg(payload=_chunked()))
+        assert "information_volume_block" in d.reasons, d.reasons
+        assert d.decision == "blocked"
+        assert d.bits_total >= sg.VOLUME_BLOCK_BITS
+
+    def test_chunking_buys_the_sender_nothing(self, gate):
+        """The property that actually closes the hole: splitting a payload
+        across label fields must cost what shipping it inline costs. If
+        chunking is cheaper by any meaningful factor it is still an evasion,
+        just a slower one."""
+        blob = _blob(60_000)
+        inline = gate.evaluate(_msg(payload={"output": blob}))
+        chunks = {f"part{i:03d}_id": blob[i * 120:(i + 1) * 120]
+                  for i in range(500)}
+        split = gate.evaluate(_msg(agent_id="codex", payload=chunks))
+        assert split.bits_total >= 0.5 * inline.bits_total, (
+            split.bits_total, inline.bits_total)
+        assert split.decision == inline.decision == "blocked"
+
+    def test_the_label_byte_budget_fires_on_bytes_alone(self, gate):
+        """Few fields, each legal, aggregating past SHANNON_LABEL_BUDGET_BYTES.
+        The COUNT budget cannot see this one — 40 fields is unremarkable — so
+        the byte budget has to carry it on its own."""
+        payload = {f"blk{i}_id": ("z" * 120) + f"{i:03d}" for i in range(40)}
+        content = sg.ShannonAnalyzer.scan(payload)
+        assert content.label_count <= sg.LABEL_BUDGET_COUNT, "count budget is clear"
+        assert content.label_bytes > sg.LABEL_BUDGET_BYTES
+        assert content.label_overflow
+        assert "label_aggregate" in gate.evaluate(_msg(payload=payload)).reasons
+
+    def test_the_label_count_budget_fires_on_count_alone(self):
+        """Many fields, few bytes: past SHANNON_LABEL_BUDGET_COUNT while the
+        byte budget is nowhere near. The two bounds are independent on
+        purpose."""
+        payload = {f"n{i}_id": f"v{i}" for i in range(sg.LABEL_BUDGET_COUNT + 1)}
+        content = sg.ShannonAnalyzer.scan(payload)
+        assert content.label_bytes < sg.LABEL_BUDGET_BYTES, "byte budget is clear"
+        assert content.label_overflow
+
+    def test_repeated_labels_are_one_string_of_information(self):
+        """Deduplication, for the same reason the scored text dedups: 500
+        copies of one id is one id's worth of information. Charging it 500
+        times would flag well-behaved clients that repeat a task id."""
+        payload = {f"k{i}_id": "same-identifier" for i in range(500)}
+        content = sg.ShannonAnalyzer.scan(payload)
+        assert content.label_count == 1
+        assert content.label_bytes == len("same-identifier")
+
+    def test_an_id_heavy_but_honest_payload_is_not_blocked(self, gate):
+        """FALSE-POSITIVE FLOOR, and the reason label bytes are charged to
+        VOLUME rather than promoted into the token stream: promoting 60 short
+        identifiers into the scored text puts H_token at log2(60) = 5.9, i.e.
+        over H_BLOCK_THRESHOLD, and every id-heavy client blocks on its first
+        message."""
+        payload = {"text": "batch complete",
+                   **{f"target{i}_id": f"1G9V{i:03d}" for i in range(60)}}
+        d = gate.evaluate(_msg(payload=payload))
+        assert d.decision != "blocked", d.reasons
+        assert "information_volume_block" not in d.reasons
+
+    def test_label_aggregate_alone_costs_a_clean_message_its_pass(
+        self, gate, monkeypatch
+    ):
+        """Crossing a budget is visible BELOW the volume thresholds — that is
+        the whole point of having budgets as well as accounting. Isolated here
+        by shrinking the count budget, so nothing but the budget can fire."""
+        monkeypatch.setattr(sg, "LABEL_BUDGET_COUNT", 2)
+        payload = {"text": WORK_TEXT, "a_id": "x1", "b_id": "x2", "c_id": "x3"}
+        d = gate.evaluate(_msg(payload=payload))
+        assert d.computed_H < sg.H_THRESHOLD, "otherwise H is doing the work"
+        assert "label_aggregate" in d.reasons
+        assert d.decision == "flagged"
+
+    def test_label_aggregate_never_blocks_on_its_own(self, gate, monkeypatch):
+        """A chatty-but-honest client is SEEN, not stopped. Only the volume
+        rule — which measures the bytes rather than counting the fields — may
+        block."""
+        monkeypatch.setattr(sg, "LABEL_BUDGET_COUNT", 2)
+        d = gate.evaluate(_msg(payload={"text": WORK_TEXT, "a_id": "x1",
+                                        "b_id": "x2", "c_id": "x3"}))
+        assert d.decision != "blocked"
+
+    def test_label_aggregate_is_observable_and_demotable(self, gate, monkeypatch):
+        """Observe-only, per the knob convention: recorded on the audit row,
+        no verdict change. SHANNON_VOLUME is the knob because this IS a volume
+        rule — an aggregate on the extensive statistic."""
+        monkeypatch.setattr(sg, "LABEL_BUDGET_COUNT", 2)
+        monkeypatch.setattr(sg, "VOLUME_MODE", "observe")
+        payload = {"text": WORK_TEXT, "a_id": "x1", "b_id": "x2", "c_id": "x3"}
+        d = gate.evaluate(_msg(payload=payload))
+        assert "label_aggregate" in d.reasons
+        assert d.decision == "pass"
+
+    def test_label_aggregate_off_mode_is_a_true_no_op(self, gate, monkeypatch):
+        monkeypatch.setattr(sg, "LABEL_BUDGET_COUNT", 2)
+        monkeypatch.setattr(sg, "VOLUME_MODE", "off")
+        d = gate.evaluate(_msg(payload={"text": WORK_TEXT, "a_id": "x1",
+                                        "b_id": "x2", "c_id": "x3"}))
+        assert "label_aggregate" not in d.reasons
+        assert d.decision == "pass"
+
+    def test_the_aggregate_byte_bound_stops_the_walk_and_fails_closed(self, gate):
+        """The bound a chunker actually has to beat. A payload that clears the
+        1 MB ingest bound can still carry more leaf bytes than the walk will
+        measure; when it does, the walk STOPS, and an incomplete measurement is
+        never a pass."""
+        payload = {f"f{i}": "q" * 1000 + str(i) for i in range(600)}
+        content = sg.ShannonAnalyzer.scan(payload)
+        assert content.total_bytes <= sg.WALK_MAX_TOTAL_BYTES + 1001
+        assert content.truncated
+        d = gate.evaluate(_msg(payload=payload))
+        assert "unscored_truncated" in d.reasons
+        assert d.decision != "pass"
+
+    def test_the_total_string_count_bound_fails_closed(self):
+        """The count analogue: more distinct strings than the walk will visit
+        is the same statement — strings exist that were not measured."""
+        payload = {f"f{i}": f"s{i}" for i in range(sg.WALK_MAX_STRINGS + 50)}
+        assert sg.ShannonAnalyzer.scan(payload).truncated
+
+    def test_the_operators_real_traffic_is_untouched_by_the_aggregate(self, gate):
+        """FALSE-POSITIVE FLOOR for R1. The real history's biggest label load
+        is three fields totalling 26 bytes — 20x under the count budget and
+        150x under the byte budget."""
+        real = [
+            {"message": "Grok Build: demo status at 23:38:33", "step": 1,
+             "source": "inject_agent_updates"},
+            {"approval_needed": True, "prompt": "Dock 1G9V?",
+             "interaction_id": "ask-sci-1"},
+            {"text": "clipboard-derived task text", "event": "ingest",
+             "source": "cmd_d"},
+        ]
+        for payload in real:
+            d = gate.evaluate(_msg(payload=payload, shannon_H=0.0))
+            assert "label_aggregate" not in d.reasons, (payload, d.reasons)
+            assert not sg.ShannonAnalyzer.scan(payload).label_overflow
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R2 — NON-STRING LEAVES ARE INFORMATION
+#
+# The walk collected `str` leaves only, so every non-string carrier was a free
+# ride. A list of 40 000 ints in 0..255 is a 40 kB file with the quotes taken
+# off: it scored nothing, carried no volume, and passed with an empty reason
+# list. The gate does NOT decode it — interpreting attacker-chosen bytes is a
+# parser and a parser is an attack surface — it packs each leaf to canonical
+# bytes and charges the INFORMATION CONTENT through the same zlib estimator.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestNonStringLeavesAreScored:
+    @staticmethod
+    def _bytes_list(n: int = 40_000) -> list[int]:
+        rng = random.Random(20260726)
+        return [rng.randrange(256) for _ in range(n)]
+
+    def test_a_list_of_byte_values_is_a_file_with_the_quotes_taken_off(self, gate):
+        """Observed before the fix: decision 'pass', reasons [], bits_total
+        0.0, for 40 kB of unpredictable content."""
+        d = gate.evaluate(_msg(payload={"kind": "status",
+                                        "data": self._bytes_list()}))
+        assert d.bits_total >= sg.VOLUME_BLOCK_BITS, d.bits_total
+        assert "information_volume_block" in d.reasons
+        assert d.decision == "blocked"
+
+    def test_a_numeric_array_under_a_metadata_key_is_still_counted(self, gate):
+        """R1 and R2 compose: the metadata skip never applied to non-strings,
+        but a reviewer should not have to work that out from the source."""
+        d = gate.evaluate(_msg(payload={"hash": self._bytes_list()}))
+        assert "information_volume_block" in d.reasons
+        assert d.decision == "blocked"
+
+    def test_deeply_nested_lists_of_small_ints_are_counted(self, gate):
+        """Nesting is not a carrier the volume rule loses track of."""
+        flat = self._bytes_list()
+        nested = [flat[i:i + 100] for i in range(0, len(flat), 100)]
+        d = gate.evaluate(_msg(payload={"rows": [{"cells": nested}]}))
+        assert "information_volume_block" in d.reasons
+        assert d.decision == "blocked"
+
+    def test_a_float_array_carries_information_too(self, gate):
+        rng = random.Random(20260727)
+        d = gate.evaluate(_msg(payload={
+            "scores": [rng.random() for _ in range(20_000)]}))
+        assert d.bits_total >= sg.VOLUME_BLOCK_BITS, d.bits_total
+        assert d.decision == "blocked"
+
+    def test_a_predictable_array_is_near_free(self, gate):
+        """FALSE-POSITIVE FLOOR, and the reason the estimator is a compressor
+        rather than a byte count: 200 000 zeros are 200 kB of nothing. A rule
+        that charged them their length would block every zero-padded tensor an
+        honest client ever sends."""
+        d = gate.evaluate(_msg(payload={"data": [0] * 200_000}))
+        assert "information_volume_block" not in d.reasons, d.reasons
+        assert d.bits_total < sg.VOLUME_FLAG_BITS
+
+    def test_ordinary_numeric_payloads_are_untouched(self, gate):
+        """The docking traffic this gate actually carries: a handful of floats
+        and ints must not acquire a reason string."""
+        d = gate.evaluate(_msg(payload={
+            "text": "docking complete", "cf_value": -42.7, "rmsd": 1.83,
+            "poses": [1, 2, 3, 4, 5], "converged": True, "note": None,
+        }))
+        assert not any(r.startswith(("information_volume", "payload_redundancy",
+                                     "label_aggregate")) for r in d.reasons), d.reasons
+
+    def test_packing_is_deterministic_and_decodes_nothing(self):
+        """DETERMINISM, asserted rather than assumed: the same payload must
+        pack to the same bytes on every machine and every run — no clock, no
+        hash randomisation, no dict-ordering dependence beyond the payload's
+        own."""
+        payload = {"a": [1, 2, 3], "b": 3.5, "c": True, "d": None,
+                   "e": [[7, 8], [9]]}
+        first = sg.ShannonAnalyzer.scan(payload)
+        second = sg.ShannonAnalyzer.scan(payload)
+        assert first.volume_extra == second.volume_extra
+        assert first.nonstring_bytes == second.nonstring_bytes > 0
+        # b"\x03" is int 3 packed; nothing here is an attempt to READ the
+        # numbers as text, a path, or anything else.
+        assert b"\x01\x02\x03" in first.volume_extra
+
+    def test_a_huge_integer_cannot_cost_unbounded_work(self):
+        """FAIL CLOSED on cost: one absurd int must not turn the walk into an
+        unbounded allocation."""
+        content = sg.ShannonAnalyzer.scan({"n": 1 << 200_000})
+        assert content.nonstring_bytes <= sg.NUMERIC_LEAF_MAX_BYTES
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # W4 — OUT-OF-BAND POINTERS
 #
 # Measured content and delivered content are disjoint when the message carries
@@ -1156,6 +1466,88 @@ class TestNothingEscapesScoring:
 # the only honest thing: it records that it did not see the content, and it
 # refuses to certify the message. It never dereferences anything.
 # ══════════════════════════════════════════════════════════════════════════════
+
+class _DereferenceTripwire:
+    """Records every ATTEMPT to reach the filesystem or the network.
+
+    R4 — WHY THIS IS NOT A `def boom(): raise`.
+    The predecessor patched `open` to raise an AssertionError and asserted
+    nothing afterwards, so it detected the SIDE EFFECT of a dereference: the
+    test failed only if the exception propagated. A validator defeated it with
+    three characters of exception handling —
+
+        try:  open(pointer)
+        except Exception:  pass
+
+    — which attempts the read, swallows the sentinel, and leaves the suite
+    green. The record kept here OUTLIVES the exception: the test inspects
+    ``calls`` after ``evaluate()`` has returned, so no amount of exception
+    handling inside the gate can hide the attempt. The sentinel still raises
+    as well, so an implementation that does NOT swallow also fails loudly at
+    the point of the attempt.
+
+    Deterministic: patches only, no real I/O, no clock, no network, no daemon.
+    """
+
+    _ROUTES = (
+        ("builtins", "open"),
+        ("io", "open"),
+        ("io", "open_code"),
+        ("os", "open"),
+        ("os", "fdopen"),
+        ("PATH", "open"),
+        ("PATH", "read_text"),
+        ("PATH", "read_bytes"),
+        ("urllib.request", "urlopen"),
+        ("urllib.request", "urlretrieve"),
+        ("SOCKET_CLASS", "connect"),
+        ("socket", "create_connection"),
+        ("subprocess", "Popen"),
+        ("subprocess", "run"),
+    )
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self._saved: list[tuple[object, str, object]] = []
+
+    def _targets(self):
+        import builtins
+        import io
+        import os
+        import socket
+        import subprocess
+        import urllib.request
+
+        table = {
+            "builtins": builtins, "io": io, "os": os, "socket": socket,
+            "subprocess": subprocess, "urllib.request": urllib.request,
+            "PATH": Path, "SOCKET_CLASS": socket.socket,
+        }
+        for mod, attr in self._ROUTES:
+            obj = table[mod]
+            if hasattr(obj, attr):
+                yield f"{mod}.{attr}", obj, attr
+
+    def __enter__(self) -> _DereferenceTripwire:
+        for name, obj, attr in self._targets():
+            self._saved.append((obj, attr, getattr(obj, attr)))
+
+            def sentinel(*a, _name=name, **k):
+                # RECORD FIRST. Everything after this line can be swallowed;
+                # this line cannot be.
+                self.calls.append(_name)
+                raise AssertionError(
+                    f"the gate must never dereference a pointer ({_name})"
+                )
+
+            setattr(obj, attr, sentinel)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        for obj, attr, original in reversed(self._saved):
+            setattr(obj, attr, original)
+        self._saved.clear()
+
 
 class TestOutOfBandPointers:
     def test_the_demonstrated_artifact_handoff_cannot_pass(self, gate):
@@ -1198,7 +1590,66 @@ class TestOutOfBandPointers:
         precisely so these do not match."""
         assert not sg.ShannonAnalyzer.is_pointer(None, text), text
 
-    def test_the_gate_never_dereferences_anything(self, gate, monkeypatch):
+    @pytest.mark.parametrize("payload", [
+        # R3 widening — shapes the pattern matcher used to walk straight past.
+        {"output": "saved to reports/final.md"},          # bare relative path
+        {"output": "see src/main.py for the change"},     # bare, mid-sentence
+        {"output": r"copied to C:\Users\me\secret.txt"},  # Windows drive path
+        {"output": "copied to C:/Users/me/secret.txt"},   # Windows, forward
+        {"output": r"on \\fileserver\share\dump.bin"},    # UNC / SMB
+        {"output": "inline data:text/plain;base64,QUJDREVG"},   # data: URI
+        {"output": "held at blob:9f3ca71b22d0"},          # opaque blob: scheme
+        {"summary": "ok", "ref": "a7f3c9d2"},             # key: ref
+        {"summary": "ok", "location": "opaque-handle-1"},  # key: location
+        {"summary": "ok", "src": "handle-2"},             # key: src
+        {"summary": "ok", "href": "handle-3"},            # key: href
+        {"summary": "ok", "uri": "handle-4"},             # key: uri
+        {"summary": "ok", "result_paths": ["h5", "h6"]},  # plural key
+        {"summary": "ok", "output_dir": "run42"},         # *_dir suffix
+        {"summary": "ok", "export_bucket": "b7"},         # *_bucket suffix
+    ])
+    def test_widened_pointer_shapes_are_caught(self, gate, payload):
+        d = gate.evaluate(_msg(payload=payload))
+        assert "unscored_pointer" in d.reasons, payload
+        assert d.decision != "pass", payload
+
+    @pytest.mark.parametrize("text", [
+        # The widening must not cost the false-positive floor. Every one of
+        # these is ordinary prose that mentions a slash, a colon or a dot.
+        "we measured 60 km/h. Then we stopped",
+        "the ratio was 1/2.5 across the runs",
+        "the split was 50/50 overall",
+        "date 2024/01/15 was the cutoff",
+        "TCP/IP is fine here",
+        "see the read/write path",
+        "his/her choice, n/a either way",
+        "input/output latency dropped 5%",
+        "cost/benefit analysis of Arm B",
+        "run 3 of 4 done",
+        "data: 42 rows returned",
+        "Grok Build: demo status at 23:38:33",
+        "clipboard-derived task text",
+        "Dock 1G9V?",
+    ])
+    def test_the_widening_did_not_break_the_false_positive_floor(self, text):
+        assert not sg.ShannonAnalyzer.is_pointer(None, text), text
+
+    def test_the_docstring_does_not_overclaim_the_heuristic(self):
+        """R3, the half that is not code. A pattern matcher documented as if it
+        were a decision procedure is worse than no documentation: the next
+        reader budgets no residual risk for it. The docstring must say what it
+        IS and enumerate what it MISSES, and this test is what stops the
+        honesty being edited back out.
+        """
+        doc = sg.ShannonAnalyzer.is_pointer.__doc__ or ""
+        assert "HEURISTIC" in doc
+        assert "BLIND SPOTS" in doc
+        for missed in ("extensionless", "opaque identifier", "encoded"):
+            assert missed in doc.lower(), missed
+        # …and it must still say the thing that is NOT a heuristic.
+        assert "dereference" in doc
+
+    def test_the_gate_never_dereferences_anything(self, gate):
         """THE POLICY, ENFORCED BY TEST — not just documented.
 
         No URL is fetched (that would make the gate an SSRF primitive on a
@@ -1206,23 +1657,106 @@ class TestOutOfBandPointers:
         no local path is opened (bounded reads still lose the TOCTOU race
         between measuring the file and delivering the reference). Any future
         edit that adds a fetch or an open on the scoring path fails here.
+
+        R4: this asserts on the ATTEMPT, not on its side effect. See
+        _DereferenceTripwire for why the previous side-effect form was
+        defeatable by three characters of exception handling.
         """
+        with _DereferenceTripwire() as tw:
+            d = gate.evaluate(_msg(payload={
+                "output": "see https://example.invalid/payload and /etc/hosts",
+                "artifact_path": "/tmp/does/not/exist.bin",
+                "windows": r"C:\Users\me\secret.txt",
+                "bare": "reports/final.md",
+            }))
+        assert tw.calls == [], f"the gate reached for: {tw.calls}"
+        assert "unscored_pointer" in d.reasons
+
+    def test_a_swallowed_dereference_cannot_hide_from_the_tripwire(
+        self, gate, monkeypatch
+    ):
+        """R4 — THE TEST THAT TESTS THE TEST.
+
+        A validator defeated the previous no-dereference test in one line: the
+        sentinel only RAISED, so an injected read wrapped in
+
+            try:  open(value)
+            except Exception:  pass
+
+        was attempted, the AssertionError was swallowed by the injected code's
+        own except clause, and the suite stayed green while the gate read
+        attacker-chosen paths. Here that exact injection is performed on the
+        scoring path, and the tripwire must still name it.
+
+        Deterministic and offline: the path opened is one that does not exist,
+        so the outcome does not depend on the filesystem — which is precisely
+        why counting side effects was never going to work.
+        """
+        original = sg.ShannonAnalyzer.__dict__["is_pointer"].__func__
+
+        def leaky(key, value):
+            try:                                   # the demonstrated defeat
+                with open("/tmp/shannon-does-not-exist.bin", "rb"):
+                    pass
+            except Exception:                      # noqa: BLE001 — the point
+                pass
+            return original(key, value)
+
+        monkeypatch.setattr(sg.ShannonAnalyzer, "is_pointer", staticmethod(leaky))
+
+        with _DereferenceTripwire() as tw:
+            gate.evaluate(_msg(payload={"output": "x", "artifact_path": "/etc/hosts"}))
+
+        assert tw.calls, (
+            "a swallowed dereference stayed invisible — the tripwire is "
+            "measuring side effects again, not attempts"
+        )
+        assert any("open" in c for c in tw.calls), tw.calls
+
+    @pytest.mark.parametrize("reach", [
+        "builtins.open", "io.open", "os.open", "pathlib.Path.open",
+        "pathlib.Path.read_text", "pathlib.Path.read_bytes",
+        "urllib.request.urlopen", "socket.socket.connect",
+        "socket.create_connection", "subprocess.Popen",
+    ])
+    def test_every_dereference_route_is_actually_covered(self, reach):
+        """A tripwire is only worth what it patches. Each route below is
+        exercised directly, so a future edit that drops one from the patch list
+        fails here rather than silently narrowing the guarantee."""
         import builtins
+        import io
+        import os
+        import socket
+        import subprocess
         import urllib.request
 
-        def boom(*a, **k):
-            raise AssertionError("the gate must never dereference a pointer")
+        mod, _, attr = reach.rpartition(".")
+        obj = {
+            "builtins": builtins, "io": io, "os": os,
+            "pathlib.Path": Path, "urllib.request": urllib.request,
+            "socket": socket, "socket.socket": socket.socket,
+            "subprocess": subprocess,
+        }[mod]
 
-        monkeypatch.setattr(builtins, "open", boom)
-        monkeypatch.setattr(urllib.request, "urlopen", boom)
-        monkeypatch.setattr(Path, "read_text", boom)
-        monkeypatch.setattr(Path, "read_bytes", boom)
-
-        d = gate.evaluate(_msg(payload={
-            "output": "see https://example.invalid/payload and /etc/hosts",
-            "artifact_path": "/tmp/does/not/exist.bin",
-        }))
-        assert "unscored_pointer" in d.reasons
+        with _DereferenceTripwire() as tw:
+            try:
+                if attr in ("read_text", "read_bytes", "open") and obj is Path:
+                    getattr(Path("/tmp/x"), attr)()
+                elif obj is socket.socket:
+                    socket.socket().connect(("127.0.0.1", 9))
+                elif attr == "create_connection":
+                    socket.create_connection(("127.0.0.1", 9))
+                elif attr == "Popen":
+                    subprocess.Popen(["/bin/true"])
+                elif attr == "urlopen":
+                    urllib.request.urlopen("http://127.0.0.1:9/")
+                elif attr == "open" and obj is os:
+                    os.open("/tmp/x", os.O_RDONLY)
+                else:
+                    getattr(obj, attr)("/tmp/x")
+            except Exception:                      # noqa: BLE001 — swallowed
+                pass
+        assert tw.calls, f"{reach} is not covered by the tripwire"
 
     def test_an_unresolvable_pointer_is_treated_exactly_like_any_other(self, gate):
         """'Unresolvable' is not a special case, because the gate never tries
@@ -1549,8 +2083,28 @@ class TestOperatorSurface:
         for name in ("SHANNON_ATTEST", "SHANNON_ATTEST_FLOOR",
                      "SHANNON_ATTEST_MARGIN", "SHANNON_UNATTESTED_FLOOR",
                      "SHANNON_ATTEST_BONUS", "SHANNON_ECHO",
-                     "SHANNON_STRICT_TYPES"):
+                     "SHANNON_STRICT_TYPES",
+                     # R1 / R2 aggregate bounds.
+                     "SHANNON_LABEL_BUDGET_BYTES", "SHANNON_LABEL_BUDGET_COUNT",
+                     "SHANNON_WALK_MAX_TOTAL_BYTES",
+                     "SHANNON_NUMERIC_LEAF_MAX_BYTES"):
             assert name in Path(sg.__file__).read_text()
+
+    def test_new_aggregate_defaults_are_stated_and_safe(self):
+        """Defaults are part of the contract: an operator reading the module
+        docstring must find the same numbers the code uses."""
+        assert sg.LABEL_BUDGET_BYTES == 4096
+        assert sg.LABEL_BUDGET_COUNT == 64
+        assert sg.WALK_MAX_TOTAL_BYTES == 524_288
+        assert sg.NUMERIC_LEAF_MAX_BYTES == 8192
+        # …and the aggregate bound must sit UNDER the ingest bound, or it can
+        # never fire.
+        assert sg.WALK_MAX_TOTAL_BYTES < sg.MAX_PAYLOAD_BYTES
+        doc = sg.__doc__ or ""
+        for stated in ("SHANNON_LABEL_BUDGET_BYTES (4096)",
+                       "SHANNON_LABEL_BUDGET_COUNT (64)",
+                       "SHANNON_WALK_MAX_TOTAL_BYTES=524288"):
+            assert stated in doc, stated
 
     def test_default_thresholds_are_unchanged(self):
         assert sg.H_THRESHOLD == pytest.approx(3.5)

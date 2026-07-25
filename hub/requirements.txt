@@ -1,4 +1,19 @@
-aiohttp
-psutil
-pytest
-requests
+# Shannon Hub — runtime + test dependencies.
+#
+# Kept in sync with the `dev` extra in ../pyproject.toml. Anything listed here
+# must also be in that extra, otherwise `pip install -e ".[dev]"` produces a
+# test run that silently skips the code paths these packages cover.
+
+# HTTP transport for agent_protocol.py / shannon_gate.py (optional at runtime,
+# guarded by try/except ImportError; required for the transport tests).
+aiohttp>=3.9
+requests>=2.31
+
+# Resource collection for system_monitor.py. OPTIONAL at runtime — the module
+# falls back to parsing `top`/`vm_stat`/`df`/`pmset` when it is missing — but
+# pinned here so the psutil branch is actually exercised rather than skipped.
+# See hub/tests/test_system_monitor.py::TestRealPsutil.
+psutil>=5.9
+
+# Test runner.
+pytest>=8.0

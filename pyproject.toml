@@ -46,6 +46,19 @@ dev = [
     "mypy>=1.10",
     "build>=1.0",
     "twine>=5.0",
+    # Optional at runtime, REQUIRED for a trustworthy test run.
+    #
+    # hub/system_monitor.py degrades to subprocess parsing when psutil is
+    # absent, so both code paths are real and both must be exercised. The
+    # mock-driven tests in hub/tests/test_system_monitor.py run either way,
+    # but TestRealPsutil (which pins the psutil path against the actual
+    # library) is skipped without it. Declaring it here means CI never takes
+    # that skip — a permanently-skipped test is indistinguishable from a
+    # deleted one.
+    "psutil>=5.9",
+    # hub/tests exercise the gate's socket and HTTP transports.
+    "aiohttp>=3.9",
+    "requests>=2.31",
 ]
 
 [project.scripts]

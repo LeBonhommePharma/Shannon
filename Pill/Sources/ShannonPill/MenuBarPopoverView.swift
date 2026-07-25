@@ -10,6 +10,11 @@ import ShannonTheme
 /// duplicated state. Approvals go through `AgentActivityMonitor.resolve`, the
 /// async path that never blocks the main thread and surfaces gate errors.
 struct MenuBarPopoverView: View {
+    /// Fixed chrome size while the popover is open. Live telemetry must not
+    /// resize the window or the footer (Quit) jumps out from under the cursor.
+    static let chromeWidth: CGFloat = 320
+    static let chromeHeight: CGFloat = 448
+
     @ObservedObject var activity: AgentActivityMonitor
     @ObservedObject var bridge: ShannonBridge
     @ObservedObject var battery: BatteryMonitor
@@ -70,62 +75,74 @@ struct MenuBarPopoverView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // No container-level transitions/animations: resource ticks used to
-        // re-sort rows + animate layout, which made the popover "pop" in/out.
-        // Gauge fills animate locally; section structure stays put.
-        VStack(alignment: .leading, spacing: 10) {
-            header
-            if showFirstRun && summary.agents.isEmpty {
-                firstRunTips
-                    .shannonGlassSection(emphasized: true)
+        // Fixed chrome + scrollable body + pinned footer.
+        // Intrinsic height used to reflow every resource tick so the Quit
+        // control "escaped" the cursor mid-click. Footer stays docked; only
+        // the middle scrolls when sections grow.
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 10) {
+                    header
+                    if showFirstRun && summary.agents.isEmpty {
+                        firstRunTips
+                            .shannonGlassSection(emphasized: true)
+                    }
+                    if let ask {
+                        GateInlineCard(
+                            ask: ask,
+                            isResolving: activity.resolving.contains(ask.interactionId),
+                            error: activity.lastResolveError,
+                            extraPending: max(0, activity.pendingAsks.count - 1),
+                            onAnswer: { approved in
+                                Task { await activity.resolve(ask, approved: approved) }
+                            },
+                            onShowAll: onShowAllGates
+                        )
+                        // Stable id so only ask *identity* changes swap the card.
+                        .id(ask.interactionId)
+                    }
+                    resourcesSection
+                        .shannonGlassSection()
+                    if BenchmarkRunLogic.shouldShowCard(activity.benchmark) {
+                        benchmarkSection
+                            .shannonGlassSection(
+                                emphasized: activity.benchmark.map { !$0.isComplete } ?? false
+                            )
+                    }
+                    keepAwakeSection
+                        .shannonGlassSection()
+                    agentSection
+                        .shannonGlassSection()
+                    staleAskNotice
+                    recentSection
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
+                // Fill width inside the scroll so gauges do not reflow sideways.
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            if let ask {
-                GateInlineCard(
-                    ask: ask,
-                    isResolving: activity.resolving.contains(ask.interactionId),
-                    error: activity.lastResolveError,
-                    extraPending: max(0, activity.pendingAsks.count - 1),
-                    onAnswer: { approved in
-                        Task { await activity.resolve(ask, approved: approved) }
-                    },
-                    onShowAll: onShowAllGates
-                )
-                // Stable id so only ask *identity* changes swap the card.
-                .id(ask.interactionId)
-            }
-            resourcesSection
-                .shannonGlassSection()
-            if BenchmarkRunLogic.shouldShowCard(activity.benchmark) {
-                benchmarkSection
-                    .shannonGlassSection(emphasized: activity.benchmark.map { !$0.isComplete } ?? false)
-            }
-            keepAwakeSection
-                .shannonGlassSection()
-            agentSection
-                .shannonGlassSection()
-            staleAskNotice
-            recentSection
+
+            // Pinned action bar — never moves with live HUD ticks.
             footer
-                .padding(.top, 2)
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    Color.black.opacity(0.22)
+                }
         }
+        .frame(width: Self.chromeWidth, height: Self.chromeHeight, alignment: .top)
         .transaction { txn in
-            // Always kill implicit layout animation on telemetry ticks.
-            // Resource/agent @Published updates used to animate height/section
-            // morphs and made the popover look like it was popping in and out.
-            // Explicit button presses still use withAnimation where needed.
+            // Kill implicit layout animation on telemetry ticks.
             txn.animation = nil
             txn.disablesAnimations = true
         }
         .onChange(of: activity.summary.busyCount) { count in
             keepAwake.syncWithAgents(busyCount: count)
         }
-        .padding(14)
-        // Fixed width; height hugs content but without animated size morphs.
-        .frame(width: 308, alignment: .topLeading)
-        .fixedSize(horizontal: true, vertical: true)
-        // Liquid Glass stack for macOS 27: `.popover` material (matches system
-        // menus) + light indigo tint + top specular so it reads as refractive
-        // glass rather than a flat dark slab.
+        // Liquid Glass stack for macOS 27: `.popover` material + specular.
         .background {
             ZStack {
                 PillMaterial(kind: .popover)
@@ -146,7 +163,6 @@ struct MenuBarPopoverView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
         }
-        // Keep the popover locked to dark mode regardless of system appearance.
         .preferredColorScheme(.dark)
     }
 
@@ -502,8 +518,9 @@ struct MenuBarPopoverView: View {
     }
 
     /// Vertical bars for each logical core — color by absolute load, height by %.
+    /// Fixed strip height so core-count / load ticks never reflow the footer.
     private func perCoreStrip(_ cores: [CPUCoreLoad], imbalance: Double?) -> some View {
-        let tall = cores.count > 10 ? CGFloat(22) : CGFloat(28)
+        let tall: CGFloat = 26
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Text("CORES")
@@ -714,12 +731,14 @@ struct MenuBarPopoverView: View {
             Text(style.displayName)
                 .font(.shannonMenuBody)
                 .foregroundStyle(style.palette.ink)
+                .lineLimit(1)
             // `statusLine`, not `status.label`: an agent that vanished two days
             // ago used to render the bare word "idle", which reads as "present
             // and waiting". This says "offline · last seen 2d".
             Text(a.statusLine)
                 .font(.shannonMenuSection)
                 .foregroundStyle(style.palette.ink)
+                .lineLimit(1)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 1)
                 .background(Capsule().fill(style.palette.wash))
@@ -728,7 +747,9 @@ struct MenuBarPopoverView: View {
             Text(a.relativeAge)
                 .font(.shannonMenuMono)
                 .foregroundStyle(Color.shannonTertiary)
+                .frame(minWidth: 28, alignment: .trailing)
         }
+        .frame(height: 18)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(style.displayName), \(a.statusLine), \(agentReading.explain(at: Date())), \(a.relativeAge)"
@@ -871,7 +892,7 @@ struct MenuBarPopoverView: View {
     // MARK: Footer
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             // Status row: H · battery · focus — fixed single line, no wrap smash.
             HStack(spacing: 6) {
                 entropyReadout
@@ -888,7 +909,8 @@ struct MenuBarPopoverView: View {
                         Text("\(snap.percentage)%")
                             .font(.shannonMenuMono)
                             .foregroundStyle(Color.shannonTertiary)
-                            .contentTransition(.numericText())
+                            .contentTransition(.identity)
+                            .frame(minWidth: 28, alignment: .trailing)
                     }
                     .layoutPriority(0)
                 }
@@ -904,7 +926,7 @@ struct MenuBarPopoverView: View {
             }
             .frame(height: 14)
 
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Text(multiDeviceFooterLine)
                     .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
@@ -912,15 +934,16 @@ struct MenuBarPopoverView: View {
                     .minimumScaleFactor(0.85)
                     .accessibilityLabel(multiDeviceFooterLine)
                 Spacer(minLength: 4)
-                footerButton("doc.text", label: "Open hub log", action: onOpenHubLog)
-                footerButton("gearshape", label: "Settings", action: onOpenSettings)
-                footerButton("power", label: "Quit Shannon", action: onQuit)
+                footerIconButton("doc.text", label: "Open hub log", action: onOpenHubLog)
+                footerIconButton("gearshape", label: "Settings", action: onOpenSettings)
+                // Labeled Quit — power-only glyph was easy to miss and sat on a
+                // moving footer when content reflowed. Fixed chrome + text keeps
+                // it under the cursor and readable.
+                quitButton
             }
-            .frame(height: 22)
+            .frame(height: 26)
         }
-        .padding(.top, 6)
         .overlay(alignment: .top) {
-            // Hairline separator — glass-friendly (no full Divider slab).
             LinearGradient(
                 colors: [
                     Color.clear,
@@ -931,7 +954,36 @@ struct MenuBarPopoverView: View {
                 endPoint: .trailing
             )
             .frame(height: 0.5)
+            .offset(y: -8)
         }
+    }
+
+    /// Explicit "Quit" control — stable hit target, no icon-only ambiguity.
+    private var quitButton: some View {
+        Button(action: onQuit) {
+            HStack(spacing: 4) {
+                Image(systemName: "power")
+                    .font(.shannonMenuBody)
+                Text("Quit")
+                    .font(.shannonMenuBody)
+            }
+            .foregroundStyle(Color.shannonSecondary)
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(ShannonQuietButtonStyle())
+        .help("Quit Shannon")
+        .accessibilityLabel("Quit Shannon")
+        .accessibilityHint("Quits the Shannon menu bar app")
     }
 
     /// Honest multi-device path from CloudPublisher (P2.7).
@@ -946,13 +998,13 @@ struct MenuBarPopoverView: View {
         }
     }
 
-    private func footerButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+    private func footerIconButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.shannonMenuBody)
                 .foregroundStyle(Color.shannonSecondary)
                 .symbolRenderingMode(.hierarchical)
-                .frame(width: 26, height: 22)
+                .frame(width: 28, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(Color.white.opacity(0.06))
@@ -965,13 +1017,15 @@ struct MenuBarPopoverView: View {
     }
 }
 
-/// Quiet press scale for popover chrome (Liquid Glass micro-interaction).
+/// Quiet press feedback for popover chrome.
+///
+/// No scaleEffect — scaling the Quit control made the hit target shrink under
+/// the cursor and felt like the button was "escaping" mid-click.
 private struct ShannonQuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
-            .opacity(configuration.isPressed ? 0.85 : 1.0)
-            .animation(.shannonSnap, value: configuration.isPressed)
+            .opacity(configuration.isPressed ? 0.72 : 1.0)
+            .animation(nil, value: configuration.isPressed)
     }
 }
 

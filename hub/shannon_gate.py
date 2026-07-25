@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-shannon_gate.py — FlexAIDdS Agent Hub Shannon Gate Daemon
-==========================================================
-Central message broker and entropy guardian for the multi-agent FlexAIDdS
+shannon_gate.py — Shannon Gate Daemon (Agent Hub)
+=================================================
+Central message broker and entropy guardian for the multi-agent Shannon
 collaboration system. Receives outputs from Codex, Claude Cowork/Dispatch/Science,
 and Grok Build; computes Shannon entropy to guard against hallucinated or
 adversarial agent contributions; routes validated messages between agents;
@@ -11,7 +11,7 @@ maintains a full SQLite audit log.
 Architecture
 ------------
   Cloud agents (Codex, Claude, Grok) ──HTTPS POST──► HTTP endpoint (0.0.0.0:8765)
-  Local agents / DatasetRunner       ──Unix socket──► /tmp/flexaidds_agent_hub.sock
+  Local agents / DatasetRunner       ──Unix socket──► /tmp/shannon.sock
                                                         │
                                                Shannon Gate (this process)
                                                         │
@@ -47,6 +47,13 @@ of enforcing is measurable BEFORE you enforce.
 
   SHANNON_ATTEST=off|observe|enforce         (default enforce)
       Self-report divergence.  See the block at "Self-report attestation".
+
+  SHANNON_BEHAVIOR=off|observe|enforce       (default observe)
+      Behavioural action-type entropy (BehavioralMonitor). In observe mode,
+      anomalous readings are logged on gate_reasons as behavior_observe:...
+      but the verdict is unchanged. In enforce mode, a high anomaly may
+      escalate pass→flagged only (never silent, never direct block).
+      Tunable: SHANNON_BEHAVIOR_FLAG_SCORE (default 1.0).
 
   SHANNON_VOLUME=off|observe|enforce         (default enforce)
       Total information content (compressed size) + padding detection, over
@@ -515,6 +522,16 @@ ATTEST_BONUS: float = float(os.environ.get("SHANNON_ATTEST_BONUS", "0.5"))
 # (no measurements, no thresholds, no reason detail). "none" = a bare ack, for
 # operators who can update every client. See _gate_response_envelope().
 ECHO_MODE: str = os.environ.get("SHANNON_ECHO", "decision").strip().lower()
+
+# ── Behavioural entropy (SHANNON_BEHAVIOR) ────────────────────────────────────
+# Action-type distribution monitor (see behavioral_entropy.BehavioralMonitor).
+# Default is observe: feed every message, record anomalous readings on
+# gate_reasons, never change the verdict. enforce may escalate pass→flagged.
+BEHAVIOR_MODE: str = os.environ.get("SHANNON_BEHAVIOR", "observe").strip().lower()
+BEHAVIOR_FLAG_SCORE: float = float(
+    os.environ.get("SHANNON_BEHAVIOR_FLAG_SCORE", "1.0")
+)
+
 # ── message_type enforcement (SHANNON_STRICT_TYPES) ───────────────────────────
 # ONE SENTENCE FOR THE OPERATOR:
 #   An unrecognised message_type is refused, because the alternative is that
@@ -593,7 +610,7 @@ VALID_MESSAGE_TYPES: frozenset[str] = frozenset({
 
 # ── Shared socket secret (memory only — never persisted, never logged) ─────────
 # Generated fresh at each daemon startup; distributed to local agents via the
-# /tmp/flexaidds_agent_hub.sock handshake.  Cloud agents use API keys (Keychain).
+# /tmp/shannon.sock handshake.  Cloud agents use API keys (Keychain).
 HUB_SECRET: str = secrets.token_hex(32)
 
 
@@ -609,6 +626,71 @@ class AgentMessage:
     shannon_H: float        # self-reported by agent (or 0 if not provided)
     confidence: float       # self-reported confidence in [0, 1]
     message_id: str = ""
+
+
+def sanitize_self_report(shannon_H: Any, confidence: Any = 1.0) -> tuple[float, float]:
+    """Normalise agent-supplied self-report fields before attestation.
+
+    Non-finite, negative, or unparseable claims are treated as *silence*
+    (0.0), not as a number the ledger could train on. An agent cannot buy a
+    free pass with ``NaN``, ``-inf``, or a string that happens to cast.
+    Confidence is clamped to ``[0, 1]``; garbage confidence becomes 1.0 so
+    it cannot immunise a liar by claiming "low confidence" with a bad type.
+    """
+    try:
+        h = float(shannon_H)
+    except (TypeError, ValueError):
+        h = 0.0
+    if not math.isfinite(h) or h < 0.0:
+        h = 0.0
+    try:
+        c = float(confidence)
+    except (TypeError, ValueError):
+        c = 1.0
+    if not math.isfinite(c):
+        c = 1.0
+    c = max(0.0, min(1.0, c))
+    return h, c
+
+
+# Pure score helpers live in gate_scores.py (P2.1); re-export for stable imports.
+try:
+    from gate_scores import (  # type: ignore
+        is_human_approval_request,
+        registry_entropy_score,
+    )
+except ImportError:  # package-style import when hub is a package
+    from hub.gate_scores import (  # type: ignore
+        is_human_approval_request,
+        registry_entropy_score,
+    )
+
+# Optional behavioural entropy monitor (observe-only by default).
+try:
+    from behavioral_entropy import BehavioralMonitor as _BehavioralMonitor  # type: ignore
+except ImportError:
+    try:
+        from hub.behavioral_entropy import BehavioralMonitor as _BehavioralMonitor  # type: ignore
+    except ImportError:
+        _BehavioralMonitor = None  # type: ignore[misc, assignment]
+
+
+def bind_socket_agent_id(claimed: Any, bound: str) -> tuple[str, Optional[str]]:
+    """Bind a socket message to the registered connection identity.
+
+    Returns ``(effective_agent_id, spoof_claim_or_None)``.
+
+    The first registration frame establishes ``bound``. Every subsequent
+    message's ``agent_id`` field is attacker-controlled; if it differs from
+    the connection, we keep scoring under the *bound* identity (so the
+    offender is audited) and never under the claim (so the victim's
+    ``entropy_score`` / last_seen cannot be laundered).
+    """
+    bound_id = str(bound or "").strip()
+    claim = str(claimed if claimed is not None else "").strip()
+    if not claim or claim == bound_id:
+        return bound_id, None
+    return bound_id, claim
 
 
 @dataclass
@@ -1409,7 +1491,11 @@ class AuditDB:
         connected_at_ns: int,
         auth_method: str = "socket_secret",
     ) -> None:
-        """INSERT or UPDATE the agents row when a socket connection is established."""
+        """INSERT or UPDATE the agents row when a socket connection is established.
+
+        Clears ``disconnected_at`` — only call this for a real open transport
+        session. HTTP observations must use :meth:`observe_agent` instead.
+        """
         with self._connect() as conn:
             conn.execute(
                 """
@@ -1434,6 +1520,76 @@ class AuditDB:
                 """,
                 (agent_id, status, connected_at_ns, connected_at_ns, auth_method,
                  connected_at_ns),
+            )
+
+    def observe_agent(
+        self,
+        agent_id: str,
+        last_seen_ns: int,
+        entropy_score: float,
+        task_id: str,
+        *,
+        task_summary: str = "",
+        status: str = "observed",
+        auth_method: str = "http_observe",
+    ) -> None:
+        """Record an observation without claiming a live socket connection.
+
+        Used for HTTP ``POST /message`` and ⌘D ingest. Leaves (or sets)
+        ``disconnected_at`` so Pill presence stays offline/observed until a
+        real socket registration clears it via :meth:`upsert_agent`.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO agents
+                    (agent_id, status, connected_at, last_seen_ns, auth_method,
+                     disconnected_at, message_count, heartbeat_ns, entropy_score,
+                     task_id, task_summary)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    last_seen_ns  = excluded.last_seen_ns,
+                    entropy_score = excluded.entropy_score,
+                    task_id       = excluded.task_id,
+                    message_count = agents.message_count + 1,
+                    status        = CASE
+                        WHEN agents.disconnected_at IS NULL
+                             AND agents.auth_method != 'http_observe'
+                        THEN agents.status
+                        ELSE excluded.status
+                    END,
+                    task_summary  = CASE
+                        WHEN excluded.task_summary != '' THEN excluded.task_summary
+                        ELSE agents.task_summary
+                    END,
+                    -- Never clear a real live connection; never promote observe
+                    -- into live. If row was live (disconnected_at NULL from socket),
+                    -- leave disconnected_at alone. If row was observe-only, keep
+                    -- disconnected_at set.
+                    disconnected_at = CASE
+                        WHEN agents.disconnected_at IS NULL
+                             AND agents.auth_method != 'http_observe'
+                        THEN NULL
+                        ELSE COALESCE(agents.disconnected_at, excluded.disconnected_at)
+                    END,
+                    auth_method = CASE
+                        WHEN agents.disconnected_at IS NULL
+                             AND agents.auth_method != 'http_observe'
+                        THEN agents.auth_method
+                        ELSE excluded.auth_method
+                    END
+                """,
+                (
+                    agent_id,
+                    status,
+                    last_seen_ns,
+                    last_seen_ns,
+                    auth_method,
+                    last_seen_ns,  # disconnected_at on insert → not live
+                    float(entropy_score),
+                    task_id or "",
+                    task_summary or "",
+                ),
             )
 
     def update_agent_seen(
@@ -2193,6 +2349,10 @@ class ShannonGate:
         )
         # {task_id: {agent_id: cf_value}}
         self._cf_cache: dict[str, dict[str, float]] = defaultdict(dict)
+        # Behavioural monitor: None when SHANNON_BEHAVIOR=off or module missing.
+        self._behavior: Any = None
+        if BEHAVIOR_MODE != "off" and _BehavioralMonitor is not None:
+            self._behavior = _BehavioralMonitor()
 
     def evaluate(self, msg: AgentMessage) -> GateDecision:
         reasons: list[str] = []
@@ -2419,6 +2579,32 @@ class ShannonGate:
         # way.
         if unknown_type and STRICT_TYPES:
             decision = "blocked"
+
+        # ── 6f. Behavioural entropy (SHANNON_BEHAVIOR) ────────────────────────
+        # Feeds action-type stream into BehavioralMonitor. Observe mode only
+        # annotates reasons; enforce may escalate pass→flagged (never block
+        # and never drop the reason). Failures are swallowed so a missing or
+        # buggy monitor cannot take the gate offline.
+        if BEHAVIOR_MODE != "off" and self._behavior is not None:
+            try:
+                ts = int(msg.timestamp_ns) if msg.timestamp_ns else time.time_ns()
+                reading = self._behavior.observe(
+                    msg.agent_id, msg.message_type, ts
+                )
+                anomalous = (
+                    reading.baseline_ready
+                    and reading.score >= BEHAVIOR_FLAG_SCORE
+                )
+                if anomalous:
+                    reasons.append(
+                        f"behavior_observe:score={reading.score:.2f}"
+                        f",kl={reading.kl_bits:.2f}"
+                        f",novel={int(reading.novel_action)}"
+                    )
+                    if BEHAVIOR_MODE == "enforce" and decision == "pass":
+                        decision = "flagged"
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.debug("behavioral monitor failed: %s", exc)
 
         gate_decision = GateDecision(
             decision=decision,
@@ -2765,15 +2951,39 @@ class AgentHub:
         if data.get("type") == "pong" or data.get("type") == "ping":
             return
 
+        # IDENTITY BINDING. The first registration frame owns this socket.
+        # A per-message `agent_id` field is attacker-controlled; accepting it
+        # let one connection overwrite another agent's last_seen + entropy_score
+        # (and paint a healthy H onto a victim the attacker never measured).
+        # Score and audit under the *bound* identity only; record spoof attempts.
+        effective_id, spoof_claim = bind_socket_agent_id(
+            data.get("agent_id"), source.agent_id
+        )
+        if spoof_claim is not None:
+            logger.warning(
+                "identity_spoof from bound=%s claimed=%s — scoring under bound id",
+                effective_id, spoof_claim,
+            )
+            try:
+                self.db.log_activity_event(
+                    effective_id, "rejected", "identity_spoof",
+                    event_output=f"claimed={spoof_claim}"[:500],
+                )
+            except Exception:
+                pass
+
         try:
+            self_h, self_conf = sanitize_self_report(
+                data.get("shannon_H", 0.0), data.get("confidence", 1.0)
+            )
             msg = AgentMessage(
-                agent_id=str(data.get("agent_id", source.agent_id)),
+                agent_id=effective_id,
                 task_id=str(data.get("task_id", "unknown")),
                 message_type=str(data.get("message_type", "status")),
                 payload=dict(data.get("payload", {})),
                 timestamp_ns=int(data.get("timestamp_ns", time.time_ns())),
-                shannon_H=float(data.get("shannon_H", 0.0)),
-                confidence=float(data.get("confidence", 1.0)),
+                shannon_H=self_h,
+                confidence=self_conf,
                 message_id=str(data.get("message_id", "")),
             )
         except Exception as exc:
@@ -2800,6 +3010,12 @@ class AgentHub:
         # of measurement, out of the audit log and out of the calibration
         # ledger by spelling.
         decision = self.gate.evaluate(msg)
+        # Spoof attempts are themselves a deception signal — escalate like a
+        # self-report lie so identity forgery cannot be free.
+        if spoof_claim is not None and "identity_spoof" not in decision.reasons:
+            decision.reasons.append("identity_spoof")
+            if decision.decision == "pass":
+                decision.decision = "flagged"
         self._log_verdict(msg, decision)
 
         # Refused at ingest. The audit row is already written (above), so the
@@ -2871,11 +3087,13 @@ class AgentHub:
                 msg.agent_id, "approval_needed", msg.payload
             )
 
-        # Refresh agent registry — last_seen, entropy, task text for HUD/pill
+        # Refresh agent registry — last_seen, entropy, task text for HUD/pill.
+        # entropy_score is ALWAYS gate-computed message H (registry_entropy_score);
+        # the agent's shannon_H self-report never lands in this column.
         self.db.update_agent_seen(
             msg.agent_id,
             time.time_ns(),
-            decision.computed_H,
+            registry_entropy_score(decision),
             msg.task_id,
             task_summary=status_upd.task_summary,
             status=status_upd.status if decision.decision != "blocked" else "blocked",
@@ -2885,27 +3103,11 @@ class AgentHub:
         # _gate_response_envelope)
         await source.send_json(self._gate_response_envelope(msg, decision))
 
-        if decision.decision == "blocked":
-            self.db.log_activity_event(
-                msg.agent_id, "blocked", status_upd.event_label,
-                event_output="; ".join(decision.reasons),
-            )
-            return
-
-        # Feed + activity for live surfaces
-        self.db.log_activity_event(
-            msg.agent_id,
-            status_upd.event_type,
-            status_upd.event_label,
-            event_output=json.dumps(msg.payload)[:2000],
-        )
-
-        # Approval ask → persisted pending interaction for hub UI
-        if (
-            msg.message_type == "approval_needed"
-            or msg.payload.get("approval_needed")
-            or msg.payload.get("require_approval")
-        ):
+        # ── Human approval asks ALWAYS surface (P0.2) ─────────────────────
+        # Previously this lived *after* the blocked early-return, so a long
+        # careful approval prompt (high message H) was blocked and never
+        # written to agent_interactions — the safety valve ate the ask.
+        if is_human_approval_request(msg):
             ask = ask_from_payload(
                 msg.agent_id,
                 msg.payload,
@@ -2916,15 +3118,34 @@ class AgentHub:
                 force=True,
             )
             assert ask is not None
+            prompt = ask.prompt
+            if decision.decision == "blocked":
+                reasons = "; ".join(decision.reasons) or "blocked"
+                prompt = f"[gate held — {reasons}] {prompt}"
             self.db.upsert_interaction(
-                ask.interaction_id, ask.agent_id, ask.prompt, "pending"
+                ask.interaction_id, ask.agent_id, prompt, "pending"
             )
             self.db.log_activity_event(
                 msg.agent_id,
                 "approval_needed",
-                ask.prompt,
+                prompt,
                 event_output=ask.interaction_id,
             )
+
+        if decision.decision == "blocked":
+            self.db.log_activity_event(
+                msg.agent_id, "blocked", status_upd.event_label,
+                event_output="; ".join(decision.reasons),
+            )
+            return
+
+        # Feed + activity for live surfaces (non-blocked path)
+        self.db.log_activity_event(
+            msg.agent_id,
+            status_upd.event_type,
+            status_upd.event_label,
+            event_output=json.dumps(msg.payload)[:2000],
+        )
 
         # Update shared benchmark state
         if msg.message_type == "benchmark_update":
@@ -3046,14 +3267,17 @@ class AgentHub:
             # did not touch. A query over HTTP is now parsed, scored, audited
             # and only then answered, exactly like a query over the socket.
             try:
+                self_h, self_conf = sanitize_self_report(
+                    data.get("shannon_H", 0.0), data.get("confidence", 1.0)
+                )
                 msg = AgentMessage(
                     agent_id=agent_id,
                     task_id=str(data.get("task_id", "unknown")),
                     message_type=str(data.get("message_type", "status")),
                     payload=dict(data.get("payload", {})),
                     timestamp_ns=int(data.get("timestamp_ns", time.time_ns())),
-                    shannon_H=float(data.get("shannon_H", 0.0)),
-                    confidence=float(data.get("confidence", 1.0)),
+                    shannon_H=self_h,
+                    confidence=self_conf,
                     message_id=str(data.get("message_id", "")),
                 )
             except Exception as exc:
@@ -3068,20 +3292,60 @@ class AgentHub:
                     {"error": f"{refusal}:{msg.message_type}"}, status=400
                 )
 
-            # The socket path calls upsert_agent at registration and
-            # update_agent_seen after every message; this path called neither,
-            # so an agent that submitted exclusively over HTTP was gated and
-            # audited but never appeared in the agents table — a reputation
-            # hole exactly the size of the transport, resettable by switching
-            # door. (The ledger derives from agent_messages for the same
-            # reason, so this is belt and braces plus HUD visibility.)
+            # HTTP is observation transport: score + audit + registry row, but
+            # NEVER claim a live socket (upsert_agent clears disconnected_at).
+            # ⌘D and remote POSTs use observe_agent so Pill presence stays honest.
+            # entropy_score is ALWAYS gate-computed message H — never self-report.
             try:
-                self.db.upsert_agent(agent_id, "active", time.time_ns())
-                self.db.update_agent_seen(
-                    agent_id, time.time_ns(), decision.computed_H, msg.task_id,
+                try:
+                    from agent_identity import status_from_payload as _status_fp
+                except ImportError:
+                    from hub.agent_identity import status_from_payload as _status_fp  # type: ignore
+                _upd = _status_fp(msg.agent_id, msg.message_type, msg.payload)
+                self.db.observe_agent(
+                    agent_id,
+                    time.time_ns(),
+                    registry_entropy_score(decision),
+                    msg.task_id,
+                    task_summary=_upd.task_summary,
+                    status=(
+                        "blocked" if decision.decision == "blocked"
+                        else (_upd.status if _upd.status != "active" else "observed")
+                    ),
                 )
             except Exception as exc:
                 logger.debug(f"HTTP agent registry update failed: {exc}")
+
+            # Approval asks always surface — even when decision is blocked (P0.2).
+            if is_human_approval_request(msg):
+                try:
+                    try:
+                        from agent_identity import ask_from_payload as _ask_fp
+                    except ImportError:
+                        from hub.agent_identity import ask_from_payload as _ask_fp  # type: ignore
+                    ask = _ask_fp(
+                        msg.agent_id,
+                        msg.payload,
+                        interaction_id=str(
+                            msg.payload.get("interaction_id") or msg.message_id or ""
+                        )
+                        or None,
+                        force=True,
+                    )
+                    if ask is not None:
+                        prompt = ask.prompt
+                        if decision.decision == "blocked":
+                            reasons = "; ".join(decision.reasons) or "blocked"
+                            prompt = f"[gate held — {reasons}] {prompt}"
+                        self.db.upsert_interaction(
+                            ask.interaction_id, ask.agent_id, prompt, "pending"
+                        )
+                        self.db.log_activity_event(
+                            msg.agent_id, "approval_needed", prompt,
+                            event_output=ask.interaction_id,
+                        )
+                except Exception as exc:
+                    logger.debug(f"HTTP approval_needed persist failed: {exc}")
 
             if decision.decision == "blocked":
                 return web.json_response(
@@ -3305,6 +3569,12 @@ def _parse_args() -> argparse.Namespace:
                    help="Information-volume mode. 'observe' measures total "
                         "content and records the reasons but changes NO "
                         "verdict. (default: %(default)s; env SHANNON_VOLUME)")
+    p.add_argument("--behavior", choices=("off", "observe", "enforce"),
+                   default=BEHAVIOR_MODE,
+                   help="Behavioural action-type entropy mode. 'observe' "
+                        "records behavior_observe reasons but changes NO "
+                        "verdict; 'enforce' may escalate pass→flagged. "
+                        "(default: %(default)s; env SHANNON_BEHAVIOR)")
     p.add_argument("--unscored", choices=("off", "observe", "flag", "block"),
                    default=UNSCORED_MODE,
                    help="Policy for messages carrying content the gate cannot "
@@ -3360,7 +3630,7 @@ def main() -> None:
 
     # Apply CLI overrides to module-level constants
     global SOCKET_PATH, DB_PATH, H_THRESHOLD, H_BLOCK_THRESHOLD, D_THRESHOLD
-    global ATTEST_MODE, VOLUME_MODE, UNSCORED_MODE, STRICT_TYPES
+    global ATTEST_MODE, VOLUME_MODE, BEHAVIOR_MODE, UNSCORED_MODE, STRICT_TYPES
     SOCKET_PATH = args.socket
     DB_PATH = Path(args.db)
     H_THRESHOLD = args.h_flag
@@ -3368,6 +3638,7 @@ def main() -> None:
     D_THRESHOLD = args.d_flag
     ATTEST_MODE = args.attest
     VOLUME_MODE = args.volume
+    BEHAVIOR_MODE = args.behavior
     UNSCORED_MODE = args.unscored
     STRICT_TYPES = bool(args.strict_types)
 
@@ -3378,7 +3649,8 @@ def main() -> None:
     hub = AgentHub(http_host=args.http_host, http_port=args.http_port)
     logger.info(
         f"Modes: attest={ATTEST_MODE} volume={VOLUME_MODE} "
-        f"unscored={UNSCORED_MODE} strict_types={int(STRICT_TYPES)}"
+        f"behavior={BEHAVIOR_MODE} unscored={UNSCORED_MODE} "
+        f"strict_types={int(STRICT_TYPES)}"
     )
     asyncio.run(hub.run())
 

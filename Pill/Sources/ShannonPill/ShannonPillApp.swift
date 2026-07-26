@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var processLock: ProcessGuard.LockHandle?
     private var controller: PillWindowController?
+    private var desktopCompanion: DesktopCompanionWindowController?
     private var menuBar: MenuBarController?
     private var nowPlaying: NowPlayingModel?
     private var battery: BatteryMonitor?
@@ -96,6 +97,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         ctl.show()
 
+        // Floating desktop pet + chat bubble (always-on-top; separate from notch).
+        let desk = DesktopCompanionWindowController(activity: activityMon, bridge: br)
+        desk.show()
+
         let settings = SettingsWindowController(
             store: prefs,
             onOpenShannonHome: { NSWorkspace.shared.open(PetBootstrap.shannonHome) },
@@ -118,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             multiDeviceStatus: cloudPub.multiDeviceStatus
         )
         menu.onShowPill = { [weak ctl] in ctl?.reassertVisibility(); ctl?.expand() }
+        menu.onShowDesktopCompanion = { [weak desk] in desk?.reassertVisibility() }
         menu.onReposition = { [weak ctl] in ctl?.reposition() }
         menu.onAddAgent = { [weak self] in self?.addAgentFromFrontApp() }
         menu.onOpenSettings = { [weak settings] in settings?.show() }
@@ -146,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cloud = cloudPub; confirmation = confirm; resources = sysRes
         keepAwake = keep; focusMode = focus
         preferencesStore = prefs; settingsWindow = settings
-        controller = ctl; menuBar = menu
+        controller = ctl; desktopCompanion = desk; menuBar = menu
 
         // Pets bootstrap + secret scrub + hub ensure: all off MainActor so
         // launch does not hitch on disk walks or a gate spawn (macOS 27 glass
@@ -268,6 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller?.reassertVisibility()
         controller?.expand()
+        desktopCompanion?.reassertVisibility()
         DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
             guard self?.confirmation?.isAwaitingConfirmation != true else { return }
             self?.controller?.presentation.isExpanded = false
@@ -362,6 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 self?.controller?.reassertVisibility()
                 self?.controller?.expand()
+                self?.desktopCompanion?.reassertVisibility()
             }
         }
     }

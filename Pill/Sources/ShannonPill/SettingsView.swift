@@ -23,6 +23,7 @@ struct SettingsView: View {
                     keepAwakeSection
                     pillSection
                     desktopSection
+                    desktopPetSection
                     agentsSection
                     tipsSection
                     dataSection
@@ -120,6 +121,46 @@ struct SettingsView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
         }
+    }
+
+
+    /// Package picker for the floating desktop companion (E1).
+    private var desktopPetSection: some View {
+        settingsCard(title: "Desktop pet package") {
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Package")
+                        .font(.shannonMenuBody)
+                        .foregroundStyle(Color.shannonPrimary)
+                    Text("Codex spritesheet used by the floating companion")
+                        .font(.shannonMenuFootnote)
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+                Picker("Package", selection: $store.desktopPetId) {
+                    ForEach(availableDesktopPetIds, id: \.self) { petId in
+                        Text(petId).tag(petId)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    /// Discoverable package ids + default + current selection (always selectable).
+    private var availableDesktopPetIds: [String] {
+        var ids = PetPackageResolver.listPetPackageIds(requireV2: true)
+        let fallback = PetPackageResolver.defaultPetId
+        if !ids.contains(fallback) {
+            ids.insert(fallback, at: 0)
+        }
+        let current = store.desktopPetId
+        if !ids.contains(current) {
+            ids.append(current)
+            ids.sort()
+        }
+        return ids
     }
 
     private var agentsSection: some View {

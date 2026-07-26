@@ -64,22 +64,22 @@ struct GateCardView: View {
                 Button {
                     hub.answer(question, approved: true)
                 } label: {
-                    Label("Approve", systemImage: "checkmark")
+                    Label(GateAskActionCopy.approve, systemImage: "checkmark")
                         .frame(maxWidth: .infinity, minHeight: 40)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.shannonSuccess)
-                .help("Approve — ⌘A")
+                .help("\(GateAskActionCopy.approve) — ⌘A")
 
                 Button {
                     hub.answer(question, approved: false)
                 } label: {
-                    Label("Deny", systemImage: "xmark")
+                    Label(GateAskActionCopy.deny, systemImage: "xmark")
                         .frame(maxWidth: .infinity, minHeight: 40)
                 }
                 .buttonStyle(.bordered)
                 .tint(.shannonError)
-                .help("Deny — ⌘D")
+                .help("\(GateAskActionCopy.deny) — ⌘D")
             }
             .font(.shannonCallout)
         }
@@ -110,12 +110,12 @@ struct GateCardView: View {
             Button {
                 hub.answer(question, approved: true)
             } label: {
-                Label("Approve", systemImage: "checkmark")
+                Label(GateAskActionCopy.approve, systemImage: "checkmark")
             }
             Button(role: .destructive) {
                 hub.answer(question, approved: false)
             } label: {
-                Label("Deny", systemImage: "xmark")
+                Label(GateAskActionCopy.deny, systemImage: "xmark")
             }
         }
         .padding(.horizontal, ShannonSpacing.md)

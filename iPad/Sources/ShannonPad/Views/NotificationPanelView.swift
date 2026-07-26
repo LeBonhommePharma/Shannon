@@ -103,14 +103,15 @@ private struct ConfirmationRow: View {
 
             HStack(spacing: ShannonSpacing.sm) {
                 Button(action: onConfirm) {
-                    Label("Confirm", systemImage: "checkmark")
+                    // UX-012: Approve (not dual-OS "Confirm") — Mac/phone parity.
+                    Label(GateAskActionCopy.approve, systemImage: "checkmark")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.shannonSuccess)
 
                 Button(action: onDeny) {
-                    Label("Deny", systemImage: "xmark")
+                    Label(GateAskActionCopy.deny, systemImage: "xmark")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.bordered)

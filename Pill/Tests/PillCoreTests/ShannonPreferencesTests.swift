@@ -27,9 +27,11 @@ final class ShannonPreferencesTests: XCTestCase {
         XCTAssertFalse(snap.firstRunDone)
         XCTAssertTrue(snap.expandPillOnLaunch)
         XCTAssertFalse(snap.startWithMonitoringPaused)
+        // E2: desktop companion shows on launch by default.
+        XCTAssertTrue(snap.showDesktopCompanion)
+        XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
         // E1: desktop pet package defaults to shannon.
         XCTAssertEqual(snap.desktopPetId, PetPackageResolver.defaultPetId)
-        XCTAssertTrue(snap.showDesktopCompanion)
         XCTAssertEqual(ShannonPreferences.desktopPetId(defaults: defaults), "shannon")
     }
 
@@ -39,6 +41,7 @@ final class ShannonPreferencesTests: XCTestCase {
         snap.expandPillOnLaunch = false
         snap.startWithMonitoringPaused = true
         snap.firstRunDone = true
+        snap.showDesktopCompanion = false
         snap.desktopPetId = "firebear"
         ShannonPreferences.save(snap, defaults: defaults)
         let loaded = ShannonPreferences.load(defaults: defaults)
@@ -47,25 +50,20 @@ final class ShannonPreferencesTests: XCTestCase {
         XCTAssertTrue(ShannonPreferences.startWithMonitoringPaused(defaults: defaults))
         XCTAssertFalse(ShannonPreferences.expandPillOnLaunch(defaults: defaults))
         XCTAssertTrue(ShannonPreferences.firstRunDone(defaults: defaults))
-        XCTAssertEqual(ShannonPreferences.desktopPetId(defaults: defaults), "firebear")
+        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
     }
 
-    /// E1: blank / whitespace desktop pet id normalizes to default package.
-    func testDesktopPetIdNormalizeAndPersist() {
-        XCTAssertEqual(ShannonPreferences.normalizeDesktopPetId(nil), "shannon")
-        XCTAssertEqual(ShannonPreferences.normalizeDesktopPetId(""), "shannon")
-        XCTAssertEqual(ShannonPreferences.normalizeDesktopPetId("  "), "shannon")
-        XCTAssertEqual(ShannonPreferences.normalizeDesktopPetId(" grok "), "grok")
+    /// E2: hide desktop companion persists; missing key still defaults to shown.
+    func testShowDesktopCompanionDefaultAndToggle() {
+        XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
+        XCTAssertNil(defaults.object(forKey: ShannonPreferences.Key.showDesktopCompanion.rawValue))
 
-        ShannonPreferences.setDesktopPetId("  bonhomme  ", defaults: defaults)
-        XCTAssertEqual(ShannonPreferences.desktopPetId(defaults: defaults), "bonhomme")
-        XCTAssertEqual(
-            defaults.string(forKey: ShannonPreferences.Key.desktopPetId.rawValue),
-            "bonhomme"
-        )
+        ShannonPreferences.setShowDesktopCompanion(false, defaults: defaults)
+        XCTAssertNotNil(defaults.object(forKey: ShannonPreferences.Key.showDesktopCompanion.rawValue))
+        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
 
-        ShannonPreferences.setDesktopPetId("", defaults: defaults)
-        XCTAssertEqual(ShannonPreferences.desktopPetId(defaults: defaults), "shannon")
+        ShannonPreferences.setShowDesktopCompanion(true, defaults: defaults)
+        XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
     }
 
     func testExplicitFalseIsNotMissingFallback() {
@@ -101,6 +99,21 @@ final class ShannonPreferencesTests: XCTestCase {
     }
 
     @MainActor
+    func testStorePersistsShowDesktopCompanionToggle() {
+        let store = ShannonPreferencesStore(defaults: defaults)
+        XCTAssertTrue(store.showDesktopCompanion)
+        var callbackValues: [Bool] = []
+        store.onShowDesktopCompanionChanged = { callbackValues.append($0) }
+        store.showDesktopCompanion = false
+        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
+        XCTAssertEqual(callbackValues, [false])
+        let store2 = ShannonPreferencesStore(defaults: defaults)
+        XCTAssertFalse(store2.showDesktopCompanion)
+        store2.showDesktopCompanion = true
+        XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
+    }
+
+    @MainActor
     func testStorePersistsDesktopPetId() {
         let store = ShannonPreferencesStore(defaults: defaults)
         XCTAssertEqual(store.desktopPetId, "shannon")
@@ -127,36 +140,14 @@ final class ShannonPreferencesTests: XCTestCase {
     }
 
     /// Keys the Settings UI claims are the keys the pure store actually writes.
-    /// E2: hide desktop companion persists; missing key still defaults to shown.
-    func testShowDesktopCompanionDefaultAndToggle() {
-        XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
-        XCTAssertNil(defaults.object(forKey: ShannonPreferences.Key.showDesktopCompanion.rawValue))
-        ShannonPreferences.setShowDesktopCompanion(false, defaults: defaults)
-        XCTAssertNotNil(defaults.object(forKey: ShannonPreferences.Key.showDesktopCompanion.rawValue))
-        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
-        ShannonPreferences.setShowDesktopCompanion(true, defaults: defaults)
-        XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
-    }
-
-    @MainActor
-    func testStorePersistsShowDesktopCompanionToggle() {
-        let store = ShannonPreferencesStore(defaults: defaults)
-        XCTAssertTrue(store.showDesktopCompanion)
-        var callbackValues: [Bool] = []
-        store.onShowDesktopCompanionChanged = { callbackValues.append($0) }
-        store.showDesktopCompanion = false
-        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
-        XCTAssertEqual(callbackValues, [false])
-    }
-
     func testSettingsKeysAreHonoredKeys() {
         let keys = Set(ShannonPreferences.Key.allCases.map(\.rawValue))
         XCTAssertTrue(keys.contains("shannon.prefs.autoKeepAwakeWithAgents"))
         XCTAssertTrue(keys.contains("shannon.pill.firstRunDone"))
         XCTAssertTrue(keys.contains("shannon.prefs.expandPillOnLaunch"))
         XCTAssertTrue(keys.contains("shannon.prefs.startWithMonitoringPaused"))
-        XCTAssertTrue(keys.contains("shannon.prefs.desktopPetId")
         XCTAssertTrue(keys.contains("shannon.prefs.showDesktopCompanion"))
+        XCTAssertTrue(keys.contains("shannon.prefs.desktopPetId"))
         XCTAssertEqual(keys.count, 6)
     }
 }

@@ -130,4 +130,40 @@ final class GateAskActionCopyTests: XCTestCase {
             "Mac GateAskCard must share offline/action copy"
         )
     }
+
+    /// UX-012: iPad must not hard-code dual-OS "Confirm" on primary approve actions.
+    func testPadWiresApproveNotConfirmVerb() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let surfaces = [
+            "iPad/Sources/ShannonPad/Views/AgentDetailView.swift",
+            "iPad/Sources/ShannonPad/Views/NotificationPanelView.swift",
+            "iPad/Sources/ShannonPad/Views/GateCardView.swift",
+            "iPad/Sources/ShannonPad/ViewModels/PaletteCatalogue.swift",
+        ]
+        for rel in surfaces {
+            let text = (try? String(
+                contentsOf: root.appendingPathComponent(rel),
+                encoding: .utf8
+            )) ?? ""
+            XCTAssertTrue(
+                text.contains("GateAskActionCopy"),
+                "\(rel) must use GateAskActionCopy"
+            )
+            XCTAssertFalse(
+                text.contains("\"Confirm\""),
+                "\(rel) must not hard-code Confirm (use Approve)"
+            )
+            XCTAssertTrue(
+                text.contains("GateAskActionCopy.approve")
+                    || text.contains("GateAskActionCopy.deny"),
+                "\(rel) must reference shared approve/deny tokens"
+            )
+        }
+    }
 }

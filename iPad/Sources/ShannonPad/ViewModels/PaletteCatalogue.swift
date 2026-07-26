@@ -61,11 +61,12 @@ enum PaletteCatalogue {
 
         if let question = hub.pendingConfirmations.first {
             let name = hub.agentName(for: question) ?? "the Mac"
+            // UX-012: palette titles match GateAskActionCopy (Approve/Deny).
             actions.append(
                 PaletteAction(
                     id: "confirm",
-                    title: "Confirm",
-                    subtitle: "Approve: \(question.question)",
+                    title: GateAskActionCopy.approve,
+                    subtitle: "\(GateAskActionCopy.approve): \(question.question)",
                     symbol: "checkmark.circle",
                     kind: .command
                 ) { hub.answerPendingConfirmation(approved: true) }
@@ -73,8 +74,8 @@ enum PaletteCatalogue {
             actions.append(
                 PaletteAction(
                     id: "deny",
-                    title: "Deny",
-                    subtitle: "Deny \(name): \(question.question)",
+                    title: GateAskActionCopy.deny,
+                    subtitle: "\(GateAskActionCopy.deny) \(name): \(question.question)",
                     symbol: "xmark.circle",
                     kind: .command
                 ) { hub.answerPendingConfirmation(approved: false) }

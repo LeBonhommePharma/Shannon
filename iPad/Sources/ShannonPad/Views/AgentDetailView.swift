@@ -78,7 +78,8 @@ struct AgentDetailView: View {
                 Button {
                     hub.answer(question, approved: true)
                 } label: {
-                    Label("Confirm", systemImage: "checkmark")
+                    // UX-012: same Approve verb as Mac GateAskCard / phone banner.
+                    Label(GateAskActionCopy.approve, systemImage: "checkmark")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
@@ -87,7 +88,7 @@ struct AgentDetailView: View {
                 Button {
                     hub.answer(question, approved: false)
                 } label: {
-                    Label("Deny", systemImage: "xmark")
+                    Label(GateAskActionCopy.deny, systemImage: "xmark")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.bordered)

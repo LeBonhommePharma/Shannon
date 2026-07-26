@@ -98,7 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ctl.show()
 
         // Floating desktop pet + chat bubble (always-on-top; separate from notch).
-        let desk = DesktopCompanionWindowController(activity: activityMon, bridge: br)
+        let desk = DesktopCompanionWindowController(
+            activity: activityMon,
+            bridge: br,
+            packagePetId: prefs.desktopPetId
+        )
         // E4: click desktop pet/bubble → expand notch + focus matching agent row.
         desk.onActivate = { [weak ctl] agentId in
             ctl?.expand(focusAgentId: agentId)
@@ -108,6 +112,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         prefs.onShowDesktopCompanionChanged = { [weak desk] visible in
             if visible { desk?.show() } else { desk?.hide() }
+        }
+        prefs.onDesktopPetIdChanged = { [weak desk] id in
+            desk?.setPackagePetId(id)
         }
 
         let settings = SettingsWindowController(

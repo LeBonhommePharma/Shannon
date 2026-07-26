@@ -29,6 +29,20 @@ public final class ShannonPreferencesStore: ObservableObject {
         }
     }
 
+    /// Codex package id for the floating desktop companion.
+    @Published public var desktopPetId: String {
+        didSet {
+            let normalized = ShannonPreferences.normalizeDesktopPetId(desktopPetId)
+            if normalized != desktopPetId {
+                desktopPetId = normalized
+                return
+            }
+            guard desktopPetId != oldValue else { return }
+            ShannonPreferences.setDesktopPetId(desktopPetId, defaults: defaults)
+            onDesktopPetIdChanged?(desktopPetId)
+        }
+    }
+
     @Published public var showDesktopCompanion: Bool {
         didSet {
             guard showDesktopCompanion != oldValue else { return }
@@ -41,7 +55,8 @@ public final class ShannonPreferencesStore: ObservableObject {
 
     /// Optional sink so KeepAwakeMonitor stays in sync without polling.
     public var onAutoKeepAwakeChanged: ((Bool) -> Void)?
-
+    /// Optional sink so desktop companion re-resolves package on picker change.
+    public var onDesktopPetIdChanged: ((String) -> Void)?
     /// Optional sink so the floating desktop companion show/hide tracks Settings/menu.
     public var onShowDesktopCompanionChanged: ((Bool) -> Void)?
 
@@ -53,6 +68,7 @@ public final class ShannonPreferencesStore: ObservableObject {
         self.autoKeepAwakeWithAgents = snap.autoKeepAwakeWithAgents
         self.expandPillOnLaunch = snap.expandPillOnLaunch
         self.startWithMonitoringPaused = snap.startWithMonitoringPaused
+        self.desktopPetId = snap.desktopPetId
         self.showDesktopCompanion = snap.showDesktopCompanion
         self.firstRunDone = snap.firstRunDone
     }
@@ -62,6 +78,7 @@ public final class ShannonPreferencesStore: ObservableObject {
         autoKeepAwakeWithAgents = snap.autoKeepAwakeWithAgents
         expandPillOnLaunch = snap.expandPillOnLaunch
         startWithMonitoringPaused = snap.startWithMonitoringPaused
+        desktopPetId = snap.desktopPetId
         showDesktopCompanion = snap.showDesktopCompanion
         firstRunDone = snap.firstRunDone
     }
@@ -83,7 +100,8 @@ public final class ShannonPreferencesStore: ObservableObject {
             firstRunDone: firstRunDone,
             expandPillOnLaunch: expandPillOnLaunch,
             startWithMonitoringPaused: startWithMonitoringPaused,
-            showDesktopCompanion: showDesktopCompanion
+            showDesktopCompanion: showDesktopCompanion,
+            desktopPetId: desktopPetId
         )
     }
 }

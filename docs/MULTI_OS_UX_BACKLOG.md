@@ -127,18 +127,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** PillCore `signatureAge` + `age` call Core; iPad UX-009 multi-statement `dashboard` explicit `return` (compile fix).
 - **Priority:** P2
 
-### - [ ] UX-012: Pad Confirm buttons use GateAskActionCopy.approve (Mac/phone parity)
+### - [x] UX-012: Pad Confirm buttons use GateAskActionCopy.approve (Mac/phone parity)
 
 - **Why:** Phone uses Approve via `GateAskActionCopy`; iPad detail / notification panel / palette still say “Confirm”.
 - **Platforms:** iPadOS, iOS (reference)
 - **Area:** `AgentDetailView`, `NotificationPanelView`, `PaletteCatalogue`
 - **First slice:** Replace hard-coded Confirm labels with `GateAskActionCopy.approve`; pure wiring test.
+- **Done:** Detail / notification / GateCard / palette use `GateAskActionCopy.approve` + `.deny`; wiring test forbids pad `"Confirm"`.
 - **Priority:** P2
 
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 8):** `--quick` ios/ipad/watch PASS; macOS FAIL (pet prefs WIP). Claimed **UX-012** (pad Confirm→Approve). Considered: GateInlineCard hard-coded needs approval → optional follow-up; no new P0. **No new UX-0xx**.
 - **2026-07-26 (loop 7):** `--quick` macOS FAIL (pet `moodDisplayWord` WIP — not multi-OS UX claim); iPad FAIL (UX-009 `dashboard` missing `return` on multi-statement `some View`). Claimed **UX-011** residual (Mac age → SharedRelativeAge) + iPad compile fix. Considered: pad Confirm verb → **UX-012**; GateInlineCard hard-code needs approval → covered by GateAskActionCopy if wired later. **No third item.**
 - **2026-07-26 (loop 6):** `--quick` failed (missing `AgentListSkim` while phone required it). Residual **UX-006** shipped: Core skim + phone fleet chip/rows. Next open **UX-008**. **No new UX-0xx**.
 - **2026-07-26 (loop 5):** `--quick` all PASS. Claimed **UX-005** (watch primary focus only when actionable). Considered: phone skim (UX-006), Reduce Motion (UX-007), widget age buckets (UX-008). **No new UX-0xx**.

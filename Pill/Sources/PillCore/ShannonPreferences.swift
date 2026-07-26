@@ -19,6 +19,8 @@ public enum ShannonPreferences {
         case startWithMonitoringPaused = "shannon.prefs.startWithMonitoringPaused"
         /// Floating desktop companion (pet + bubble). Default on; menu/Settings can hide.
         case showDesktopCompanion = "shannon.prefs.showDesktopCompanion"
+        /// Codex package id for the floating desktop companion (default "shannon").
+        case desktopPetId = "shannon.prefs.desktopPetId"
     }
 
     /// Snapshot of all product preferences (value type for UI + tests).
@@ -28,24 +30,35 @@ public enum ShannonPreferences {
         public var expandPillOnLaunch: Bool
         public var startWithMonitoringPaused: Bool
         public var showDesktopCompanion: Bool
+        /// Package id used by the desktop companion surface.
+        public var desktopPetId: String
 
         public init(
             autoKeepAwakeWithAgents: Bool = true,
             firstRunDone: Bool = false,
             expandPillOnLaunch: Bool = true,
             startWithMonitoringPaused: Bool = false,
-            showDesktopCompanion: Bool = true
+            showDesktopCompanion: Bool = true,
+            desktopPetId: String = PetPackageResolver.defaultPetId
         ) {
             self.autoKeepAwakeWithAgents = autoKeepAwakeWithAgents
             self.firstRunDone = firstRunDone
             self.expandPillOnLaunch = expandPillOnLaunch
             self.startWithMonitoringPaused = startWithMonitoringPaused
             self.showDesktopCompanion = showDesktopCompanion
+            self.desktopPetId = ShannonPreferences.normalizeDesktopPetId(desktopPetId)
         }
     }
 
     /// Factory defaults when a key has never been written.
     public static let factoryDefaults = Snapshot()
+
+    /// Empty / whitespace → default package id (`shannon`).
+    public static func normalizeDesktopPetId(_ raw: String?) -> String {
+        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? PetPackageResolver.defaultPetId : trimmed
+    }
+
 
     // MARK: Load / save
 
@@ -71,6 +84,11 @@ public enum ShannonPreferences {
                 defaults,
                 key: .showDesktopCompanion,
                 fallback: factoryDefaults.showDesktopCompanion
+            ),
+            desktopPetId: string(
+                defaults,
+                key: .desktopPetId,
+                fallback: factoryDefaults.desktopPetId
             )
         )
     }
@@ -81,6 +99,10 @@ public enum ShannonPreferences {
         defaults.set(snap.expandPillOnLaunch, forKey: Key.expandPillOnLaunch.rawValue)
         defaults.set(snap.startWithMonitoringPaused, forKey: Key.startWithMonitoringPaused.rawValue)
         defaults.set(snap.showDesktopCompanion, forKey: Key.showDesktopCompanion.rawValue)
+        defaults.set(
+            normalizeDesktopPetId(snap.desktopPetId),
+            forKey: Key.desktopPetId.rawValue
+        )
     }
 
     // MARK: Individual accessors (monitors call these)
@@ -125,6 +147,15 @@ public enum ShannonPreferences {
         defaults.set(value, forKey: Key.showDesktopCompanion.rawValue)
     }
 
+    public static func desktopPetId(defaults: UserDefaults = .standard) -> String {
+        string(defaults, key: .desktopPetId, fallback: factoryDefaults.desktopPetId)
+    }
+
+    public static func setDesktopPetId(_ value: String, defaults: UserDefaults = .standard) {
+        defaults.set(normalizeDesktopPetId(value), forKey: Key.desktopPetId.rawValue)
+    }
+
+
     public static func firstRunDone(defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: Key.firstRunDone.rawValue)
     }
@@ -149,5 +180,18 @@ public enum ShannonPreferences {
     ) -> Bool {
         if defaults.object(forKey: key.rawValue) == nil { return fallback }
         return defaults.bool(forKey: key.rawValue)
+    }
+
+
+    /// Missing / blank string → fallback (normalized package id).
+    private static func string(
+        _ defaults: UserDefaults,
+        key: Key,
+        fallback: String
+    ) -> String {
+        guard let raw = defaults.string(forKey: key.rawValue) else {
+            return normalizeDesktopPetId(fallback)
+        }
+        return normalizeDesktopPetId(raw)
     }
 }

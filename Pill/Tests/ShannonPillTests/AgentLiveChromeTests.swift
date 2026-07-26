@@ -49,7 +49,7 @@ final class AgentLiveChromeTests: XCTestCase {
     }
 
     func testIdleBadgeSaysLive() {
-        var s = surface(attention: .idle)
+        let s = surface(attention: .idle)
         // Force the pure badge path with an idle surface from real resolve.
         if s.attention == .idle || s.attention == .unknown {
             let label = AgentLiveChrome.badgeLabel(surface: s, fallbackStatusLine: "offline")

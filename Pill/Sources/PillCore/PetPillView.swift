@@ -150,13 +150,25 @@ public struct CompanionView: View {
 public struct CompanionGlyph: View {
     public let state: CompanionState
     public let size: CGFloat
+    /// Optional force package id (user preference / surface). `nil` → map from agent.
+    public let packagePetIdOverride: String?
 
-    public init(state: CompanionState, size: CGFloat = 26) {
+    public init(state: CompanionState, size: CGFloat = 26, packagePetId: String? = nil) {
         self.state = state
         self.size = size
+        self.packagePetIdOverride = packagePetId
     }
 
     private var style: AgentStyle { AgentStyleCatalog.style(for: state.agent.id) }
+
+    /// Atlas package for this agent (B3) — not always `"shannon"`.
+    public var packagePetId: String {
+        PetPackageResolver.preferredPackageId(
+            forAgentId: state.agent.id,
+            preferenceOverride: packagePetIdOverride,
+            style: style
+        )
+    }
 
     public var body: some View {
         if let kind = state.kind {
@@ -166,7 +178,7 @@ public struct CompanionGlyph: View {
                           size: size,
                           happyStart: happyStart,
                           codexMotion: state.codexMotion,
-                          packagePetId: PetPackageResolver.defaultPetId)
+                          packagePetId: packagePetId)
         } else {
             Image(systemName: state.symbolFallback)
                 .font(.system(size: size * 0.62, weight: .medium))
@@ -191,10 +203,12 @@ public struct CompanionGlyph: View {
 public struct CompanionBadge: View {
     public let state: CompanionState
     public let size: CGFloat
+    public let packagePetIdOverride: String?
 
-    public init(state: CompanionState, size: CGFloat = 26) {
+    public init(state: CompanionState, size: CGFloat = 26, packagePetId: String? = nil) {
         self.state = state
         self.size = size
+        self.packagePetIdOverride = packagePetId
     }
 
     public var body: some View {
@@ -202,7 +216,7 @@ public struct CompanionBadge: View {
             Circle()
                 .strokeBorder(state.mood.ringColor.opacity(state.mood.ringOpacity),
                               lineWidth: state.mood == .wary ? 1.6 : 1)
-            CompanionGlyph(state: state, size: size * 0.86)
+            CompanionGlyph(state: state, size: size * 0.86, packagePetId: packagePetIdOverride)
         }
         .frame(width: size, height: size)
     }
@@ -218,8 +232,13 @@ public struct CompanionBadge: View {
 @available(macOS 14.0, *)
 public struct CompanionRow: View {
     public let state: CompanionState
+    /// Desktop-pet handoff (E4): true when this row matches the focused agent.
+    public var isFocused: Bool
 
-    public init(state: CompanionState) { self.state = state }
+    public init(state: CompanionState, isFocused: Bool = false) {
+        self.state = state
+        self.isFocused = isFocused
+    }
 
     private var style: AgentStyle { AgentStyleCatalog.style(for: state.agent.id) }
 
@@ -254,16 +273,43 @@ public struct CompanionRow: View {
 
             Spacer(minLength: 4)
 
-            Text(state.mood.label)
+            // T3: motion-honest word (review/failed never show resting/sleeping).
+            Text(state.moodDisplayWord)
                 .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(state.mood == .idle || state.mood == .sleepy
-                                 ? AnyShapeStyle(.tertiary)
-                                 : AnyShapeStyle(state.mood.ringColor))
+                .foregroundStyle(moodWordStyle)
                 .lineLimit(1)
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, isFocused ? 6 : 0)
+        .padding(.vertical, isFocused ? 4 : 2)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isFocused ? Color.shannonAccent.opacity(0.14) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(
+                    isFocused ? Color.shannonAccent.opacity(0.55) : Color.clear,
+                    lineWidth: 1
+                )
+        )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(state.accessibilityLine))
+        .accessibilityAddTraits(isFocused ? .isSelected : [])
+    }
+
+    /// Quiet tertiary only when both procedural mood and codex motion are idle-ish.
+    private var moodWordStyle: AnyShapeStyle {
+        switch state.codexMotion {
+        case .failed:
+            return AnyShapeStyle(CompanionMood.wary.ringColor)
+        case .review:
+            return AnyShapeStyle(Color.secondary)
+        default:
+            if state.mood == .idle || state.mood == .sleepy {
+                return AnyShapeStyle(.tertiary)
+            }
+            return AnyShapeStyle(state.mood.ringColor)
+        }
     }
 }
 
@@ -277,10 +323,17 @@ public struct CompanionRow: View {
 public struct CompanionBoardView: View {
     public let states: [CompanionState]
     public let maxRows: Int
+    /// Desktop-pet handoff (E4): agent id to highlight, if any.
+    public var focusedAgentId: String?
 
-    public init(states: [CompanionState], maxRows: Int = 6) {
+    public init(
+        states: [CompanionState],
+        maxRows: Int = 6,
+        focusedAgentId: String? = nil
+    ) {
         self.states = states
         self.maxRows = maxRows
+        self.focusedAgentId = focusedAgentId
     }
 
     /// Convenience: build straight from an activity summary.
@@ -292,7 +345,8 @@ public struct CompanionBoardView: View {
                 pendingAsks: [GateDBReader.PendingAsk] = [],
                 lastOutcomes: [String: String] = [:],
                 activity: [GateDBReader.ActivityEvent] = [],
-                maxRows: Int = 6) {
+                maxRows: Int = 6,
+                focusedAgentId: String? = nil) {
         self.states = CompanionRoster.build(from: summary,
                                             now: now,
                                             approvals: approvals,
@@ -302,6 +356,7 @@ public struct CompanionBoardView: View {
                                             lastOutcomes: lastOutcomes,
                                             activity: activity)
         self.maxRows = maxRows
+        self.focusedAgentId = focusedAgentId
     }
 
     public var body: some View {
@@ -310,7 +365,13 @@ public struct CompanionBoardView: View {
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(states.prefix(maxRows)) { state in
-                    CompanionRow(state: state)
+                    CompanionRow(
+                        state: state,
+                        isFocused: DesktopCompanionHandoff.isFocusedRow(
+                            rowAgentId: state.id,
+                            focusedAgentId: focusedAgentId
+                        )
+                    )
                 }
                 if states.count > maxRows {
                     Text("+\(states.count - maxRows) more")

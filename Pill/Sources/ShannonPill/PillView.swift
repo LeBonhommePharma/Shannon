@@ -85,6 +85,8 @@ struct PillView: View {
     @ObservedObject var activity: AgentActivityMonitor
     @ObservedObject var resources: SystemResourceMonitor
     @Binding var isExpanded: Bool
+    /// Desktop-pet handoff (E4): highlight this agent row while expanded.
+    var focusedAgentId: String? = nil
 
     /// Drives the pulsing red border shown when entropy collapses (deception alert).
     @State private var collapsePulse  = false
@@ -1002,7 +1004,8 @@ struct PillView: View {
                     entropyDeltas: agentCompanionDeltas,
                     pendingAsks: activity.pendingAsks,
                     activity: activity.recentActivity,
-                    maxRows: busy.isEmpty ? 3 : 4
+                    maxRows: busy.isEmpty ? 3 : 4,
+                    focusedAgentId: focusedAgentId
                 )
             } else {
                 // The companions are Canvas-drawn and need macOS 14; the package
@@ -1076,7 +1079,12 @@ struct PillView: View {
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(
-                    surface.needsYou
+                    DesktopCompanionHandoff.isFocusedRow(
+                        rowAgentId: a.id,
+                        focusedAgentId: focusedAgentId
+                    )
+                        ? Color.shannonAccent.opacity(0.14)
+                        : surface.needsYou
                         ? Color.shannonWarning.opacity(0.10)
                         : Color.shannonSurfaceElevated.opacity(0.6)
                 )

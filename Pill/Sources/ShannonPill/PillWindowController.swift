@@ -8,6 +8,8 @@ import QuartzCore
 @MainActor
 final class PillPresentation: ObservableObject {
     @Published var isExpanded = false
+    /// Desktop-pet handoff (E4): agent row to highlight while expanded.
+    @Published var focusedAgentId: String? = nil
 }
 
 /// Borderless, non-activating panel pinned to the notch / menu bar.
@@ -257,8 +259,9 @@ final class PillWindowController {
         }
     }
 
-    func expand() {
+    func expand(focusAgentId: String? = nil) {
         presentation.isExpanded = true
+        presentation.focusedAgentId = DesktopCompanionHandoff.focusAgentId(focusAgentId)
         applyFrameForCurrentPresentation(force: true)
         reassertVisibility()
     }
@@ -294,8 +297,14 @@ private struct PillHost: View {
                 resources: resources,
                 isExpanded: Binding(
                     get: { presentation.isExpanded },
-                    set: { presentation.isExpanded = $0 }
-                )
+                    set: { newValue in
+                        presentation.isExpanded = newValue
+                        if !newValue {
+                            presentation.focusedAgentId = nil
+                        }
+                    }
+                ),
+                focusedAgentId: presentation.focusedAgentId
             )
             Spacer(minLength: 0)
         }

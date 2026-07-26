@@ -99,6 +99,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Floating desktop pet + chat bubble (always-on-top; separate from notch).
         let desk = DesktopCompanionWindowController(activity: activityMon, bridge: br)
+        // E4: click desktop pet/bubble → expand notch + focus matching agent row.
+        desk.onActivate = { [weak ctl] agentId in
+            ctl?.expand(focusAgentId: agentId)
+        }
         desk.show()
 
         let settings = SettingsWindowController(

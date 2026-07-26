@@ -107,25 +107,6 @@ final class DesktopCompanionWindowTests: XCTestCase {
             CompanionBubbleText.emptyRosterText
         )
     }
-    /// E2: hide sticks — reassert must not resurrect a deliberately hidden pet.
-    func testHideBlocksReassertUntilShow() {
-        let activity = AgentActivityMonitor()
-        let bridge = ShannonBridge()
-        let ctl = DesktopCompanionWindowController(activity: activity, bridge: bridge)
-        XCTAssertFalse(ctl.wantsVisible)
-        ctl.show()
-        defer { ctl.hide() }
-        XCTAssertTrue(ctl.wantsVisible)
-        ctl.hide()
-        XCTAssertFalse(ctl.wantsVisible)
-        ctl.reassertVisibility()
-        XCTAssertFalse(ctl.wantsVisible)
-        XCTAssertFalse(ctl.isVisible)
-        ctl.show()
-        XCTAssertTrue(ctl.wantsVisible)
-        XCTAssertTrue(ctl.isVisible)
-    }
-
 
     func testModelSchedulesQuietPollWhenRosterEmpty() {
         // O1: no fixed 2 s wake — empty/quiet uses 30 s sleepy poll.

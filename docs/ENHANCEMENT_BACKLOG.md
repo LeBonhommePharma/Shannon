@@ -52,11 +52,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 - **Done:** Readers populate `tokensIn`/`tokensOut` from Claude `message.usage` (sum input+cache keys) and Codex `token_count.total_token_usage` (plain `input_tokens` only); UsageCore stub left for ENH-014; fixtures+tests for usage and fail-closed nil.
 - **Priority:** P1
 
-### - [ ] ENH-005: Deduplicate agent roster vs pulled-sessions double listing
+### - [x] ENH-005: Deduplicate agent roster vs pulled-sessions double listing
 
 - **Why:** The same logical agent can appear in **Active now** (gate live) and **Pulled sessions** (disk), with different attention badges — glanceable fleet becomes noisy.
 - **Area:** `MenuBarAgentRoster`, `PulledSessionsSection`, `SessionContentPresenter`
 - **First slice:** When an agent id is already on the live roster, either hide the pulled row or fold disk meta into the roster card only; pure helper + unit test.
+- **Done:** `sessionsExcludingLiveAgents` + `cards(… liveAgentIds:)`; Pulled section hides ids already on live summary; meta still on roster via ENH-003.
 - **Priority:** P1
 
 ### - [ ] ENH-006: Surface pending ask prompt on roster rows when `canAnswerInline`
@@ -174,7 +175,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-004: ShannonPill 32 pass; PillCore 818 pass, 1 skip |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-005: ShannonPill 32 pass; PillCore 821 pass, 1 skip |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `PYTHONPATH=python pytest tests/python/ -v` | 180 passed, 51 skipped (bare pytest needs path — see ENH-009) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

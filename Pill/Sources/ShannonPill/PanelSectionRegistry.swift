@@ -151,6 +151,8 @@ struct PulledSessionsSection: View {
     /// Gate asks so a pulled session that also needs approval ranks + labels correctly.
     var pendingAsks: [GateDBReader.PendingAsk] = []
     var activity: [GateDBReader.ActivityEvent] = []
+    /// Agent ids already shown on the live roster — hide matching disk rows (ENH-005).
+    var liveAgentIds: Set<String> = []
 
     /// Ranked cards: needs-you → working → finished → idle; optional fields fail-closed.
     private var cards: [SessionContentCard] {
@@ -158,12 +160,13 @@ struct PulledSessionsSection: View {
             sessions: sessions,
             pendingAsks: pendingAsks,
             activity: activity,
-            limit: 5
+            limit: 5,
+            liveAgentIds: liveAgentIds
         )
     }
 
     var body: some View {
-        if sessions.isEmpty {
+        if cards.isEmpty {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 6) {

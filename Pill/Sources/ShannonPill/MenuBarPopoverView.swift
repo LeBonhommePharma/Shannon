@@ -160,7 +160,8 @@ struct MenuBarPopoverView: View {
                     PulledSessionsSection(
                         sessions: parity.sessions,
                         pendingAsks: activity.pendingAsks,
-                        activity: activity.recentActivity
+                        activity: activity.recentActivity,
+                        liveAgentIds: Set(summary.agents.map(\.id))
                     )
                         .shannonGlassSection()
                     DevServersSection(

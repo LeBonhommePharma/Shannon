@@ -336,6 +336,56 @@ final class SessionContentPresenterTests: XCTestCase {
         XCTAssertEqual(cards[0].metaLine, "api · feat/hud · Sonnet")
     }
 
+    // MARK: - ENH-005: hide pulled rows for live roster agents
+
+    func testSessionsExcludingLiveAgentsDropsMatchingIds() {
+        let live = makeSession(
+            id: "art:claude", agent: "claude_code", source: .artifact, task: "disk"
+        )
+        let other = makeSession(
+            id: "art:codex", agent: "codex", source: .artifact, task: "other disk"
+        )
+        let filtered = SessionContentPresenter.sessionsExcludingLiveAgents(
+            [live, other],
+            liveAgentIds: ["claude_code"]
+        )
+        XCTAssertEqual(filtered.map(\.agentId), ["codex"])
+    }
+
+    func testSessionsExcludingLiveAgentsEmptySetKeepsAll() {
+        let s = makeSession(id: "art:1", agent: "claude_code", source: .artifact)
+        let filtered = SessionContentPresenter.sessionsExcludingLiveAgents(
+            [s],
+            liveAgentIds: []
+        )
+        XCTAssertEqual(filtered.count, 1)
+    }
+
+    func testCardsHidePulledWhenAgentOnLiveRoster() {
+        let claudeArt = makeSession(
+            id: "art:c", agent: "claude_code", name: "Claude Code",
+            source: .artifact, task: "old transcript"
+        )
+        let codexArt = makeSession(
+            id: "art:x", agent: "codex", name: "Codex",
+            source: .artifact, task: "cold session"
+        )
+        let cards = SessionContentPresenter.cards(
+            sessions: [claudeArt, codexArt],
+            now: now,
+            limit: 5,
+            liveAgentIds: ["claude_code"]
+        )
+        XCTAssertEqual(cards.map(\.agentId), ["codex"])
+        // All live → pulled section empty.
+        let none = SessionContentPresenter.cards(
+            sessions: [claudeArt],
+            now: now,
+            liveAgentIds: ["claude_code"]
+        )
+        XCTAssertTrue(none.isEmpty)
+    }
+
     // MARK: - Working tool line scenario
 
     func testWorkingToolLineCard() {

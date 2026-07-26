@@ -185,15 +185,30 @@ public enum SessionContentPresenter {
         )
     }
 
+    /// Drop artifact/pulled rows whose `agentId` is already on the live roster.
+    ///
+    /// Keeps the fleet glanceable (ENH-005): live agents own the Active-now
+    /// section; disk meta for those ids already folds into roster via
+    /// `sessionsByAgent`. Empty `liveAgentIds` returns `sessions` unchanged.
+    public static func sessionsExcludingLiveAgents(
+        _ sessions: [AgentSession],
+        liveAgentIds: Set<String>
+    ) -> [AgentSession] {
+        guard !liveAgentIds.isEmpty else { return sessions }
+        return sessions.filter { !liveAgentIds.contains($0.agentId) }
+    }
+
     /// Ranked session cards: needs-you → working → finished → idle → unknown.
     public static func cards(
         sessions: [AgentSession],
         pendingAsks: [GateDBReader.PendingAsk] = [],
         activity: [GateDBReader.ActivityEvent] = [],
         now: Date = Date(),
-        limit: Int = 8
+        limit: Int = 8,
+        liveAgentIds: Set<String> = []
     ) -> [SessionContentCard] {
-        let built = sessions.map {
+        let filtered = sessionsExcludingLiveAgents(sessions, liveAgentIds: liveAgentIds)
+        let built = filtered.map {
             card(session: $0, pendingAsks: pendingAsks, activity: activity, now: now)
         }
         let ranked = built.sorted { lhs, rhs in

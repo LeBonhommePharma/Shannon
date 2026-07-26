@@ -25,6 +25,7 @@ final class SessionUIWiringTests: XCTestCase {
             ("PanelSectionRegistry.swift", [
                 "SessionContentPresenter.cards",
                 "card.badgeLabel",
+                "liveAgentIds",
             ]),
             ("PillView.swift", [
                 "AgentLiveSurfaceLogic.rankedAgents",
@@ -35,6 +36,7 @@ final class SessionUIWiringTests: XCTestCase {
             ("MenuBarPopoverView.swift", [
                 "AgentLiveSurfaceLogic.primaryFocus",
                 "PulledSessionsSection",
+                "liveAgentIds",
             ]),
         ]
 

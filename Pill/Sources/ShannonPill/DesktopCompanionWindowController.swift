@@ -52,28 +52,47 @@ final class DesktopCompanionPanel: NSPanel {
 @MainActor
 final class DesktopCompanionModel: ObservableObject {
     @Published private(set) var presentation: DesktopCompanionPresentation
+    /// How many agents are in the desktop cycle set (top N busy). E3.
+    @Published private(set) var cycleCount: Int = 0
+    /// Current slot within the cycle set (0-based). E3.
+    @Published private(set) var selectedIndex: Int = 0
 
     private let activity: AgentActivityMonitor
     private let bridge: ShannonBridge
+    private var initialPackagePetId: String?
     private var cancellables = Set<AnyCancellable>()
-    /// Adaptive sleepy poll (O1) — not the fixed 2 s historical tick.
     private var pollCancellable: AnyCancellable?
     private var currentPollInterval: TimeInterval?
+    private var selectedAgentId: String?
+    /// Forced package id (E1 picker); nil → selector default / B3 map.
+    private var packagePetId: String?
 
-    /// Last scheduled wall-timer interval (tests / diagnostics).
     var scheduledPollIntervalForTesting: TimeInterval? { currentPollInterval }
 
-    init(activity: AgentActivityMonitor, bridge: ShannonBridge) {
+    init(
+        activity: AgentActivityMonitor,
+        bridge: ShannonBridge,
+        packagePetId: String? = nil
+    ) {
         self.activity = activity
         self.bridge = bridge
-        self.presentation = Self.makePresentation(activity: activity, bridge: bridge)
+        self.packagePetId = packagePetId
+        let built = Self.makePresentation(
+            activity: activity,
+            bridge: bridge,
+            preferredId: nil,
+            fallbackIndex: 0,
+            packagePetId: packagePetId
+        )
+        self.presentation = built.presentation
+        self.selectedIndex = built.selectedIndex
+        self.cycleCount = built.cycleCount
+        self.selectedAgentId = built.presentation.state?.id
         bind()
         ensurePollTimer()
     }
 
     private func bind() {
-        // Activity + bridge ticks rebuild immediately; wall timer only covers
-        // idle→sleepy age flips when gate traffic is quiet (see O1 cadence).
         activity.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -87,16 +106,61 @@ final class DesktopCompanionModel: ObservableObject {
                 DispatchQueue.main.async { self?.refresh() }
             }
             .store(in: &cancellables)
+    }
 
+    func setPackagePetId(_ id: String?) {
+        packagePetId = id
+        refresh()
     }
 
     func refresh() {
-        presentation = Self.makePresentation(activity: activity, bridge: bridge)
+        apply(
+            Self.makePresentation(
+                activity: activity,
+                bridge: bridge,
+                preferredId: selectedAgentId,
+                fallbackIndex: selectedIndex,
+                packagePetId: packagePetId
+            )
+        )
         ensurePollTimer()
     }
 
+    /// Advance to the next top-N busy agent (click cycle). No-op when ≤1.
+    func cycleToNext() {
+        let built = Self.makePresentation(
+            activity: activity,
+            bridge: bridge,
+            preferredId: selectedAgentId,
+            fallbackIndex: selectedIndex,
+            packagePetId: packagePetId
+        )
+        guard built.cycleCount > 1 else {
+            apply(built)
+            return
+        }
+        let next = DesktopCompanionCycle.nextIndex(
+            after: built.selectedIndex,
+            count: built.cycleCount
+        )
+        apply(
+            Self.makePresentation(
+                activity: activity,
+                bridge: bridge,
+                preferredId: nil,
+                fallbackIndex: next,
+                packagePetId: packagePetId
+            )
+        )
+    }
 
-    /// Schedule / reschedule the sleepy poll from pure cadence policy.
+    private func apply(_ built: DesktopCompanionCycle.PresentResult) {
+        presentation = built.presentation
+        selectedIndex = built.selectedIndex
+        cycleCount = built.cycleCount
+        selectedAgentId = built.presentation.state?.id
+    }
+
     private func ensurePollTimer() {
         let interval = DesktopCompanionRefreshCadence.pollInterval(
             agents: activity.summary.agents
@@ -111,8 +175,11 @@ final class DesktopCompanionModel: ObservableObject {
 
     static func makePresentation(
         activity: AgentActivityMonitor,
-        bridge: ShannonBridge
-    ) -> DesktopCompanionPresentation {
+        bridge: ShannonBridge,
+        preferredId: String?,
+        fallbackIndex: Int,
+        packagePetId: String?
+    ) -> DesktopCompanionCycle.PresentResult {
         let summary = activity.summary
         let deltas = EntropyProvenance.companionDeltas(
             agentIds: summary.agents.map(\.id),
@@ -121,11 +188,17 @@ final class DesktopCompanionModel: ObservableObject {
             gate: activity.agentEntropy,
             gateDBAvailable: activity.gateDBAvailable
         )
-        return DesktopCompanionSelector.present(
-            summary: summary,
+        let full = CompanionRoster.build(
+            from: summary,
             entropyDeltas: deltas,
             pendingAsks: activity.pendingAsks,
             activity: activity.recentActivity
+        )
+        return DesktopCompanionCycle.present(
+            roster: full,
+            selectedIndex: fallbackIndex,
+            preferredId: preferredId,
+            packagePetId: packagePetId
         )
     }
 }
@@ -150,9 +223,14 @@ final class DesktopCompanionWindowController {
     /// Default size: pet + bubble + padding.
     static let defaultSize = CGSize(width: 200, height: 160)
 
-    init(activity: AgentActivityMonitor, bridge: ShannonBridge) {
+    init(
+        activity: AgentActivityMonitor,
+        bridge: ShannonBridge,
+        packagePetId: String? = nil
+    ) {
         self.activity = activity
         self.bridge = bridge
+        self.initialPackagePetId = packagePetId
     }
 
     var isVisible: Bool { panel?.isVisible == true }
@@ -184,7 +262,7 @@ final class DesktopCompanionWindowController {
 
     func show() {
         shouldBeVisible = true
-        let model = self.model ?? DesktopCompanionModel(activity: activity, bridge: bridge)
+        let model = self.model ?? DesktopCompanionModel(activity: activity, bridge: bridge, packagePetId: initialPackagePetId)
         self.model = model
 
         let size = Self.defaultSize
@@ -306,7 +384,7 @@ struct DesktopCompanionHost: View {
         .preferredColorScheme(.dark)
         .contentShape(Rectangle())
         .onTapGesture {
-            
+            model.cycleToNext()
             onActivate()
         }
         .accessibilityHint("Click to expand Shannon and focus this agent")

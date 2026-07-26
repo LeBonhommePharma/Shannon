@@ -103,7 +103,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         desk.onActivate = { [weak ctl] agentId in
             ctl?.expand(focusAgentId: agentId)
         }
-        desk.show()
+        if prefs.showDesktopCompanion {
+            desk.show()
+        }
+        prefs.onShowDesktopCompanionChanged = { [weak desk] visible in
+            if visible { desk?.show() } else { desk?.hide() }
+        }
 
         let settings = SettingsWindowController(
             store: prefs,

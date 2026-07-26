@@ -5,6 +5,9 @@
 //
 // Roots come from `PetPaths` (shared with agent memory). Agent-memory roots are
 // never treated as a spritesheet store.
+//
+// O2: process-wide resolve cache keyed by (petId, roots mtime, requireV2,
+// path-env fingerprint). Invalidates when roots mtime or path env changes.
 
 import Foundation
 
@@ -44,6 +47,21 @@ public enum PetPackageResolver {
 
     public static let defaultPetId = "shannon"
 
+    // MARK: - Process-wide resolve cache (O2)
+
+    /// Clear the process-wide package resolve cache (tests / path-env rebind).
+    public static func clearResolveCache() {
+        resolveCache.clear()
+    }
+
+    /// Cache hits since last clear (for pure cache tests).
+    public static var resolveCacheHitCount: Int { resolveCache.hitCount }
+
+    /// Cache misses since last clear (for pure cache tests).
+    public static var resolveCacheMissCount: Int { resolveCache.missCount }
+
+    private static let resolveCache = PackageResolveCache()
+
     /// Search roots (first hit wins). Never includes agent-memory roots.
     /// Delegates to `PetPaths.packageRootsExcludingMemory`.
     public static func defaultRoots(
@@ -62,6 +80,10 @@ public enum PetPackageResolver {
     }
 
     /// Resolve package by id. Always succeeds: missing → procedural.
+    ///
+    /// Results are cached process-wide (O2) keyed by pet id, requireV2, search
+    /// roots, max roots/package mtime, and path-env fingerprint. Call
+    /// `clearResolveCache()` after tests or when path env is rebound in-process.
     public static func resolve(
         petId: String = defaultPetId,
         roots: [URL]? = nil,
@@ -76,7 +98,44 @@ public enum PetPackageResolver {
         let search = roots
             ?? PetPaths.packageRootsExcludingMemory(home: home, env: env, fileManager: fileManager)
         let memory = PetPaths.agentMemoryRoot(home: home, env: env).standardizedFileURL
+        let pathEnv = pathEnvFingerprint(env)
+        let mtime = rootsMtimeSignature(roots: search, petId: pid, fileManager: fileManager)
+        let key = PackageResolveCache.Key(
+            petId: pid,
+            requireV2: requireV2,
+            rootsPaths: search.map { $0.standardizedFileURL.path },
+            rootsMtime: mtime,
+            pathEnv: pathEnv,
+            memoryPath: memory.path
+        )
 
+        // Global invalidation when path env fingerprint changes mid-process.
+        resolveCache.invalidateIfPathEnvChanged(pathEnv)
+
+        if let hit = resolveCache.get(key) {
+            return hit
+        }
+
+        let result = resolveUncached(
+            pid: pid,
+            search: search,
+            memory: memory,
+            requireV2: requireV2,
+            fileManager: fileManager
+        )
+        resolveCache.set(key, result)
+        return result
+    }
+
+    // MARK: - Uncached resolve
+
+    private static func resolveUncached(
+        pid: String,
+        search: [URL],
+        memory: URL,
+        requireV2: Bool,
+        fileManager: FileManager
+    ) -> PetPackage {
         for root in search {
             let standardized = root.standardizedFileURL
             if standardized == memory { continue }
@@ -93,6 +152,49 @@ public enum PetPackageResolver {
             }
         }
         return .procedural(petId: pid)
+    }
+
+    // MARK: - Cache key helpers
+
+    /// Fingerprint of path-related env vars that affect root / memory resolution.
+    static func pathEnvFingerprint(_ env: [String: String]) -> String {
+        let keys = [
+            PetPaths.envUnified,
+            PetPaths.envPackages,
+            PetPaths.envAgents,
+            PetPaths.envCodexHome,
+            PetPaths.envShannonHome,
+            PetPaths.envFlexaidHome,
+        ]
+        return keys.map { key in
+            let raw = env[key]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return "\(key)=\(raw)"
+        }.joined(separator: "\u{1e}")
+    }
+
+    /// Max mtime (ms) over package roots and the candidate package / pet.json.
+    /// Changing pet.json or package dir content updates this and busts the cache.
+    static func rootsMtimeSignature(
+        roots: [URL],
+        petId: String,
+        fileManager: FileManager
+    ) -> Int64 {
+        var maxMs: Int64 = 0
+        func consider(_ path: String) {
+            guard let date = try? fileManager.attributesOfItem(atPath: path)[.modificationDate] as? Date
+            else { return }
+            let ms = Int64((date.timeIntervalSince1970 * 1000.0).rounded())
+            if ms > maxMs { maxMs = ms }
+        }
+        for root in roots {
+            consider(root.path)
+            let pkg = root.appendingPathComponent(petId)
+            consider(pkg.path)
+            consider(pkg.appendingPathComponent("pet.json").path)
+            consider(pkg.appendingPathComponent("spritesheet.webp").path)
+            consider(root.appendingPathComponent("pet.json").path)
+        }
+        return maxMs
     }
 
     // MARK: - Internals
@@ -178,5 +280,61 @@ public enum PetPackageResolver {
             return (2, "spriteVersionNumber missing; inferred 2 from spritesheet presence")
         }
         return (0, nil)
+    }
+}
+
+// MARK: - Process-wide cache store
+
+/// Thread-safe process-wide cache for `PetPackageResolver.resolve` (O2).
+private final class PackageResolveCache: @unchecked Sendable {
+    struct Key: Hashable {
+        let petId: String
+        let requireV2: Bool
+        let rootsPaths: [String]
+        let rootsMtime: Int64
+        let pathEnv: String
+        let memoryPath: String
+    }
+
+    private let lock = NSLock()
+    private var entries: [Key: PetPackage] = [:]
+    private var lastPathEnv: String?
+    private(set) var hitCount = 0
+    private(set) var missCount = 0
+
+    func get(_ key: Key) -> PetPackage? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let value = entries[key] {
+            hitCount += 1
+            return value
+        }
+        missCount += 1
+        return nil
+    }
+
+    func set(_ key: Key, _ value: PetPackage) {
+        lock.lock()
+        entries[key] = value
+        lock.unlock()
+    }
+
+    /// Drop all entries when path-env fingerprint changes (O2 invalidation).
+    func invalidateIfPathEnvChanged(_ pathEnv: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let last = lastPathEnv, last != pathEnv {
+            entries.removeAll(keepingCapacity: false)
+        }
+        lastPathEnv = pathEnv
+    }
+
+    func clear() {
+        lock.lock()
+        entries.removeAll(keepingCapacity: false)
+        lastPathEnv = nil
+        hitCount = 0
+        missCount = 0
+        lock.unlock()
     }
 }

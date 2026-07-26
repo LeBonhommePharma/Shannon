@@ -54,12 +54,15 @@ Test baseline (must stay green while implementing):
 
 ## Enhancements / features
 
-- [ ] **E1 — Desktop pet package picker (Settings)**  
+- [x] **E1 — Desktop pet package picker (Settings)**  
   Observation: desktop companion always uses default `"shannon"` package;
   `~/.codex/pets` lists 6 drawable v2 packages (shannon, bonhomme, bonhomme-cat,
   collapse-cat, firebear, grok). No UI to choose.  
   Work: `ShannonPreferences.desktopPetId` + Settings picker fed by
-  `list_pet_packages` / Swift list helper; persist and re-resolve on change.
+  `list_pet_packages` / Swift list helper; persist and re-resolve on change.  
+  **Done:** `desktopPetId` pref + store callback; `listPetPackageIds` pure list;
+  Settings package picker; desktop companion re-resolves on change.
+
 
 - [x] **E2 — Toggle hide/show desktop companion (persisted)**  
   Observation: desktop pet always shows on launch; menu only has “Show Desktop

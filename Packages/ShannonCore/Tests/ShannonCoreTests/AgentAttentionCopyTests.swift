@@ -122,7 +122,11 @@ final class AgentAttentionCopyTests: XCTestCase {
             contentsOf: root.appendingPathComponent("iOS/Sources/ShannonPhone/HomeView.swift"),
             encoding: .utf8
         )) ?? ""
-        XCTAssertTrue(phone.contains("AgentAttentionCopy"), "phone AgentCard must use shared badges")
+        // UX-006: cards go through AgentListSkim → AgentAttentionCopy badges.
+        XCTAssertTrue(
+            phone.contains("AgentAttentionCopy") || phone.contains("AgentListSkim"),
+            "phone AgentCard must use shared attention badges (direct or via AgentListSkim)"
+        )
 
         let padTheme = (try? String(
             contentsOf: root.appendingPathComponent("iPad/Sources/Shared/AgentActivity+Theme.swift"),

@@ -44,6 +44,15 @@ final class ParityRefreshOffMainTests: XCTestCase {
             src.contains("collectParityPayload"),
             "refresh must call the pure collector"
         )
+        // ENH-002: hop via applyParityPayload — never `guard let self` in concurrent MainActor.run.
+        XCTAssertTrue(
+            src.contains("applyParityPayload"),
+            "refresh must apply payload via MainActor method (Swift 6 Sendable-safe)"
+        )
+        XCTAssertFalse(
+            src.contains("guard let self else"),
+            "must not rebind self as var in concurrent Task.detached body"
+        )
     }
 
     func testResourcesSectionStableRowOrderHelper() {

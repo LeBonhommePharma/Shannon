@@ -70,13 +70,17 @@ final class ParityPanelModel: ObservableObject {
                 now: now,
                 home: home
             )
-            await MainActor.run {
-                guard let self else { return }
-                self.sessions = payload.sessions
-                self.servers = payload.servers
-                self.routes = payload.routes
-            }
+            await self?.applyParityPayload(payload)
         }
+    }
+
+    /// Apply a collected parity snapshot on the main actor (avoids Swift 6
+    /// `var self` capture in concurrently-executing `MainActor.run` closures).
+    @MainActor
+    private func applyParityPayload(_ payload: ParityPayload) {
+        sessions = payload.sessions
+        servers = payload.servers
+        routes = payload.routes
     }
 
     /// One snapshot of parity panel data (sessions / servers / routes).

@@ -71,9 +71,13 @@ class TestIsHumanApprovalRequest:
 
 
 class TestApprovalSurfacesWhenBlocked:
-    def test_evaluate_blocks_verbose_approval_prompt(self, hub: sg.AgentHub):
-        """Sanity: verbose prompt still measures as blocked/flagged — we do not
-        disable the H rule; we only refuse to drop the human ask."""
+    def test_evaluate_verbose_approval_still_scored(self, hub: sg.AgentHub):
+        """Verbose approval is scored (text proxy may observe) but never drops the ask.
+
+        After polarity fix, high word-H no longer hard-blocks by default; the
+        important property is that evaluate returns a legal decision and the
+        human-surface path still runs (covered by the socket e2e test).
+        """
         d = hub.gate.evaluate(
             sg.AgentMessage(
                 agent_id="science",
@@ -85,9 +89,76 @@ class TestApprovalSurfacesWhenBlocked:
                 confidence=1.0,
             )
         )
-        # Depending on thresholds this is flagged or blocked; either is fine.
         assert d.decision in ("flagged", "blocked", "pass")
         assert d.computed_H > 0
+        assert sg.is_human_approval_request(
+            sg.AgentMessage(
+                agent_id="science",
+                task_id="t1",
+                message_type="approval_needed",
+                payload={"prompt": _verbose_prompt(120), "approval_needed": True},
+                timestamp_ns=0,
+                shannon_H=0.0,
+                confidence=1.0,
+            )
+        )
+
+    def test_verbose_approval_surfaces_even_if_text_proxy_enforce_blocks(
+        self, db_path: Path, monkeypatch
+    ):
+        """Even under legacy TEXT_PROXY=enforce hard-block, the ask is persisted."""
+        monkeypatch.setattr(sg, "TEXT_PROXY_MODE", "enforce")
+        monkeypatch.setattr(sg, "BEHAVIOR_MODE", "off")
+        import asyncio
+        import json
+        import uuid
+        from pathlib import Path as P
+
+        socket_path = f"/tmp/shannon_ask_proxy_{uuid.uuid4().hex[:8]}.sock"
+        prompt = _verbose_prompt(120)
+        iid = "ask-proxy-enforce-surface"
+
+        async def scenario():
+            hub = sg.AgentHub(db_path=db_path)
+            hub._lock = asyncio.Lock()
+            hub._shutdown = asyncio.Event()
+            server = await asyncio.start_unix_server(
+                hub._handle_socket_conn, path=socket_path
+            )
+            async with server:
+                reader, writer = await asyncio.open_unix_connection(socket_path)
+                writer.write(
+                    (json.dumps({"agent_id": "science", "task_id": "t1"}) + "\n").encode()
+                )
+                await writer.drain()
+                await reader.readline()
+                body = {
+                    "agent_id": "science",
+                    "task_id": "t1",
+                    "message_type": "approval_needed",
+                    "message_id": iid,
+                    "payload": {
+                        "prompt": prompt,
+                        "approval_needed": True,
+                        "interaction_id": iid,
+                    },
+                    "shannon_H": 0.0,
+                    "confidence": 1.0,
+                }
+                writer.write((json.dumps(body) + "\n").encode())
+                await writer.drain()
+                reply = json.loads((await reader.readline()).decode())
+                writer.close()
+                return reply, hub
+
+        try:
+            reply, hub = asyncio.run(scenario())
+        finally:
+            P(socket_path).unlink(missing_ok=True)
+
+        pending = hub.db.list_pending_interactions()
+        ids = {p["interaction_id"] for p in pending}
+        assert iid in ids, f"must surface under text_proxy enforce; reply={reply}"
 
     def test_socket_path_surfaces_approval_even_when_blocked(self, db_path: Path):
         """End-to-end through AgentHub socket: blocked + approval_needed → pending.

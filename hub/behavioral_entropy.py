@@ -280,9 +280,9 @@ class BehavioralMonitor:
 
     Feed it ``(agent_id, action_type, timestamp_ns)`` and read a
     :class:`BehavioralReading`. It holds no reference to the gate and makes no
-    block decisions — it is a measurement, deliberately kept observational so
-    it can be run alongside the existing gate and calibrated against real
-    traffic before any enforcement is attached to it.
+    block decisions itself — the gate consumes readings under
+    ``SHANNON_BEHAVIOR=off|observe|enforce`` (default **enforce**). This module
+    stays a pure measurement so thresholds and polarity stay in ``shannon_gate``.
     """
 
     def __init__(

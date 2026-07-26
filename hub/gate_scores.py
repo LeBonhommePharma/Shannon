@@ -36,12 +36,40 @@ _ATTACH_SOURCES = frozenset({"cmd_d", "process_attach", "ingest"})
 def registry_entropy_score(decision: "GateDecision") -> float:
     """The ONLY number that may be written to ``agents.entropy_score``.
 
-    Always ``decision.computed_H`` — message content entropy, not token H.
+    Polarity matches the Mac HUD and the scientific library: **low = danger**,
+    **high = healthy**. Preference order:
+
+    1. Core token-distribution H when the message carried logprobs/logits
+       (``core_collapse_H``).
+    2. Behavioural action-type entropy bits (``behavior_entropy_bits``) —
+       collapsed repertoires sit low; diverse agents sit high.
+    3. Text-proxy ``computed_H`` only as a last resort (verbosity proxy;
+       demoted — see SHANNON_TEXT_PROXY / ENTROPY_AUDIT_2026-07-23.md).
     """
+    core = getattr(decision, "core_collapse_H", None)
+    if core is not None:
+        try:
+            h = float(core)
+            if math.isfinite(h):
+                return max(0.0, h)
+        except (TypeError, ValueError):
+            pass
+    # Behavioural action H only after a real history exists. A single status
+    # event has H=0 by construction and must not wipe the HUD with a false
+    # "collapse" zero (entropy integrity: store gate measurement, not noise).
+    beh = getattr(decision, "behavior_entropy_bits", None)
+    beh_n = int(getattr(decision, "behavior_n_events", 0) or 0)
+    if beh is not None and beh_n >= 2:
+        try:
+            h = float(beh)
+            if math.isfinite(h):
+                return max(0.0, h)
+        except (TypeError, ValueError):
+            pass
     h = float(decision.computed_H)
     if not math.isfinite(h):
         return 0.0
-    return h
+    return max(0.0, h)
 
 
 def is_attach_status_noise(payload: Optional[dict[str, Any]] = None) -> bool:

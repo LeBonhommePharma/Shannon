@@ -85,11 +85,18 @@ class TestGateThresholds:
         assert sg.H_THRESHOLD == pytest.approx(3.5)
         assert sg.H_BLOCK_THRESHOLD == pytest.approx(5.0)
         assert sg.D_THRESHOLD == pytest.approx(1.8)
+        # Primary signal is behavioural enforce; text proxy is observe-only.
+        assert sg.BEHAVIOR_MODE == "enforce"
+        assert sg.TEXT_PROXY_MODE == "observe"
 
 
 class TestShannonGateEvaluate:
     @pytest.fixture
-    def gate(self, tmp_path):
+    def gate(self, tmp_path, monkeypatch):
+        # Isolate polarity tests from attestation / volume side-effects.
+        monkeypatch.setattr(sg, "ATTEST_MODE", "off")
+        monkeypatch.setattr(sg, "VOLUME_MODE", "off")
+        monkeypatch.setattr(sg, "UNSCORED_MODE", "off")
         db = sg.AuditDB(tmp_path / "agent_hub.db")
         return sg.ShannonGate(db)
 
@@ -111,19 +118,45 @@ class TestShannonGateEvaluate:
         decision = gate.evaluate(msg)
         assert decision.decision == "pass"
 
-    def test_high_entropy_message_is_flagged(self, gate):
+    def test_high_text_proxy_h_does_not_block_by_default(self, gate):
+        """Verbosity is not danger — high combined_H must not primary-block."""
         diverse_text = " ".join(f"word{i}" for i in range(60))
         msg = self._msg(payload={"text": diverse_text})
         decision = gate.evaluate(msg)
         assert decision.computed_H >= sg.H_THRESHOLD
-        assert decision.decision in ("flagged", "blocked")
+        # Observe-only proxy may annotate; must not force blocked.
+        assert decision.decision != "blocked"
+        assert any(
+            r.startswith("text_proxy_observe:") for r in decision.reasons
+        ) or decision.decision == "pass"
 
-    def test_very_high_entropy_message_is_blocked(self, gate):
+    def test_text_proxy_enforce_restores_legacy_high_h_block(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "TEXT_PROXY_MODE", "enforce")
+        monkeypatch.setattr(sg, "BEHAVIOR_MODE", "off")
+        monkeypatch.setattr(sg, "ATTEST_MODE", "off")
+        monkeypatch.setattr(sg, "VOLUME_MODE", "off")
+        monkeypatch.setattr(sg, "UNSCORED_MODE", "off")
+        gate = sg.ShannonGate(sg.AuditDB(tmp_path / "legacy.db"))
         diverse_text = " ".join(f"uniqueword{i}" for i in range(400))
-        msg = self._msg(payload={"text": diverse_text})
-        decision = gate.evaluate(msg)
+        decision = gate.evaluate(self._msg(payload={"text": diverse_text}))
         if decision.computed_H >= sg.H_BLOCK_THRESHOLD:
             assert decision.decision == "blocked"
+            assert any("H_hard_block" in r for r in decision.reasons)
+
+    def test_short_dangerous_not_autopassed_by_low_word_h(self, gate):
+        """rm -rf style text has low word-H; must not be 'safe' via proxy alone.
+
+        With text proxy demoted, short text is not blocked by H — but it also
+        is not *certified* by low H. Decision is not forced to pass by the
+        proxy; volume/attest/behavior still apply. Here other modes are off so
+        pass is allowed, and computed_H is recorded (low), never inverted into
+        a 'healthy high-H' pass signal.
+        """
+        decision = gate.evaluate(self._msg(payload={"text": "rm -rf /"}))
+        assert decision.computed_H < sg.H_THRESHOLD
+        # Must not carry a legacy H_hard_block / H_flag reason from high proxy.
+        assert not any(r.startswith("H_hard_block") or r.startswith("H_flag(")
+                       for r in decision.reasons)
 
     def test_cf_disagreement_flags_message(self, gate):
         gate.evaluate(self._msg(agent_id="codex", payload={"cf_value": -3.2}))
@@ -131,6 +164,114 @@ class TestShannonGateEvaluate:
             self._msg(agent_id="science", payload={"cf_value": -4.91})
         )
         assert any("CF_disagreement" in r for r in decision.reasons)
+
+
+class TestPolarityAndPrimarySignal:
+    """Low behavioural anomaly free / high diversity = healthy; KL spike = danger."""
+
+    def _msg(self, agent_id, message_type, ts, text="ok"):
+        return sg.AgentMessage(
+            agent_id=agent_id,
+            task_id="t1",
+            message_type=message_type,
+            payload={"text": text},
+            timestamp_ns=ts,
+            shannon_H=0.0,
+            confidence=1.0,
+        )
+
+    def test_anomaly_after_baseline_flags_under_enforce(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "BEHAVIOR_MODE", "enforce")
+        monkeypatch.setattr(sg, "BEHAVIOR_FLAG_SCORE", 0.5)
+        monkeypatch.setattr(sg, "TEXT_PROXY_MODE", "off")
+        monkeypatch.setattr(sg, "ATTEST_MODE", "off")
+        monkeypatch.setattr(sg, "VOLUME_MODE", "off")
+        monkeypatch.setattr(sg, "UNSCORED_MODE", "off")
+        gate = sg.ShannonGate(sg.AuditDB(tmp_path / "pol.db"))
+        if gate._behavior is None:
+            pytest.skip("BehavioralMonitor unavailable")
+        t = 0
+        for _ in range(40):
+            t += 1_000_000_000
+            gate.evaluate(self._msg("science", "status", t))
+        t += 1_000_000_000
+        d = gate.evaluate(self._msg("science", "result", t, text="done"))
+        assert any(r.startswith("behavior_observe:") for r in d.reasons), d.reasons
+        assert d.decision == "flagged"
+        assert d.behavior_score >= 0.5
+        # Registry polarity: prefers behavioural H (finite, >= 0).
+        score = sg.registry_entropy_score(d)
+        assert score >= 0.0
+        assert math.isfinite(score)
+
+    def test_diverse_action_sequence_not_flagged_by_entropy(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "BEHAVIOR_MODE", "enforce")
+        monkeypatch.setattr(sg, "BEHAVIOR_FLAG_SCORE", 1.0)
+        monkeypatch.setattr(sg, "TEXT_PROXY_MODE", "off")
+        monkeypatch.setattr(sg, "ATTEST_MODE", "off")
+        monkeypatch.setattr(sg, "VOLUME_MODE", "off")
+        monkeypatch.setattr(sg, "UNSCORED_MODE", "off")
+        gate = sg.ShannonGate(sg.AuditDB(tmp_path / "div.db"))
+        if gate._behavior is None:
+            pytest.skip("BehavioralMonitor unavailable")
+        types = ("status", "result", "code_suggestion", "alert", "benchmark_update")
+        t = 0
+        last = None
+        for i in range(50):
+            t += 1_000_000_000
+            last = gate.evaluate(
+                self._msg("science", types[i % len(types)], t, text=f"ping {i}")
+            )
+        assert last is not None
+        # Steady diverse repertoire should not raise a behaviour anomaly flag.
+        assert not any(r.startswith("behavior_observe:") for r in last.reasons), last.reasons
+        assert last.decision == "pass"
+        assert last.behavior_entropy_bits is not None
+        assert last.behavior_entropy_bits > 1.0  # high action-type H = healthy
+
+    def test_core_logprobs_collapse_flags(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sg, "BEHAVIOR_MODE", "off")
+        monkeypatch.setattr(sg, "TEXT_PROXY_MODE", "off")
+        monkeypatch.setattr(sg, "ATTEST_MODE", "off")
+        monkeypatch.setattr(sg, "VOLUME_MODE", "off")
+        monkeypatch.setattr(sg, "UNSCORED_MODE", "off")
+        monkeypatch.setattr(sg, "CORE_COLLAPSE_H", 4.0)
+        gate = sg.ShannonGate(sg.AuditDB(tmp_path / "core.db"))
+        # Peaked distribution → low Shannon H (collapse).
+        import math
+        peaked = [0.0] + [-20.0] * 31  # logprobs: one token dominates
+        d = gate.evaluate(
+            sg.AgentMessage(
+                agent_id="science",
+                task_id="t",
+                message_type="status",
+                payload={"text": "x", "logprobs": peaked},
+                timestamp_ns=1,
+                shannon_H=0.0,
+                confidence=1.0,
+            )
+        )
+        assert d.core_collapse_H is not None
+        assert d.core_collapse_H < 4.0
+        assert d.decision == "flagged"
+        assert any("core_collapse" in r for r in d.reasons)
+        # Uniform logprobs → high H, no collapse flag.
+        n = 32
+        uni = [-math.log(n)] * n
+        d2 = gate.evaluate(
+            sg.AgentMessage(
+                agent_id="science",
+                task_id="t",
+                message_type="status",
+                payload={"text": "y", "logprobs": uni},
+                timestamp_ns=2,
+                shannon_H=0.0,
+                confidence=1.0,
+            )
+        )
+        assert d2.core_collapse_H is not None
+        assert d2.core_collapse_H >= 4.0
+        assert d2.decision == "pass"
 
 
 class TestAuditDB:

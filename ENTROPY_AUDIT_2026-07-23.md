@@ -1,11 +1,26 @@
 # Entropy Audit — Shannon Agent Hub
 
-**Date:** 2026-07-23
+**Date:** 2026-07-23  
+**Updated:** 2026-07-26 — polarity + primary signal fix (see Status below)  
 **Scope:** `hub/shannon_gate.py`, `hub/agent_protocol.py`, `hub/AgentHubApp.swift`,
-`python/shannon/detector.py`, `python/shannon/_numba_fallback.py`, `src/shannon.cpp`
-**Verdict:** The library's entropy kernels are correct. The hub gate's entropy is not
-measuring what the system claims it measures, and the gate and the UI interpret the
-same number with **opposite polarity**.
+`python/shannon/detector.py`, `python/shannon/_numba_fallback.py`, `src/shannon.cpp`  
+**Verdict (historical):** The library's entropy kernels are correct. The hub gate's
+text-proxy entropy was not measuring what the system claimed, and the gate and the UI
+interpreted the same number with **opposite polarity**.
+
+### Status (2026-07-26) — FIXED
+
+| Issue | Fix |
+|---|---|
+| High text-proxy H blocked verbose messages | `SHANNON_TEXT_PROXY` default **observe** — no longer primary block |
+| Low H / high anomaly = danger polarity | Gate + `registry_entropy_score` align with UI (low = danger) |
+| Behavioural signal observe-only | `SHANNON_BEHAVIOR` default **enforce**; BehavioralMonitor primary |
+| No per-agent baseline | BehavioralMonitor per-agent KL / burst / novelty |
+| Real logprobs unused | `core_entropy_from_payload` prefers `shannon` kernels when present |
+| Approval silent-drop | Socket + HTTP surface `approval_needed` before blocked early-return (P0.2) |
+
+Core library (`src/shannon`, `python/shannon`) remains the scientific kernel and is
+untouched by the hub polarity fix.
 
 ---
 

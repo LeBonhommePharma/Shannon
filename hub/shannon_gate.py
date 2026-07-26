@@ -33,8 +33,17 @@ Usage
 Environment
 -----------
   FLEXAIDDS_LOG_DIR   Override default log/DB directory
-  SHANNON_H_THRESHOLD Override flag threshold (default 3.5)
-  SHANNON_H_BLOCK     Override block threshold (default 5.0)
+  SHANNON_H_THRESHOLD Text-proxy flag threshold (legacy; see SHANNON_TEXT_PROXY)
+  SHANNON_H_BLOCK     Text-proxy block threshold (legacy; see SHANNON_TEXT_PROXY)
+
+Polarity (non-negotiable — see ENTROPY_AUDIT_2026-07-23.md)
+-----------------------------------------------------------
+  LOW entropy / high behavioural anomaly = danger (collapse, runaway, deception).
+  HIGH entropy = healthy / exploratory.
+  The UI reads agents.entropy_score the same way (red at low H).
+  The old combined_entropy text proxy had the OPPOSITE polarity (high word-H
+  blocked verbose messages). It is demoted to SHANNON_TEXT_PROXY and must not
+  drive blocking by default.
 
 Gate knobs, and what to do if one misfires
 ------------------------------------------
@@ -48,12 +57,21 @@ of enforcing is measurable BEFORE you enforce.
   SHANNON_ATTEST=off|observe|enforce         (default enforce)
       Self-report divergence.  See the block at "Self-report attestation".
 
-  SHANNON_BEHAVIOR=off|observe|enforce       (default observe)
-      Behavioural action-type entropy (BehavioralMonitor). In observe mode,
-      anomalous readings are logged on gate_reasons as behavior_observe:...
-      but the verdict is unchanged. In enforce mode, a high anomaly may
-      escalate pass→flagged only (never silent, never direct block).
-      Tunable: SHANNON_BEHAVIOR_FLAG_SCORE (default 1.0).
+  SHANNON_BEHAVIOR=off|observe|enforce       (default enforce)
+      PRIMARY gate signal: behavioural action-type entropy
+      (BehavioralMonitor — per-agent baselines, KL, burstiness, low efficiency).
+      In observe mode, anomalous / low-H readings are logged on gate_reasons as
+      behavior_observe:... but the verdict is unchanged. In enforce mode, high
+      anomaly or collapsed action repertoire escalates pass→flagged (never
+      silent). Tunables: SHANNON_BEHAVIOR_FLAG_SCORE (default 1.0),
+      SHANNON_BEHAVIOR_LOW_EFF (default 0.15).
+
+  SHANNON_TEXT_PROXY=off|observe|enforce     (default observe)
+      Legacy combined_entropy (≈ 0.7·log₂(n_words) + 0.3·char H) — a verbosity
+      proxy, NOT model collapse. Observe: record text_proxy_observe:... only.
+      Enforce: restore the old high-H flag/block path (discouraged; polarity
+      inverted vs the library and the UI). Off: compute H for the audit column
+      only. Prefer SHANNON_BEHAVIOR + real logprobs.
 
   SHANNON_VOLUME=off|observe|enforce         (default enforce)
       Total information content (compressed size) + padding detection, over
@@ -194,13 +212,19 @@ _log_dir_env = (
 LOG_DIR: Path = Path(_log_dir_env) if _log_dir_env else Path.home() / ".shannon"
 DB_PATH: Path = LOG_DIR / "agent_hub.db"
 
-# Shannon gate thresholds
+# Shannon gate thresholds — TEXT PROXY only (verbosity ≈ 0.7·log₂(n_words)).
+# These do NOT drive blocking unless SHANNON_TEXT_PROXY=enforce (legacy).
+# Correct polarity for danger is LOW H / high behavioural anomaly; see
+# SHANNON_BEHAVIOR and ENTROPY_AUDIT_2026-07-23.md.
 H_THRESHOLD: float = float(os.environ.get("SHANNON_H_THRESHOLD", "3.5"))
 H_BLOCK_THRESHOLD: float = float(os.environ.get("SHANNON_H_BLOCK", "5.0"))
 D_THRESHOLD: float = float(os.environ.get("SHANNON_D_THRESHOLD", "1.8"))
-H_TEMPORAL_SPIKE: float = 2.0   # flag when agent's behavioral entropy exceeds this
+H_TEMPORAL_SPIKE: float = 2.0   # legacy high-type-diversity flag (text-proxy family)
 TEMPORAL_WINDOW: int = 20        # rolling message-type history per agent
 CF_DISAGREE_PCT: float = 0.05   # 5% CF disagreement triggers D flag
+# Real token-distribution collapse (when payload carries logprobs/logits).
+# Healthy model streams sit ~8–12 bits; collapse often ~2–4. Flag below this.
+CORE_COLLAPSE_H: float = float(os.environ.get("SHANNON_CORE_COLLAPSE_H", "4.0"))
 
 
 # ── Self-report attestation ───────────────────────────────────────────────────
@@ -566,14 +590,27 @@ ATTEST_BONUS: float = float(os.environ.get("SHANNON_ATTEST_BONUS", "0.5"))
 # operators who can update every client. See _gate_response_envelope().
 ECHO_MODE: str = os.environ.get("SHANNON_ECHO", "decision").strip().lower()
 
-# ── Behavioural entropy (SHANNON_BEHAVIOR) ────────────────────────────────────
+# ── Behavioural entropy (SHANNON_BEHAVIOR) — PRIMARY decision signal ──────────
 # Action-type distribution monitor (see behavioral_entropy.BehavioralMonitor).
-# Default is observe: feed every message, record anomalous readings on
-# gate_reasons, never change the verdict. enforce may escalate pass→flagged.
-BEHAVIOR_MODE: str = os.environ.get("SHANNON_BEHAVIOR", "observe").strip().lower()
+# Default enforce: per-agent KL / burst / novelty anomaly OR low action
+# efficiency (collapsed repertoire) may escalate pass→flagged. Observe logs
+# only; off disables the monitor. Text-proxy combined_H is NOT primary.
+BEHAVIOR_MODE: str = os.environ.get("SHANNON_BEHAVIOR", "enforce").strip().lower()
 BEHAVIOR_FLAG_SCORE: float = float(
     os.environ.get("SHANNON_BEHAVIOR_FLAG_SCORE", "1.0")
 )
+# Efficiency H/log₂(K) at or below this (with a warm baseline) = collapse danger.
+BEHAVIOR_LOW_EFF: float = float(
+    os.environ.get("SHANNON_BEHAVIOR_LOW_EFF", "0.15")
+)
+# Min events before low-efficiency can escalate (avoid cold-start red).
+BEHAVIOR_LOW_EFF_MIN_N: int = int(
+    os.environ.get("SHANNON_BEHAVIOR_LOW_EFF_MIN_N", "16")
+)
+
+# ── Text-proxy combined_entropy (SHANNON_TEXT_PROXY) — secondary only ───────
+# Verbosity proxy; inverted polarity vs library/UI. Default observe.
+TEXT_PROXY_MODE: str = os.environ.get("SHANNON_TEXT_PROXY", "observe").strip().lower()
 
 # ── message_type enforcement (SHANNON_STRICT_TYPES) ───────────────────────────
 # ONE SENTENCE FOR THE OPERATOR:
@@ -710,7 +747,7 @@ except ImportError:  # package-style import when hub is a package
         should_refresh_registry_entropy,
     )
 
-# Optional behavioural entropy monitor (observe-only by default).
+# Optional behavioural entropy monitor (PRIMARY when SHANNON_BEHAVIOR≠off).
 try:
     from behavioral_entropy import BehavioralMonitor as _BehavioralMonitor  # type: ignore
 except ImportError:
@@ -718,6 +755,69 @@ except ImportError:
         from hub.behavioral_entropy import BehavioralMonitor as _BehavioralMonitor  # type: ignore
     except ImportError:
         _BehavioralMonitor = None  # type: ignore[misc, assignment]
+
+
+def core_entropy_from_payload(payload: dict[str, Any]) -> Optional[float]:
+    """Real token-distribution Shannon H when the payload carries logprobs/logits.
+
+    Uses the scientific kernel (``python/shannon``) when importable. Returns
+    None when no distribution is present or the library is unavailable — caller
+    must fall back to BehavioralMonitor. Does not invent numbers.
+    """
+    if not isinstance(payload, dict):
+        return None
+    raw = (
+        payload.get("logprobs")
+        or payload.get("logits")
+        or payload.get("token_logprobs")
+        or payload.get("token_logits")
+    )
+    if raw is None:
+        return None
+    try:
+        import numpy as np  # local: optional for hub hosts without numpy
+    except ImportError:
+        return None
+    try:
+        arr = np.asarray(raw, dtype=np.float64).ravel()
+    except (TypeError, ValueError):
+        return None
+    if arr.size < 2:
+        return None
+    # Prefer logprobs keys as already-normalized log p; logits need log-sum-exp.
+    is_logprob = (
+        payload.get("logprobs") is not None
+        or payload.get("token_logprobs") is not None
+    )
+    try:
+        if is_logprob:
+            from shannon import shannon_entropy_from_logprobs  # type: ignore
+
+            h = float(shannon_entropy_from_logprobs(arr))
+        else:
+            from shannon import shannon_entropy_from_logits  # type: ignore
+
+            h = float(shannon_entropy_from_logits(arr))
+    except Exception:
+        # Pure-Python fallback: normalize logprobs/logits ourselves only if
+        # shannon is missing — still log-sum-exp stable, no third science path.
+        try:
+            if is_logprob:
+                # Treat as log p; renormalize for safety.
+                m = float(np.max(arr))
+                p = np.exp(arr - m)
+                p = p / float(np.sum(p))
+            else:
+                m = float(np.max(arr))
+                e = np.exp(arr - m)
+                p = e / float(np.sum(e))
+            mask = p > 1e-15
+            h = float(-np.sum(p[mask] * np.log2(p[mask])))
+        except Exception:
+            return None
+    if not math.isfinite(h):
+        return None
+    return max(0.0, h)
 
 
 def bind_socket_agent_id(claimed: Any, bound: str) -> tuple[str, Optional[str]]:
@@ -742,7 +842,7 @@ def bind_socket_agent_id(claimed: Any, bound: str) -> tuple[str, Optional[str]]:
 class GateDecision:
     decision: str           # "pass" | "flagged" | "blocked"
     reasons: list[str]
-    computed_H: float       # gate-computed output entropy
+    computed_H: float       # text-proxy combined_entropy (audit; not primary danger)
     computed_D: float       # gate-computed disagreement entropy (0 if N/A)
     computed_H_temporal: float = 0.0
     # ── Self-report attestation ───────────────────────────────────────────
@@ -763,6 +863,13 @@ class GateDecision:
     bits_total: float = 0.0
     redundancy: float = 0.0                       # compressed/raw, 0..~1
     pointers: tuple[str, ...] = ()                # unscored references found
+    # ── Primary polarity-aligned signals (LOW H / high anomaly = danger) ──
+    behavior_score: float = 0.0                   # BehavioralMonitor anomaly
+    behavior_entropy_bits: Optional[float] = None  # action-type H (high=healthy)
+    behavior_efficiency: Optional[float] = None    # H/log₂(K) ∈ [0,1]
+    behavior_n_events: int = 0                    # history depth for this agent
+    core_collapse_H: Optional[float] = None        # real token H from logprobs
+    primary_signal: str = "none"                   # behavior|core_collapse|text_proxy
 
 
 @dataclass
@@ -2654,38 +2761,124 @@ class ShannonGate:
         reasons.extend(att.reasons)
 
         # ── 6. Gate decision tree ─────────────────────────────────────────────
-        # Attested calibration is the ONLY thing that moves a threshold, it
-        # moves only the flag threshold, and it moves it by at most
-        # ATTEST_BONUS. H_BLOCK_THRESHOLD is never touched by reputation in
-        # either direction.
+        # PRIMARY polarity (ENTROPY_AUDIT_2026-07-23): low entropy / high
+        # behavioural anomaly = danger. Text-proxy combined_H is a verbosity
+        # measure with INVERTED polarity and is secondary (SHANNON_TEXT_PROXY).
+        # Attested calibration may still raise the *legacy* text-proxy flag
+        # threshold when that path is in enforce mode.
         H_flag_eff = H_THRESHOLD + (att.headroom if ATTEST_MODE == "enforce" else 0.0)
-        decision: str
+        decision: str = "pass"
+        primary_signal = "none"
+        behavior_score = 0.0
+        behavior_entropy_bits: Optional[float] = None
+        behavior_efficiency: Optional[float] = None
+        behavior_n_events = 0
+        core_H: Optional[float] = None
 
-        if H >= H_BLOCK_THRESHOLD:
-            reasons.append(
-                f"H_hard_block({H:.2f}>={H_BLOCK_THRESHOLD})"
-            )
-            if msg.message_type == "code_suggestion":
-                reasons.append("code_suggestion_hard_blocked")
-            decision = "blocked"
+        # ── 6a. Core library entropy when real logprobs/logits are present ───
+        # Prefer ShannonCollapseDetector kernels over any proxy. Collapse =
+        # low H. Failures / missing package → BehavioralMonitor.
+        core_H = core_entropy_from_payload(msg.payload if isinstance(msg.payload, dict) else {})
+        if core_H is not None:
+            reasons.append(f"core_entropy:H={core_H:.2f}")
+            primary_signal = "core_collapse"
+            if core_H < CORE_COLLAPSE_H:
+                reasons.append(
+                    f"core_collapse({core_H:.2f}<{CORE_COLLAPSE_H})"
+                )
+                decision = "flagged"
 
-        elif H >= H_flag_eff:
-            reasons.append(f"H_flag({H:.2f}>={H_flag_eff})")
-            decision = "flagged"
+        # ── 6b. Text-proxy combined_H (SHANNON_TEXT_PROXY) ────────────────────
+        # Observe: record only. Enforce: legacy high-H block (discouraged).
+        # Off: silent H already stored on the decision for audit.
+        if TEXT_PROXY_MODE == "enforce":
+            primary_signal = primary_signal if primary_signal != "none" else "text_proxy"
+            if H >= H_BLOCK_THRESHOLD:
+                reasons.append(
+                    f"H_hard_block({H:.2f}>={H_BLOCK_THRESHOLD})"
+                )
+                if msg.message_type == "code_suggestion":
+                    reasons.append("code_suggestion_hard_blocked")
+                decision = "blocked"
+            elif H >= H_flag_eff and decision == "pass":
+                reasons.append(f"H_flag({H:.2f}>={H_flag_eff})")
+                decision = "flagged"
+            elif (H_temp >= H_TEMPORAL_SPIKE
+                  and len(self._temporal_history[msg.agent_id]) >= 10
+                  and decision == "pass"):
+                reasons.append(
+                    f"H_temporal_spike({H_temp:.2f}>={H_TEMPORAL_SPIKE})"
+                )
+                decision = "flagged"
+        elif TEXT_PROXY_MODE == "observe":
+            if H >= H_flag_eff:
+                reasons.append(
+                    f"text_proxy_observe:H={H:.2f}>={H_flag_eff}"
+                )
+            if (H_temp >= H_TEMPORAL_SPIKE
+                    and len(self._temporal_history[msg.agent_id]) >= 10):
+                reasons.append(
+                    f"text_proxy_observe:H_temporal={H_temp:.2f}"
+                )
 
-        elif D >= D_THRESHOLD:
+        # Docking CF disagreement is domain-appropriate (not the text proxy).
+        if D >= D_THRESHOLD and decision == "pass":
             reasons.append(f"D_flag({D:.2f}>={D_THRESHOLD})")
             decision = "flagged"
 
-        elif (H_temp >= H_TEMPORAL_SPIKE
-              and len(self._temporal_history[msg.agent_id]) >= 10):
-            reasons.append(f"H_temporal_spike({H_temp:.2f}>={H_TEMPORAL_SPIKE})")
-            decision = "flagged"
+        # ── 6c. Behavioural entropy (SHANNON_BEHAVIOR) — PRIMARY by default ──
+        # Feeds action-type stream into BehavioralMonitor (per-agent baseline).
+        # Danger: high anomaly score OR collapsed action efficiency (low H).
+        # Observe annotates; enforce escalates pass→flagged. Never silent-drop.
+        if BEHAVIOR_MODE != "off" and self._behavior is not None:
+            try:
+                ts = int(msg.timestamp_ns) if msg.timestamp_ns else time.time_ns()
+                reading = self._behavior.observe(
+                    msg.agent_id, msg.message_type, ts
+                )
+                behavior_score = float(reading.score)
+                behavior_entropy_bits = float(reading.entropy_bits)
+                behavior_efficiency = float(reading.efficiency)
+                behavior_n_events = int(reading.n_events)
+                if primary_signal == "none":
+                    primary_signal = "behavior"
+                # Anomaly = departure from *this* agent's baseline (KL / burst /
+                # novel). Absolute low efficiency alone must NOT escalate: a
+                # status-only reporter has H≈0 by design; punishing it would
+                # reintroduce a universal threshold against narrow repertoires.
+                anomalous = (
+                    reading.baseline_ready
+                    and reading.score >= BEHAVIOR_FLAG_SCORE
+                )
+                low_eff = (
+                    reading.n_events >= BEHAVIOR_LOW_EFF_MIN_N
+                    and reading.efficiency <= BEHAVIOR_LOW_EFF
+                )
+                if anomalous:
+                    reasons.append(
+                        f"behavior_observe:score={reading.score:.2f}"
+                        f",kl={reading.kl_bits:.2f}"
+                        f",novel={int(reading.novel_action)}"
+                        f",H={reading.entropy_bits:.2f}"
+                        f",eff={reading.efficiency:.2f}"
+                    )
+                elif low_eff:
+                    # Observational only: collapsed repertoire note for HUD/audit.
+                    reasons.append(
+                        f"behavior_low_H:eff={reading.efficiency:.2f}"
+                        f",H={reading.entropy_bits:.2f}"
+                        f",n={reading.n_events}"
+                    )
+                if (
+                    BEHAVIOR_MODE == "enforce"
+                    and decision == "pass"
+                    and anomalous
+                ):
+                    decision = "flagged"
+            except Exception as exc:  # pragma: no cover — defensive
+                logger.debug("behavioral monitor failed: %s", exc)
 
-        else:
-            decision = "pass"
-
-        # ── 6b. Attestation escalation (terminal stage) ───────────────────────
+        # ── 6d. Attestation escalation (terminal stage) ───────────────────────
         # Deliberately AFTER the tree, never inside it, so the entropy verdict
         # stays a pure function of the measurement and the claim's effect on it
         # is one auditable step. pass -> blocked is structurally impossible:
@@ -2697,7 +2890,7 @@ class ShannonGate:
             if att.escalate_block and decision == "flagged":
                 decision = "blocked"
 
-        # ── 6c. Volume / dilution escalation ──────────────────────────────────
+        # ── 6e. Volume / dilution escalation ──────────────────────────────────
         # Under its OWN mode knob, not ATTEST_MODE. The dilution escalation
         # used to live inside the `if ATTEST_MODE == "enforce"` block above,
         # which meant SHANNON_ATTEST=off silently disarmed the padding guard
@@ -2705,7 +2898,7 @@ class ShannonGate:
         # the same class of silent no-op this file keeps being bitten by.
         # A volume block is a measurement of the bytes in hand, not a verdict
         # about the agent, so unlike the attestation ladder it may block
-        # directly — exactly like H_hard_block.
+        # directly.
         if VOLUME_MODE == "enforce":
             if vol_block:
                 decision = "blocked"
@@ -2716,7 +2909,7 @@ class ShannonGate:
                 # aggregate to a payload, vol_block above already caught it.
                 decision = "flagged"
 
-        # ── 6d. Unscored content ──────────────────────────────────────────────
+        # ── 6f. Unscored content ──────────────────────────────────────────────
         # "Must not be able to reach 'pass' silently": in `flag` (default) the
         # message is still delivered — only `blocked` stops traffic — but it
         # can never be certified clean. `block` refuses delivery outright.
@@ -2726,38 +2919,12 @@ class ShannonGate:
             elif UNSCORED_MODE == "flag" and decision == "pass":
                 decision = "flagged"
 
-        # ── 6e. Unknown message_type — hard, unconditional refusal ────────────
+        # ── 6g. Unknown message_type — hard, unconditional refusal ────────────
         # Last, so nothing can walk it back. SHANNON_STRICT_TYPES=0 downgrades
         # this to observe-only; the reason string is on the audit row either
         # way.
         if unknown_type and STRICT_TYPES:
             decision = "blocked"
-
-        # ── 6f. Behavioural entropy (SHANNON_BEHAVIOR) ────────────────────────
-        # Feeds action-type stream into BehavioralMonitor. Observe mode only
-        # annotates reasons; enforce may escalate pass→flagged (never block
-        # and never drop the reason). Failures are swallowed so a missing or
-        # buggy monitor cannot take the gate offline.
-        if BEHAVIOR_MODE != "off" and self._behavior is not None:
-            try:
-                ts = int(msg.timestamp_ns) if msg.timestamp_ns else time.time_ns()
-                reading = self._behavior.observe(
-                    msg.agent_id, msg.message_type, ts
-                )
-                anomalous = (
-                    reading.baseline_ready
-                    and reading.score >= BEHAVIOR_FLAG_SCORE
-                )
-                if anomalous:
-                    reasons.append(
-                        f"behavior_observe:score={reading.score:.2f}"
-                        f",kl={reading.kl_bits:.2f}"
-                        f",novel={int(reading.novel_action)}"
-                    )
-                    if BEHAVIOR_MODE == "enforce" and decision == "pass":
-                        decision = "flagged"
-            except Exception as exc:  # pragma: no cover — defensive
-                logger.debug("behavioral monitor failed: %s", exc)
 
         gate_decision = GateDecision(
             decision=decision,
@@ -2773,6 +2940,12 @@ class ShannonGate:
             bits_total=bits_total,
             redundancy=redundancy,
             pointers=content.pointers,
+            behavior_score=behavior_score,
+            behavior_entropy_bits=behavior_entropy_bits,
+            behavior_efficiency=behavior_efficiency,
+            behavior_n_events=behavior_n_events,
+            core_collapse_H=core_H,
+            primary_signal=primary_signal,
         )
 
         # ── 7. Persist to audit log ───────────────────────────────────────────

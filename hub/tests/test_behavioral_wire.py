@@ -1,7 +1,8 @@
-"""P1.1 / P0.3: BehavioralMonitor observe path wired into ShannonGate.evaluate.
+"""P1.1 / P0.3: BehavioralMonitor is the primary gate signal (default enforce).
 
-Default SHANNON_BEHAVIOR=observe must never change the gate decision.
+SHANNON_BEHAVIOR=observe must never change the gate decision.
 Enforce may escalate pass→flagged only when the behavioural score is high.
+Default mode is enforce (polarity fix — see ENTROPY_AUDIT_2026-07-23.md).
 """
 
 from __future__ import annotations
@@ -138,3 +139,41 @@ class TestBehavioralWireSmoke:
             decision="pass", reasons=[], computed_H=2.5, computed_D=0.0
         )
         assert sg.registry_entropy_score(d) == 2.5
+
+    def test_registry_prefers_behavior_entropy_over_text_proxy(self):
+        """HUD polarity: low behavioural H is danger; prefer it over verbosity H."""
+        d = sg.GateDecision(
+            decision="flagged",
+            reasons=[],
+            computed_H=6.0,  # verbose text proxy (would look "healthy" if inverted)
+            computed_D=0.0,
+            behavior_entropy_bits=1.2,  # collapsed repertoire
+            behavior_n_events=8,
+        )
+        assert sg.registry_entropy_score(d) == pytest.approx(1.2)
+
+    def test_registry_ignores_single_event_behavior_h(self):
+        """First action always has H=0 — do not overwrite computed_H with that."""
+        d = sg.GateDecision(
+            decision="pass",
+            reasons=[],
+            computed_H=3.2,
+            computed_D=0.0,
+            behavior_entropy_bits=0.0,
+            behavior_n_events=1,
+        )
+        assert sg.registry_entropy_score(d) == pytest.approx(3.2)
+
+    def test_registry_prefers_core_collapse_h(self):
+        d = sg.GateDecision(
+            decision="flagged",
+            reasons=[],
+            computed_H=5.0,
+            computed_D=0.0,
+            behavior_entropy_bits=3.0,
+            core_collapse_H=2.1,
+        )
+        assert sg.registry_entropy_score(d) == pytest.approx(2.1)
+
+    def test_default_behavior_mode_is_enforce(self):
+        assert sg.BEHAVIOR_MODE == "enforce"

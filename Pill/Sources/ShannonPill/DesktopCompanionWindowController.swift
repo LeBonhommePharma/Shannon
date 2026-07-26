@@ -52,34 +52,28 @@ final class DesktopCompanionPanel: NSPanel {
 @MainActor
 final class DesktopCompanionModel: ObservableObject {
     @Published private(set) var presentation: DesktopCompanionPresentation
-    /// How many agents are in the desktop cycle set (top N busy).
-    @Published private(set) var cycleCount: Int = 0
-    /// Current slot within the cycle set (0-based).
-    @Published private(set) var selectedIndex: Int = 0
 
     private let activity: AgentActivityMonitor
     private let bridge: ShannonBridge
     private var cancellables = Set<AnyCancellable>()
-    /// Sticky agent id so a refresh keeps the same pet when the roster reorders.
-    private var selectedAgentId: String?
+    /// Adaptive sleepy poll (O1) — not the fixed 2 s historical tick.
+    private var pollCancellable: AnyCancellable?
+    private var currentPollInterval: TimeInterval?
+
+    /// Last scheduled wall-timer interval (tests / diagnostics).
+    var scheduledPollIntervalForTesting: TimeInterval? { currentPollInterval }
 
     init(activity: AgentActivityMonitor, bridge: ShannonBridge) {
         self.activity = activity
         self.bridge = bridge
-        let built = Self.makePresentation(
-            activity: activity,
-            bridge: bridge,
-            preferredId: nil,
-            fallbackIndex: 0
-        )
-        self.presentation = built.presentation
-        self.selectedIndex = built.selectedIndex
-        self.cycleCount = built.cycleCount
-        self.selectedAgentId = built.presentation.state?.id
+        self.presentation = Self.makePresentation(activity: activity, bridge: bridge)
         bind()
+        ensurePollTimer()
     }
 
     private func bind() {
+        // Activity + bridge ticks rebuild immediately; wall timer only covers
+        // idle→sleepy age flips when gate traffic is quiet (see O1 cadence).
         activity.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -94,63 +88,31 @@ final class DesktopCompanionModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Steady tick so sleepy thresholds advance even without gate traffic.
-        Timer.publish(every: 2.0, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in self?.refresh() }
-            .store(in: &cancellables)
     }
 
     func refresh() {
-        apply(
-            Self.makePresentation(
-                activity: activity,
-                bridge: bridge,
-                preferredId: selectedAgentId,
-                fallbackIndex: selectedIndex
-            )
-        )
+        presentation = Self.makePresentation(activity: activity, bridge: bridge)
+        ensurePollTimer()
     }
 
-    /// Advance to the next top-N busy agent (click cycle). No-op when ≤1.
-    func cycleToNext() {
-        let built = Self.makePresentation(
-            activity: activity,
-            bridge: bridge,
-            preferredId: selectedAgentId,
-            fallbackIndex: selectedIndex
-        )
-        guard built.cycleCount > 1 else {
-            apply(built)
-            return
-        }
-        let next = DesktopCompanionCycle.nextIndex(
-            after: built.selectedIndex,
-            count: built.cycleCount
-        )
-        apply(
-            Self.makePresentation(
-                activity: activity,
-                bridge: bridge,
-                preferredId: nil,
-                fallbackIndex: next
-            )
-        )
-    }
 
-    private func apply(_ built: DesktopCompanionCycle.PresentResult) {
-        presentation = built.presentation
-        selectedIndex = built.selectedIndex
-        cycleCount = built.cycleCount
-        selectedAgentId = built.presentation.state?.id
+    /// Schedule / reschedule the sleepy poll from pure cadence policy.
+    private func ensurePollTimer() {
+        let interval = DesktopCompanionRefreshCadence.pollInterval(
+            agents: activity.summary.agents
+        )
+        if currentPollInterval == interval, pollCancellable != nil { return }
+        currentPollInterval = interval
+        pollCancellable?.cancel()
+        pollCancellable = Timer.publish(every: interval, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in self?.refresh() }
     }
 
     static func makePresentation(
         activity: AgentActivityMonitor,
-        bridge: ShannonBridge,
-        preferredId: String?,
-        fallbackIndex: Int
-    ) -> DesktopCompanionCycle.PresentResult {
+        bridge: ShannonBridge
+    ) -> DesktopCompanionPresentation {
         let summary = activity.summary
         let deltas = EntropyProvenance.companionDeltas(
             agentIds: summary.agents.map(\.id),
@@ -159,16 +121,11 @@ final class DesktopCompanionModel: ObservableObject {
             gate: activity.agentEntropy,
             gateDBAvailable: activity.gateDBAvailable
         )
-        let full = CompanionRoster.build(
-            from: summary,
+        return DesktopCompanionSelector.present(
+            summary: summary,
             entropyDeltas: deltas,
             pendingAsks: activity.pendingAsks,
             activity: activity.recentActivity
-        )
-        return DesktopCompanionCycle.present(
-            roster: full,
-            selectedIndex: fallbackIndex,
-            preferredId: preferredId
         )
     }
 }
@@ -321,6 +278,8 @@ final class DesktopCompanionWindowController {
 /// Adaptive host for the window (macOS 13 package floor; Canvas pet on 14+).
 struct DesktopCompanionHost: View {
     @ObservedObject var model: DesktopCompanionModel
+    /// E4: expand notch / focus agent (optional).
+    var onActivate: () -> Void = {}
 
     var body: some View {
         Group {
@@ -342,8 +301,18 @@ struct DesktopCompanionHost: View {
         .padding(8)
         .preferredColorScheme(.dark)
         .contentShape(Rectangle())
-        .onTapGesture { model.cycleToNext() }
-        .accessibilityHint(model.cycleCount > 1 ? "Click to show next agent" : "")
+        .onTapGesture {
+            // E4 handoff first; E3 multi-agent cycle when more than one.
+            onActivate()
+            if model.cycleCount > 1 {
+                model.cycleToNext()
+            }
+        }
+        .accessibilityHint(
+            model.cycleCount > 1
+                ? "Click to open in Shannon and show next agent"
+                : "Click to open in Shannon"
+        )
     }
 }
 

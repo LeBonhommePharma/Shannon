@@ -1546,16 +1546,23 @@ class AuditDB:
 
         ``update_entropy=False`` keeps the previous registry H (process-attach
         heartbeats must not freeze the HUD on a repeated short-status score).
+        Rows with a score but no honest ``entropy_updated_ns`` (pre-fix freeze
+        at ~2.38) are zeroed so the column cannot keep advertising unstamped H.
         """
         # On first insert with heartbeat-only traffic, store 0 so the pill
         # skips DEFAULT-looking scores until a substantive message arrives.
         insert_h = float(entropy_score) if update_entropy else 0.0
-        entropy_sql = (
-            "excluded.entropy_score" if update_entropy else "agents.entropy_score"
-        )
-        entropy_ts_sql = (
-            "excluded.last_seen_ns" if update_entropy else "agents.entropy_updated_ns"
-        )
+        # Substantive: write score + measurement clock.
+        # Heartbeat: keep stamped H; clear unstamped poison (updated_ns == 0).
+        if update_entropy:
+            entropy_sql = "excluded.entropy_score"
+            entropy_ts_sql = "excluded.last_seen_ns"
+        else:
+            entropy_sql = (
+                "CASE WHEN COALESCE(agents.entropy_updated_ns, 0) = 0 "
+                "THEN 0.0 ELSE agents.entropy_score END"
+            )
+            entropy_ts_sql = "agents.entropy_updated_ns"
         with self._connect() as conn:
             conn.execute(
                 f"""
@@ -1625,9 +1632,10 @@ class AuditDB:
         """Increment message_count and refresh last_seen after each message.
 
         When ``update_entropy`` is False (heartbeat / process-attach status),
-        ``entropy_score`` is left unchanged so the HUD keeps the last
-        *substantive* measurement instead of freezing on a repeated short
-        status H (~2.38 for "Working in Ghostty").
+        a *stamped* ``entropy_score`` is left unchanged so the HUD keeps the
+        last substantive measurement instead of freezing on a repeated short
+        status H (~2.38 for "Working in Ghostty"). Unstamped poison
+        (``entropy_updated_ns`` 0/NULL with a leftover score) is zeroed.
         """
         with self._connect() as conn:
             if update_entropy:
@@ -1665,6 +1673,10 @@ class AuditDB:
                     UPDATE agents SET
                         last_seen_ns  = ?,
                         heartbeat_ns  = ?,
+                        entropy_score = CASE
+                            WHEN COALESCE(entropy_updated_ns, 0) = 0 THEN 0.0
+                            ELSE entropy_score
+                        END,
                         task_id       = ?,
                         message_count = message_count + 1,
                         status        = ?,

@@ -38,7 +38,8 @@ struct AgentCardView: View {
         VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
             header
 
-            Text(agent.taskTitle.isEmpty ? "No task" : agent.taskTitle)
+            // UX-030: empty task chrome shares AgentState.displayTaskTitle.
+            Text(agent.displayTaskTitle)
                 .shannonText(.shannonBody)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)

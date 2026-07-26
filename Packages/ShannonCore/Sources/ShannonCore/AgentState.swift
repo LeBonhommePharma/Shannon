@@ -68,6 +68,15 @@ public struct AgentState: CloudSyncable, Codable, Identifiable, Hashable {
         self.updatedAt = updatedAt
     }
 
+    /// Empty task chrome on pad card / detail (UX-030).
+    public static let emptyTaskTitle = "No task"
+
+    /// Task line for companion cards; placeholder when publisher sent no title.
+    public var displayTaskTitle: String {
+        let t = taskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? Self.emptyTaskTitle : t
+    }
+
     /// "H 8.4" / "H 2.1 ▽3.4" — mirrors the Mac pill's readout so the same
     /// number reads the same way on every device.
     public var entropyLabel: String? {

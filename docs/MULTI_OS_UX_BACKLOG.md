@@ -291,10 +291,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `NowPlayingSnapshot.idleTitle` + `displayTitle`; pad/watch wired; PresentationTests.
 - **Priority:** P2
 
+### - [x] UX-030: Pad agent card + detail empty task share AgentState.displayTaskTitle
+
+- **Why:** `AgentCardView` and `AgentDetailView` both hard-coded `"No task"` when `taskTitle` empty — dual empty-task chrome.
+- **Platforms:** iPadOS (Core presenter for multi-OS reuse)
+- **Area:** `AgentState`, `AgentCardView`, `AgentDetailView`
+- **First slice:** Core `emptyTaskTitle` / `displayTaskTitle`; wire both pad surfaces; pure wiring test.
+- **Done:** `AgentState.emptyTaskTitle` + `displayTaskTitle`; card + detail wired; PresentationTests.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 25):** `--quick` all PASS. Backlog empty after UX-029. Residual pad dual `"No task"` on card + detail. Claimed **UX-030**. Considered: widget docking `"Idle"` (leave); desktop `"Open in Shannon"` a11y brand (optional); watch `"No notifications"` / `"iPhone away"` (surface-specific). **No additional UX-0xx**.
 - **2026-07-26 (loop 24):** `--quick` all PASS. Backlog empty after UX-028. Residual pad/watch dual `"Nothing playing"`. Claimed **UX-029**. Considered: widget docking `"Idle"` (leave); desktop `"Open in Shannon"` a11y brand (optional); watch `"No notifications"` / `"iPhone away"` (surface-specific). **No additional UX-0xx**.
 - **2026-07-26 (loop 23):** `--quick` all PASS. Backlog empty after UX-027. Residual Mac ConfirmationPrompt Yes/No vs gate Approve/Deny + dual gesture coaching. Claimed **UX-028**. Considered: widget docking `"Idle"` (leave); pad/watch `"Nothing playing"` dual (optional); desktop `"Open in Shannon"` a11y brand (optional). **No additional UX-0xx**.
 - **2026-07-26 (loop 22):** `--quick` all PASS. Backlog empty after UX-026. Residual Mac menu-bar `"Gate · approve"` dual + status-item a11y `"Shannon"`. Claimed **UX-027**. Considered: widget docking `"Idle"` (not brand/gate); `configurationDisplayName` catalog (leave); theme preview product chrome OK; phone head-gesture “Nod to confirm” (gesture copy, not primary Approve verb). **No additional UX-0xx**.

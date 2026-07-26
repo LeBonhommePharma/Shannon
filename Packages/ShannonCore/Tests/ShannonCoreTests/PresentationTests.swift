@@ -47,6 +47,51 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(rising.entropyLabel, "H 8.4", "positive delta is not an alarm")
     }
 
+    /// UX-030: pad card/detail empty task chrome shares emptyTaskTitle / displayTaskTitle.
+    func testAgentDisplayTaskTitleIdleAndTrack() {
+        XCTAssertEqual(AgentState.emptyTaskTitle, "No task")
+        XCTAssertEqual(
+            AgentState(id: "a", name: "A", activity: .idle, taskTitle: "").displayTaskTitle,
+            AgentState.emptyTaskTitle
+        )
+        XCTAssertEqual(
+            AgentState(id: "a", name: "A", activity: .idle, taskTitle: "   ").displayTaskTitle,
+            AgentState.emptyTaskTitle
+        )
+        XCTAssertEqual(
+            AgentState(id: "a", name: "A", activity: .running, taskTitle: "Dock 1of6")
+                .displayTaskTitle,
+            "Dock 1of6"
+        )
+    }
+
+    func testPadWiresAgentDisplayTaskTitle() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        for rel in [
+            "iPad/Sources/ShannonPad/Views/AgentCardView.swift",
+            "iPad/Sources/ShannonPad/Views/AgentDetailView.swift",
+        ] {
+            let text = (try? String(
+                contentsOf: root.appendingPathComponent(rel),
+                encoding: .utf8
+            )) ?? ""
+            XCTAssertTrue(
+                text.contains("displayTaskTitle"),
+                "\(rel) must use AgentState.displayTaskTitle"
+            )
+            XCTAssertFalse(
+                text.contains("\"No task\""),
+                "\(rel) must not hard-code dual No task string"
+            )
+        }
+    }
+
     func testCompactLinesTruncateToWatchWidth() {
         let agent = AgentState(id: "a", name: String(repeating: "x", count: 80),
                                activity: .running, turnCount: 3)

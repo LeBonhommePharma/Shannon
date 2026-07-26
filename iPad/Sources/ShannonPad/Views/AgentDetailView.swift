@@ -53,7 +53,8 @@ struct AgentDetailView: View {
                 .buttonStyle(.bordered)
             }
 
-            Text(agent.taskTitle.isEmpty ? "No task" : agent.taskTitle)
+            // UX-030: empty task chrome shares AgentState.displayTaskTitle.
+            Text(agent.displayTaskTitle)
                 .shannonText(.shannonBody, color: .shannonSecondary)
 
             Text(agent.id)

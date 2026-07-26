@@ -66,6 +66,25 @@ final class ShannonPreferencesTests: XCTestCase {
         XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
     }
 
+
+    /// E1: blank / whitespace desktop pet id normalizes to default package.
+    func testDesktopPetIdNormalizeAndPersist() {
+        XCTAssertEqual(ShannonPreferences.normalizeDesktopPetId(nil), "shannon")
+        XCTAssertEqual(ShannonPreferences.normalizeDesktopPetId(""), "shannon")
+        XCTAssertEqual(ShannonPreferences.normalizeDesktopPetId("  "), "shannon")
+        XCTAssertEqual(ShannonPreferences.normalizeDesktopPetId(" grok "), "grok")
+
+        ShannonPreferences.setDesktopPetId("  bonhomme  ", defaults: defaults)
+        XCTAssertEqual(ShannonPreferences.desktopPetId(defaults: defaults), "bonhomme")
+        XCTAssertEqual(
+            defaults.string(forKey: ShannonPreferences.Key.desktopPetId.rawValue),
+            "bonhomme"
+        )
+
+        ShannonPreferences.setDesktopPetId("", defaults: defaults)
+        XCTAssertEqual(ShannonPreferences.desktopPetId(defaults: defaults), "shannon")
+    }
+
     func testExplicitFalseIsNotMissingFallback() {
         ShannonPreferences.setAutoKeepAwakeWithAgents(false, defaults: defaults)
         // bool(forKey:) alone would be false either way — object exists must stick.

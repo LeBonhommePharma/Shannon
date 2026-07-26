@@ -1,11 +1,15 @@
 import SwiftUI
 import PillCore
+import ShannonCore
 
 // MARK: - GateInlineCard
 
 /// The newest pending gate approval, answerable without leaving the popover.
 /// While the write is in flight the buttons give way to a spinner (no double
 /// resolution); a failed write leaves the ask in place with the error inline.
+///
+/// **UX-013:** Approve/Deny + “needs approval” via `GateAskActionCopy` so the
+/// menu-bar popover cannot drift from Mac `GateAskCard` / phone / pad.
 struct GateInlineCard: View {
     let ask: GateDBReader.PendingAsk
     let isResolving: Bool
@@ -23,7 +27,7 @@ struct GateInlineCard: View {
                 Text(style.displayName)
                     .font(.shannonMenuBody)
                     .foregroundStyle(style.palette.ink)
-                Text("needs approval")
+                Text(GateAskActionCopy.needsApproval)
                     .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonWarning)
                     .padding(.horizontal, 5)
@@ -49,14 +53,22 @@ struct GateInlineCard: View {
             HStack(spacing: 8) {
                 if isResolving {
                     ProgressView().controlSize(.small)
-                    Text("Sending to gate…")
+                    Text(GateAskActionCopy.sending)
                         .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonSecondary)
                 } else {
-                    answerButton("Approve", systemImage: "checkmark", tint: .shannonSuccess) {
+                    answerButton(
+                        GateAskActionCopy.approve,
+                        systemImage: "checkmark",
+                        tint: .shannonSuccess
+                    ) {
                         onAnswer(true)
                     }
-                    answerButton("Deny", systemImage: "xmark", tint: .shannonError) {
+                    answerButton(
+                        GateAskActionCopy.deny,
+                        systemImage: "xmark",
+                        tint: .shannonError
+                    ) {
                         onAnswer(false)
                     }
                 }
@@ -84,7 +96,9 @@ struct GateInlineCard: View {
                 .shadow(color: Color.shannonWarning.opacity(0.12), radius: 8, y: 2)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(style.displayName) needs approval: \(ask.prompt)")
+        .accessibilityLabel(
+            "\(style.displayName) \(GateAskActionCopy.needsApproval): \(ask.prompt)"
+        )
     }
 
     private func answerButton(

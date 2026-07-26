@@ -131,6 +131,38 @@ final class GateAskActionCopyTests: XCTestCase {
         )
     }
 
+    /// UX-013: menu-bar GateInlineCard shares tokens with GateAskCard / phone / pad.
+    func testMacGateInlineCardWiresSharedCopy() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let inline = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Pill/Sources/ShannonPill/GateInlineCard.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            inline.contains("GateAskActionCopy"),
+            "GateInlineCard must use GateAskActionCopy"
+        )
+        XCTAssertTrue(inline.contains("GateAskActionCopy.needsApproval"))
+        XCTAssertTrue(inline.contains("GateAskActionCopy.approve"))
+        XCTAssertTrue(inline.contains("GateAskActionCopy.deny"))
+        XCTAssertFalse(
+            inline.contains("Text(\"needs approval\")"),
+            "GateInlineCard must not hard-code needs-approval capsule"
+        )
+        XCTAssertFalse(
+            inline.contains("answerButton(\"Approve\""),
+            "GateInlineCard must not hard-code Approve string"
+        )
+    }
+
     /// UX-012: iPad must not hard-code dual-OS "Confirm" on primary approve actions.
     func testPadWiresApproveNotConfirmVerb() {
         let root = URL(fileURLWithPath: #filePath)

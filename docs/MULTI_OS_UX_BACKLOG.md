@@ -136,10 +136,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** Detail / notification / GateCard / palette use `GateAskActionCopy.approve` + `.deny`; wiring test forbids pad `"Confirm"`.
 - **Priority:** P2
 
+### - [x] UX-013: Mac GateInlineCard shares GateAskActionCopy with GateAskCard
+
+- **Why:** Menu-bar popover still hard-coded “needs approval” / Approve / Deny while notch `GateAskCard` uses Core tokens → dual Mac wording drift.
+- **Platforms:** macOS
+- **Area:** `Pill/Sources/ShannonPill/GateInlineCard.swift`, `GateAskActionCopy`
+- **First slice:** Wire capsule + buttons + a11y to `GateAskActionCopy`; pure wiring test.
+- **Done:** `GateInlineCard` uses `needsApproval` / `approve` / `deny` / `sending`; Core wiring test forbids hard-coded capsule string.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 9):** `--quick` all PASS. Backlog empty; residual dual wording on Mac `GateInlineCard`. Claimed **UX-013**. Considered: no other grounded dual-string forks in shipped surfaces. **No additional UX-0xx**.
 - **2026-07-26 (loop 8):** `--quick` ios/ipad/watch PASS; macOS FAIL (pet prefs WIP). Claimed **UX-012** (pad Confirm→Approve). Considered: GateInlineCard hard-coded needs approval → optional follow-up; no new P0. **No new UX-0xx**.
 - **2026-07-26 (loop 7):** `--quick` macOS FAIL (pet `moodDisplayWord` WIP — not multi-OS UX claim); iPad FAIL (UX-009 `dashboard` missing `return` on multi-statement `some View`). Claimed **UX-011** residual (Mac age → SharedRelativeAge) + iPad compile fix. Considered: pad Confirm verb → **UX-012**; GateInlineCard hard-code needs approval → covered by GateAskActionCopy if wired later. **No third item.**
 - **2026-07-26 (loop 6):** `--quick` failed (missing `AgentListSkim` while phone required it). Residual **UX-006** shipped: Core skim + phone fleet chip/rows. Next open **UX-008**. **No new UX-0xx**.

@@ -153,22 +153,14 @@ public struct KimiSessionReader: SessionProviding {
                 lastAssistant = textBit
             }
             // Waiting-on-user markers from various CLIs (observational only).
-            // Explicit flag — do NOT rely on lastUser ?? after assistant already spoke.
+            // ONLY explicit status → needsYou. Do not infer wait from message order
+            // (user-without-assistant is the *agent's* turn → midTask, like Cursor).
+            // Do not sticky-wait on bare "?" in assistant prose (completed Q&A noise).
             if let status = (obj["status"] as? String)?.lowercased(),
                status.contains("wait") || status.contains("ask") || status == "needs_input"
                 || status.contains("needs_you") || status == "paused_for_user" {
                 waitingOnYou = true
                 waitPrompt = textBit ?? lastAssistant ?? lastUser ?? "waiting on you"
-            }
-            // Assistant left an unanswered question (common Kimi/Claude-style end).
-            if (role.contains("assistant") || role == "model"),
-               let textBit,
-               textBit.contains("?")
-                || textBit.lowercased().contains("choose")
-                || textBit.lowercased().contains("confirm") {
-                // Only sticky if no later user reply (user branch clears waitingOnYou).
-                waitingOnYou = true
-                waitPrompt = textBit
             }
         }
 
@@ -182,20 +174,33 @@ public struct KimiSessionReader: SessionProviding {
         let task = waitingOnYou
             ? (waitPrompt ?? lastAssistant ?? lastUser)
             : (lastUser ?? lastAssistant)
-        let waiting = waitingOnYou || (lastUser != nil && lastAssistant == nil)
+        // Status: explicit wait only → blocked/needsYou. User just spoke (no assistant
+        // yet) → midTask/working (agent's turn), never needsYou.
+        let status: AgentRunStatus = {
+            if waitingOnYou { return .blocked }
+            if lastUser != nil, lastAssistant == nil { return .midTask }
+            if lastAssistant != nil, lastUser != nil { return .idle }
+            if lastAssistant != nil { return .idle }
+            return .idle
+        }()
+        let stateLabel: String = {
+            if waitingOnYou { return "waiting (answer in terminal)" }
+            if status == .midTask { return "working" }
+            return "artifact"
+        }()
 
         return AgentSession(
             id: "kimi:\(sessionId)",
             agentId: "kimi",
             displayName: "Kimi",
             presence: .observed,
-            status: waiting ? .blocked : .idle,
+            status: status,
             sourceKind: .artifact,
             updatedAt: updated,
             project: cwd.map { ($0 as NSString).lastPathComponent },
             cwd: cwd,
             // Honest: surface wait; do not claim gate can Approve (AgentNotch policy).
-            stateLabel: waiting ? "waiting (answer in terminal)" : "artifact",
+            stateLabel: stateLabel,
             lastTask: task.map { AgentActivitySnapshot.shorten($0, max: 120) },
             model: model,
             sourcePath: url.path,

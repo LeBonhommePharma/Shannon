@@ -1,0 +1,374 @@
+{
+  "version": 1,
+  "description": "Shared Swift \u2194 Python PetCodexMotion / map_pet_motion golden matrix. Signal field names use Python snake_case; Swift tests map them onto PetCodexMotion.Signals. Both sides must produce expected for every case (fail closed if the file is missing or a label drifts).",
+  "source_of_truth": [
+    "hub/pet_codex_motion.py::map_pet_motion",
+    "Pill/Sources/PillCore/PetCodexMotion.swift::map"
+  ],
+  "cases": [
+    {
+      "id": "default_idle",
+      "signals": {
+        "presence": "observed",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "idle"
+    },
+    {
+      "id": "live_active_running",
+      "signals": {
+        "presence": "live",
+        "status": "active",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "running"
+    },
+    {
+      "id": "live_mid_task_running",
+      "signals": {
+        "presence": "live",
+        "status": "mid_task",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "running"
+    },
+    {
+      "id": "live_blocked_waiting",
+      "signals": {
+        "presence": "live",
+        "status": "blocked",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "waiting"
+    },
+    {
+      "id": "live_active_pending_ask_waiting",
+      "signals": {
+        "presence": "live",
+        "status": "active",
+        "has_pending_ask": true,
+        "last_outcome": null,
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "waiting"
+    },
+    {
+      "id": "live_idle_failed_outcome",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": "failed",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "failed"
+    },
+    {
+      "id": "live_idle_error_outcome",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": "error",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "failed"
+    },
+    {
+      "id": "live_idle_success_review",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": "success",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "review"
+    },
+    {
+      "id": "live_idle_completed_review",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": "completed",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "review"
+    },
+    {
+      "id": "live_idle_review_outcome",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": "review",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "review"
+    },
+    {
+      "id": "just_approved_waving",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": true,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "waving"
+    },
+    {
+      "id": "just_approved_jump",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": true,
+        "entropy_collapse": false,
+        "celebrate_as_jump": true
+      },
+      "expected": "jumping"
+    },
+    {
+      "id": "collapse_outranks_approval",
+      "signals": {
+        "presence": "live",
+        "status": "active",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": true,
+        "entropy_collapse": true,
+        "celebrate_as_jump": false
+      },
+      "expected": "failed"
+    },
+    {
+      "id": "live_collapse_failed",
+      "signals": {
+        "presence": "live",
+        "status": "active",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": false,
+        "entropy_collapse": true,
+        "celebrate_as_jump": false
+      },
+      "expected": "failed"
+    },
+    {
+      "id": "observed_busy_never_claims_work",
+      "signals": {
+        "presence": "observed",
+        "status": "active",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "idle"
+    },
+    {
+      "id": "offline_busy_is_idle",
+      "signals": {
+        "presence": "offline",
+        "status": "mid_task",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "idle"
+    },
+    {
+      "id": "observed_failed_outcome_is_idle",
+      "signals": {
+        "presence": "observed",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": "failed",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "idle"
+    },
+    {
+      "id": "observed_success_is_idle",
+      "signals": {
+        "presence": "observed",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": "success",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "idle"
+    },
+    {
+      "id": "failed_outcome_outranks_busy",
+      "signals": {
+        "presence": "live",
+        "status": "active",
+        "has_pending_ask": false,
+        "last_outcome": "failed",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "failed"
+    },
+    {
+      "id": "busy_outranks_review_outcome",
+      "signals": {
+        "presence": "live",
+        "status": "active",
+        "has_pending_ask": false,
+        "last_outcome": "success",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "running"
+    },
+    {
+      "id": "waiting_outranks_failed_outcome",
+      "signals": {
+        "presence": "live",
+        "status": "blocked",
+        "has_pending_ask": false,
+        "last_outcome": "failed",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "waiting"
+    },
+    {
+      "id": "pending_ask_outranks_failed_outcome",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": true,
+        "last_outcome": "failed",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "waiting"
+    },
+    {
+      "id": "live_idle_no_outcome",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "idle"
+    },
+    {
+      "id": "approval_without_live_still_waves",
+      "signals": {
+        "presence": "observed",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": true,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "waving"
+    },
+    {
+      "id": "collapse_requires_live",
+      "signals": {
+        "presence": "observed",
+        "status": "active",
+        "has_pending_ask": false,
+        "last_outcome": null,
+        "just_approved": false,
+        "entropy_collapse": true,
+        "celebrate_as_jump": false
+      },
+      "expected": "idle"
+    },
+    {
+      "id": "outcome_case_and_space_normalized",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": "  Success  ",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "review"
+    },
+    {
+      "id": "failed_crash_alias",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": "crashed",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "failed"
+    },
+    {
+      "id": "review_passed_alias",
+      "signals": {
+        "presence": "live",
+        "status": "idle",
+        "has_pending_ask": false,
+        "last_outcome": "passed",
+        "just_approved": false,
+        "entropy_collapse": false,
+        "celebrate_as_jump": false
+      },
+      "expected": "review"
+    }
+  ]
+}

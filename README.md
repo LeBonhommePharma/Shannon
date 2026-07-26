@@ -11,39 +11,101 @@
 [![PyPI](https://img.shields.io/badge/PyPI-shannon--entropy-blue.svg)](https://pypi.org/project/shannon-entropy/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-70%20pass-brightgreen.svg)]()
+[![macOS](https://img.shields.io/badge/macOS-13%2B-black.svg)](Pill/README.md)
+[![iOS](https://img.shields.io/badge/iOS-17%2B-lightgrey.svg)](iOS/README.md)
+[![watchOS](https://img.shields.io/badge/watchOS-10%2B-lightgrey.svg)](watchOS/README.md)
 
-> 100% sensitivity / 1.0% FP on the bundled synthetic benchmark (δ=-3.2) | <1 µs/token on top-k API-streaming logprobs
+> **Apple-first operator path** — macOS Pill hub first, then iPhone / iPad / Watch companions.
+> Scientific entropy library (Python / C++) remains available below and via PyPI.
 >
-> Directly ported from the configurational entropy engine in [FlexAIDdS](https://github.com/LeBonhommePharma/FlexAIDdS) — validated on 590 protein-drug complexes (r=0.93 ITC, 92% binding mode rescue).
+> Ported from the configurational entropy engine in [FlexAIDdS](https://github.com/LeBonhommePharma/FlexAIDdS).
 
 </div>
 
 ---
 
-## Quick Start (macOS)
+## Quick Start — Apple platforms
 
-One command from a clone:
+### macOS hub (primary)
 
 ```bash
 git clone https://github.com/LeBonhommePharma/Shannon
 cd Shannon
-./scripts/shannon
+./scripts/shannon                 # pets + install /Applications/Shannon.app + start
 ```
 
-That installs `/Applications/Shannon.app`, creates agent pets under `~/.shannon/pets/`, and starts the menu-bar + notch pill. Then:
+| Command | Purpose |
+|---------|---------|
+| `./scripts/shannon` | Bootstrap pets + app (rebuilds if missing) |
+| `./scripts/shannon app` | Force rebuild release app and reinstall |
+| `./scripts/shannon stop` | Quit the pill (`ShannonPill`) |
+| `./scripts/shannon probe` | Diagnostics (battery, media, bridge) |
+| `./scripts/shannon status` | Running? gate? pets? |
+| `./scripts/shannon help` | Full command list |
 
-1. Look for the **Shannon glyph** in the menu bar (`○ ready` or an agent name).
-2. Press **⌘D** in Terminal, Claude, ChatGPT, Codex, or a browser to attach that app as an agent + pet.
+On launch:
+
+1. **Menu-bar** glyph: `○ ready` or an active agent name (always present — use it to quit).
+2. **Notch pill** (or menu-bar-adjacent capsule on non-notch displays).
+3. **⌘D** captures the frontmost app (Terminal / Claude / ChatGPT / Codex / browser) as an agent + pet.
+
+**Quit:** menu-bar → **Quit Shannon**, or `./scripts/shannon stop`.
+
+**Homebrew (optional, same monorepo tap):**
 
 ```bash
-./scripts/shannon help      # all commands
-./scripts/shannon stop      # quit
-./scripts/shannon probe     # diagnostics
+brew tap lebonhommepharma/shannon https://github.com/LeBonhommePharma/Shannon
+brew trust --formula lebonhommepharma/shannon/shannon
+brew install lebonhommepharma/shannon/shannon    # shannon-agent CLI (stable v2.1.0+)
+# Cask (requires published ZIP sha — already pinned for v2.1.0):
+brew trust --cask lebonhommepharma/shannon/shannon-pill
+brew install --cask lebonhommepharma/shannon/shannon-pill
 ```
 
-**Optional later:** `./setup.sh` (full dev toolchain), `pip install -e ".[dev]"` (live entropy bridge), Fastlane / iOS simulators, Homebrew cask after a signed release.
+Local unsigned rebuild without a release: `./scripts/package_pill.sh --install`  
+Deep pill detail: [`Pill/README.md`](Pill/README.md) · honest gaps: [`Pill/BLOCKED.md`](Pill/BLOCKED.md)
 
+### iOS (iPhone) · iPadOS · watchOS
+
+| Platform | Min OS | What it is | Doc |
+|----------|--------|------------|-----|
+| **iPhone** | iOS 17 | Live agent cards, confirmations, widget | [`iOS/README.md`](iOS/README.md) |
+| **iPad** | iPadOS 17 | Multi-agent hub canvas (not a phone scale-up) | [`iPad/README.md`](iPad/README.md) |
+| **Apple Watch** | watchOS 10 | Shannon Face + complications (display relay) | [`watchOS/README.md`](watchOS/README.md) |
+
+Sync direction is **Mac → iPhone (CloudKit) → Watch (WatchConnectivity)**. Playback / confirmation answers flow back as `RemoteCommand` / `ConfirmationResponse`. Full architecture: [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md).
+
+```bash
+# Shared model (no signing, no simulator required)
+cd Packages/ShannonCore && swift test
+
+# iPhone + Watch (XcodeGen → open project)
+cd iOS && xcodegen generate && open Shannon.xcodeproj
+
+# iPad dashboard
+cd iPad && xcodegen generate && open ShannonPad.xcodeproj
+```
+
+CloudKit sync needs a paid Apple Developer team (container `iCloud.com.lebonhommepharma.shannon`). Without it, apps still **build and launch** with an empty in-memory backend — they simply do not sync. Steps: [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md#what-lp-needs-to-configure-in-xcode).
+
+### Tests on a Mac (no UI required)
+
+```bash
+# Pill pure logic (presence, entropy provenance, companions, layout, …)
+cd Pill && swift test
+
+# Shared multi-device model + sync codecs
+cd Packages/ShannonCore && swift test
+
+# Theme tokens
+cd Packages/ShannonTheme && swift test
+
+# Doc/path contracts (README claims vs shipped scripts)
+export PYTHONPATH=hub
+python3 -m pytest hub/tests/test_apple_docs_contract.py -v
+```
+
+**Secondary paths (science library / Linux / Windows):** see [Installation](#installation) below for `pip install shannon-entropy`, pure-Python fallbacks, and C++ `shannon-agent`.
 ---
 
 ## Overview
@@ -177,12 +239,17 @@ shannon-agent --help
 ```
 
 ```bash
-# Optional — Homebrew cask after a signed release:
+# Optional — Homebrew cask (v2.1.0+ zip is published; Gatekeeper may need quarantine clear):
 brew install --cask lebonhommepharma/shannon/shannon-pill
+xattr -dr com.apple.quarantine /Applications/Shannon.app   # if blocked
 
-# Maintainers only — DMG/zip/cask checksums:
-./scripts/package_pill.sh 0.1.0 --update-cask
+# Maintainers — rebuild DMG/zip and refresh cask sha from THIS build:
+./scripts/package_pill.sh 2.1.0 --update-cask
+# Prefer pinning sha to the GitHub release asset when it differs from a local rebuild.
 ```
+
+Apple multi-device entry points are in [Quick Start — Apple platforms](#quick-start--apple-platforms).
+
 ---
 
 ## Installation
@@ -539,45 +606,36 @@ Full detail in [`Pill/README.md`](Pill/README.md).
 
 ---
 
-## iPhone & Apple Watch companions
+## iPhone, iPad & Apple Watch companions
 
-The Mac hub mirrors its state to iCloud so an iPhone and Apple Watch on the
-same account can follow what the agents are doing.
+The Mac hub can mirror state to iCloud so devices on the same account follow
+along. **Min OS (apps):** iOS / iPadOS **17**, watchOS **10**. Shared package
+`ShannonCore` supports macOS 13+ / iOS 16+ / watchOS 9+ for library code.
 
 ```
   Mac (ShannonPill)                iPhone (ShannonPhone)          Apple Watch
-  NowPlaying / battery ──CloudKit──▶ cards + widget + push ──WC──▶ 3 cards +
-  Shannon entropy bridge  (private)  notification feed             complication
+  NowPlaying / battery ──CloudKit──▶ cards + widget + push ──WC──▶ Face +
+  agents / entropy        (private)  notification feed             complications
           ▲                                  │                          │
-          └────────── playback commands ◀────┴──────── crown taps ◀─────┘
+          └──────── RemoteCommand / answers ◀┴──────── crown taps ◀─────┘
 ```
 
-- **iPhone** (iOS 16+): one card per running agent with turn count, last action
-  and live entropy; a FlexAID∆S progress ring with best RMSD and ETA; Now
-  Playing with controls that reach back to the Mac; a mirrored notification
-  feed; and a WidgetKit widget for the Lock and Home Screens.
-- **Apple Watch** (watchOS 10+): the **Shannon Face** — a full-screen view
-  styled as a watch face (large SF Rounded clock, active agent progress, Now
-  Playing), plus complications in every family Apple allows third parties.
-  The Digital Crown moves between face, agents, Now Playing and alerts. No
-  computation happens on the watch; it is a display relay.
-- **Shared model**: [`Packages/ShannonCore/`](Packages/ShannonCore) is a local
-  Swift package all three platforms import, holding the snapshot structs, the
-  CloudKit serialization, the gesture and voice-command logic, and the alert
-  edge-triggering. Its 78 tests run without an iCloud container.
+| Device | Role | Doc |
+|--------|------|-----|
+| **iPhone** | Glance cards, confirmations, widget, AirPods gestures | [`iOS/README.md`](iOS/README.md) |
+| **iPad** | Multi-agent hub canvas (sidebar / rail / feed) | [`iPad/README.md`](iPad/README.md) |
+| **Watch** | Display relay only — no docking / entropy compute | [`watchOS/README.md`](watchOS/README.md) |
+| **Shared model** | Snapshots, CloudKit codecs, voice/gestures | [`Packages/ShannonCore`](Packages/ShannonCore) |
 
 ```bash
-cd Packages/ShannonCore && swift test          # shared model
-cd iOS && xcodegen generate                    # then open Shannon.xcodeproj
+cd Packages/ShannonCore && swift test          # no CloudKit container required
+cd iOS && xcodegen generate && open Shannon.xcodeproj
+cd iPad && xcodegen generate && open ShannonPad.xcodeproj
 ```
 
-Sync stays deliberately light: only state snapshots cross iCloud — never raw
-data files, transcripts, or docking output — unchanged records are not
-republished, and artwork over 200 KB is dropped.
-
-CloudKit needs a paid Apple Developer account. Everything builds and runs
-without one (falling back to an empty in-memory backend); the exact Signing &
-Capabilities steps to activate real sync are in
+Sync stays light: state snapshots only — never raw transcripts or docking
+output; unchanged records are not republished; artwork over 200 KB is dropped.
+Full setup, entitlements, and security model:
 [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md).
 
 ### Gesture controls

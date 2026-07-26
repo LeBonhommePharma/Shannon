@@ -1,8 +1,21 @@
 # Multi-device companion apps
 
-Shannon's Mac agent hub publishes its state to iCloud so an iPhone and Apple
-Watch on the same iCloud account can follow along. This document covers the
-architecture and the one-time Xcode configuration needed to activate sync.
+Shannon's **macOS** agent hub (Pill) can publish its state to iCloud so an
+**iPhone**, **iPad**, and **Apple Watch** on the same iCloud account can follow
+along. This document is the production reference for architecture, build/test
+commands, and the one-time Xcode configuration needed to activate real sync.
+
+| Doc | Role |
+|-----|------|
+| [Pill/README.md](../Pill/README.md) | Mac hub operator + pure tests |
+| [iOS/README.md](../iOS/README.md) | iPhone app + widget |
+| [iPad/README.md](../iPad/README.md) | iPad multi-agent canvas |
+| [watchOS/README.md](../watchOS/README.md) | Watch face + complications |
+| Root [README.md](../README.md) | Apple-first quick start |
+
+**Honest default:** without CloudKit entitlements and a paid team, every companion
+**builds and launches** with an empty in-memory backend — it does not sync, and
+it does not invent data.
 
 ## Architecture
 
@@ -98,25 +111,58 @@ watchOS/                       app targets require watchOS 10
 Pill/Sources/ShannonPill/CloudPublishing.swift   Mac publishing side
 ```
 
-## Building
+## Building & testing
+
+### Always available on a Mac (no simulator, no team)
 
 ```bash
-# Shared package — runs anywhere, no entitlements needed
+# Shared multi-device model + sync codecs + security (gating suite)
 cd Packages/ShannonCore && swift test
 
-# iPhone + Watch apps
+# Design tokens
+cd Packages/ShannonTheme && swift test
+
+# Mac pill pure logic (presence, entropy provenance, companions, layout, …)
+cd Pill && swift test
+```
+
+### App targets (XcodeGen)
+
+```bash
+# iPhone + Watch (+ widget + complication) — one project.yml
 cd iOS && xcodegen generate
+# Then either open Shannon.xcodeproj in Xcode, or:
 xcodebuild -project Shannon.xcodeproj -scheme ShannonPhone \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 xcodebuild -project Shannon.xcodeproj -scheme ShannonWatch \
   -destination 'generic/platform=watchOS Simulator' CODE_SIGNING_ALLOWED=NO build
 
-# Mac hub (publishes state)
-cd Pill && swift build && swift test
+# iPad hub
+cd iPad && xcodegen generate
+xcodebuild -project ShannonPad.xcodeproj -scheme ShannonPad \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+
+# Mac hub Xcode target (for CloudKit signing / Instruments)
+cd Pill && xcodegen generate && open ShannonPill.xcodeproj
 ```
 
-The `.xcodeproj` is generated and not checked in — regenerate it after adding
-source files.
+Prefer regenerating with `xcodegen generate` after adding sources. Some trees
+keep a generated `.xcodeproj` checked in for convenience — treat `project.yml`
+as the source of truth and re-run XcodeGen when in doubt.
+
+**Environment limits:** Xcode beta hosts may hang `simctl` or lack Simulator
+frameworks. A successful `CODE_SIGNING_ALLOWED=NO` build is still valid compile
+evidence; runtime screenshots are optional when simulators fail.
+
+### Doc contracts
+
+```bash
+export PYTHONPATH=hub
+python3 -m pytest hub/tests/test_apple_docs_contract.py -v
+```
+
+Asserts root README Apple paths, platform READMEs, and `./scripts/shannon`
+commands exist against the real tree.
 
 ## What LP needs to configure in Xcode
 

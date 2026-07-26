@@ -4,12 +4,17 @@ A dedicated agent-coordination dashboard, not a scaled-up iPhone app. The
 phone answers "what is Shannon doing right now?" in a scrolling list; the iPad
 answers "what are all of them doing, and which one needs me?" on one canvas.
 
+| Item | Value |
+|------|--------|
+| **Min OS** | iPadOS **17.0** (`@Observable` / ShannonStore) |
+| **Build** | `cd iPad && xcodegen generate && open ShannonPad.xcodeproj` |
+| **Sync** | Same CloudKit zone as iPhone — see [docs/MULTI_DEVICE.md](../docs/MULTI_DEVICE.md) |
+
 ```bash
 cd iPad && xcodegen generate && open ShannonPad.xcodeproj
 ```
 
-The `.xcodeproj` is generated and not checked in — regenerate after adding
-source files.
+Regenerate after adding sources (`project.yml` is authoritative).
 
 ## Layout
 
@@ -100,9 +105,27 @@ Honest gaps, so nothing on screen implies more than it does:
 - **Pocket geometry** — the ROI canvas draws over a schematic placeholder until
   FlexAID∆S exports real pocket geometry.
 
+## Tests
+
+```bash
+# Layout / hub pure logic (when present in package tests)
+cd Packages/ShannonCore && swift test
+
+# Full multi-device model
+cd Packages/ShannonTheme && swift test
+```
+
+There is no separate iPad-only XCTest target in CI. Prefer ShannonCore policy
+tests plus a compile check:
+
+```bash
+cd iPad && xcodegen generate
+xcodebuild -project ShannonPad.xcodeproj -scheme ShannonPad \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+```
+
 ## Verification status
 
-`xcodebuild` for the iPad Pro 11" simulator succeeds, and the app installs.
-Runtime behaviour is **not** verified: this host's Xcode 27 beta is missing
-`SimulatorKit.framework`, and `simctl` hangs after launch, so no screenshot of
-the running hub was obtained.
+Unsigned simulator **compile** is the portable bar. Runtime screenshots may fail
+on Xcode betas missing SimulatorKit / hanging `simctl` — document that limit
+rather than inventing UI proof.

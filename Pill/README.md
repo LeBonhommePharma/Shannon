@@ -99,6 +99,35 @@ so the suite runs without a window server, a media session or a live agent.
 Each hardware source sits behind a protocol (`BatteryProviding`,
 `NowPlayingProviding`) with a deterministic stub.
 
+## Tests (production bar)
+
+```bash
+cd Pill
+swift test                         # PillCoreTests + ShannonPillTests
+swift test --filter PillCoreTests  # pure logic only
+```
+
+Typical pure-logic areas (names evolve; `swift test` is authoritative):
+
+- Agent presence / attach honesty (observation ≠ work)
+- Entropy provenance (measured vs simulated)
+- Companion mood / Codex motion mapping
+- Panel height / notch metrics / chrome policy
+- Gate ask cards / shared telemetry binding
+
+Shared multi-device model (used when CloudKit publish is wired):
+
+```bash
+cd Packages/ShannonCore && swift test
+```
+
+Doc contracts for README install paths:
+
+```bash
+export PYTHONPATH=hub
+python3 -m pytest hub/tests/test_apple_docs_contract.py -v
+```
+
 ### Where the pill sits
 
 `NotchGeometry` derives the notch rect from `NSScreen.safeAreaInsets.top` plus

@@ -55,3 +55,8 @@ fastlane/README.md
 
 # Local planning notes (not shipped)
 SHANNON_PARITY_ROADMAP.md
+ENTROPY_AUDIT_*.md
+SHANNON_AGENTPEEK_GAP.md
+
+# One-off screenshots (not product assets)
+hub/docs/img/tests_passing.png

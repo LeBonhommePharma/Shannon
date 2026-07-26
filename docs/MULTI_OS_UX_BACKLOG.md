@@ -210,10 +210,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `CompanionEmptyStateCopy.content(isPhoneReachable:)`; AgentList empty uses offline title/chip when `!isPhoneReachable`; pure + wiring tests.
 - **Priority:** P2
 
+### - [x] UX-021: Pad detail + notification panel disable Approve/Deny when hub offline
+
+- **Why:** GateCard (UX-018) uses `companionAffordance`; `AgentDetailView` / `NotificationPanelView` still show live Approve/Deny when sync is down (VM refuse only — looks tappable).
+- **Platforms:** iPadOS (iOS phone banner reference)
+- **Area:** `AgentDetailView`, `NotificationPanelView`, `GateAskActionCopy`
+- **First slice:** Wire both surfaces to `companionAffordance` + disable + status; pure wiring test.
+- **Done:** Detail blockedPrompt + Notification ConfirmationRow use companionAffordance; hub passes lastError; Core wiring test.
+- **Priority:** P1
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 16):** `--quick` all PASS. Backlog empty; residual pad detail/notification live Approve offline. Claimed **UX-021**. Considered: widget `"Idle"` docking-empty (different context); watch `"iPhone away"` gate chip (status narrative, not empty-roster dual); pad StatusLegend on empty (optional polish). **No additional UX-0xx**.
 - **2026-07-26 (loop 15):** `--quick` all PASS. Claimed P2 **UX-020** (watch offline empty). Considered: multi-OS dual primary verbs clean; backlog empty after this claim. **No new UX-0xx**.
 - **2026-07-26 (loop 14):** `--quick` all PASS. Claimed P1 **UX-019** (pad/watch pending badge elevate). Considered: UX-020 watch offline empty; residual dual primary verbs clean. **No new UX-0xx**.
 - **2026-07-26 (loop 13):** `--quick` all PASS. Open P1 **UX-018** claimed (pad GateCard offline). Considered: UX-019 pending badge elevate; UX-020 watch offline empty; residual detail/notification buttons inherit VM guard. **No new UX-0xx**.

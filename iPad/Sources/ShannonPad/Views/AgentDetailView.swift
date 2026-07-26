@@ -63,7 +63,12 @@ struct AgentDetailView: View {
     }
 
     private func blockedPrompt(_ question: PendingConfirmation) -> some View {
-        VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
+        // UX-021: same offline/expired honesty as GateCard / phone banner.
+        let a = GateAskActionCopy.companionAffordance(
+            pending: question,
+            lastError: hub.store.lastError
+        )
+        return VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
             // Same token as Mac notch / phone badge (UX-001).
             Label(AgentAttentionCopy.needsYou, systemImage: "questionmark.circle.fill")
                 .shannonText(.shannonHeadline, color: .shannonWarning)
@@ -72,6 +77,12 @@ struct AgentDetailView: View {
             if !question.detail.isEmpty {
                 Text(question.detail)
                     .shannonText(.shannonCaption, color: .shannonSecondary)
+            }
+
+            if let status = a.statusMessage {
+                Text(status)
+                    .shannonText(.shannonCaption, color: .shannonWarning)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: ShannonSpacing.sm) {
@@ -84,6 +95,7 @@ struct AgentDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.shannonSuccess)
+                .disabled(!a.canInteract)
 
                 Button {
                     hub.answer(question, approved: false)
@@ -93,7 +105,9 @@ struct AgentDetailView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(.shannonError)
+                .disabled(!a.canInteract)
             }
+            .opacity(a.canInteract ? 1 : 0.45)
         }
         .shannonCard(isHighlighted: true)
     }

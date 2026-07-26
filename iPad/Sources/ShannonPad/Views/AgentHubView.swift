@@ -144,6 +144,7 @@ struct AgentHubView: View {
             agentName: hub.agentName(for:),
             notifications: hub.visibleNotifications,
             isImportant: hub.isImportant,
+            lastError: hub.store.lastError,
             onConfirm: { hub.answer($0, approved: true) },
             onDeny: { hub.answer($0, approved: false) },
             onDismissNotification: hub.dismissNotification,

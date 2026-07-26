@@ -288,4 +288,63 @@ final class GateAskActionCopyTests: XCTestCase {
             "AgentHubViewModel.answer must guard with companionAffordance"
         )
     }
+
+    /// UX-021: pad detail + notification panel disable when hub offline (not GateCard only).
+    func testPadDetailAndNotificationWireCompanionAffordance() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let detail = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/AgentDetailView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            detail.contains("companionAffordance"),
+            "AgentDetailView must use companionAffordance"
+        )
+        XCTAssertTrue(
+            detail.contains("disabled(!a.canInteract)") || detail.contains(".disabled(!a.canInteract)"),
+            "AgentDetailView must disable Approve/Deny when cannot interact"
+        )
+        XCTAssertTrue(
+            detail.contains("statusMessage"),
+            "AgentDetailView must surface offline/expired status"
+        )
+
+        let panel = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/NotificationPanelView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            panel.contains("companionAffordance"),
+            "NotificationPanelView must use companionAffordance"
+        )
+        XCTAssertTrue(
+            panel.contains("lastError"),
+            "NotificationPanelView must accept lastError"
+        )
+        XCTAssertTrue(
+            panel.contains("disabled(!a.canInteract)") || panel.contains(".disabled(!a.canInteract)"),
+            "NotificationPanelView must disable Approve/Deny when cannot interact"
+        )
+
+        let hub = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/AgentHubView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            hub.contains("lastError: hub.store.lastError"),
+            "AgentHubView must pass store.lastError into NotificationPanelView"
+        )
+    }
 }

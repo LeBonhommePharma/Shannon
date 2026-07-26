@@ -12,6 +12,8 @@ struct NotificationPanelView: View {
     var agentName: (PendingConfirmation) -> String?
     var notifications: [NotificationMirror]
     var isImportant: (String) -> Bool
+    /// UX-021: `ShannonStore.lastError` — when set, Approve/Deny must not look live.
+    var lastError: String? = nil
 
     var onConfirm: (PendingConfirmation) -> Void
     var onDeny: (PendingConfirmation) -> Void
@@ -27,6 +29,7 @@ struct NotificationPanelView: View {
                         ConfirmationRow(
                             confirmation: question,
                             agentName: agentName(question),
+                            lastError: lastError,
                             onConfirm: { onConfirm(question) },
                             onDeny: { onDeny(question) }
                         )
@@ -74,11 +77,21 @@ struct NotificationPanelView: View {
 private struct ConfirmationRow: View {
     var confirmation: PendingConfirmation
     var agentName: String?
+    var lastError: String? = nil
     var onConfirm: () -> Void
     var onDeny: () -> Void
 
+    private var affordance: GateAskActionCopy.Affordance {
+        // UX-021: phone banner / GateCard parity — fail-closed when hub offline.
+        GateAskActionCopy.companionAffordance(
+            pending: confirmation,
+            lastError: lastError
+        )
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
+        let a = affordance
+        return VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
             HStack(spacing: ShannonSpacing.sm) {
                 ShannonStatusDot(state: .warning, diameter: 8)
                 Text(agentName ?? "Shannon")
@@ -101,6 +114,12 @@ private struct ConfirmationRow: View {
                     .lineLimit(4)
             }
 
+            if let status = a.statusMessage {
+                Text(status)
+                    .shannonText(.shannonCaption, color: .shannonWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack(spacing: ShannonSpacing.sm) {
                 Button(action: onConfirm) {
                     // UX-012: Approve token — Mac/phone parity (no dual-OS Confirm).
@@ -109,6 +128,7 @@ private struct ConfirmationRow: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.shannonSuccess)
+                .disabled(!a.canInteract)
 
                 Button(action: onDeny) {
                     Label(GateAskActionCopy.deny, systemImage: "xmark")
@@ -116,8 +136,10 @@ private struct ConfirmationRow: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(.shannonError)
+                .disabled(!a.canInteract)
             }
             .font(.shannonCallout)
+            .opacity(a.canInteract ? 1 : 0.45)
         }
         .shannonCard(isHighlighted: true)
     }

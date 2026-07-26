@@ -114,12 +114,14 @@ Test baseline (must stay green while implementing):
 
 ## Test / coverage gaps (found during pass)
 
-- [ ] **T1 — Live spritesheet drawable check for real `shannon` webp**  
+- [x] **T1 — Live spritesheet drawable check for real `shannon` webp**  
   Observation: package resolve tests assert metadata + path; no test loads
   `~/.codex/pets/shannon/spritesheet.webp` through `PetAtlasRenderer.frameImage`
   (geometry/crop).  
   Work: macOS-only test: if live sheet exists, `isDrawable` and one crop
-  non-nil for `.idle` / `.running`.
+  non-nil for `.idle` / `.running`.  
+  **Done:** `testLiveShannonSpritesheetDrawableIfPresent` in PetPackageResolverTests;
+  XCTSkip when sheet/AppKit missing so CI without pets stays green.
 
 - [ ] **T2 — Swift ↔ Python motion matrix golden file**  
   Observation: both sides claim parallel precedence; no shared fixture asserts

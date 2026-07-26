@@ -857,6 +857,42 @@ final class PetPackageResolverTests: XCTestCase {
             XCTAssertNil(PetAtlasRenderer.frameImage(package: pkg, motion: .idle, tSeconds: 0))
         }
     }
+
+    /// T1: live `~/.codex/pets/shannon/spritesheet.webp` through PetAtlasRenderer
+    /// (geometry/crop), not only package metadata resolve. Skip when missing so
+    /// CI without pets stays green.
+    func testLiveShannonSpritesheetDrawableIfPresent() throws {
+        #if canImport(AppKit)
+        guard #available(macOS 14.0, *) else {
+            throw XCTSkip("PetAtlasRenderer requires macOS 14+")
+        }
+        let sheet = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/pets/shannon/spritesheet.webp")
+        guard FileManager.default.fileExists(atPath: sheet.path) else {
+            throw XCTSkip("live ~/.codex/pets/shannon/spritesheet.webp not present")
+        }
+
+        let pkg = PetPackageResolver.resolve(petId: "shannon", requireV2: true)
+        XCTAssertFalse(pkg.useProcedural, "live shannon package should resolve as non-procedural")
+        XCTAssertNotNil(pkg.spritesheetURL, "live shannon must expose spritesheetURL")
+        XCTAssertTrue(
+            PetAtlasRenderer.isDrawable(package: pkg),
+            "live shannon webp must be drawable via PetAtlasRenderer"
+        )
+        for motion in [PetCodexMotion.idle, .running] {
+            let crop = PetAtlasRenderer.frameImage(
+                package: pkg, motion: motion, tSeconds: 0
+            )
+            XCTAssertNotNil(crop, "frameImage must crop non-nil for \(motion)")
+            if let crop {
+                XCTAssertGreaterThan(crop.width, 0)
+                XCTAssertGreaterThan(crop.height, 0)
+            }
+        }
+        #else
+        throw XCTSkip("AppKit unavailable")
+        #endif
+    }
 }
 
 // MARK: - Roster pending ask / outcome → Codex motion

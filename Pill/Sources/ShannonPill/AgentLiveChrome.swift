@@ -9,17 +9,17 @@ import ShannonTheme
 /// "needs you" / "working" / "live" wording so dual-HUD drift cannot reappear.
 enum AgentLiveChrome {
     /// Capsule badge text from a resolved live surface.
+    ///
+    /// Delegates to `AgentLiveSurfaceLogic.badgeLabel` so notch + menu-bar +
+    /// session cards share one wording source (no dual-HUD drift).
     static func badgeLabel(
         surface: AgentLiveSurface,
         fallbackStatusLine: String
     ) -> String {
-        switch surface.attention {
-        case .needsYou: return "needs you"
-        case .working: return surface.toolKind == .none ? "working" : surface.toolKind.rawValue
-        case .finished: return "done"
-        case .idle: return "live"
-        case .unknown: return fallbackStatusLine
-        }
+        AgentLiveSurfaceLogic.badgeLabel(
+            surface: surface,
+            fallbackStatusLine: fallbackStatusLine
+        )
     }
 
     /// Capsule ink color for the given attention state.

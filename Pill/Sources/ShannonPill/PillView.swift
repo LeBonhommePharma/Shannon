@@ -130,9 +130,17 @@ struct PillView: View {
         )
     }
 
-    /// Agents currently listed on the board (busy first, else roster sample).
+    /// Agents currently listed on the board — needs-you → working → finished → idle.
     private var listedAgents: [AgentActivitySnapshot] {
-        Array((busy.isEmpty ? summary.agents.prefix(3) : busy.prefix(4)))
+        let limit = busy.isEmpty ? 3 : 4
+        let ranked = AgentLiveSurfaceLogic.rankedAgents(
+            agents: summary.agents,
+            pendingAsks: activity.pendingAsks,
+            activity: activity.recentActivity,
+            limit: limit
+        )
+        if !ranked.isEmpty { return ranked }
+        return Array((busy.isEmpty ? summary.agents.prefix(3) : busy.prefix(4)))
     }
 
     /// Independent per-agent readings for every listed agent id.
@@ -509,14 +517,26 @@ struct PillView: View {
                 entropyReadout
             }
 
-            if summary.busyCount > 1 {
-                Text("\(summary.busyCount)")
+            // Usage chip only when a real local source reported tokens / ctx %.
+            if let usage = collapsedUsageChip {
+                Text(usage)
+                    .font(.shannonMenuSection)
+                    .foregroundStyle(Color.shannonTertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.shannonSurfaceElevated.opacity(0.7)))
+                    .help("Usage from local session telemetry")
+            }
+
+            // Multi-agent count: needs-you + working fleet (AgentNotch density).
+            if collapsedActiveCount > 1 {
+                Text("\(collapsedActiveCount)")
                     .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonAccent)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(Capsule().fill(Color.shannonAccentSubtle))
-                    .help("\(summary.busyCount) agents currently busy")
+                    .help("\(collapsedActiveCount) agents need a glance")
             }
 
             if hasPendingAsk {
@@ -687,7 +707,29 @@ struct PillView: View {
         if let c = resources.snapshot.mostConstrained, c.percent >= 60 {
             return c.shortLabel
         }
-        return "Shannon · idle"
+        return SessionContentPresenter.collapsedStatusLine(
+            agents: summary.agents,
+            pendingAsks: activity.pendingAsks,
+            activity: activity.recentActivity
+        )
+    }
+
+    /// Multi-agent glance count (needs-you + working), not only gate busy status.
+    private var collapsedActiveCount: Int {
+        SessionContentPresenter.collapsedActiveCount(
+            agents: summary.agents,
+            pendingAsks: activity.pendingAsks,
+            activity: activity.recentActivity
+        )
+    }
+
+    /// Compact usage chip when a real source provided metrics for the focus agent.
+    private var collapsedUsageChip: String? {
+        SessionContentPresenter.collapsedUsageChip(
+            agents: summary.agents,
+            pendingAsks: activity.pendingAsks,
+            activity: activity.recentActivity
+        )
     }
 
     /// Compact host-resource chip for the collapsed pill when stressed, or
@@ -1015,7 +1057,11 @@ struct PillView: View {
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.shannonSurfaceElevated.opacity(0.6))
+                .fill(
+                    liveSurface(for: a).needsYou
+                        ? Color.shannonWarning.opacity(0.10)
+                        : Color.shannonSurfaceElevated.opacity(0.6)
+                )
         )
     }
 

@@ -301,6 +301,23 @@ public enum AgentLiveSurfaceLogic {
         usageByAgent: [String: AgentUsageSnapshot] = [:],
         now: Date = Date()
     ) -> String? {
+        primarySurface(
+            agents: agents,
+            pendingAsks: pendingAsks,
+            activity: activity,
+            usageByAgent: usageByAgent,
+            now: now
+        )?.collapsedFocus
+    }
+
+    /// Top actionable surface (needs-you / working / finished), or nil when quiet.
+    public static func primarySurface(
+        agents: [AgentActivitySnapshot],
+        pendingAsks: [GateDBReader.PendingAsk] = [],
+        activity: [GateDBReader.ActivityEvent] = [],
+        usageByAgent: [String: AgentUsageSnapshot] = [:],
+        now: Date = Date()
+    ) -> AgentLiveSurface? {
         let f = fleet(
             agents: agents,
             pendingAsks: pendingAsks,
@@ -309,13 +326,83 @@ public enum AgentLiveSurfaceLogic {
             now: now,
             limit: 4
         )
-        guard let top = f.first(where: {
+        return f.first(where: {
             switch $0.attention {
             case .needsYou, .working, .finished: return true
             case .idle, .unknown: return false
             }
-        }) else { return nil }
-        return top.collapsedFocus
+        })
+    }
+
+    /// How many agents currently need a glance (needs-you or working).
+    ///
+    /// Used for the collapsed multi-agent count chip — never invents busy work.
+    public static func activeFleetCount(
+        agents: [AgentActivitySnapshot],
+        pendingAsks: [GateDBReader.PendingAsk] = [],
+        activity: [GateDBReader.ActivityEvent] = [],
+        usageByAgent: [String: AgentUsageSnapshot] = [:],
+        now: Date = Date()
+    ) -> Int {
+        fleet(
+            agents: agents,
+            pendingAsks: pendingAsks,
+            activity: activity,
+            usageByAgent: usageByAgent,
+            now: now,
+            limit: max(4, agents.count)
+        ).filter {
+            $0.attention == .needsYou || $0.attention == .working
+        }.count
+    }
+
+    /// Capsule badge text shared by notch + menu-bar (one wording source).
+    public static func badgeLabel(
+        surface: AgentLiveSurface,
+        fallbackStatusLine: String
+    ) -> String {
+        switch surface.attention {
+        case .needsYou: return "needs you"
+        case .working: return surface.toolKind == .none ? "working" : surface.toolKind.rawValue
+        case .finished: return "done"
+        case .idle: return "live"
+        case .unknown: return fallbackStatusLine
+        }
+    }
+
+    /// Rank agents for roster/board: needs-you → working → finished → idle → unknown.
+    ///
+    /// Returns activity snapshots in glance order so both HUDs share one sort.
+    public static func rankedAgents(
+        agents: [AgentActivitySnapshot],
+        pendingAsks: [GateDBReader.PendingAsk] = [],
+        activity: [GateDBReader.ActivityEvent] = [],
+        usageByAgent: [String: AgentUsageSnapshot] = [:],
+        now: Date = Date(),
+        limit: Int = 4
+    ) -> [AgentActivitySnapshot] {
+        let surfaces = fleet(
+            agents: agents,
+            pendingAsks: pendingAsks,
+            activity: activity,
+            usageByAgent: usageByAgent,
+            now: now,
+            limit: max(limit, agents.count)
+        )
+        let byId = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
+        var ordered: [AgentActivitySnapshot] = []
+        var seen = Set<String>()
+        for s in surfaces {
+            guard let a = byId[s.agentId], !seen.contains(a.id) else { continue }
+            ordered.append(a)
+            seen.insert(a.id)
+        }
+        // Append remaining agents (quiet / unknown) after fleet hits.
+        for a in agents where !seen.contains(a.id) {
+            ordered.append(a)
+            seen.insert(a.id)
+        }
+        return Array(ordered.prefix(max(0, limit)))
     }
 
     // MARK: - Tool / completion classification (pure)

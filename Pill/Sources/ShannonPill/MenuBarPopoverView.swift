@@ -91,6 +91,19 @@ struct MenuBarPopoverView: View {
     /// Newest pending approval — the one worth answering inline.
     private var ask: GateDBReader.PendingAsk? { activity.pendingAsks.first }
 
+    /// Best session per agent id (project / branch / model / tokens when real).
+    private var sessionsByAgentId: [String: AgentSession] {
+        var best: [String: AgentSession] = [:]
+        for s in parity.sessions {
+            if let existing = best[s.agentId] {
+                best[s.agentId] = SessionMerge.prefer(existing, s)
+            } else {
+                best[s.agentId] = s
+            }
+        }
+        return best
+    }
+
     /// Gate readiness line for the hub badge / header (P0.3).
     private var gateHealth: GateHealth {
         GateHealthResolver.resolve(
@@ -146,10 +159,15 @@ struct MenuBarPopoverView: View {
                         activity: activity,
                         bridge: bridge,
                         agentReadings: agentReadings,
-                        entropyTint: entropyTint
+                        entropyTint: entropyTint,
+                        sessionsByAgent: sessionsByAgentId
                     )
                         .shannonGlassSection()
-                    PulledSessionsSection(sessions: parity.sessions)
+                    PulledSessionsSection(
+                        sessions: parity.sessions,
+                        pendingAsks: activity.pendingAsks,
+                        activity: activity.recentActivity
+                    )
                         .shannonGlassSection()
                     DevServersSection(
                         servers: parity.servers,

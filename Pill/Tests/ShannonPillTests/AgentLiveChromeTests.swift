@@ -3,6 +3,7 @@ import XCTest
 @testable import PillCore
 
 /// Shared badge labels must match across notch + menu-bar surfaces.
+/// Dual-HUD wording: `AgentLiveChrome` must stay glued to `AgentLiveSurfaceLogic`.
 final class AgentLiveChromeTests: XCTestCase {
 
     private func surface(
@@ -90,6 +91,30 @@ final class AgentLiveChromeTests: XCTestCase {
         // Working with no tool → "working"; other attentions still non-empty.
         if s.attention == .working, s.toolKind == .none {
             XCTAssertEqual(label, "working")
+        }
+    }
+
+    /// Notch chrome and PillCore badge wording must stay identical.
+    func testChromeBadgeDelegatesToSurfaceLogic() {
+        let attentions: [AgentLiveAttention] = [
+            .needsYou, .working, .finished, .idle, .unknown,
+        ]
+        for attention in attentions {
+            let surface = AgentLiveSurface(
+                agentId: "x",
+                displayName: "X",
+                attention: attention,
+                toolKind: attention == .working ? .edit : .none,
+                activityLine: "line",
+                needsYou: attention == .needsYou,
+                isFinished: attention == .finished
+            )
+            let fallback = "fallback-\(attention.rawValue)"
+            XCTAssertEqual(
+                AgentLiveChrome.badgeLabel(surface: surface, fallbackStatusLine: fallback),
+                AgentLiveSurfaceLogic.badgeLabel(surface: surface, fallbackStatusLine: fallback),
+                "drift for \(attention)"
+            )
         }
     }
 }

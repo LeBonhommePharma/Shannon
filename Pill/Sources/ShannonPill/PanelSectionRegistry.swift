@@ -133,6 +133,19 @@ final class ParityPanelModel: ObservableObject {
 
 struct PulledSessionsSection: View {
     let sessions: [AgentSession]
+    /// Gate asks so a pulled session that also needs approval ranks + labels correctly.
+    var pendingAsks: [GateDBReader.PendingAsk] = []
+    var activity: [GateDBReader.ActivityEvent] = []
+
+    /// Ranked cards: needs-you → working → finished → idle; optional fields fail-closed.
+    private var cards: [SessionContentCard] {
+        SessionContentPresenter.cards(
+            sessions: sessions,
+            pendingAsks: pendingAsks,
+            activity: activity,
+            limit: 5
+        )
+    }
 
     var body: some View {
         if sessions.isEmpty {
@@ -140,28 +153,79 @@ struct PulledSessionsSection: View {
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 sectionHeader("Pulled sessions", systemImage: "doc.text.magnifyingglass")
-                ForEach(sessions.prefix(5)) { s in
-                    HStack(spacing: 6) {
-                        Text(AgentStyleCatalog.style(for: s.agentId).emoji)
-                            .font(.shannonMenuFootnote)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(s.displayName)
-                                .font(.shannonMenuBody)
-                                .foregroundStyle(Color.shannonPrimary)
-                                .lineLimit(1)
-                            Text(s.lastTask ?? s.project ?? s.cwd ?? "on disk")
-                                .font(.shannonMenuFootnote)
-                                .foregroundStyle(Color.shannonSecondary)
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                        Text(s.sourceKind == .artifact ? "disk" : s.sourceKind.rawValue)
-                            .font(.shannonMenuSection)
-                            .foregroundStyle(Color.shannonTertiary)
-                    }
+                ForEach(cards) { card in
+                    sessionCardRow(card)
                 }
             }
         }
+    }
+
+    private func sessionCardRow(_ card: SessionContentCard) -> some View {
+        let style = AgentStyleCatalog.style(for: card.agentId)
+        let surface = AgentLiveSurface(
+            agentId: card.agentId,
+            displayName: card.displayName,
+            attention: card.attention,
+            activityLine: card.activityLine,
+            usage: card.usage,
+            needsYou: card.needsYou,
+            isFinished: card.isFinished
+        )
+        return HStack(spacing: 6) {
+            Text(style.emoji)
+                .font(.shannonMenuFootnote)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    Text(card.displayName)
+                        .font(.shannonMenuBody)
+                        .foregroundStyle(Color.shannonPrimary)
+                        .lineLimit(1)
+                    Text(card.badgeLabel)
+                        .font(.shannonMenuSection)
+                        .foregroundStyle(
+                            AgentLiveChrome.attentionColor(
+                                surface: surface,
+                                styleInk: style.palette.ink
+                            )
+                        )
+                        .lineLimit(1)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(style.palette.wash))
+                    Spacer(minLength: 0)
+                    if let usage = card.usageLabel {
+                        Text(usage)
+                            .font(.shannonMenuMono)
+                            .foregroundStyle(Color.shannonTertiary)
+                    }
+                    if let age = card.relativeAge {
+                        Text(age)
+                            .font(.shannonMenuMono)
+                            .foregroundStyle(Color.shannonTertiary)
+                    }
+                }
+                if !card.activityLine.isEmpty {
+                    Text(card.activityLine)
+                        .font(.shannonMenuFootnote)
+                        .foregroundStyle(Color.shannonSecondary)
+                        .lineLimit(1)
+                }
+                if let meta = card.metaLine {
+                    Text(meta)
+                        .font(.shannonMenuMono)
+                        .foregroundStyle(Color.shannonTertiary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            Text(card.sourceKind == .artifact ? "disk" : card.sourceKind.rawValue)
+                .font(.shannonMenuSection)
+                .foregroundStyle(Color.shannonTertiary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(card.displayName), \(card.badgeLabel), \(card.activityLine), \(card.metaLine ?? "")"
+        )
     }
 }
 

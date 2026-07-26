@@ -329,4 +329,60 @@ final class AgentLiveSurfaceTests: XCTestCase {
         // Live idle, not working on stale edit.
         XCTAssertEqual(surface.attention, .idle)
     }
+
+    // MARK: Shared badge + ranked agents
+
+    func testBadgeLabelSharedWording() {
+        let needs = AgentLiveSurface(
+            agentId: "c", displayName: "Claude", attention: .needsYou, activityLine: "x", needsYou: true
+        )
+        XCTAssertEqual(
+            AgentLiveSurfaceLogic.badgeLabel(surface: needs, fallbackStatusLine: "f"),
+            "needs you"
+        )
+        let working = AgentLiveSurface(
+            agentId: "c", displayName: "Claude", attention: .working,
+            toolKind: .edit, activityLine: "Editing a"
+        )
+        XCTAssertEqual(
+            AgentLiveSurfaceLogic.badgeLabel(surface: working, fallbackStatusLine: "f"),
+            "edit"
+        )
+        let done = AgentLiveSurface(
+            agentId: "c", displayName: "Claude", attention: .finished,
+            activityLine: "ready", isFinished: true
+        )
+        XCTAssertEqual(
+            AgentLiveSurfaceLogic.badgeLabel(surface: done, fallbackStatusLine: "f"),
+            "done"
+        )
+    }
+
+    func testRankedAgentsNeedsYouFirst() {
+        let working = agent(id: "codex", name: "Codex", status: .midTask)
+        let needs = agent(id: "claude_code", name: "Claude Code", status: .idle, presence: .live, task: "")
+        let ask = GateDBReader.PendingAsk(
+            interactionId: "a", agentId: "claude_code", prompt: "?", createdAt: now
+        )
+        let ranked = AgentLiveSurfaceLogic.rankedAgents(
+            agents: [working, needs],
+            pendingAsks: [ask],
+            activity: [event(id: 3, agent: "codex", type: "tool_call", label: "Edited x")],
+            now: now,
+            limit: 4
+        )
+        XCTAssertEqual(ranked.first?.id, "claude_code")
+        XCTAssertEqual(ranked.map(\.id).contains("codex"), true)
+    }
+
+    func testActiveFleetCountExcludesIdle() {
+        let w = agent(id: "codex", name: "Codex", status: .midTask)
+        let idle = agent(id: "design", name: "Design", status: .idle, presence: .live, task: "")
+        let n = AgentLiveSurfaceLogic.activeFleetCount(
+            agents: [w, idle],
+            activity: [event(id: 4, agent: "codex", type: "tool_call", label: "Edited y")],
+            now: now
+        )
+        XCTAssertEqual(n, 1)
+    }
 }

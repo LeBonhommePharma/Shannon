@@ -6,45 +6,54 @@ import ShannonTheme
 
 /// Busy / live agent list for the menu-bar popover.
 ///
-/// Uses `AgentLiveChrome` for badge labels so notch + popover cannot drift.
+/// Uses `AgentLiveChrome` + `SessionContentPresenter` so notch + popover
+/// share attention ranking and badge wording (AgentNotch-class fleet).
 struct MenuBarAgentRoster: View {
     @ObservedObject var activity: AgentActivityMonitor
     @ObservedObject var bridge: ShannonBridge
     var agentReadings: [String: EntropyReading]
     var entropyTint: (EntropyReading) -> Color
+    /// Optional pulled/gate sessions keyed by agent id for project/branch/model.
+    var sessionsByAgent: [String: AgentSession] = [:]
 
     private var summary: AgentActivitySummary { activity.summary }
     private var busy: [AgentActivitySnapshot] { summary.busy }
 
-    /// Roster rows: busy first, then connected/live, cap at 3.
-    private var agentRows: [AgentActivitySnapshot] {
-        if !busy.isEmpty { return Array(busy.prefix(3)) }
-        let live = summary.agents.filter { agent in
-            let line = agent.statusLine.lowercased()
-            if line.contains("offline") { return false }
-            return true
+    /// Roster cards: needs-you → working → finished → idle, cap at 3.
+    private var rosterCards: [SessionContentCard] {
+        SessionContentPresenter.cardsFromAgents(
+            agents: summary.agents,
+            pendingAsks: activity.pendingAsks,
+            activity: activity.recentActivity,
+            sessionsByAgent: sessionsByAgent,
+            limit: 3
+        )
+    }
+
+    private var hasActionable: Bool {
+        rosterCards.contains {
+            $0.attention == .needsYou || $0.attention == .working || $0.attention == .finished
         }
-        return Array((live.isEmpty ? summary.agents : live).prefix(3))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text((busy.isEmpty ? "Agents" : "Active now").uppercased())
+            Text((hasActionable ? "Active now" : "Agents").uppercased())
                 .font(.shannonMenuSection)
                 .foregroundStyle(Color.shannonSecondary)
                 .tracking(0.8)
                 .accessibilityAddTraits(.isHeader)
-            if busy.isEmpty && summary.agents.isEmpty {
+            if summary.agents.isEmpty {
                 Text("No agents. ⌘D attaches the front app · DatasetRunner fills FlexAIDdS progress.")
                     .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
                     .lineLimit(2)
                     .frame(minHeight: 28, alignment: .topLeading)
             } else {
-                ForEach(agentRows) { agent in
-                    agentRow(agent)
+                ForEach(rosterCards) { card in
+                    agentCardRow(card)
                 }
-                let hidden = max(0, (busy.isEmpty ? summary.agents.count : busy.count) - agentRows.count)
+                let hidden = max(0, summary.agents.count - rosterCards.count)
                 if hidden > 0 {
                     Text("+\(hidden) more")
                         .font(.shannonMenuFootnote)
@@ -54,42 +63,42 @@ struct MenuBarAgentRoster: View {
         }
     }
 
-    private func agentRow(_ a: AgentActivitySnapshot) -> some View {
-        let style = AgentStyleCatalog.style(for: a.id)
+    private func agentCardRow(_ card: SessionContentCard) -> some View {
+        let style = AgentStyleCatalog.style(for: card.agentId)
         let agentReading: EntropyReading = {
-            if activity.entropyMemory.latest(for: a.id) != nil {
+            if activity.entropyMemory.latest(for: card.agentId) != nil {
                 return activity.entropyMemory.reading(
-                    for: a.id,
+                    for: card.agentId,
                     gateDBAvailable: activity.gateDBAvailable
                 )
             }
-            return agentReadings[a.id]
+            return agentReadings[card.agentId]
                 ?? EntropyProvenance.resolveForAgent(
-                    agentId: a.id,
+                    agentId: card.agentId,
                     bridgeConnected: bridge.connected,
                     bridgeStatus: bridge.status,
                     gate: activity.agentEntropy,
                     gateDBAvailable: activity.gateDBAvailable
                 )
         }()
-        let surface = AgentLiveChrome.surface(
-            agent: a,
-            pendingAsks: activity.pendingAsks,
-            activity: activity.recentActivity
+        // Synthetic surface for shared attention color (badge already on card).
+        let surface = AgentLiveSurface(
+            agentId: card.agentId,
+            displayName: card.displayName,
+            attention: card.attention,
+            activityLine: card.activityLine,
+            usage: card.usage,
+            needsYou: card.needsYou,
+            isFinished: card.isFinished
         )
-        let badge = AgentLiveChrome.badgeLabel(
-            surface: surface,
-            fallbackStatusLine: a.statusLine
-        )
-        let replay = surface.activityLine
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 7) {
                 Text(style.emoji).font(.shannonMenuBody)
-                Text(style.displayName)
+                Text(card.displayName)
                     .font(.shannonMenuBody)
                     .foregroundStyle(style.palette.ink)
                     .lineLimit(1)
-                Text(badge)
+                Text(card.badgeLabel)
                     .font(.shannonMenuSection)
                     .foregroundStyle(
                         AgentLiveChrome.attentionColor(
@@ -102,21 +111,30 @@ struct MenuBarAgentRoster: View {
                     .padding(.vertical, 1)
                     .background(Capsule().fill(style.palette.wash))
                 Spacer(minLength: 4)
-                if let usage = surface.usage?.shortLabel {
+                if let usage = card.usageLabel {
                     Text(usage)
                         .font(.shannonMenuMono)
                         .foregroundStyle(Color.shannonTertiary)
                 }
                 agentEntropyLabel(agentReading)
-                Text(a.relativeAge)
-                    .font(.shannonMenuMono)
-                    .foregroundStyle(Color.shannonTertiary)
-                    .frame(minWidth: 28, alignment: .trailing)
+                if let age = card.relativeAge {
+                    Text(age)
+                        .font(.shannonMenuMono)
+                        .foregroundStyle(Color.shannonTertiary)
+                        .frame(minWidth: 28, alignment: .trailing)
+                }
             }
-            if !replay.isEmpty, surface.attention != .unknown {
-                Text(replay)
+            if !card.activityLine.isEmpty, card.attention != .unknown {
+                Text(card.activityLine)
                     .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonSecondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let meta = card.metaLine {
+                Text(meta)
+                    .font(.shannonMenuMono)
+                    .foregroundStyle(Color.shannonTertiary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -124,7 +142,7 @@ struct MenuBarAgentRoster: View {
         .frame(minHeight: 18, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(style.displayName), \(badge), \(replay), \(agentReading.explain(at: Date())), \(a.relativeAge)"
+            "\(card.displayName), \(card.badgeLabel), \(card.activityLine), \(agentReading.explain(at: Date())), \(card.relativeAge ?? "")"
         )
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import ShannonCore
 
 /// Pure, testable presentation policy for ShannonPill chrome.
 ///
@@ -61,8 +62,8 @@ public enum PillChromePolicy {
     }
 
     /// Operator legend: amber = human approval, red = measured entropy collapse.
-    public static let statusLegend: String =
-        "Amber = approval needed · Red = entropy collapse"
+    /// Single source of truth lives in ShannonCore (`StatusLegendCopy`, UX-010).
+    public static let statusLegend: String = StatusLegendCopy.line
 
     /// Expanded board legend only while first-run coaching is still active.
     public static func shouldShowStatusLegend(firstRunPending: Bool) -> Bool {

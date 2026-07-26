@@ -307,6 +307,7 @@ struct AgentCard: View {
         VStack(alignment: .leading, spacing: ShannonSpacing.xs) {
             HStack(spacing: ShannonSpacing.sm) {
                 ShannonStatusDot(state: state)
+                    .modifier(PulseIfRunning(isRunning: agent.activity == .running))
                 Text(agent.name)
                     .font(.shannonHeadline)
                     .foregroundStyle(Color.shannonPrimary)
@@ -646,6 +647,7 @@ struct VoiceOverlay: View {
 
 /// Fail-closed empty roster (UX-002): idle vs hub offline share Core copy so
 /// phone never looks "all quiet" when CloudKit is down.
+/// Status colour legend (UX-010) matches Mac amber=ask / red=collapse.
 @available(iOS 17.0, *)
 struct EmptyStateView: View {
     let error: String?
@@ -663,9 +665,17 @@ struct EmptyStateView: View {
                 .font(.shannonCaption)
                 .foregroundStyle(Color.shannonTertiary)
                 .multilineTextAlignment(.center)
+            Text(StatusLegendCopy.line)
+                .font(.shannonCaption)
+                .foregroundStyle(Color.shannonTertiary)
+                .multilineTextAlignment(.center)
+                .padding(.top, ShannonSpacing.xs)
+                .accessibilityLabel(StatusLegendCopy.accessibilityLabel)
         }
         .padding(.horizontal, ShannonSpacing.xl)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(copy.title). \(copy.detail)")
+        .accessibilityLabel(
+            "\(copy.title). \(copy.detail). \(StatusLegendCopy.accessibilityLabel)"
+        )
     }
 }

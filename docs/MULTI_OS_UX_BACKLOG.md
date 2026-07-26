@@ -105,12 +105,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Pin needs-you section header or sticky top card when any pending ask.
 - **Priority:** P2
 
-### - [ ] UX-010: Document multi-OS status legend (amber ask vs red collapse) once
+### - [x] UX-010: Document multi-OS status legend (amber ask vs red collapse) once
 
 - **Why:** Mac has `PillChromePolicy.statusLegend`; phone/pad users need the same mental model in Settings or first-run.
 - **Platforms:** all
 - **Area:** docs + optional Settings blurb; `FirstRunCoach` patterns
 - **First slice:** Short shared string in Core + show on phone empty/help.
+- **Done:** `StatusLegendCopy` in ShannonCore (amber=approval · red=collapse); Mac `PillChromePolicy.statusLegend` delegates; phone `EmptyStateView` footer; pure + wiring tests.
 - **Priority:** P2
 
 ---

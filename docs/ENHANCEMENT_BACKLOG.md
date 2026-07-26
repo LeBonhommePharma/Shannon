@@ -155,11 +155,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 ## P3 — low priority / polish
 
-### - [ ] ENH-016: Companion board ordering vs `rankedAgents` alignment
+### - [x] ENH-016: Companion board ordering vs `rankedAgents` alignment
 
 - **Why:** `CompanionRoster` uses mood/waiting heuristics; board listing uses `rankedAgents`. Usually aligned for needs-you, but finished-vs-working edge cases can reorder pets vs status rows.
 - **Area:** `PetCompanion.swift` `CompanionRoster.build`, `PillView.listedAgents`
 - **First slice:** Sort companions by the same attention rank helper; one pure test.
+- **Done:** `CompanionRoster.build` orders via `AgentLiveSurfaceLogic.rankedAgents`; tests pin id order == rankedAgents (incl. working before finished).
 - **Priority:** P3
 
 ### - [ ] ENH-017: Hub gate: emit structured tool kind on activity rows

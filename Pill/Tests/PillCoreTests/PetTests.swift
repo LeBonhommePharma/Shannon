@@ -493,9 +493,45 @@ final class CompanionRosterTests: XCTestCase {
         ], scannedAt: now)
 
         let roster = CompanionRoster.build(from: summary, now: now)
-        XCTAssertEqual(roster.map(\.id), ["science", "codex", "cursor", "chatgpt"])
+        // ENH-016: matches rankedAgents — working first, then idle by displayName.
+        // ChatGPT < Codex < Cursor among idle catalog names.
+        XCTAssertEqual(roster.map(\.id), ["science", "chatgpt", "codex", "cursor"])
         XCTAssertEqual(roster[0].mood, .alert)
         XCTAssertEqual(roster[1].mood, .idle)
+        let ranked = AgentLiveSurfaceLogic.rankedAgents(
+            agents: summary.agents, now: now, limit: 8
+        )
+        XCTAssertEqual(roster.map(\.id), ranked.map(\.id))
+    }
+
+    /// ENH-016: finished-vs-working edge — companions follow attention rank,
+    /// not mood/waiting heuristics (working before finished).
+    func testOrderingAlignsWithRankedAgentsFinishedVsWorking() {
+        let now = Date()
+        let working = snapshot(id: "codex", status: .midTask, presence: .live, secondsAgo: 1, now: now)
+        let finishedAgent = snapshot(id: "claude_code", status: .idle, presence: .live, secondsAgo: 1, now: now)
+        let activity = [
+            GateDBReader.ActivityEvent(
+                id: 1, agentId: "codex", at: now.addingTimeInterval(-2),
+                type: "tool_call", label: "Edited x", output: ""
+            ),
+            GateDBReader.ActivityEvent(
+                id: 2, agentId: "claude_code", at: now.addingTimeInterval(-1),
+                type: "task_complete", label: "Done", output: ""
+            ),
+        ]
+        let summary = AgentActivitySummary(agents: [finishedAgent, working], scannedAt: now)
+        let roster = CompanionRoster.build(
+            from: summary, now: now, activity: activity
+        )
+        let ranked = AgentLiveSurfaceLogic.rankedAgents(
+            agents: summary.agents,
+            activity: activity,
+            now: now,
+            limit: 4
+        )
+        XCTAssertEqual(roster.map(\.id), ranked.map(\.id))
+        XCTAssertEqual(roster.map(\.id).first, "codex", "working outranks finished")
     }
 
     /// The roster must not smear a machine-wide collapse across agents it only

@@ -487,8 +487,12 @@ public struct CompanionState: Sendable, Equatable, Identifiable {
 /// Builds the companion board from an activity summary.
 public enum CompanionRoster {
 
-    /// One companion per agent, ordered the way the board should read:
-    /// provably working first, then live, then most recently seen.
+    /// One companion per agent, ordered like the status board (`rankedAgents`).
+    ///
+    /// **ENH-016:** needs-you → working → finished → idle → unknown (same
+    /// attention rank helper as `AgentLiveSurfaceLogic.rankedAgents` / listed
+    /// agents). Mood still drives pet art; it no longer reorders the board
+    /// differently from status rows for finished-vs-working edge cases.
     ///
     /// - Parameter entropyDeltas: per-agent measured ΔH (or collapse proxy),
     ///   from `EntropyProvenance.companionDeltas`. Only agents present in the
@@ -516,35 +520,53 @@ public enum CompanionRoster {
         let inferred = activity.isEmpty
             ? lastOutcomes
             : mergeOutcomes(explicit: lastOutcomes, activity: activity, now: now)
-        return summary.agents
-            .map { agent in
-                let perAgent = entropyDeltas[agent.id]
-                let shared = entropyDelta
-                let delta: Double? = {
-                    guard agent.presence == .live else { return nil }
-                    if let perAgent { return perAgent }
-                    return shared
-                }()
-                return CompanionState(
-                    agent: agent,
-                    now: now,
-                    approvedAt: approvals[agent.id],
-                    entropyDelta: delta,
-                    hasPendingAsk: askAgents.contains(agent.id),
-                    lastOutcome: inferred[agent.id]
-                )
-            }
-            .sorted { l, r in
-                // Waiting for human (pending ask) ranks with work for board order.
-                let lw = l.codexMotion == .waiting || l.mood.claimsWork
-                let rw = r.codexMotion == .waiting || r.mood.claimsWork
-                if lw != rw { return lw }
-                let lb = l.mood.claimsWork, rb = r.mood.claimsWork
-                if lb != rb { return lb }
-                let ll = l.agent.presence == .live, rl = r.agent.presence == .live
-                if ll != rl { return ll }
-                return l.agent.updatedAt > r.agent.updatedAt
-            }
+        // Last state wins for a duplicate id (tests may stress-map presence × status).
+        var byId: [String: CompanionState] = [:]
+        byId.reserveCapacity(summary.agents.count)
+        var statesInInputOrder: [CompanionState] = []
+        statesInInputOrder.reserveCapacity(summary.agents.count)
+        for agent in summary.agents {
+            let perAgent = entropyDeltas[agent.id]
+            let shared = entropyDelta
+            let delta: Double? = {
+                guard agent.presence == .live else { return nil }
+                if let perAgent { return perAgent }
+                return shared
+            }()
+            let state = CompanionState(
+                agent: agent,
+                now: now,
+                approvedAt: approvals[agent.id],
+                entropyDelta: delta,
+                hasPendingAsk: askAgents.contains(agent.id),
+                lastOutcome: inferred[agent.id]
+            )
+            byId[agent.id] = state
+            statesInInputOrder.append(state)
+        }
+        // Same glance order as PillView.listedAgents / status rows.
+        let ranked = AgentLiveSurfaceLogic.rankedAgents(
+            agents: summary.agents,
+            pendingAsks: pendingAsks,
+            activity: activity,
+            now: now,
+            limit: max(summary.agents.count, 1)
+        )
+        var ordered: [CompanionState] = []
+        var seen = Set<String>()
+        ordered.reserveCapacity(byId.count)
+        for agent in ranked {
+            guard let state = byId[agent.id], !seen.contains(agent.id) else { continue }
+            ordered.append(state)
+            seen.insert(agent.id)
+        }
+        // Defensive: any agent missing from rank output keeps stable input order.
+        // When ids collide, only one companion row is kept (byId last-write).
+        for state in statesInInputOrder where !seen.contains(state.id) {
+            ordered.append(state)
+            seen.insert(state.id)
+        }
+        return ordered
     }
 
     /// Infer per-agent last outcome from the newest activity event.

@@ -345,19 +345,26 @@ public enum AgentLiveSurfaceLogic {
         now: Date = Date(),
         limit: Int = 4
     ) -> [(agent: AgentActivitySnapshot, surface: AgentLiveSurface)] {
-        let byId = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
-        var surfaceById: [String: AgentLiveSurface] = [:]
-        surfaceById.reserveCapacity(agents.count)
+        // Last write wins when the same agent id appears more than once.
+        var byId: [String: AgentActivitySnapshot] = [:]
+        var firstSeenOrder: [String] = []
+        byId.reserveCapacity(agents.count)
         for a in agents {
-            surfaceById[a.id] = resolve(
+            if byId[a.id] == nil { firstSeenOrder.append(a.id) }
+            byId[a.id] = a
+        }
+        var surfaceById: [String: AgentLiveSurface] = [:]
+        surfaceById.reserveCapacity(byId.count)
+        for (id, a) in byId {
+            surfaceById[id] = resolve(
                 agent: a,
                 pendingAsks: pendingAsks,
                 activity: activity,
-                usage: usageByAgent[a.id],
+                usage: usageByAgent[id],
                 now: now
             )
         }
-        let rankedSurfaces = agents.compactMap { surfaceById[$0.id] }.sorted { lhs, rhs in
+        let rankedSurfaces = firstSeenOrder.compactMap { surfaceById[$0] }.sorted { lhs, rhs in
             let lp = rank(lhs.attention)
             let rp = rank(rhs.attention)
             if lp != rp { return lp < rp }
@@ -375,11 +382,11 @@ public enum AgentLiveSurfaceLogic {
             ordered.append((a, s))
             seen.insert(a.id)
         }
-        // Quiet / unknown remainder keep input order (matches prior rankedAgents).
-        for a in agents where !seen.contains(a.id) {
-            if let s = surfaceById[a.id] {
+        // Quiet / unknown remainder keep first-seen input order.
+        for id in firstSeenOrder where !seen.contains(id) {
+            if let a = byId[id], let s = surfaceById[id] {
                 ordered.append((a, s))
-                seen.insert(a.id)
+                seen.insert(id)
             }
         }
         return Array(ordered.prefix(max(0, limit)))

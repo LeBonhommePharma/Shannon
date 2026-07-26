@@ -24,7 +24,7 @@ jobs:
             artifact_name: shannon-macos
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -87,7 +87,7 @@ jobs:
           shasum -a 256 ${{ matrix.artifact_name }}.tar.gz | tee ${{ matrix.artifact_name }}.sha256
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: |
@@ -99,7 +99,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Resolve version from tag
         id: ver
@@ -122,7 +122,7 @@ jobs:
           shasum -a 256 "dist/Shannon-${{ steps.ver.outputs.version }}.dmg" | tee dist/Shannon.dmg.sha256
 
       - name: Upload macOS app artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: shannon-macos-app
           path: |
@@ -138,10 +138,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (for release notes)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 

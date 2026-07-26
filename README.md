@@ -79,6 +79,11 @@ Sync direction is **Mac → iPhone (CloudKit) → Watch (WatchConnectivity)**. P
 # Shared model (no signing, no simulator required)
 cd Packages/ShannonCore && swift test
 
+# Multi-OS health (macOS always; iOS / iPad / watch Simulator builds when Xcode allows)
+./scripts/test_apple_platforms.sh
+./scripts/test_apple_platforms.sh --quick    # packages + unsigned app builds
+# Guide: docs/APPLE_PLATFORM_TESTING.md · UX backlog: docs/MULTI_OS_UX_BACKLOG.md
+
 # iPhone + Watch (XcodeGen → open project)
 cd iOS && xcodegen generate && open Shannon.xcodeproj
 

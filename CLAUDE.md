@@ -46,6 +46,12 @@ pytest tests/python/test_detector.py -v -k "test_name"
 cmake -B build -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF
 cmake --build build -j
 ctest --test-dir build --output-on-failure
+
+# Apple platforms (macOS Pill + packages; iOS / iPadOS / watchOS when Xcode allows)
+./scripts/test_apple_platforms.sh              # all available
+./scripts/test_apple_platforms.sh --quick      # packages + generic app builds
+./scripts/test_apple_platforms.sh ios ipad watch
+# Details: docs/APPLE_PLATFORM_TESTING.md
 ```
 
 ## Linting & Formatting
@@ -63,6 +69,7 @@ Target: Python 3.10+, line length 100, ruff rules E/F/W/I/UP.
 - Primary languages: Python, C++20, with YAML for configuration
 - CMake build system — always run `cmake -B build` then `cmake --build build` to compile
 - Python tests via `pytest tests/python/ -v` (repo-root `pythonpath = ["python"]` in pyproject.toml), C++ tests via `ctest --test-dir build --output-on-failure`
+- Apple multi-platform: `./scripts/test_apple_platforms.sh` (macOS always; iOS/iPad/watch Simulator builds when Xcode + xcodegen allow — see `docs/APPLE_PLATFORM_TESTING.md`)
 - Python + GoogleTest C++ suites — all should pass before committing
 
 ## Architecture

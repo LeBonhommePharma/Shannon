@@ -231,6 +231,34 @@ jobs:
             dist/*.tar.gz
           retention-days: 14
 
+  # ── Apple platforms (macOS packages + optional iOS/iPad/watch builds) ──
+  # Hosted runners often lack Simulator runtimes; the script SKIPs those
+  # honestly and still runs ShannonCore/Theme/Pill on macOS.
+  apple-platforms:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          # Prefer newest installed Xcode; fall back to default.
+          if [[ -d /Applications/Xcode.app ]]; then
+            sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          fi
+          xcodebuild -version
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Multi-platform test script
+        run: |
+          chmod +x scripts/test_apple_platforms.sh
+          # Full Pill suite can be long on GHA; packages + app builds still run.
+          ./scripts/test_apple_platforms.sh --quick
+        env:
+          SHANNON_XCODE_TIMEOUT: "900"
+
   # ── Benchmarks ──────────────────────────────────────────────────────────
   benchmarks:
     runs-on: ubuntu-latest

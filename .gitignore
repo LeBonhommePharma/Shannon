@@ -45,6 +45,8 @@ iPad/Resources/*.entitlements
 # Xcode build products (xcodebuild -derivedDataPath)
 DerivedData/
 Pill/DerivedData/
+**/.derivedData*/
+Packages/*/.derivedData*/
 # clangd background index
 .cache/
 # fastlane run output

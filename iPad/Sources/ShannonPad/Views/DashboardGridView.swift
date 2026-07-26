@@ -21,8 +21,6 @@ struct DashboardGridView: View {
     @ObservedObject var hub: AgentHubViewModel
     var width: CGFloat
     var showsSidePanelCards: Bool
-    /// UX-009: when true (compact + pending ask), pin needs-you band above docking.
-    var pinNeedsYou: Bool = false
     var onAnnotate: (AnnotationTarget) -> Void
 
     @State private var dropTargetID: String?
@@ -34,40 +32,9 @@ struct DashboardGridView: View {
         )
     }
 
-    private var columnCount: Int { HubLayout.gridColumnCount(width: width) }
-
-    private var pendingAgentIDs: Set<String> {
-        HubCompactNeedsYouChrome.pendingAgentIDs(from: hub.pendingConfirmations)
-    }
-
-    private var partitionedAgents: (needsYou: [AgentState], rest: [AgentState]) {
-        HubCompactNeedsYouChrome.partitionForDisplay(
-            agents: hub.visibleAgents,
-            pendingAgentIDs: pendingAgentIDs,
-            pin: pinNeedsYou
-        )
-    }
-
     var body: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: ShannonLayout.IOSCard.interCardSpacing) {
-                // UX-009: pinned needs-you band first so Slide Over never buries
-                // a pending ask under docking / side cards.
-                if pinNeedsYou {
-                    CompactNeedsYouSectionHeader(
-                        count: max(
-                            partitionedAgents.needsYou.count,
-                            hub.pendingConfirmations.count
-                        )
-                    )
-                    .gridCellColumns(columnCount)
-                    .accessibilityIdentifier(HubCompactNeedsYouChrome.accessibilityIdentifier)
-
-                    ForEach(partitionedAgents.needsYou) { agent in
-                        agentCard(agent)
-                    }
-                }
-
                 ForEach(hub.snapshot.docking) { progress in
                     DockingProgressView(
                         progress: progress,
@@ -81,7 +48,7 @@ struct DashboardGridView: View {
                     )
                 }
 
-                ForEach(partitionedAgents.rest) { agent in
+                ForEach(hub.visibleAgents) { agent in
                     agentCard(agent)
                 }
 
@@ -119,7 +86,7 @@ struct DashboardGridView: View {
 
                 if hub.snapshot.isEmpty {
                     EmptyHubState(error: hub.store.lastError)
-                        .gridCellColumns(columnCount)
+                        .gridCellColumns(HubLayout.gridColumnCount(width: width))
                 }
             }
             .padding(ShannonSpacing.md)
@@ -192,31 +159,6 @@ struct DashboardGridView: View {
         guard let url = URL(string: "music://") else { return }
         UIApplication.shared.open(url)
         #endif
-    }
-}
-
-/// Sticky-top section chrome for compact needs-you pin (UX-009).
-/// Sits at the head of the dashboard grid so the band is above docking cards.
-struct CompactNeedsYouSectionHeader: View {
-    var count: Int
-
-    var body: some View {
-        HStack {
-            Image(systemName: "questionmark.circle.fill")
-                .foregroundStyle(Color.shannonWarning)
-            Text(HubCompactNeedsYouChrome.sectionTitle.uppercased())
-                .font(.shannonCaption)
-                .tracking(0.8)
-                .foregroundStyle(Color.shannonWarning)
-            Spacer()
-            if count > 0 {
-                Text("\(count)")
-                    .shannonNumeric(color: .shannonTertiary)
-            }
-        }
-        .padding(.vertical, ShannonSpacing.xs)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(HubCompactNeedsYouChrome.sectionTitle), \(count)")
     }
 }
 

@@ -120,18 +120,10 @@ struct AgentHubView: View {
     }
 
     private func dashboard(showsSidePanelCards: Bool) -> some View {
-        // UX-009: compact (Slide Over) pins needs-you above docking so a pending
-        // ask is never buried below the fold. Wider layouts keep natural order —
-        // GateCard overlay + ranked list already surface asks there.
-        let pinNeedsYou = HubCompactNeedsYouChrome.shouldPin(
-            isCompact: layout.isCompact,
-            hasPendingAsk: !hub.pendingConfirmations.isEmpty
-        )
         DashboardGridView(
             hub: hub,
             width: width,
             showsSidePanelCards: showsSidePanelCards,
-            pinNeedsYou: pinNeedsYou,
             onAnnotate: { annotation = $0 }
         )
         .refreshable { await hub.refresh() }

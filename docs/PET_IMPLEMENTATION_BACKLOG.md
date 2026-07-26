@@ -41,15 +41,12 @@ Test baseline (must stay green while implementing):
 
 
 
-- [x] **B3 — Board companions always atlas-bind package id `"shannon"`**  
+- [ ] **B3 — Board companions always atlas-bind package id `"shannon"`**  
   Observation: `CompanionGlyph` passes `packagePetId: PetPackageResolver.defaultPetId`
   for every agent. Live packages include `grok`, `bonhomme`, `firebear`, etc.,
   but per-agent surfaces never select them.  
   Work: map agent id / style → preferred package id (with procedural fallback);
-  optional preference override.  
-  **Done:** `PetPackageResolver.preferredPackageId(forAgentId:preferenceOverride:style:)`
-  + agent/style tables; `CompanionGlyph`/`Badge` map per agent; desktop selector
-  derives from selected agent (`nil` packagePetId) with force override; unit tests.
+  optional preference override.
 
 ---
 
@@ -62,13 +59,10 @@ Test baseline (must stay green while implementing):
   Work: `ShannonPreferences.desktopPetId` + Settings picker fed by
   `list_pet_packages` / Swift list helper; persist and re-resolve on change.
 
-- [x] **E2 — Toggle hide/show desktop companion (persisted)**  
+- [ ] **E2 — Toggle hide/show desktop companion (persisted)**  
   Observation: desktop pet always shows on launch; menu only has “Show Desktop
   Pet” reassert, no hide / no Settings toggle.  
-  Work: preference + menu checkmark; honor at launch.  
-  **Done:** `ShannonPreferences.showDesktopCompanion` (default true) + store;
-  menu checkmark toggle; Settings toggle; launch honors preference; hide blocks
-  reassert until show.
+  Work: preference + menu checkmark; honor at launch.
 
 - [ ] **E3 — Multi-agent desktop carousel or stack**  
   Observation: `DesktopCompanionSelector` shows only `roster.first` (working
@@ -95,15 +89,12 @@ Test baseline (must stay green while implementing):
 
 ## Optimizations
 
-- [x] **O1 — Desktop companion refresh cadence**  
+- [ ] **O1 — Desktop companion refresh cadence**  
   Observation: `DesktopCompanionModel` binds `objectWillChange` from activity +
   bridge **and** a 2 s timer that always rebuilds presentation. Quiet machines
   still wake every 2 s.  
   Work: timer only when a sleepy threshold is near, or coalesce to activity
-  ticks + 30 s sleepy poll.  
-  **Done:** `DesktopCompanionRefreshCadence` pure policy — quiet 30 s poll,
-  2 s only within `nearSleepyWindow` of `sleepyAfter`; model reschedules on
-  refresh; unit tests for interval selection + empty-roster quiet schedule.
+  ticks + 30 s sleepy poll.
 
 - [ ] **O2 — Cache `PetPackageResolver` results per process**  
   Observation: `CompanionView.resolvePackageOnce` caches per view instance, but
@@ -132,22 +123,16 @@ Test baseline (must stay green while implementing):
   **Done:** `testLiveShannonSpritesheetDrawableIfPresent` in PetPackageResolverTests;
   XCTSkip when sheet/AppKit missing so CI without pets stays green.
 
-- [x] **T2 — Swift ↔ Python motion matrix golden file**  
+- [ ] **T2 — Swift ↔ Python motion matrix golden file**  
   Observation: both sides claim parallel precedence; no shared fixture asserts
   identical labels for the same signal table.  
   Work: JSON cases consumed by both `PetCodexMotionTests` and
-  `test_pet_codex_motion.py`.  
-  **Done:** `hub/tests/fixtures/pet_codex_motion_matrix.json` (28 cases);
-  Python `TestMotionMatrixGolden` + Swift `testMotionMatrixGoldenMatchesSwiftMap`
-  load the same file and fail closed on missing file or label drift.
+  `test_pet_codex_motion.py`.
 
-- [x] **T3 — Bubble honesty when motion is review/failed but mood is idle**  
+- [ ] **T3 — Bubble honesty when motion is review/failed but mood is idle**  
   Observation: matrix tests cover Signals; fewer cases build from real
   `CompanionState` after roster outcome merge.  
-  Work: roster + activity → bubble text golden for review/failed.  
-  **Done:** `moodDisplayWord` / moodLine never claim resting/sleeping when
-  codexMotion is review (`ready`) or failed (`uneasy`); failed bubble mood
-  always `.wary`; roster+activity + selector goldens in DesktopCompanionTests.
+  Work: roster + activity → bubble text golden for review/failed.
 
 ---
 
@@ -168,5 +153,3 @@ Test baseline (must stay green while implementing):
 | Hub `test_pet_*.py` | 111 passed (later loop: 114) |
 | Live `~/.codex/pets` | shannon/bonhomme/bonhomme-cat/collapse-cat/firebear/grok → v2 OK; oc-an/stitch → v1 only (B1) |
 | B2 (2026-07-26) | CompanionBubbleText + CompanionState lastOutcome plumb; see DesktopCompanionTests |
-| T3 (2026-07-26) | moodDisplayWord + roster/activity bubble goldens for review/failed vs idle mood |
-| E2 (2026-07-26) | showDesktopCompanion pref + menu checkmark + launch honor; hide blocks reassert |

@@ -15,9 +15,6 @@ enum HubLayout: Equatable {
     /// Landscape or a wide Stage Manager window. Rail + detail + right panel.
     case threeColumn
 
-    /// Slide Over / narrow Stage Manager — single column, needs-you pin eligible (UX-009).
-    var isCompact: Bool { self == .compact }
-
     static func resolve(width: CGFloat, sizeClass: UserInterfaceSizeClass?) -> HubLayout {
         if sizeClass == .compact || width < 600 { return .compact }
         if width >= 1100 { return .threeColumn }

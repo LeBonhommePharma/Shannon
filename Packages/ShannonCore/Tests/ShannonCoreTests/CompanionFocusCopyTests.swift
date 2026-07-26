@@ -133,4 +133,44 @@ final class CompanionFocusCopyTests: XCTestCase {
         XCTAssertTrue(face.contains("CompanionFocusCopy"), "watch face must use shared focus")
         XCTAssertTrue(face.contains("quietFace") || face.contains("actionableAgents"))
     }
+
+    /// UX-024: Mac pill quiet header + watch face screen title use quietShort.
+    func testMacPillAndWatchScreenWireQuietShort() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let pill = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Pill/Sources/ShannonPill/PillView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            pill.contains("CompanionFocusCopy.quietShort"),
+            "Mac pill quiet headerTitle must use CompanionFocusCopy.quietShort"
+        )
+        XCTAssertFalse(
+            pill.contains("return \"Shannon\""),
+            "Mac pill must not hard-code dual quiet short literal"
+        )
+
+        let watchModel = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "watchOS/Sources/ShannonWatch/WatchModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            watchModel.contains("CompanionFocusCopy.quietShort"),
+            "watch face screen title must use CompanionFocusCopy.quietShort"
+        )
+        XCTAssertFalse(
+            watchModel.contains("return \"Shannon\""),
+            "watch face title must not hard-code dual quiet short literal"
+        )
+    }
 }

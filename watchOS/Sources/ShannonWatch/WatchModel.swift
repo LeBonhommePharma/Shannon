@@ -21,7 +21,8 @@ public enum WatchScreen: Int, CaseIterable, Sendable {
 
     public var title: String {
         switch self {
-        case .face:          return "Shannon"
+        // UX-024: face nav title shares Core quietShort (not dual "Shannon").
+        case .face:          return CompanionFocusCopy.quietShort
         case .agents:        return "Agents"
         case .nowPlaying:    return "Playing"
         case .notifications: return "Alerts"

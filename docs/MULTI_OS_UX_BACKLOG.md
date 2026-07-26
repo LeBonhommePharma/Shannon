@@ -237,10 +237,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `GateAskActionCopy.sent` + `.queuedForPhone`; face + gate statusLine wired; dual hard-code tests.
 - **Priority:** P2
 
+### - [x] UX-024: Mac pill + watch face quiet titles use CompanionFocusCopy.quietShort
+
+- **Why:** Pill `headerTitle` and watch `WatchScreen.face` title hard-coded `"Shannon"` while Core owns `quietShort` (complications / displayLine quiet path).
+- **Platforms:** macOS, watchOS
+- **Area:** `PillView.headerTitle`, `WatchModel.WatchScreen`, `CompanionFocusCopy`
+- **First slice:** Return `quietShort`; pure wiring tests forbid dual literal.
+- **Done:** Pill + WatchScreen face title → `CompanionFocusCopy.quietShort`; CompanionFocusCopyTests wiring.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 19):** `--quick` all PASS. Backlog empty; Mac/watch dual quiet `"Shannon"`. Claimed **UX-024**. Considered: widget `"Idle"` docking-empty (different context — not quiet brand token); pad feed empty prose OK. **No additional UX-0xx**.
 - **2026-07-26 (loop 18):** `--quick` all PASS. Backlog empty; watch face vs gate delivery dual strings. Claimed **UX-023**. Considered: widget `"Idle"` docking-empty (different context); PillView header `"Shannon"` quietShort (optional); pad notification empty prose OK. **No additional UX-0xx**.
 - **2026-07-26 (loop 17):** `--quick` all PASS. Backlog empty; pad empty missing StatusLegend. Claimed **UX-022**. Considered: widget `"Idle"` docking-empty (different context); watch face `"Sending answer…"` delivery narrative vs `GateAskActionCopy.sending`; PillView header `"Shannon"` quietShort family (optional). **No additional UX-0xx**.
 - **2026-07-26 (loop 16):** `--quick` all PASS. Backlog empty; residual pad detail/notification live Approve offline. Claimed **UX-021**. Considered: widget `"Idle"` docking-empty (different context); watch `"iPhone away"` gate chip (status narrative, not empty-roster dual); pad StatusLegend on empty (optional polish). **No additional UX-0xx**.

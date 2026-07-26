@@ -988,7 +988,8 @@ struct PillView: View {
         if showMedia, let title = nowPlaying.state.info?.title, !title.isEmpty {
             return title
         }
-        return "Shannon"
+        // UX-024: same quiet short token as complications / watch face family.
+        return CompanionFocusCopy.quietShort
     }
 
     private var headerSubtitle: String {

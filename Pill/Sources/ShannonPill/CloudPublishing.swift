@@ -1,6 +1,5 @@
 import Foundation
 import PillCore
-import ShannonCore
 
 /// Mac → iCloud publishing. Reads the same models the pill renders and mirrors
 /// them into CloudKit for the iPhone and Apple Watch.

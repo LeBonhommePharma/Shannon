@@ -1,6 +1,5 @@
 import SwiftUI
 import PillCore
-import ShannonTheme
 
 // MARK: - GateInlineCard
 

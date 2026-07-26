@@ -1,6 +1,5 @@
 import SwiftUI
-import ShannonCore
-import ShannonTheme
+import PillCore
 
 /// Where the model layer meets the design system.
 ///

@@ -1,6 +1,5 @@
 import SwiftUI
 import PillCore
-import ShannonTheme
 
 // MARK: - Shared agent live chrome (notch + menu-bar popover)
 

@@ -2,7 +2,6 @@ import AppKit
 import Combine
 import SwiftUI
 import PillCore
-import ShannonTheme
 import QuartzCore
 
 /// Shared expand/collapse state between the SwiftUI view and the window.

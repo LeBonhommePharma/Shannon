@@ -100,11 +100,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 - **Done:** `tool.pytest.ini_options.pythonpath = ["python"]` in pyproject.toml; `tests/python/conftest.py` prepends `python/` to `PYTHONPATH` for subprocess CLI tests; CLAUDE.md Testing notes updated; bare `pytest tests/python/ -q` → 180 passed, 51 skipped.
 - **Priority:** P2
 
-### - [ ] ENH-010: Fix ShannonPill / PillCore class duplication in installed app probe
+### - [x] ENH-010: Fix ShannonPill / PillCore class duplication in installed app probe
 
 - **Why:** `./scripts/shannon probe` loads `/Applications/Shannon.app` and logs many *“Class … implemented in both PillCore.framework and ShannonPill”* warnings. Spurious cast risk for production install.
 - **Area:** `scripts/package_pill.sh`, Xcode / SPM linking, app bundle layout
 - **First slice:** Ensure PillCore is linked once (framework OR static into executable, not both); re-run probe without duplicate-class lines.
+- **Done:** Strategy A — ShannonPill links ShannonCore/Theme only via embedded `PillCore.framework` (`@_exported` in `ModuleExports.swift`); removed direct package deps that dual-linked into the executable. Also added static AgentReaders/DevServers/Routes to XcodeGen so Xcode builds match SPM modules. `package_pill.sh` auto prefers SwiftPM first. Probe *“implemented in both”*: 11 → 0 (Xcode Debug app + SPM `make_app`).
 - **Priority:** P2
 
 ### - [x] ENH-011: Mute `var s` / unused-mutation warnings in AgentLiveChromeTests
@@ -179,7 +180,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-008: ShannonPill suite green (artifact throttle); PillCore 827 pass, 1 skip |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-010: PillCore 827 pass, 1 skip; Xcode + SPM probe 0 class-dupe lines |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `pytest tests/python/ -q` | 2026-07-26 ENH-009: 180 passed, 51 skipped (pythonpath wired; bare pytest works) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

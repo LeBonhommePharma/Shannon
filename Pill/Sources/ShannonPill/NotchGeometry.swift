@@ -1,6 +1,5 @@
 import AppKit
 import PillCore
-import ShannonTheme
 
 /// Resolves where the pill should sit on a given screen.
 ///

@@ -1,6 +1,5 @@
 import SwiftUI
 import PillCore
-import ShannonTheme
 
 // MARK: - Menu-bar popover resources HUD (extracted from MenuBarPopoverView)
 

@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import PillCore
-import ShannonTheme
 import DevServers
 import Routes
 

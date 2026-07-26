@@ -1,6 +1,5 @@
 import SwiftUI
 import PillCore
-import ShannonTheme
 
 // `ShannonStatus.isSynthetic` / `.syntheticBackends` and the provenance rules
 // built on them now live in PillCore (`EntropyProvenance.swift`), so the

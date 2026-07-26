@@ -1,6 +1,5 @@
 import SwiftUI
 import PillCore
-import ShannonTheme
 import AgentReaders
 import DevServers
 import Routes

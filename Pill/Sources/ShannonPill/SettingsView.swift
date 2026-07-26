@@ -1,6 +1,5 @@
 import SwiftUI
 import PillCore
-import ShannonTheme
 
 /// Shannon product Settings — fixed chrome, system typography, no thrash.
 ///

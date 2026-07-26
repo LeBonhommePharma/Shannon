@@ -1,6 +1,5 @@
 import SwiftUI
 import PillCore
-import ShannonTheme
 import AppKit
 
 // MARK: - GateAskCard

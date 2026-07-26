@@ -50,18 +50,47 @@ targets:
         # and `codesign --deep` in scripts/package_pill.sh fails the same way.
         GENERATE_INFOPLIST_FILE: YES
 
+  # Static helpers matching SwiftPM targets. Depend on PillCore only — do not
+  # re-list ShannonCore/Theme or they will dual-link with the framework.
+  AgentReaders:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/AgentReaders
+    dependencies:
+      - target: PillCore
+
+  DevServers:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/DevServers
+    dependencies:
+      - target: PillCore
+
+  Routes:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/Routes
+    dependencies:
+      - target: PillCore
+
   ShannonPill:
     type: application
     platform: macOS
     sources:
       - path: Sources/ShannonPill
     dependencies:
+      # Link ShannonCore/Theme only via PillCore (dynamic). Listing the packages
+      # here as well statically re-links them into the executable while the same
+      # classes already live in Frameworks/PillCore.framework → ObjC
+      # "implemented in both" at probe. Modules are @_exported from PillCore.
       - target: PillCore
         embed: true
-      - package: ShannonCore
-        product: ShannonCore
-      - package: ShannonTheme
-        product: ShannonTheme
+      - target: AgentReaders
+      - target: DevServers
+      - target: Routes
     # Generated, not Resources/Info.plist — XcodeGen rewrites whatever file it
     # is pointed at, and the SwiftPM bundle needs those literal values intact.
     info:
@@ -92,6 +121,9 @@ targets:
       - path: Tests/PillCoreTests
     dependencies:
       - target: PillCore
+      - target: AgentReaders
+      - target: DevServers
+      - target: Routes
 
 schemes:
   ShannonPill:

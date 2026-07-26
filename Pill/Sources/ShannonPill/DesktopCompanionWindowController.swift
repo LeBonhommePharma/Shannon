@@ -8,7 +8,6 @@ import AppKit
 import Combine
 import SwiftUI
 import PillCore
-import ShannonTheme
 
 // MARK: - Panel
 

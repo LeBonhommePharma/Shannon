@@ -12,7 +12,7 @@
 #   CODESIGN_IDENTITY   Developer ID Application: …  (default: ad-hoc "-")
 #   NOTARY_PROFILE      notarytool keychain profile (optional notarization)
 #   SHANNON_DMG_DIR     output directory (default: <repo>/dist)
-#   SHANNON_BUILD_METHOD  auto|swiftpm|xcode  (default: auto)
+#   SHANNON_BUILD_METHOD  auto|swiftpm|xcode  (default: auto = swiftpm then xcode)
 #
 # Produces Shannon-<version>.dmg containing Shannon.app.
 
@@ -155,12 +155,15 @@ case "${BUILD_METHOD}" in
   swiftpm) build_via_swiftpm ;;
   xcode)   build_via_xcode ;;
   auto)
-    if build_via_xcode 2>"${WORKDIR}/xcode.err"; then
+    # Prefer SwiftPM first: single static link of ShannonCore (no Frameworks
+    # dual-load). Xcode archive is still available via SHANNON_BUILD_METHOD=xcode
+    # and remains correct after project.yml stopped re-linking Core into the app.
+    if build_via_swiftpm 2>"${WORKDIR}/swiftpm.err"; then
       :
     else
-      echo "==> Xcode archive failed; falling back to SwiftPM"
-      cat "${WORKDIR}/xcode.err" >&2 || true
-      build_via_swiftpm
+      echo "==> SwiftPM build failed; falling back to Xcode archive"
+      cat "${WORKDIR}/swiftpm.err" >&2 || true
+      build_via_xcode
     fi
     ;;
   *)

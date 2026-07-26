@@ -126,10 +126,8 @@ class optional_build_ext(_build_ext):
 
     def _prepare_core_extension(self, ext: Extension) -> bool:
         if _skip_core_requested():
-            warnings.warn(
-                "SHANNON_SKIP_CORE set — installing pure-Python package only.",
-                stacklevel=2,
-            )
+            # Intentional pure path — print, don't warn (CI/twine treat UserWarning as noise).
+            print("SHANNON_SKIP_CORE set — installing pure-Python package only.", file=sys.stderr)
             return False
 
         try:
@@ -175,10 +173,7 @@ class optional_build_ext(_build_ext):
 def _placeholder_extension_modules() -> List[Extension]:
     """Declare _core with relative sources; real flags filled at build time."""
     if _skip_core_requested():
-        warnings.warn(
-            "SHANNON_SKIP_CORE set — installing pure-Python package only.",
-            stacklevel=2,
-        )
+        print("SHANNON_SKIP_CORE set — installing pure-Python package only.", file=sys.stderr)
         return []
 
     if not _core_sources_available():

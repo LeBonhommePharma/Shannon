@@ -64,9 +64,12 @@ class Shannon < Formula
     <<~EOS
       This formula installs the native `shannon-agent` CLI only (C++ entropy referee).
 
-      Python package (separate):
-        pip install "git+https://github.com/LeBonhommePharma/Shannon.git"
-        # or after PyPI: pip install shannon-entropy
+      Python package (pure-Python works on Windows/Linux/macOS — no compiler):
+        pip install shannon-entropy
+        # or from a clone:
+        #   SHANNON_SKIP_CORE=1 pip install -e .
+        #   Windows:  powershell -File scripts\\Install-Shannon.ps1 -Source path
+        #   Unix:     ./scripts/install_shannon.sh --path
         shannon-monitor --help
 
       macOS Pill app (separate cask):
@@ -77,6 +80,7 @@ class Shannon < Formula
         brew tap lebonhommepharma/shannon https://github.com/LeBonhommePharma/Shannon
         brew trust --formula lebonhommepharma/shannon/shannon
         brew install --HEAD lebonhommepharma/shannon/shannon
+        # Stable: brew install lebonhommepharma/shannon/shannon  (after v2.1.0 tag + formula sha)
 
       Default build: CPU + OpenMP (portable). Formula head tracks main only.
       Shannon is CPU-only; GPU backends were removed (see README).

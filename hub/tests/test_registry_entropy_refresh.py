@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from gate_scores import should_refresh_registry_entropy
+from gate_scores import is_attach_status_noise, should_refresh_registry_entropy
 
 
 class TestShouldRefreshRegistryEntropy:
@@ -28,6 +28,7 @@ class TestShouldRefreshRegistryEntropy:
 
     def test_cmd_d_ingest_does_not_refresh(self):
         # This is the stuck-2.38 path: identical "Working in Ghostty" forever.
+        # That H is attach-spam signature, not token-distribution collapse.
         assert not should_refresh_registry_entropy(
             "status",
             {"event": "ingest", "source": "cmd_d", "text": "Working in Ghostty"},
@@ -35,6 +36,14 @@ class TestShouldRefreshRegistryEntropy:
         assert not should_refresh_registry_entropy(
             "status",
             {"source": "process_attach", "text": "Working in Ghostty"},
+        )
+
+    def test_working_in_template_is_noise_without_source_tag(self):
+        # ⌘D default even if source/event fields are missing.
+        assert is_attach_status_noise({"text": "Working in Ghostty"})
+        assert is_attach_status_noise({"message": "Working in Cursor"})
+        assert not should_refresh_registry_entropy(
+            "status", {"text": "Working in Ghostty"}
         )
 
     def test_tiny_status_is_heartbeat(self):
@@ -45,4 +54,7 @@ class TestShouldRefreshRegistryEntropy:
         assert should_refresh_registry_entropy(
             "status",
             {"message": "Docking target 1ACJ — simulation 4/10 complete"},
+        )
+        assert not is_attach_status_noise(
+            {"message": "Docking target 1ACJ — simulation 4/10 complete"}
         )

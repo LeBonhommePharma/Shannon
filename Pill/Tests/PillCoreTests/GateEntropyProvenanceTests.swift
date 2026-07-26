@@ -212,13 +212,28 @@ final class GateEntropyProvenanceTests: XCTestCase {
             lastSeenSeconds: 999
         )
         XCTAssertEqual(withClock ?? -1, 100, accuracy: 1e-9)
-        // Legacy schema without the column still ages from last_seen.
+        // Legacy schema without the column still ages from last_seen —
+        // unless the score is the classic attach-spam band (~2.38).
         let legacy = GateEntropyClock.measuredAtSeconds(
             hasEntropyUpdatedColumn: false,
             entropyUpdatedSeconds: 0,
             lastSeenSeconds: 50
         )
         XCTAssertEqual(legacy ?? -1, 50, accuracy: 1e-9)
+        XCTAssertNil(GateEntropyClock.measuredAtSeconds(
+            hasEntropyUpdatedColumn: false,
+            entropyUpdatedSeconds: 0,
+            lastSeenSeconds: 50,
+            scoreBits: 2.3763
+        ), "legacy + attach-spam band must not look live")
+    }
+
+    func testAttachSpamSignatureIsNotTokenCollapse() {
+        // Documented contract: ~2.38 is attach status noise, not library collapse.
+        XCTAssertTrue(EntropyIntegrity.looksLikeAttachSpamSignature(2.38))
+        XCTAssertTrue(EntropyIntegrity.looksLikeAttachSpamSignature(2.3763))
+        XCTAssertFalse(EntropyIntegrity.looksLikeAttachSpamSignature(4.1))
+        XCTAssertFalse(EntropyIntegrity.looksLikeAttachSpamSignature(8.0))
     }
 
     /// Ages from entropy_updated_ns, not the fresher last_seen (heartbeat).

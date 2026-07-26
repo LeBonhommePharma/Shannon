@@ -1195,8 +1195,33 @@ class AuditDB:
         self.db_path = db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
+        # Clear pre-fix attach-spam freezes so the HUD never inherits a
+        # ~2.38 unstamped score from disk (not token collapse — see gate_scores).
+        self.scrub_unstamped_entropy_scores()
 
     # ── DDL ───────────────────────────────────────────────────────────────────
+
+    def scrub_unstamped_entropy_scores(self) -> int:
+        """Zero ``entropy_score`` when there is no honest measurement clock.
+
+        Pre-fix rows kept a frozen attach-status H (~2.38) with
+        ``entropy_updated_ns`` DEFAULT 0. The pill already refuses those, but
+        exporters and the raw column still advertised the spam signature.
+        Returns the number of rows cleared.
+        """
+        with self._connect() as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)")}
+            if "entropy_updated_ns" not in cols:
+                return 0
+            cur = conn.execute(
+                """
+                UPDATE agents
+                   SET entropy_score = 0.0
+                 WHERE COALESCE(entropy_updated_ns, 0) = 0
+                   AND COALESCE(entropy_score, 0) != 0
+                """
+            )
+            return int(cur.rowcount or 0)
 
     def _init_schema(self) -> None:
         with self._connect() as conn:

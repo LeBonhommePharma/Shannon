@@ -141,3 +141,32 @@ class TestEntropyUpdatedNs:
             ).fetchone()
         assert row[0] == pytest.approx(0.0)
         assert (row[1] or 0) == 0
+
+    def test_open_db_scrubs_unstamped_attach_spam_signature(
+        self, tmp_path: Path
+    ):
+        """Opening AuditDB clears leftover ~2.38 with entropy_updated_ns=0."""
+        db_path = tmp_path / "scrub.db"
+        # First open creates schema
+        _ = AuditDB(db_path)
+        now = time.time_ns()
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO agents
+                    (agent_id, status, connected_at, last_seen_ns, disconnected_at,
+                     message_count, entropy_score, entropy_updated_ns, task_id)
+                VALUES ('grok_build', 'observed', ?, ?, ?, 9, 2.3763, 0, 'ingest')
+                """,
+                (now, now, now),
+            )
+            conn.commit()
+        # Re-open must scrub on __init__ (simulates gate restart).
+        _ = AuditDB(db_path)
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                "SELECT entropy_score, entropy_updated_ns FROM agents "
+                "WHERE agent_id='grok_build'"
+            ).fetchone()
+        assert row[0] == pytest.approx(0.0), "attach-spam signature must be zeroed"
+        assert (row[1] or 0) == 0

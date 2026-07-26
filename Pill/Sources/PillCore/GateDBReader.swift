@@ -9,20 +9,31 @@ import SQLite3
 ///
 /// Heartbeats still advance `last_seen_ns` without touching the score. If we
 /// aged H from `last_seen`, a frozen ~2.38 bit attach-status score would look
-/// live forever. When the schema has `entropy_updated_ns`, only that clock is
-/// usable; a zero/DEFAULT value means "no honest measurement time" → refuse.
+/// live forever. That ~2.38 is a **systematic attach-spam signature** (identical
+/// ⌘D status text), not Shannon token-distribution collapse. When the schema
+/// has `entropy_updated_ns`, only that clock is usable; a zero/DEFAULT value
+/// means "no honest measurement time" → refuse.
 public enum GateEntropyClock {
     /// - Parameter hasEntropyUpdatedColumn: true when SELECT included col 8.
     /// - Parameter entropyUpdatedSeconds: unix seconds (0 = never written).
     /// - Parameter lastSeenSeconds: only used for pre-column legacy schemas.
+    /// - Parameter scoreBits: optional score for attach-spam defence-in-depth.
     /// - Returns: unix seconds for `measuredAt`, or `nil` to refuse the score.
     public static func measuredAtSeconds(
         hasEntropyUpdatedColumn: Bool,
         entropyUpdatedSeconds: TimeInterval,
-        lastSeenSeconds: TimeInterval
+        lastSeenSeconds: TimeInterval,
+        scoreBits: Double? = nil
     ) -> TimeInterval? {
         if hasEntropyUpdatedColumn {
-            return entropyUpdatedSeconds > 0 ? entropyUpdatedSeconds : nil
+            // Unstamped: never current — clears the frozen-2.38 attach path.
+            guard entropyUpdatedSeconds > 0 else { return nil }
+            return entropyUpdatedSeconds
+        }
+        // Legacy schema (no entropy_updated_ns column): refuse classic attach
+        // spam band so we do not resurrect ~2.38 as "live" from last_seen alone.
+        if let bits = scoreBits, EntropyIntegrity.looksLikeAttachSpamSignature(bits) {
+            return nil
         }
         return lastSeenSeconds > 0 ? lastSeenSeconds : nil
     }
@@ -329,7 +340,8 @@ public enum GateDBReader {
             let entropyMeasuredAt = GateEntropyClock.measuredAtSeconds(
                 hasEntropyUpdatedColumn: hasEntropyUpdatedCol,
                 entropyUpdatedSeconds: entropyUpdated,
-                lastSeenSeconds: lastSeen
+                lastSeenSeconds: lastSeen,
+                scoreBits: entropyIsNull ? nil : entropyRaw
             )
 
             let cleanTask = AgentActivitySnapshot.looksLikeSecretOrJunk(task)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -10,7 +11,13 @@ if TYPE_CHECKING:
 
 # Message types that refresh agents.entropy_score (live HUD H).
 # Heartbeat / process-attach status spam is excluded so the pill does not
-# freeze on a single short-status H (e.g. always "Working in Ghostty" → 2.38).
+# freeze on a single short-status H (e.g. always "Working in Ghostty" → ~2.38).
+#
+# That ~2.38 figure is NOT token-distribution collapse from the Shannon
+# library (logits/logprobs, ~8–12 → ~2–4). It is a *systematic attach-spam
+# signature*: identical short ⌘D / process-attach status text always scores
+# the same message-content H. Seeing it a lot means attach traffic (or an
+# old unstamped score) is dominating — not that the model is collapsed.
 _REGISTRY_ENTROPY_TYPES = frozenset({
     "result",
     "code_suggestion",
@@ -18,6 +25,12 @@ _REGISTRY_ENTROPY_TYPES = frozenset({
     "alert",
     "approval_needed",
 })
+
+# ⌘D default task template: "Working in Ghostty" / "Working in Cursor" …
+_WORKING_IN_RE = re.compile(r"^working in\s+\S", re.IGNORECASE)
+
+# Sources that mean "host capture / attach", never substantive agent work.
+_ATTACH_SOURCES = frozenset({"cmd_d", "process_attach", "ingest"})
 
 
 def registry_entropy_score(decision: "GateDecision") -> float:
@@ -29,6 +42,24 @@ def registry_entropy_score(decision: "GateDecision") -> float:
     if not math.isfinite(h):
         return 0.0
     return h
+
+
+def is_attach_status_noise(payload: Optional[dict[str, Any]] = None) -> bool:
+    """True when this payload is ⌘D / process-attach traffic, not real work.
+
+    Attach noise always produces the same short-status H (~2.38 for common
+    templates). It must never refresh the registry score or be read as
+    token-distribution collapse on the HUD.
+    """
+    p = payload or {}
+    if str(p.get("event") or "").lower() == "ingest":
+        return True
+    if str(p.get("source") or "").lower() in _ATTACH_SOURCES:
+        return True
+    text = str(p.get("message") or p.get("text") or p.get("output") or "").strip()
+    if _WORKING_IN_RE.match(text):
+        return True
+    return False
 
 
 def should_refresh_registry_entropy(
@@ -48,13 +79,14 @@ def should_refresh_registry_entropy(
         return True
     if mt != "status":
         return False
-    p = payload or {}
-    # ⌘D / process-attach path — never clobber usable H with attach noise.
-    if str(p.get("event") or "").lower() == "ingest":
+    if is_attach_status_noise(payload):
         return False
-    if str(p.get("source") or "").lower() in ("cmd_d", "process_attach", "ingest"):
-        return False
-    text = str(p.get("message") or p.get("text") or p.get("output") or "").strip()
+    text = str(
+        (payload or {}).get("message")
+        or (payload or {}).get("text")
+        or (payload or {}).get("output")
+        or ""
+    ).strip()
     # Tiny status lines are heartbeats, not measurements worth showing as live H.
     if len(text) < 12:
         return False

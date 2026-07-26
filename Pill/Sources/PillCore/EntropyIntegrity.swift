@@ -47,6 +47,20 @@ public enum EntropySelfReportKey: String, Sendable, CaseIterable {
 /// through these so a self-report can never masquerade as measured H.
 public enum EntropyIntegrity {
 
+    /// Classic message-content H for repeated ⌘D / process-attach status text
+    /// (e.g. "Working in Ghostty"). **Not** Shannon library token-collapse
+    /// (logits/logprobs ~8–12 → ~2–4). Seeing this band a lot means attach
+    /// spam or an unstamped leftover score is dominating the display.
+    public static let attachSpamSignatureBits: ClosedRange<Double> = 2.30...2.45
+
+    /// True when bits match the systematic attach-status spam band.
+    /// Callers with **no honest measurement clock** must refuse these as
+    /// current H; a stamped substantive write outside this band is fine.
+    public static func looksLikeAttachSpamSignature(_ bits: Double) -> Bool {
+        guard bits.isFinite else { return false }
+        return attachSpamSignatureBits.contains(bits)
+    }
+
     /// True when this source is allowed to produce a displayable measurement.
     /// Offline gate rows are still *trusted as historical* (they may be stale)
     /// — trust here means "not agent-authored", not "current".

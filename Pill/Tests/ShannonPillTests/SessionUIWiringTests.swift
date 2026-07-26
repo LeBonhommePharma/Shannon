@@ -30,10 +30,14 @@ final class SessionUIWiringTests: XCTestCase {
                 "liveAgentIds",
             ]),
             ("PillView.swift", [
-                "AgentLiveSurfaceLogic.rankedAgentSurfaces",
+                "SessionContentPresenter.listedSurfaces",
                 "SessionContentPresenter.collapsedActiveCount",
                 "SessionContentPresenter.collapsedUsageChip",
+                "usageByAgent",
+                "sessionsByAgent",
+                "parity.sessionsByAgent",
                 "AgentLiveChrome.badgeLabel",
+                "metaLine",
             ]),
             ("MenuBarPopoverView.swift", [
                 "AgentLiveSurfaceLogic.primaryFocus",

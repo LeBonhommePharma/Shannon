@@ -125,6 +125,78 @@ public enum SessionContentPresenter {
         UsageBridge.fromTokens(input: session.tokensIn, output: session.tokensOut)
     }
 
+    /// Map sessions → usage snapshots for surface resolve (fail-closed, no zeros).
+    ///
+    /// Used by notch pill **and** menu-bar roster so collapsed chips / expanded
+    /// usage badges share one path (AgentNotch/AgentPeek density).
+    public static func usageByAgent(
+        from sessionsByAgent: [String: AgentSession]
+    ) -> [String: AgentUsageSnapshot] {
+        var out: [String: AgentUsageSnapshot] = [:]
+        for (id, session) in sessionsByAgent {
+            if let u = usageFromSession(session) { out[id] = u }
+        }
+        return out
+    }
+
+    /// Merge explicit usage with session-derived tokens (explicit wins per id).
+    public static func mergedUsageByAgent(
+        usageByAgent: [String: AgentUsageSnapshot] = [:],
+        sessionsByAgent: [String: AgentSession] = [:]
+    ) -> [String: AgentUsageSnapshot] {
+        var merged = usageByAgent
+        for (id, session) in sessionsByAgent {
+            if merged[id] == nil, let u = usageFromSession(session) {
+                merged[id] = u
+            }
+        }
+        return merged
+    }
+
+    /// Optional meta line for an agent when a session has project/branch/model.
+    public static func metaLine(
+        agentId: String,
+        sessionsByAgent: [String: AgentSession]
+    ) -> String? {
+        guard let s = sessionsByAgent[agentId] else { return nil }
+        var chips: [String] = []
+        if let p = nonEmpty(s.project) { chips.append(p) }
+        if let b = nonEmpty(s.branch) { chips.append(b) }
+        if let m = nonEmpty(s.model) { chips.append(m) }
+        return chips.isEmpty ? nil : chips.joined(separator: " · ")
+    }
+
+    /// Board rows with surfaces — same inputs as menu-bar `cardsFromAgents`.
+    ///
+    /// Pure so tests prove notch cannot drop `sessionsByAgent` / usage without
+    /// the returned surface.usage / meta diverging from card assembly.
+    public static func listedSurfaces(
+        agents: [AgentActivitySnapshot],
+        pendingAsks: [GateDBReader.PendingAsk] = [],
+        activity: [GateDBReader.ActivityEvent] = [],
+        sessionsByAgent: [String: AgentSession] = [:],
+        usageByAgent: [String: AgentUsageSnapshot] = [:],
+        now: Date = Date(),
+        limit: Int = 4
+    ) -> [(agent: AgentActivitySnapshot, surface: AgentLiveSurface, metaLine: String?)] {
+        let merged = mergedUsageByAgent(
+            usageByAgent: usageByAgent,
+            sessionsByAgent: sessionsByAgent
+        )
+        let pairs = AgentLiveSurfaceLogic.rankedAgentSurfaces(
+            agents: agents,
+            pendingAsks: pendingAsks,
+            activity: activity,
+            usageByAgent: merged,
+            now: now,
+            limit: limit
+        )
+        return pairs.map { agent, surface in
+            let meta = metaLine(agentId: agent.id, sessionsByAgent: sessionsByAgent)
+            return (agent, surface, meta)
+        }
+    }
+
     /// Resolve live surface for one session (identity + gate activity + asks).
     public static func resolveSurface(
         session: AgentSession,
@@ -240,14 +312,12 @@ public enum SessionContentPresenter {
         now: Date = Date(),
         limit: Int = 4
     ) -> [SessionContentCard] {
-        // Merge session token usage into the resolve map once so roster cards
-        // share one surface tick with rankedAgentSurfaces (ENH-007).
-        var mergedUsage = usageByAgent
-        for (id, session) in sessionsByAgent {
-            if mergedUsage[id] == nil, let u = usageFromSession(session) {
-                mergedUsage[id] = u
-            }
-        }
+        // Merge session token usage once so roster cards share one surface tick
+        // with notch `listedSurfaces` (ENH-007 / product-class density).
+        let mergedUsage = mergedUsageByAgent(
+            usageByAgent: usageByAgent,
+            sessionsByAgent: sessionsByAgent
+        )
         let ranked = AgentLiveSurfaceLogic.rankedAgentSurfaces(
             agents: agents,
             pendingAsks: pendingAsks,

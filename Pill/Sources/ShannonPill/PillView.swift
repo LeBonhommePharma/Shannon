@@ -84,6 +84,8 @@ struct PillView: View {
     @ObservedObject var ingest: AgentIngestService
     @ObservedObject var activity: AgentActivityMonitor
     @ObservedObject var resources: SystemResourceMonitor
+    /// Gate + artifact sessions (project/branch/model/tokens) — same source as menu bar.
+    @ObservedObject var parity: ParityPanelModel
     @Binding var isExpanded: Bool
     /// Desktop-pet handoff (E4): highlight this agent row while expanded.
     var focusedAgentId: String? = nil
@@ -131,29 +133,49 @@ struct PillView: View {
         )
     }
 
+    /// Best session per agent (project / branch / model / tokens) — menu-bar parity.
+    private var sessionsByAgent: [String: AgentSession] { parity.sessionsByAgent }
+
+    /// Usage map from sessions (fail-closed) — feeds collapsed chip + expanded badges.
+    private var usageByAgent: [String: AgentUsageSnapshot] {
+        SessionContentPresenter.usageByAgent(from: sessionsByAgent)
+    }
+
     /// Listed board rows with **one** surface resolve per agent (ENH-007 residual).
     ///
-    /// Order matches `rankedAgentSurfaces` / menu-bar roster. Prefer this over
-    /// `listedAgents` + per-row `resolve` so badge/detail/entropy lines share one tick.
-    private var listedAgentSurfaces: [(agent: AgentActivitySnapshot, surface: AgentLiveSurface)] {
+    /// Same path as menu-bar `cardsFromAgents`: sessions → usage merge → ranked
+    /// surfaces + optional meta line (project · branch · model).
+    private var listedAgentSurfaces: [(
+        agent: AgentActivitySnapshot,
+        surface: AgentLiveSurface,
+        metaLine: String?
+    )] {
         let limit = busy.isEmpty ? 3 : 4
-        let pairs = AgentLiveSurfaceLogic.rankedAgentSurfaces(
+        let pairs = SessionContentPresenter.listedSurfaces(
             agents: summary.agents,
             pendingAsks: activity.pendingAsks,
             activity: activity.recentActivity,
+            sessionsByAgent: sessionsByAgent,
+            usageByAgent: usageByAgent,
             limit: limit
         )
         if !pairs.isEmpty { return pairs }
         let fallback = Array((busy.isEmpty ? summary.agents.prefix(3) : busy.prefix(4)))
+        let merged = SessionContentPresenter.mergedUsageByAgent(
+            usageByAgent: usageByAgent,
+            sessionsByAgent: sessionsByAgent
+        )
         return fallback.map { a in
-            (
-                a,
-                AgentLiveSurfaceLogic.resolve(
-                    agent: a,
-                    pendingAsks: activity.pendingAsks,
-                    activity: activity.recentActivity
-                )
+            let surface = AgentLiveSurfaceLogic.resolve(
+                agent: a,
+                pendingAsks: activity.pendingAsks,
+                activity: activity.recentActivity,
+                usage: merged[a.id]
             )
+            let meta = SessionContentPresenter.metaLine(
+                agentId: a.id, sessionsByAgent: sessionsByAgent
+            )
+            return (a, surface, meta)
         }
     }
 
@@ -470,6 +492,11 @@ struct PillView: View {
             idleBreath = !reduceMotion
             ShannonNotifier.requestPermission()
             armGateAskIfNeeded()
+            // Same session merge as menu bar (project/branch/tokens for density).
+            parity.refresh(gateAgents: summary.agents, force: true)
+        }
+        .onChange(of: summary.agents.count) { _ in
+            parity.refresh(gateAgents: summary.agents)
         }
     }
 
@@ -705,7 +732,8 @@ struct PillView: View {
         if let focus = AgentLiveSurfaceLogic.primaryFocus(
             agents: summary.agents,
             pendingAsks: activity.pendingAsks,
-            activity: activity.recentActivity
+            activity: activity.recentActivity,
+            usageByAgent: usageByAgent
         ) {
             return focus
         }
@@ -729,7 +757,8 @@ struct PillView: View {
         return SessionContentPresenter.collapsedStatusLine(
             agents: summary.agents,
             pendingAsks: activity.pendingAsks,
-            activity: activity.recentActivity
+            activity: activity.recentActivity,
+            usageByAgent: usageByAgent
         )
     }
 
@@ -743,11 +772,15 @@ struct PillView: View {
     }
 
     /// Compact usage chip when a real source provided metrics for the focus agent.
+    ///
+    /// Passes `usageByAgent` from session merge so artifact tokens surface
+    /// (AgentNotch/AgentPeek density) — never invents numbers.
     private var collapsedUsageChip: String? {
         SessionContentPresenter.collapsedUsageChip(
             agents: summary.agents,
             pendingAsks: activity.pendingAsks,
-            activity: activity.recentActivity
+            activity: activity.recentActivity,
+            usageByAgent: usageByAgent
         )
     }
 
@@ -1013,7 +1046,7 @@ struct PillView: View {
                 // the artwork, never information — the companion restates status,
                 // it is not the only place status appears.
                 ForEach(listedAgentSurfaces, id: \.agent.id) { pair in
-                    agentRow(pair.agent, surface: pair.surface)
+                    agentRow(pair.agent, surface: pair.surface, metaLine: pair.metaLine)
                 }
             }
             // Per-agent entropy rails — each listed agent owns its own H.
@@ -1021,7 +1054,11 @@ struct PillView: View {
         }
     }
 
-    private func agentRow(_ a: AgentActivitySnapshot, surface: AgentLiveSurface) -> some View {
+    private func agentRow(
+        _ a: AgentActivitySnapshot,
+        surface: AgentLiveSurface,
+        metaLine: String? = nil
+    ) -> some View {
         let reading = agentReadings[a.id]
             ?? EntropyProvenance.resolveForAgent(
                 agentId: a.id,
@@ -1071,6 +1108,14 @@ struct PillView: View {
                         .foregroundStyle(Color.shannonSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                }
+                // Project · branch · model — only when a session source reported them.
+                if let meta = metaLine, !meta.isEmpty {
+                    Text(meta)
+                        .font(.shannonPillMono)
+                        .foregroundStyle(Color.shannonTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
         }

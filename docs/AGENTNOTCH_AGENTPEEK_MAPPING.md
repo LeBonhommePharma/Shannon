@@ -30,8 +30,8 @@ Category parity (defining mechanics), not pixel clones. All fields fail-closed.
 
 | UI | Presenter |
 |---|---|
-| Collapsed pill | `primaryFocus` / `collapsedStatusLine` / usage + count chips |
-| Expanded board | `rankedAgentSurfaces` + companions + entropy rails |
+| Collapsed pill | `primaryFocus` / `collapsedStatusLine` / usage + count chips via `usageByAgent` from `parity.sessionsByAgent` |
+| Expanded board | `SessionContentPresenter.listedSurfaces` (same session merge as menu bar) + meta line + usage badge + companions + entropy rails |
 | Menu-bar roster | `SessionContentPresenter.cardsFromAgents` + badges/meta/usage |
 | Pulled sessions | `SessionContentPresenter.cards` (artifact; live agents de-duped) |
 | Approvals | GateAskCard (expand) / GateInlineCard (popover) |

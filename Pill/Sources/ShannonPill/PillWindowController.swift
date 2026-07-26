@@ -69,6 +69,8 @@ final class PillWindowController {
     private let ingest: AgentIngestService
     private let activity: AgentActivityMonitor
     private let resources: SystemResourceMonitor
+    /// Shared with menu-bar popover when provided; else local model for notch density.
+    private let parity: ParityPanelModel
 
     init(
         nowPlaying: NowPlayingModel,
@@ -78,7 +80,8 @@ final class PillWindowController {
         confirmation: ConfirmationController,
         ingest: AgentIngestService,
         activity: AgentActivityMonitor,
-        resources: SystemResourceMonitor
+        resources: SystemResourceMonitor,
+        parity: ParityPanelModel? = nil
     ) {
         self.nowPlaying = nowPlaying
         self.battery = battery
@@ -88,6 +91,8 @@ final class PillWindowController {
         self.ingest = ingest
         self.activity = activity
         self.resources = resources
+        // Own a model when app does not share the menu-bar parity instance.
+        self.parity = parity ?? ParityPanelModel()
     }
 
     var isVisible: Bool { panel?.isVisible == true }
@@ -119,6 +124,7 @@ final class PillWindowController {
                 ingest: ingest,
                 activity: activity,
                 resources: resources,
+                parity: parity,
                 onContentHeight: { [weak self] height in
                     Task { @MainActor in self?.resizeToContent(height: height) }
                 }
@@ -280,6 +286,7 @@ private struct PillHost: View {
     @ObservedObject var ingest: AgentIngestService
     @ObservedObject var activity: AgentActivityMonitor
     @ObservedObject var resources: SystemResourceMonitor
+    @ObservedObject var parity: ParityPanelModel
     /// Called when the pill's laid-out height changes, so the panel can follow.
     var onContentHeight: (CGFloat) -> Void = { _ in }
 
@@ -295,6 +302,7 @@ private struct PillHost: View {
                 ingest: ingest,
                 activity: activity,
                 resources: resources,
+                parity: parity,
                 isExpanded: Binding(
                     get: { presentation.isExpanded },
                     set: { newValue in

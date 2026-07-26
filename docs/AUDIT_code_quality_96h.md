@@ -4,7 +4,7 @@
 **Scope:** Shannon entropy pipeline (C++/Python), data structures/algorithms, security hazards, companion apps (Pill, hub, iOS/iPad, ShannonCore pets/sync)  
 **Out of scope:** FlexAID∆S docking science / CF.com  
 **Method:** source inspection of algorithms and call sites; not commit-message archaeology alone  
-**Date context:** HEAD on main; companion surface present as monorepo packages under `Pill/`, `hub/`, `agent_hub/`, `iOS/`, `iPad/`, `Packages/`, `watchOS/`
+**Date context:** HEAD on main; companion surface present as monorepo packages under `Pill/`, `hub/`, `iOS/`, `iPad/`, `Packages/`, `watchOS/` (the former `agent_hub/` tree was removed on `refactor/modern-structure` — canonical hub is `hub/` only).
 
 ---
 
@@ -182,7 +182,7 @@ Module was renamed to `shannon._core` (CHANGELOG); `_core` exposes `SlidingWindo
 
 ### high — Dual `hub/` vs `agent_hub/` + divergent SQLite schemas
 
-`hub/tools/dataset_runner_bridge.py:77-83` creates `benchmark_state(agent_id PRIMARY KEY, progress, state_json, …)` while `shannon_gate.AuditDB` uses a different shape. Bridge tests query `agent_id` columns the gate schema does not have. **Two hubs, two schemas, one monorepo** — high risk of wiring the wrong tree in deployment.
+~~**Package dual-tree:**~~ **Resolved on `refactor/modern-structure`** — `agent_hub/` deleted; only `hub/` remains. Residual risk is **schema drift inside `hub/`**: `hub/tools/dataset_runner_bridge.py` creates `benchmark_state(agent_id PRIMARY KEY, progress, state_json, …)` while `shannon_gate.AuditDB` uses a different shape. Bridge tests query `agent_id` columns the gate schema does not have.
 
 ### high — MI module advertised but not built; “MI” is KL
 
@@ -247,7 +247,7 @@ Ignores configured input format for socket mode (`stream_ingest.cpp:156`); Termi
 ### nit — Duplicate / legacy packages
 
 - `tests/test_detector.py` vs `tests/python/test_detector.py`  
-- `agent_hub/` vs `hub/`  
+- ~~`agent_hub/` vs `hub/`~~ (package tree collapsed; keep schema unification open)
 - `shannon.cpp` v1 vs `src/shannon/*` v2  
 Keep one canonical tree.
 
@@ -275,7 +275,7 @@ Some files MIT SPDX (`shannon.cpp`), package Apache-2.0 (`pyproject.toml`). Cosm
 - Demo detector ticks entropy on every property read (`pill_bridge.py:215-231`) so a single `status_payload` advances the counter multiple times — UI flicker / desync in `--demo` only.
 - Bridge does not use the v2 C++ agent; it only mirrors Python detector state (depends on Python correctness above).
 
-### Hub / Agent Hub (`hub/`, `agent_hub/`)
+### Hub (`hub/` only; former `agent_hub/` removed)
 
 **Strengths**
 
@@ -287,7 +287,7 @@ Some files MIT SPDX (`shannon.cpp`), package Apache-2.0 (`pyproject.toml`). Cosm
 
 1. Unauthenticated HTTP / unused `HUB_SECRET` (above).  
 2. `update_benchmark_state` schema bug (above).  
-3. Duplicate trees `hub/` and `agent_hub/` invite drift.  
+3. ~~Duplicate trees `hub/` and `agent_hub/` invite drift.~~ Resolved — single `hub/` package.
 4. Gate “Shannon” is **whitespace token entropy of agent prose**, unrelated to `shannon_configurational_entropy` — naming collision will confuse operators and false-security claims.  
 5. Soft-pass on network failure in `check_cloud_agent` (`credentials.py:269-275`) can green-light missing auth in CI-like environments.
 
@@ -369,7 +369,7 @@ Some files MIT SPDX (`shannon.cpp`), package Apache-2.0 (`pyproject.toml`). Cosm
 
 ### P2 — architecture hygiene
 
-9. Collapse `hub/` and `agent_hub/` to one package; one SQLite schema; bridge and gate share models.  
+9. ~~Collapse `hub/` and `agent_hub/` to one package~~ (done). Still open: one SQLite schema; bridge and gate share models.
 10. Deprecate/archive v1 `shannon.cpp` detector once Python uses v2; avoid two `CollapseResult` types.  
 11. Add SIMD-vs-scalar parity tests and pointer null checks on public C++ kernels.  
 12. Rename hub “Shannon gate” metrics (`gate_H` text entropy) to avoid collision with token-distribution entropy.

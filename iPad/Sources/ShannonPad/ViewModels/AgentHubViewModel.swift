@@ -71,8 +71,9 @@ final class AgentHubViewModel: ObservableObject {
     /// section, the transparency half of the iPadOS redesign.
     @Published private(set) var recentGateEvents: [GateEvent] = []
 
-    static let historyLimit = 180
-    static let gateEventLimit = 12
+    /// Nonisolated so pure helpers can default to these without MainActor hops.
+    nonisolated static let historyLimit = 180
+    nonisolated static let gateEventLimit = 12
 
     private var started = false
 
@@ -277,11 +278,7 @@ final class AgentHubViewModel: ObservableObject {
             approved: approved,
             answeredAt: Date()
         )
-        recentGateEvents.removeAll { $0.id == event.id }
-        recentGateEvents.insert(event, at: 0)
-        if recentGateEvents.count > Self.gateEventLimit {
-            recentGateEvents.removeLast(recentGateEvents.count - Self.gateEventLimit)
-        }
+        recentGateEvents = Self.cappedGateEvents(prepending: event, to: recentGateEvents)
         objectWillChange.send()
         PadHaptics.notify(approved ? .success : .warning)
     }
@@ -321,27 +318,78 @@ final class AgentHubViewModel: ObservableObject {
 
     private func record(_ snapshot: ShannonSnapshot) {
         let now = snapshot.capturedAt
+        var nextEntropy = entropyHistory
+        var nextRMSD = rmsdHistory
+
         for agent in snapshot.agents {
+            // Entropy is Mac-published only — never synthesised on the pad.
             guard let bits = agent.entropyBits else { continue }
-            append(MetricSample(date: now, value: bits), to: &entropyHistory[agent.id, default: []])
+            nextEntropy[agent.id] = Self.appending(
+                MetricSample(date: now, value: bits),
+                to: nextEntropy[agent.id] ?? []
+            )
         }
         for progress in snapshot.docking {
             guard let rmsd = progress.bestRMSD else { continue }
-            append(MetricSample(date: now, value: rmsd), to: &rmsdHistory[progress.id, default: []])
+            nextRMSD[progress.id] = Self.appending(
+                MetricSample(date: now, value: rmsd),
+                to: nextRMSD[progress.id] ?? []
+            )
         }
+
+        // Drop series for agents / benchmarks the Mac no longer publishes so a
+        // long-lived hub session cannot retain unbounded map keys.
+        let liveAgentIDs = Set(snapshot.agents.map(\.id))
+        let liveDockingIDs = Set(snapshot.docking.map(\.id))
+        entropyHistory = Self.pruningHistory(nextEntropy, keeping: liveAgentIDs)
+        rmsdHistory = Self.pruningHistory(nextRMSD, keeping: liveDockingIDs)
     }
 
-    private func append(_ sample: MetricSample, to series: inout [MetricSample]) {
+    // MARK: Pure history helpers
+
+    /// Append a sample, skipping near-duplicate plateaus and enforcing
+    /// `historyLimit`. Pure so unit tests can exercise the cap without the store.
+    nonisolated static func appending(
+        _ sample: MetricSample,
+        to series: [MetricSample],
+        limit: Int = historyLimit,
+        plateauInterval: TimeInterval = 5
+    ) -> [MetricSample] {
         // Snapshots arrive every 20s whether or not the value moved; an
         // unchanged reading would otherwise flatten the chart's time axis into
         // a run of identical points.
         if let last = series.last, last.value == sample.value,
-           sample.date.timeIntervalSince(last.date) < 5 {
-            return
+           sample.date.timeIntervalSince(last.date) < plateauInterval {
+            return series
         }
-        series.append(sample)
-        if series.count > Self.historyLimit {
-            series.removeFirst(series.count - Self.historyLimit)
+        var next = series
+        next.append(sample)
+        if next.count > limit {
+            next.removeFirst(next.count - limit)
         }
+        return next
+    }
+
+    /// Keep only series whose keys are still live in the current snapshot.
+    nonisolated static func pruningHistory(
+        _ history: [String: [MetricSample]],
+        keeping liveIDs: Set<String>
+    ) -> [String: [MetricSample]] {
+        guard !history.isEmpty else { return history }
+        return history.filter { liveIDs.contains($0.key) }
+    }
+
+    /// Newest-first gate trail, de-duplicated by id, capped at `gateEventLimit`.
+    nonisolated static func cappedGateEvents(
+        prepending event: GateEvent,
+        to existing: [GateEvent],
+        limit: Int = gateEventLimit
+    ) -> [GateEvent] {
+        var next = existing.filter { $0.id != event.id }
+        next.insert(event, at: 0)
+        if next.count > limit {
+            next.removeLast(next.count - limit)
+        }
+        return next
     }
 }

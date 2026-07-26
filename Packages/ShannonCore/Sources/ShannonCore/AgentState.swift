@@ -141,6 +141,9 @@ public extension Array where Element == AgentState {
     /// Ordering used by every device: alerting first, then running, then by
     /// recency. The watch shows `prefix(3)` of this and must not disagree with
     /// the phone about which agents those are.
+    ///
+    /// Fully stable: equal activity + equal `updatedAt` falls back to `id`
+    /// ascending so phone, watch and complication never re-shuffle a tie.
     func rankedForDisplay() -> [AgentState] {
         func rank(_ a: AgentState) -> Int {
             switch a.activity {
@@ -152,7 +155,10 @@ public extension Array where Element == AgentState {
             }
         }
         return sorted {
-            rank($0) != rank($1) ? rank($0) < rank($1) : $0.updatedAt > $1.updatedAt
+            let r0 = rank($0), r1 = rank($1)
+            if r0 != r1 { return r0 < r1 }
+            if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
+            return $0.id < $1.id
         }
     }
 

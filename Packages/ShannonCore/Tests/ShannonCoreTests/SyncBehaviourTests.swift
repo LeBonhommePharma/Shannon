@@ -151,4 +151,138 @@ final class SyncBehaviourTests: XCTestCase {
     func testWatchRelayRejectsMalformedPayload() {
         XCTAssertThrowsError(try WatchRelayCodec.decode(["wrongKey": Data()]))
     }
+
+    // MARK: trimmedForWatch bounds
+
+    /// Direct trim contract: newest notifications survive, artwork is stripped,
+    /// and every other field is preserved so the watch still has full agent
+    /// / docking / confirmation state.
+    func testTrimmedForWatchBoundsAndPreservation() {
+        let notes = (0..<9).map {
+            NotificationMirror(
+                id: "n\($0)", sender: "S", title: "T", body: "B",
+                postedAt: fixedDate.addingTimeInterval(Double($0))
+            )
+        }
+        let agents = [
+            AgentState(id: "a1", name: "A", activity: .running,
+                       entropyBits: 2.1, updatedAt: fixedDate),
+        ]
+        let docking = [
+            DockingProgress(id: "b", benchmarkName: "Astex",
+                            targetsComplete: 1, targetsTotal: 85, updatedAt: fixedDate),
+        ]
+        let confirmations = [
+            PendingConfirmation(id: "c1", question: "Dock?", createdAt: fixedDate,
+                                expiresAt: fixedDate.addingTimeInterval(600)),
+        ]
+        let snapshot = ShannonSnapshot(
+            agents: agents,
+            docking: docking,
+            nowPlaying: NowPlayingSnapshot(
+                title: "Track", artworkJPEG: Data(repeating: 1, count: 256),
+                updatedAt: fixedDate
+            ),
+            device: MacDeviceState(deviceName: "Mac", batteryPercent: 50,
+                                   isCharging: false, updatedAt: fixedDate),
+            notifications: notes,
+            timers: [TimerState(id: "t1", label: "Tea",
+                                fireAt: fixedDate.addingTimeInterval(60),
+                                updatedAt: fixedDate)],
+            confirmations: confirmations,
+            capturedAt: fixedDate
+        )
+
+        let defaultTrim = snapshot.trimmedForWatch()
+        XCTAssertEqual(defaultTrim.notifications.count, 5)
+        XCTAssertEqual(defaultTrim.notifications.map(\.id), ["n8", "n7", "n6", "n5", "n4"])
+        XCTAssertNil(defaultTrim.nowPlaying?.artworkJPEG)
+        XCTAssertEqual(defaultTrim.nowPlaying?.title, "Track")
+        XCTAssertEqual(defaultTrim.agents, agents)
+        XCTAssertEqual(defaultTrim.docking, docking)
+        XCTAssertEqual(defaultTrim.confirmations, confirmations)
+        XCTAssertEqual(defaultTrim.timers.count, 1)
+        XCTAssertEqual(defaultTrim.device?.deviceName, "Mac")
+        XCTAssertEqual(defaultTrim.agents.first?.entropyBits, 2.1,
+                       "trim must not drop optional entropy")
+
+        let zero = snapshot.trimmedForWatch(maxNotifications: 0)
+        XCTAssertTrue(zero.notifications.isEmpty)
+        XCTAssertEqual(zero.agents.count, 1)
+
+        let negative = snapshot.trimmedForWatch(maxNotifications: -3)
+        XCTAssertTrue(negative.notifications.isEmpty,
+                      "negative limit must clamp, not trap")
+
+        let oversized = snapshot.trimmedForWatch(maxNotifications: 100)
+        XCTAssertEqual(oversized.notifications.count, notes.count)
+    }
+
+    /// Encode path always trims; decode must not re-inflate stripped artwork.
+    func testWatchRelayEncodeAlwaysAppliesTrim() throws {
+        let notes = (0..<8).map {
+            NotificationMirror(id: "n\($0)", sender: "S", title: "T", body: "B",
+                               postedAt: fixedDate.addingTimeInterval(Double($0)))
+        }
+        let snapshot = ShannonSnapshot(
+            nowPlaying: NowPlayingSnapshot(title: "T",
+                                           artworkJPEG: Data(repeating: 9, count: 128)),
+            notifications: notes,
+            capturedAt: fixedDate
+        )
+        let payload = try WatchRelayCodec.encode(snapshot)
+        let decoded = try WatchRelayCodec.decode(payload)
+        XCTAssertNil(decoded.nowPlaying?.artworkJPEG)
+        XCTAssertEqual(decoded.notifications.count, 5)
+    }
+
+    // MARK: WatchMessageCodec
+
+    func testWatchMessageSnapshotRoundTripAndTrim() throws {
+        let snapshot = ShannonSnapshot(
+            agents: [AgentState(id: "a", name: "A", activity: .blocked,
+                                updatedAt: fixedDate)],
+            nowPlaying: NowPlayingSnapshot(title: "T",
+                                           artworkJPEG: Data([1, 2, 3]),
+                                           updatedAt: fixedDate),
+            notifications: (0..<7).map {
+                NotificationMirror(id: "n\($0)", sender: "S", title: "T", body: "B",
+                                   postedAt: fixedDate.addingTimeInterval(Double($0)))
+            },
+            confirmations: [PendingConfirmation(id: "c", question: "Proceed?",
+                                                createdAt: fixedDate,
+                                                expiresAt: fixedDate.addingTimeInterval(600))],
+            capturedAt: fixedDate
+        )
+        let decoded = try WatchMessageCodec.decode(
+            try WatchMessageCodec.encode(.snapshot(snapshot))
+        )
+        guard case .snapshot(let out) = decoded else {
+            return XCTFail("expected snapshot envelope")
+        }
+        XCTAssertEqual(out.agents.map(\.id), ["a"])
+        XCTAssertNil(out.nowPlaying?.artworkJPEG)
+        XCTAssertEqual(out.notifications.count, 5)
+        XCTAssertEqual(out.confirmations.map(\.id), ["c"])
+    }
+
+    func testWatchMessageTimeCriticalRoundTrips() throws {
+        let cases: [WatchMessage] = [
+            .alert("agent-errored"),
+            .command(.nextTrack),
+            .answer(id: "c1", answer: .confirmed, source: .headNod),
+            .answer(id: "c2", answer: .denied, source: .voice),
+        ]
+        for message in cases {
+            XCTAssertTrue(message.isTimeCritical)
+            let decoded = try WatchMessageCodec.decode(try WatchMessageCodec.encode(message))
+            XCTAssertEqual(decoded, message)
+        }
+        XCTAssertFalse(WatchMessage.snapshot(ShannonSnapshot()).isTimeCritical)
+    }
+
+    func testWatchMessageRejectsMalformedPayload() {
+        XCTAssertThrowsError(try WatchMessageCodec.decode(["wrongKey": Data()]))
+        XCTAssertThrowsError(try WatchMessageCodec.decode([:]))
+    }
 }

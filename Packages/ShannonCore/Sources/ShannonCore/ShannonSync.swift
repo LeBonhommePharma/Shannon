@@ -356,11 +356,15 @@ public struct ShannonSnapshot: Codable, Equatable, Sendable {
     /// Strips artwork and older notifications before the phone relays this to
     /// the watch — WatchConnectivity payloads are size-capped, and the watch
     /// renders neither.
+    ///
+    /// `maxNotifications` is clamped to ≥ 0 so a misconfigured caller cannot
+    /// trap on `Array.prefix`’s negative-length precondition.
     public func trimmedForWatch(maxNotifications: Int = 5) -> ShannonSnapshot {
         var copy = self
         copy.nowPlaying?.artworkJPEG = nil
+        let limit = max(0, maxNotifications)
         copy.notifications = Array(
-            notifications.sorted { $0.postedAt > $1.postedAt }.prefix(maxNotifications)
+            notifications.sorted { $0.postedAt > $1.postedAt }.prefix(limit)
         )
         return copy
     }

@@ -38,6 +38,44 @@ public enum UICadence: Sendable {
     public static let menuBarBackupIntervalMin: TimeInterval = 0.3
     public static let menuBarBackupIntervalMax: TimeInterval = 0.75
 
+    // MARK: Fixed-chrome thrash guard (popover / menu bar)
+
+    /// Continuous poll ticks must not reflow fixed chrome when content is still.
+    /// Prefer `SharedTelemetryBinding.shouldPublish` / snapshot equality first;
+    /// this floor only applies when a wall-timer paints without a content
+    /// signature (legacy). Content change always wins (responsive).
+    public static let fixedChromeMinRepaintInterval: TimeInterval = 0.35
+
+    /// Whether a timer-driven chrome paint is allowed.
+    ///
+    /// - `contentChanged == true` → always paint (responsive).
+    /// - `contentChanged == false` → never paint (non-thrashing fixed chrome).
+    ///
+    /// Wall-clock `minInterval` is reserved for future debounce of *churny*
+    /// content; with equality-gated snapshots, identical ticks short-circuit.
+    public static func shouldAllowTimerChromePaint(
+        contentChanged: Bool,
+        lastPaintAt: Date? = nil,
+        now: Date = Date(),
+        minInterval: TimeInterval = fixedChromeMinRepaintInterval
+    ) -> Bool {
+        if contentChanged { return true }
+        // Identical content: fixed chrome (popover size, Quit footer) must not
+        // re-layout or "pop" under the cursor on continuous agent/resource ticks.
+        _ = lastPaintAt
+        _ = now
+        _ = minInterval
+        return false
+    }
+
+    /// Equality-gate wrapper for shared telemetry snapshots (notch + menu bar).
+    public static func shouldPublishSharedTelemetry(
+        previous: SharedTelemetrySnapshot?,
+        next: SharedTelemetrySnapshot
+    ) -> Bool {
+        SharedTelemetryBinding.shouldPublish(previous: previous, next: next)
+    }
+
     // MARK: Clamp helpers (shipped entry points)
 
     public static func clampResourceInterval(_ raw: TimeInterval) -> TimeInterval {

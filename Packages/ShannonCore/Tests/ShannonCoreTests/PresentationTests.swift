@@ -105,6 +105,65 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(agents.runningCount, 1)
     }
 
+    /// Same activity: newer `updatedAt` wins so the agent that just moved
+    /// surfaces on the watch first.
+    func testRankingBreaksTiesByRecency() {
+        let older = AgentState(id: "old", name: "Old", activity: .running,
+                               updatedAt: fixedDate)
+        let newer = AgentState(id: "new", name: "New", activity: .running,
+                               updatedAt: fixedDate.addingTimeInterval(30))
+        XCTAssertEqual([older, newer].rankedForDisplay().map(\.id), ["new", "old"])
+        XCTAssertEqual([newer, older].rankedForDisplay().map(\.id), ["new", "old"])
+    }
+
+    /// Fully tied agents (same activity + same timestamp) must sort by id so
+    /// phone, watch and complication agree which three cards to show.
+    func testRankingIsStableOnFullTie() {
+        let agents = [
+            AgentState(id: "zulu", name: "Z", activity: .running, updatedAt: fixedDate),
+            AgentState(id: "alpha", name: "A", activity: .running, updatedAt: fixedDate),
+            AgentState(id: "mike", name: "M", activity: .running, updatedAt: fixedDate),
+        ]
+        let expected = ["alpha", "mike", "zulu"]
+        XCTAssertEqual(agents.rankedForDisplay().map(\.id), expected)
+        XCTAssertEqual(agents.reversed().rankedForDisplay().map(\.id), expected)
+        // Multi-pass: ranking is idempotent.
+        XCTAssertEqual(
+            agents.rankedForDisplay().rankedForDisplay().map(\.id),
+            expected
+        )
+    }
+
+    /// Mixed multi-agent board: activity rank first, then recency, then id.
+    func testMultiAgentRankStabilityAcrossDevices() {
+        let board = [
+            AgentState(id: "idle-b", name: "IdleB", activity: .idle,
+                       updatedAt: fixedDate.addingTimeInterval(100)),
+            AgentState(id: "run-old", name: "RunOld", activity: .running,
+                       updatedAt: fixedDate),
+            AgentState(id: "err-a", name: "ErrA", activity: .errored,
+                       updatedAt: fixedDate),
+            AgentState(id: "run-new", name: "RunNew", activity: .running,
+                       updatedAt: fixedDate.addingTimeInterval(50)),
+            AgentState(id: "err-b", name: "ErrB", activity: .errored,
+                       updatedAt: fixedDate),
+            AgentState(id: "block", name: "Block", activity: .blocked,
+                       updatedAt: fixedDate),
+            AgentState(id: "done", name: "Done", activity: .finished,
+                       updatedAt: fixedDate),
+        ]
+        let ranked = board.rankedForDisplay().map(\.id)
+        XCTAssertEqual(ranked, [
+            "err-a", "err-b",   // errored, id order on equal time
+            "block",            // blocked
+            "run-new", "run-old", // running by recency
+            "done",             // finished
+            "idle-b",           // idle
+        ])
+        // Shuffling input must not change the ranked order.
+        XCTAssertEqual(board.shuffled().rankedForDisplay().map(\.id), ranked)
+    }
+
     func testComplicationPrefersRunningBenchmark() {
         let snapshot = ShannonSnapshot(
             agents: [AgentState(id: "a", name: "A", activity: .running, entropyBits: 0.61)],

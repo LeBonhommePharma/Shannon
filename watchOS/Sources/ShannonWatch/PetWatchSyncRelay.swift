@@ -9,6 +9,10 @@ import ShannonCore
 // WatchConnectivity `applicationContext` and writes it to App Group defaults
 // (so the complication can reload). Interaction events travel the other way:
 // watch → phone via `sendMessage`.
+//
+// WCSession has a single delegate: `WatchModel` owns it. This type is a pure
+// display/write relay — never assign `WCSession.default.delegate` here, or
+// Shannon snapshot delivery dies.
 
 @available(watchOS 10.0, *)
 @MainActor
@@ -17,20 +21,28 @@ public final class PetWatchSyncRelay: NSObject {
     private let suite = "group.com.lebonhommepharma.shannon"
     private override init() { super.init() }
 
+    /// No-op keep-alive for call sites that used to activate a private
+    /// session. Session ownership lives on `WatchModel.activate()`.
     public func activate() {
+        // Do not set WCSession.default.delegate — WatchModel is the sole owner.
         guard WCSession.isSupported() else { return }
-        WCSession.default.delegate = _Delegate(relay: self)
-        WCSession.default.activate()
+        if WCSession.default.activationState == .notActivated {
+            WCSession.default.activate()
+        }
     }
 
+    /// Fail-closed on unreachability: drop the interaction rather than
+    /// pretend it landed. Pet XP is non-critical (unlike gate answers).
     public func sendInteraction(_ kind: PetInteractionKind) {
-        guard WCSession.default.isReachable else { return }
+        guard WCSession.default.activationState == .activated,
+              WCSession.default.isReachable else { return }
         WCSession.default.sendMessage(["petInteraction": kind.rawValue],
                                       replyHandler: nil)
     }
 
-    // Called from the WCSessionDelegate (below) on the delegate queue.
-    fileprivate func didReceiveContext(_ ctx: [String: Any]) {
+    /// Apply a phone-pushed pet dictionary into App Group defaults and bounce
+    /// the pet complication. Called from `WatchModel`'s WCSessionDelegate.
+    public func applyContext(_ ctx: [String: Any]) {
         guard let pet = ctx["pet"] as? [String: Any] else { return }
         let d = UserDefaults(suiteName: suite)
         d?.set(pet["mood"]       as? String, forKey: "pet.mood")
@@ -40,23 +52,6 @@ public final class PetWatchSyncRelay: NSObject {
         d?.set(pet["lastMemory"] as? String, forKey: "pet.lastMemory")
         WidgetCenter.shared.reloadTimelines(ofKind: "ShannonPetComplication")
     }
-}
-
-// MARK: - Private WCSessionDelegate (avoids polluting PetWatchSyncRelay's public API)
-
-@available(watchOS 10.0, *)
-private final class _Delegate: NSObject, WCSessionDelegate {
-    weak var relay: PetWatchSyncRelay?
-    init(relay: PetWatchSyncRelay) { self.relay = relay }
-
-    func session(_ session: WCSession,
-                 didReceiveApplicationContext ctx: [String: Any]) {
-        Task { @MainActor in relay?.didReceiveContext(ctx) }
-    }
-
-    func session(_ session: WCSession,
-                 activationDidCompleteWith state: WCSessionActivationState,
-                 error: Error?) {}
 }
 
 // MARK: - PetPhoneSyncRelay  (phone side — kept in the same file for discoverability)

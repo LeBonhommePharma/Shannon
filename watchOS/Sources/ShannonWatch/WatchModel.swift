@@ -85,6 +85,10 @@ public final class WatchModel: NSObject {
     /// Confirmation ids already answered from this watch, kept so a phone
     /// snapshot that has not yet caught up cannot resurrect an answered card.
     @ObservationIgnored private var answeredIDs: [String: Date] = [:]
+    /// Answers encoded while WCSession was not yet activated. Flushed once
+    /// activation completes so a Double Tap in the first second of launch
+    /// cannot evaporate.
+    @ObservationIgnored private var pendingAnswerPayloads: [[String: Any]] = []
 
     public override init() {
         super.init()
@@ -101,6 +105,9 @@ public final class WatchModel: NSObject {
         // real state instead of a spinner. Never show a loading state.
         if let cached = SnapshotCache.watch.load() {
             snapshot = cached
+            // Marks the face as "has state" so a late older push cannot
+            // regress past the cache on the first live apply.
+            lastReceivedAt = cached.capturedAt
         }
 
         #if canImport(WatchConnectivity)
@@ -216,11 +223,22 @@ public final class WatchModel: NSObject {
     /// Answers must never be lost: live message when the phone is reachable,
     /// with a fallback to the system-queued `transferUserInfo` (delivered
     /// whenever the phone next connects) on unreachability or send failure.
+    /// Claiming `.queued` without actually enqueueing is forbidden — that is
+    /// the fail-closed contract for unreachable / not-yet-activated phone.
     private func relayAnswer(_ message: WatchMessage, id: String) {
         #if canImport(WatchConnectivity)
+        guard let payload = try? WatchMessageCodec.encode(message) else {
+            // Cannot encode → cannot deliver. Still surface queued so the UI
+            // never hangs on "Sending…"; the optimistic local drop stands.
+            delivery = .queued(id: id)
+            return
+        }
+
         let session = WCSession.default
-        guard session.activationState == .activated,
-              let payload = try? WatchMessageCodec.encode(message) else {
+        guard session.activationState == .activated else {
+            // Session not ready yet: hold the payload and flush on activate.
+            // transferUserInfo before activation is undefined / dropped.
+            pendingAnswerPayloads.append(payload)
             delivery = .queued(id: id)
             return
         }
@@ -250,6 +268,21 @@ public final class WatchModel: NSObject {
         #endif
     }
 
+    /// Drain any answers that landed before WCSession finished activating.
+    private func flushPendingAnswers() {
+        #if canImport(WatchConnectivity)
+        guard WCSession.default.activationState == .activated,
+              !pendingAnswerPayloads.isEmpty else { return }
+        let pending = pendingAnswerPayloads
+        pendingAnswerPayloads.removeAll()
+        for payload in pending {
+            // System queue: survives unreachability; phone receives via
+            // didReceiveUserInfo once connectivity returns.
+            WCSession.default.transferUserInfo(payload)
+        }
+        #endif
+    }
+
     /// Fire-and-forget commands (playback etc.) — losing one is harmless.
     private func relay(_ message: WatchMessage) {
         #if canImport(WatchConnectivity)
@@ -263,6 +296,16 @@ public final class WatchModel: NSObject {
     // MARK: Inbound
 
     fileprivate func apply(_ fresh: ShannonSnapshot) {
+        // Reject older-or-equal snapshots so a late WCSession delivery cannot
+        // overwrite a newer face the watch already has (cache, live message,
+        // or a previous context push). `lastReceivedAt == nil` is the only
+        // "blank slate" escape — not `snapshot.isEmpty`, which becomes true
+        // after optimistically clearing the last confirmation and would then
+        // resurrect stale phone state.
+        if lastReceivedAt != nil {
+            guard fresh.capturedAt > snapshot.capturedAt else { return }
+        }
+
         let wasAwaiting = isAwaitingConfirmation
         var fresh = fresh
         pruneAnsweredIDs()
@@ -357,7 +400,11 @@ extension WatchModel: WCSessionDelegate {
         error: Error?
     ) {
         let reachable = session.isReachable
-        Task { @MainActor in self.reachabilityChanged(reachable) }
+        Task { @MainActor in
+            self.reachabilityChanged(reachable)
+            // Flush answers that landed before the session was ready.
+            self.flushPendingAnswers()
+        }
     }
 
     nonisolated public func sessionReachabilityDidChange(_ session: WCSession) {
@@ -369,15 +416,30 @@ extension WatchModel: WCSessionDelegate {
         _ session: WCSession,
         didReceiveApplicationContext applicationContext: [String: Any]
     ) {
-        guard let message = try? WatchMessageCodec.decode(applicationContext),
-              case .snapshot(let fresh) = message else { return }
-        Task { @MainActor in self.apply(fresh) }
+        // Shannon snapshot (typed envelope) and optional pet fields share the
+        // same context dictionary when the phone co-packages them. Pet-only
+        // pushes are handled without tearing down snapshot ownership.
+        let hasPet = applicationContext["pet"] != nil
+        let decoded = try? WatchMessageCodec.decode(applicationContext)
+        Task { @MainActor in
+            if hasPet {
+                PetWatchSyncRelay.shared.applyContext(applicationContext)
+            }
+            if case .snapshot(let fresh) = decoded {
+                self.apply(fresh)
+            }
+        }
     }
 
     nonisolated public func session(
         _ session: WCSession,
         didReceiveMessage message: [String: Any]
     ) {
+        // Pet interaction acks are phone→watch only if ever added; Shannon
+        // messages use the typed codec.
+        if message["pet"] != nil {
+            Task { @MainActor in PetWatchSyncRelay.shared.applyContext(message) }
+        }
         guard let decoded = try? WatchMessageCodec.decode(message) else { return }
         Task { @MainActor in
             switch decoded {

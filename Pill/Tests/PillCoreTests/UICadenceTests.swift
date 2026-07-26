@@ -91,4 +91,33 @@ final class UICadenceTests: XCTestCase {
             accuracy: 1e-9
         )
     }
+
+    /// Continuous ticks must not thrash fixed chrome when content is still.
+    func testFixedChromePaintIsNonThrashing() {
+        XCTAssertFalse(UICadence.shouldAllowTimerChromePaint(contentChanged: false))
+        XCTAssertTrue(UICadence.shouldAllowTimerChromePaint(contentChanged: true))
+        XCTAssertGreaterThan(UICadence.fixedChromeMinRepaintInterval, 0)
+        XCTAssertLessThanOrEqual(
+            UICadence.fixedChromeMinRepaintInterval,
+            UICadence.resourceInterval + 0.05
+        )
+    }
+
+    func testSharedTelemetryPublishGateIsEqualityBased() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let snap = SharedTelemetrySnapshot(
+            agents: [
+                AgentActivitySnapshot(
+                    id: "a", displayName: "A", status: .idle, lastTask: "",
+                    source: "gate", updatedAt: now, resumable: false,
+                    historyCount: 0, presence: .live
+                ),
+            ],
+            scannedAt: now
+        )
+        var later = snap
+        later.scannedAt = now.addingTimeInterval(5)
+        XCTAssertFalse(UICadence.shouldPublishSharedTelemetry(previous: snap, next: later))
+        XCTAssertTrue(UICadence.shouldPublishSharedTelemetry(previous: nil, next: snap))
+    }
 }

@@ -154,4 +154,157 @@ final class SerializationTests: XCTestCase {
         fields[AgentState.Field.isCollapsed] = .int(1)
         XCTAssertTrue(try AgentState(cloudFields: fields).isCollapsed)
     }
+
+    // MARK: ShannonSnapshot JSON codec
+
+    /// SnapshotCache / WatchConnectivity both use JSON Codable. A field that
+    /// encodes but fails to decode blanks a card on the watch.
+    func testShannonSnapshotJSONRoundTrip() throws {
+        let snapshot = ShannonSnapshot(
+            agents: [
+                AgentState(
+                    id: "a1", name: "FlexAID∆S", activity: .running,
+                    taskTitle: "Dock 1of6", turnCount: 12,
+                    entropyBits: 8.42, entropyDelta: -3.4, isCollapsed: true,
+                    updatedAt: fixedDate
+                ),
+            ],
+            docking: [
+                DockingProgress(
+                    id: "astex", benchmarkName: "Astex Diverse",
+                    targetsComplete: 34, targetsTotal: 85,
+                    bestRMSD: 1.42, updatedAt: fixedDate
+                ),
+            ],
+            nowPlaying: NowPlayingSnapshot(
+                title: "Blue in Green", artist: "Miles Davis",
+                artworkJPEG: Data([0xFF, 0xD8]), updatedAt: fixedDate
+            ),
+            device: MacDeviceState(
+                deviceName: "Mac", batteryPercent: 80, isCharging: false,
+                updatedAt: fixedDate
+            ),
+            notifications: [
+                NotificationMirror(
+                    id: "n1", sender: "Messages", title: "Anne", body: "Hi",
+                    postedAt: fixedDate
+                ),
+            ],
+            timers: [
+                TimerState(
+                    id: "t1", label: "Tea",
+                    fireAt: fixedDate.addingTimeInterval(300),
+                    updatedAt: fixedDate
+                ),
+            ],
+            confirmations: [
+                PendingConfirmation(
+                    id: "c1", question: "Dock 1a4g?",
+                    agentID: "a1", createdAt: fixedDate,
+                    expiresAt: fixedDate.addingTimeInterval(900)
+                ),
+            ],
+            capturedAt: fixedDate
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let data = try encoder.encode(snapshot)
+        let decoded = try decoder.decode(ShannonSnapshot.self, from: data)
+        XCTAssertEqual(decoded, snapshot)
+        XCTAssertEqual(decoded.agents.first?.entropyBits, 8.42)
+        XCTAssertEqual(decoded.agents.first?.entropyDelta, -3.4)
+        XCTAssertEqual(decoded.nowPlaying?.artworkJPEG, Data([0xFF, 0xD8]))
+        XCTAssertEqual(decoded.confirmations.first?.id, "c1")
+    }
+
+    /// Empty / sparse snapshots must round-trip without inventing media,
+    /// device state, or entropy numbers.
+    func testShannonSnapshotSparseJSONRoundTripDoesNotFabricateOptionals() throws {
+        let snapshot = ShannonSnapshot(
+            agents: [AgentState(id: "a", name: "A", activity: .idle, updatedAt: fixedDate)],
+            capturedAt: fixedDate
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let decoded = try decoder.decode(
+            ShannonSnapshot.self,
+            from: try encoder.encode(snapshot)
+        )
+        XCTAssertEqual(decoded, snapshot)
+        XCTAssertNil(decoded.nowPlaying)
+        XCTAssertNil(decoded.device)
+        XCTAssertNil(decoded.agents.first?.entropyBits)
+        XCTAssertNil(decoded.agents.first?.entropyDelta)
+        XCTAssertTrue(decoded.notifications.isEmpty)
+        XCTAssertTrue(decoded.confirmations.isEmpty)
+        XCTAssertTrue(decoded.docking.isEmpty)
+        XCTAssertTrue(decoded.timers.isEmpty)
+    }
+
+    /// Optional entropy must stay nil when the CloudKit field is absent —
+    /// fabricating 0.0 would look like a real collapse reading.
+    func testMissingOptionalEntropyFieldsStayNil() throws {
+        let fields = AgentState(id: "a", name: "n", activity: .running, updatedAt: fixedDate)
+            .cloudFields
+        XCTAssertNil(fields[AgentState.Field.entropyBits],
+                     "nil optionals must not be written to the wire")
+        XCTAssertNil(fields[AgentState.Field.entropyDelta])
+
+        let decoded = try AgentState(cloudFields: fields)
+        XCTAssertNil(decoded.entropyBits)
+        XCTAssertNil(decoded.entropyDelta)
+        XCTAssertFalse(decoded.isCollapsed)
+    }
+
+    /// JSON that omits entropy keys must decode as nil, not 0.
+    func testJSONOmittingEntropyDoesNotDefaultToZero() throws {
+        // Minimal AgentState-shaped JSON without entropy keys.
+        let json = """
+        {
+          "id": "a1",
+          "name": "Agent",
+          "activity": "running",
+          "taskTitle": "",
+          "turnCount": 0,
+          "lastAction": "",
+          "isCollapsed": false,
+          "updatedAt": "2023-11-14T22:13:20Z"
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let agent = try decoder.decode(AgentState.self, from: json)
+        XCTAssertNil(agent.entropyBits)
+        XCTAssertNil(agent.entropyDelta)
+    }
+
+    /// Explicit JSON null for optional entropy must also stay nil.
+    func testJSONNullEntropyStaysNil() throws {
+        let json = """
+        {
+          "id": "a1",
+          "name": "Agent",
+          "activity": "idle",
+          "taskTitle": "",
+          "turnCount": 0,
+          "lastAction": "",
+          "entropyBits": null,
+          "entropyDelta": null,
+          "isCollapsed": false,
+          "updatedAt": "2023-11-14T22:13:20Z"
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let agent = try decoder.decode(AgentState.self, from: json)
+        XCTAssertNil(agent.entropyBits)
+        XCTAssertNil(agent.entropyDelta)
+    }
 }

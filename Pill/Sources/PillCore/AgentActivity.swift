@@ -882,6 +882,10 @@ public final class AgentActivityMonitor: ObservableObject {
     /// history but are not claimed current — see `AgentEntropyMemory`.
     @Published public private(set) var entropyMemory = AgentEntropyMemory()
 
+    /// Last equality-gated joint snapshot for HUD + menu-bar co-consumers.
+    /// Updated only when telemetry fields change (not pure clock).
+    @Published public private(set) var lastSharedTelemetry = SharedTelemetrySnapshot()
+
     /// Latest FlexAIDdS / DatasetRunner benchmark progress from the gate (nil if none).
     @Published public private(set) var benchmark: BenchmarkRunSnapshot?
 
@@ -1030,6 +1034,22 @@ public final class AgentActivityMonitor: ObservableObject {
             if mem != entropyMemory { entropyMemory = mem }
         }
         if benchmark != full.benchmark { benchmark = full.benchmark }
+
+        // Notify co-consumers (menu bar, cloud) that shared telemetry advanced
+        // without each re-polling SQLite. Equality-gated — pure clock is not dirty.
+        let joint = SharedTelemetrySnapshot.capture(
+            agents: summary.agents,
+            pendingAsks: pendingAsks,
+            agentEntropy: agentEntropy,
+            bridgeConnected: false, // bridge is a separate object; consumers merge
+            bridgeStatus: nil,
+            entropyMemory: entropyMemory,
+            gateAvailable: gateAvailable,
+            scannedAt: full.summary.scannedAt
+        )
+        if SharedTelemetryBinding.shouldPublish(previous: lastSharedTelemetry, next: joint) {
+            lastSharedTelemetry = joint
+        }
         // Drop stale in-flight state for asks the gate has since cleared.
         let live = Set(full.pendingAsks.map(\.interactionId))
         if !resolving.isSubset(of: live) { resolving.formIntersection(live) }

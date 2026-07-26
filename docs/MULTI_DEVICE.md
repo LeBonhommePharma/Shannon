@@ -88,7 +88,7 @@ Packages/ShannonCore/          shared Swift package (macOS 13+, iOS 16+, watchOS
     CloudRecord.swift          CloudValue field model, typed decoding
     ShannonSync.swift          CloudKit backend, snapshot aggregate, watch codec
     ShannonStore.swift         @Observable store + Mac-side publisher actor
-  Tests/ShannonCoreTests/      78 tests, no CloudKit container required
+  Tests/ShannonCoreTests/      pure-logic suite (run: swift test — count is not frozen in docs)
 
 iOS/                           app targets require iOS 17
   project.yml                  XcodeGen spec for all four app targets

@@ -87,7 +87,7 @@ Pill/
       NotchGeometry.swift     where the pill sits on a given screen
       PillWindowController.swift  the non-activating panel
       PillView.swift          collapsed + expanded SwiftUI
-  Tests/PillCoreTests/        73 tests
+  Tests/PillCoreTests/        pure-logic suite (`swift test` is authoritative)
   Resources/Info.plist        literal plist for the SwiftPM bundle
   project.yml                 XcodeGen spec
   Scripts/make_app.sh         SwiftPM binary → .app

@@ -108,10 +108,10 @@ Honest gaps, so nothing on screen implies more than it does:
 ## Tests
 
 ```bash
-# Layout / hub pure logic (when present in package tests)
+# Multi-device model + sync / confirmation / security policies
 cd Packages/ShannonCore && swift test
 
-# Full multi-device model
+# Design tokens only (not the multi-device model)
 cd Packages/ShannonTheme && swift test
 ```
 

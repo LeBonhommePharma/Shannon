@@ -115,6 +115,65 @@ def test_package_pill_script_exists():
     assert "--update-cask" in body
 
 
+# Hardcoded suite sizes go stale the moment a test is added. Apple platform docs
+# must point operators at `swift test` instead of inventing inventory.
+_FROZEN_SUITE_COUNT = re.compile(
+    r"(?i)(?:"
+    r"\b\d{1,4}\s+tests\b"  # "78 tests", "737 tests"
+    r"|\bTests/\w+/?\s+\d{1,4}\s+tests\b"
+    r")"
+)
+
+_APPLE_DOC_PATHS = (
+    REPO / "docs" / "MULTI_DEVICE.md",
+    REPO / "Pill" / "README.md",
+    REPO / "iOS" / "README.md",
+    REPO / "iPad" / "README.md",
+    REPO / "watchOS" / "README.md",
+)
+
+
+def test_apple_docs_forbid_hardcoded_suite_counts():
+    """Production docs must not freeze XCTest inventory numbers."""
+    offenders: list[str] = []
+    for path in _APPLE_DOC_PATHS:
+        body = path.read_text(encoding="utf-8")
+        for m in _FROZEN_SUITE_COUNT.finditer(body):
+            # Allow explicit "not frozen" / authoritative wording nearby is still
+            # a count claim if digits appear — ban all digit+"tests" in these files.
+            line_no = body.count("\n", 0, m.start()) + 1
+            offenders.append(f"{path.relative_to(REPO)}:{line_no}: {m.group(0)!r}")
+    assert not offenders, (
+        "Hardcoded suite sizes drift; use 'swift test is authoritative' instead:\n"
+        + "\n".join(offenders)
+    )
+
+
+def test_apple_docs_point_at_swift_test_authority():
+    multi = MULTI.read_text(encoding="utf-8")
+    pill = (REPO / "Pill" / "README.md").read_text(encoding="utf-8")
+    assert "swift test" in multi
+    assert "swift test" in pill
+    assert "authoritative" in pill.lower() or "not frozen" in multi.lower()
+
+
+def test_ipad_readme_labels_core_vs_theme_correctly():
+    body = (REPO / "iPad" / "README.md").read_text(encoding="utf-8")
+    low = body.lower()
+    assert "shannoncore" in low and "shannontheme" in low
+    # Core = multi-device model / policies; Theme = design tokens only.
+    assert "multi-device model" in low
+    assert "design tokens only" in low or "design tokens" in low
+    # Order: Core how-to before Theme how-to.
+    core_i = low.find("packages/shannoncore")
+    theme_i = low.find("packages/shannontheme")
+    assert 0 <= core_i < theme_i, "ShannonCore how-to should appear before ShannonTheme"
+    before_theme = low[max(0, theme_i - 120) : theme_i]
+    assert "token" in before_theme, before_theme
+    # Theme line must explicitly deny being the multi-device model.
+    assert "not the multi-device model" in before_theme or "design tokens only" in before_theme
+
+
 @pytest.mark.parametrize(
     "rel",
     [

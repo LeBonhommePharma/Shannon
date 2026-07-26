@@ -447,7 +447,7 @@ pip install -e ".[dev]"
 pytest tests/python/ -v
 ```
 
-### Swift (42 tests, macOS only)
+### Swift (macOS packages — `swift test` is authoritative)
 
 ```bash
 cd Pill

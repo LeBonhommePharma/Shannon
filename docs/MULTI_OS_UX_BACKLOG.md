@@ -60,12 +60,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `AgentAttentionRank` + `rankedForDisplay(pendingAgentIDs:)` + `ShannonSnapshot.agentsRankedForDisplay()` (needs-you elevates open confirmations); pad `visibleAgents`, phone list, watch face/list/complication wired; pure tests for Mac-parity order.
 - **Priority:** P1
 
-### - [ ] UX-005: Watch face shows primary focus line only when actionable
+### - [x] UX-005: Watch face shows primary focus line only when actionable
 
 - **Why:** Mac collapsed pill stays quiet when idle (`Shannon · idle`); Watch should not invent busy chrome.
 - **Platforms:** watchOS, macOS (reference)
 - **Area:** `watchOS/Sources/ShannonWatch/`, shared focus string if available via sync snapshot
 - **First slice:** Map synced attention → short line; idle → minimal face.
+- **Done:** `CompanionFocusCopy` (actionable filter + primaryFocusLine + quiet tokens); snapshot `complicationLine` / face use it; idle agents no longer invent busy chrome; Always-On / quiet face show `Shannon · idle`; pure + wiring tests.
 - **Priority:** P1
 
 ### - [ ] UX-006: Mac collapsed multi-agent density vs phone card list skim
@@ -116,6 +117,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (loop 5):** `--quick` all PASS. Claimed **UX-005** (watch primary focus only when actionable). Considered: phone skim (UX-006), Reduce Motion (UX-007), widget age buckets (UX-008). **No new UX-0xx**.
 - **2026-07-26 (loop 4):** `--quick` all PASS. Claimed **UX-004** (needs-you rank Mac parity). Considered: watch idle face (UX-005), phone skim (UX-006, ranking now shared), Reduce Motion (UX-007). **No new UX-0xx**.
 - **2026-07-26 (loop 3):** `--quick` all PASS. Claimed **UX-003** (Approve/Deny + disabled hub-offline copy). Considered: pad attention rank (UX-004), watch idle face (UX-005), Reduce Motion (UX-007). **No new UX-0xx**.
 - **2026-07-26 (loop 2):** `--quick` all PASS. Claimed **UX-002** (shared fail-closed empty states). Considered: Confirm/Approve verb (UX-003), pad rank (UX-004), watch idle focus (UX-005). **No new UX-0xx**.

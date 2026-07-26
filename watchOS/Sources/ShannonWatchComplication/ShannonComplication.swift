@@ -83,10 +83,13 @@ struct ComplicationView: View {
     private var isInSmartStack: Bool { showsBackground }
 
     private var docking: DockingProgress? {
-        snapshot.docking.first(where: { $0.isRunning }) ?? snapshot.docking.first
+        snapshot.docking.first(where: { $0.isRunning })
     }
 
-    private var agent: AgentState? { snapshot.agentsRankedForDisplay().first }
+    /// Actionable agents only — idle must not invent busy complication chrome (UX-005).
+    private var agent: AgentState? {
+        CompanionFocusCopy.actionableAgents(in: snapshot).first
+    }
 
     /// Unexpired gates awaiting an answer — the number worth glancing for.
     private var pendingGateCount: Int {

@@ -307,28 +307,18 @@ public struct ShannonSnapshot: Codable, Equatable, Sendable {
             && confirmations.isEmpty
     }
 
-    /// The single line a watch complication shows. Docking progress wins when
-    /// a benchmark is running (that is what LP is waiting on), then an
-    /// alerting agent, then media.
-    public func complicationLine() -> String {
-        // A blocked agent outranks everything: it is the one state where
-        // Shannon is waiting on LP rather than the other way round.
-        if let pending = oldestPendingConfirmation() {
-            return "? \(pending.question)"
-        }
-        if let run = docking.first(where: { $0.isRunning }) ?? docking.first {
-            var line = run.complicationLine()
-            if let h = agentsRankedForDisplay().first?.entropyBits {
-                line += " H=\(String(format: "%.2f", h))"
-            }
-            return line
-        }
-        if let alerting = agentsRankedForDisplay().first(where: { $0.activity.isAlerting }) {
-            return alerting.compactLine()
-        }
-        if let media = nowPlaying?.compactLine() { return media }
-        if let agent = agentsRankedForDisplay().first { return agent.compactLine() }
-        return "Shannon"
+    /// The single line a watch complication shows.
+    ///
+    /// **UX-005:** only actionable attention (needs-you / working / finished /
+    /// errored / collapse / live docking / media). Pure idle agents no longer
+    /// invent busy chrome — quiet → `"Shannon"` (Mac `Shannon · idle` family).
+    public func complicationLine(now: Date = Date()) -> String {
+        CompanionFocusCopy.displayLine(in: self, now: now, quiet: CompanionFocusCopy.quietShort)
+    }
+
+    /// Primary focus for the in-app watch face; `nil` when quiet (minimal face).
+    public func primaryFocusLine(now: Date = Date()) -> String? {
+        CompanionFocusCopy.primaryFocusLine(in: self, now: now)
     }
 
     /// The oldest confirmation still awaiting an answer, ignoring expired
@@ -341,13 +331,18 @@ public struct ShannonSnapshot: Codable, Equatable, Sendable {
 
     public var isAwaitingConfirmation: Bool { oldestPendingConfirmation() != nil }
 
-    /// The three cards the watch shows, in order.
-    public func watchCards(limit: Int = 3) -> [String] {
+    /// The three cards the watch shows, in order (actionable only — UX-005).
+    public func watchCards(limit: Int = 3, now: Date = Date()) -> [String] {
         var cards: [String] = []
-        if let pending = oldestPendingConfirmation() { cards.append("? \(pending.question)") }
-        if let agent = agentsRankedForDisplay().first { cards.append(agent.compactLine()) }
-        if let run = docking.first(where: { $0.isRunning }) ?? docking.first {
+        if let pending = oldestPendingConfirmation(now: now) {
+            let q = pending.question.trimmingCharacters(in: .whitespacesAndNewlines)
+            cards.append(q.isEmpty ? "Needs you" : "? \(q)")
+        }
+        if let run = docking.first(where: { $0.isRunning }) {
             cards.append(run.complicationLine())
+        }
+        if let agent = CompanionFocusCopy.actionableAgents(in: self, now: now).first {
+            cards.append(agent.compactLine())
         }
         if let media = nowPlaying?.compactLine() { cards.append(media) }
         return Array(cards.prefix(limit))

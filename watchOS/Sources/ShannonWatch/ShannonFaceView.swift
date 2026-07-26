@@ -19,10 +19,22 @@ struct ShannonFaceView: View {
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
     private var snapshot: ShannonSnapshot { model.snapshot }
+    /// Running benchmark only — completed docking must not invent busy chrome (UX-005).
     private var docking: DockingProgress? {
-        snapshot.docking.first(where: { $0.isRunning }) ?? snapshot.docking.first
+        snapshot.docking.first(where: { $0.isRunning })
     }
-    private var agent: AgentState? { snapshot.agentsRankedForDisplay().first }
+    /// Needs-you / working / finished / errored / collapse only (Mac primarySurface family).
+    private var agent: AgentState? {
+        CompanionFocusCopy.actionableAgents(in: snapshot).first
+    }
+    private var focusLine: String? { snapshot.primaryFocusLine() }
+    private var isQuietFace: Bool {
+        model.pendingConfirmation == nil
+            && model.delivery == .idle
+            && docking == nil
+            && agent == nil
+            && (snapshot.nowPlaying == nil || snapshot.nowPlaying?.isIdle == true)
+    }
 
     private var accent: Color {
         // Always-On dims to 15% for burn-in; an elevated heart rate (only when
@@ -43,6 +55,12 @@ struct ShannonFaceView: View {
                     if let pending = model.pendingConfirmation {
                         // The gate takes over the face — no sheet, no stack.
                         GateApprovalView(model: model, pending: pending)
+                    } else if isQuietFace {
+                        // Mac-parity quiet face: clock + idle token, no fake agent chrome.
+                        Text(CompanionFocusCopy.quietFace)
+                            .font(.shannonCaption)
+                            .foregroundStyle(Color.shannonTertiary)
+                            .lineLimit(1)
                     } else {
                         if model.delivery != .idle {
                             // Answer in flight: show where it is instead of
@@ -51,22 +69,17 @@ struct ShannonFaceView: View {
                         }
                         if let docking { DockingRow(progress: docking, accent: accent) }
                         if let agent { AgentRow(agent: agent) }
-                        // Most-constrained host chip (Mac capacity or local thermal).
-                        HostCapacityChip(
-                            capacity: snapshot.device?.capacity
-                                ?? HostCapacitySnapshot(
-                                    thermal: HostThermalState.fromProcessInfoRawValue(
-                                        ProcessInfo.processInfo.thermalState.rawValue
-                                    )
-                                )
-                        )
+                        // Capacity chip only when something is constrained — not always-on noise.
+                        if let cap = snapshot.device?.capacity, !cap.constrainedRanked.isEmpty {
+                            HostCapacityChip(capacity: cap)
+                        }
                         if let media = snapshot.nowPlaying, !media.isIdle {
                             MediaRow(media: media)
                         }
                     }
                 } else {
-                    // Always-On: exactly one line of status, nothing else.
-                    Text(snapshot.complicationLine())
+                    // Always-On: exactly one line — actionable focus or quiet (UX-005).
+                    Text(focusLine ?? CompanionFocusCopy.quietFace)
                         .font(.shannonMono)
                         .foregroundStyle(Color.shannonSecondary)
                         .lineLimit(1)

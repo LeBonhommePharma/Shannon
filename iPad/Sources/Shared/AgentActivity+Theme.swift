@@ -43,14 +43,8 @@ extension AgentActivity {
         }
     }
 
-    /// Sentence-case label for the card and the command palette.
+    /// Activity badge — same tokens as Mac notch (`AgentAttentionCopy` / UX-001).
     var label: String {
-        switch self {
-        case .running:  return "Running"
-        case .idle:     return "Idle"
-        case .blocked:  return "Waiting on you"
-        case .errored:  return "Errored"
-        case .finished: return "Finished"
-        }
+        AgentAttentionCopy.activityLabel(for: self)
     }
 }

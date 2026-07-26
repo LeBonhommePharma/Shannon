@@ -146,12 +146,7 @@ public enum GlobalNotifyResponse {
     public static func content(for pending: PendingConfirmation) -> NotifyContent {
         let agent = pending.agentID?.trimmingCharacters(in: .whitespacesAndNewlines)
         let q = pending.question.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title: String
-        if let agent, !agent.isEmpty {
-            title = "\(agent) needs you"
-        } else {
-            title = "Approval needed"
-        }
+        let title = AgentAttentionCopy.needsYouNotifyTitle(agentID: agent)
         let body = q.isEmpty ? "An agent is waiting for your answer" : q
         return NotifyContent(
             title: title,
@@ -168,10 +163,7 @@ public enum GlobalNotifyResponse {
     ) -> String? {
         guard let p = primaryPending(in: snapshot, now: now) else { return nil }
         let c = content(for: p)
-        if let agent = c.agentID {
-            return "Needs you · \(agent)"
-        }
-        return "Needs you"
+        return AgentAttentionCopy.needsYouFocusLine(agentDisplayName: c.agentID ?? "")
     }
 }
 

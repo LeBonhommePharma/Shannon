@@ -184,6 +184,7 @@ dest_for_watch_udid() {
 run_macos() {
   log "macOS — ShannonCore + ShannonTheme + Pill"
   local ok_all=1
+  # --quick: build packages (swift test still for Core — pure, fast) + Pill build only.
   if ! (cd "$ROOT/Packages/ShannonCore" && run_timed "ShannonCore swift test" swift test); then
     ok_all=0
   fi

@@ -1,4 +1,5 @@
 import Foundation
+import ShannonCore
 @_exported import UsageCore
 
 // MARK: - Clean-room live agent surface (AgentNotch-class outcomes)
@@ -318,18 +319,28 @@ public enum AgentLiveSurfaceLogic {
         }.count
     }
 
-    /// Capsule badge text shared by notch + menu-bar (one wording source).
+    /// Capsule badge text shared by notch + menu-bar (and mobile via ShannonCore).
+    ///
+    /// Delegates to `AgentAttentionCopy` so Mac / iPhone / iPad / Watch cannot
+    /// drift on "needs you" / "working" / "done" / "live" (UX-001).
     public static func badgeLabel(
         surface: AgentLiveSurface,
         fallbackStatusLine: String
     ) -> String {
+        let kind: AgentAttentionCopy.Kind
         switch surface.attention {
-        case .needsYou: return "needs you"
-        case .working: return surface.toolKind == .none ? "working" : surface.toolKind.rawValue
-        case .finished: return "done"
-        case .idle: return "live"
-        case .unknown: return fallbackStatusLine
+        case .needsYou: kind = .needsYou
+        case .working: kind = .working
+        case .finished: kind = .finished
+        case .idle: kind = .idle
+        case .unknown: kind = .unknown
         }
+        let tool = surface.toolKind == .none ? nil : surface.toolKind.rawValue
+        return AgentAttentionCopy.badgeLabel(
+            kind: kind,
+            toolKindRaw: tool,
+            fallback: fallbackStatusLine
+        )
     }
 
     /// Rank agents with their surfaces: needs-you → working → finished → idle → unknown.

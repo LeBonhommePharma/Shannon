@@ -57,12 +57,19 @@ final class HostCapacityCompanionPresenceTests: XCTestCase {
     }
 
     func testMacPopoverOrdersMostConstrainedFirst() {
+        // Resource block lives in MenuBarResourcesSection (extracted from popover).
         let path = repoRoot
-            .appendingPathComponent("Pill/Sources/ShannonPill/MenuBarPopoverView.swift")
+            .appendingPathComponent("Pill/Sources/ShannonPill/MenuBarResourcesSection.swift")
         let text = (try? String(contentsOf: path, encoding: .utf8)) ?? ""
-        XCTAssertTrue(text.contains("resourceRowsOrdered"))
-        XCTAssertTrue(text.contains("most constrained"))
+        XCTAssertFalse(text.isEmpty, "missing \(path.path)")
+        XCTAssertTrue(text.contains("resourceRowsOrdered"), text.prefix(200).description)
+        XCTAssertTrue(text.contains("mostConstrained") || text.contains("most constrained"))
         XCTAssertTrue(text.contains(".disk") || text.contains("diskDetail"))
         XCTAssertTrue(text.contains("thermalDetail") || text.contains(".thermal"))
+        // Popover still hosts the section.
+        let popover = repoRoot
+            .appendingPathComponent("Pill/Sources/ShannonPill/MenuBarPopoverView.swift")
+        let popText = (try? String(contentsOf: popover, encoding: .utf8)) ?? ""
+        XCTAssertTrue(popText.contains("MenuBarResourcesSection"))
     }
 }

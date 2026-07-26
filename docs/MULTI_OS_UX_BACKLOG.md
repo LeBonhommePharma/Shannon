@@ -20,12 +20,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## P0 — parity & honesty
 
-### - [ ] UX-001: Shared “needs you” / badge strings in ShannonCore for phone + pad + watch
+### - [x] UX-001: Shared “needs you” / badge strings in ShannonCore for phone + pad + watch
 
 - **Why:** Mac uses `AgentLiveSurfaceLogic.badgeLabel` / chrome; iPhone/iPad/Watch may hard-code “needs approval” / status labels → dual-OS wording drift.
 - **Platforms:** macOS (reference), iOS, iPadOS, watchOS
 - **Area:** `Packages/ShannonCore/`, `Pill/Sources/PillCore/AgentLiveSurface.swift`, phone/pad status views
 - **First slice:** Export or mirror badge vocabulary in ShannonCore; one pure test; call from one mobile surface.
+- **Done:** `AgentAttentionCopy` in ShannonCore (badge/focus/notify tokens); PillCore `badgeLabel` delegates; pad `AgentActivity.label` + GlobalNotify use it; `AgentAttentionCopyTests` + Mac attention suites green.
 - **Priority:** P0
 
 ### - [ ] UX-002: Fail-closed empty states when CloudKit / hub offline (phone + pad)

@@ -208,6 +208,31 @@ final class AgentArtifactReaderTests: XCTestCase {
         XCTAssertEqual(surface.attention, .needsYou)
     }
 
+    func testKimiUserOnlyIsWorkingNotNeedsYou() {
+        // User just sent — agent turn (same shape as Cursor midTask). Must NOT
+        // elevate needsYou / "waiting (answer in terminal)".
+        let root = fixturesRoot.appendingPathComponent("kimi/sessions", isDirectory: true)
+        let sessions = KimiSessionReader.readSessions(
+            roots: [root],
+            now: Date(timeIntervalSince1970: 1_721_500_300),
+            maxSessions: 10
+        )
+        let s = sessions.first { $0.id.contains("useronly-dddd") }
+        XCTAssertNotNil(s, "expected user-only fixture sess-kimi-useronly-dddd-4444")
+        guard let s else { return }
+        XCTAssertNotEqual(s.status, .blocked, "user-without-assistant is agent turn, not wait")
+        XCTAssertEqual(s.status, .midTask)
+        XCTAssertEqual(s.stateLabel, "working")
+        XCTAssertFalse((s.stateLabel ?? "").lowercased().contains("waiting"))
+        let card = SessionContentPresenter.card(session: s, pendingAsks: [], now: Date())
+        XCTAssertFalse(card.needsYou, "must not false-elevate needsYou on agent turn")
+        XCTAssertNotEqual(card.attention, .needsYou)
+        XCTAssertFalse(card.canAnswerInline)
+        let surface = SessionContentPresenter.resolveSurface(session: s)
+        XCTAssertFalse(surface.needsYou)
+        XCTAssertNotEqual(surface.attention, .needsYou)
+    }
+
     func testCursorProjectLabelPreservesDottedUsernameHome() {
         let home = "/Users/lp.more"
         let label = CursorSessionReader.projectLabel(

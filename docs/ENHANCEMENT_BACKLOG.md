@@ -80,11 +80,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 - **Done:** `rankedAgentSurfaces` one resolve/tick; `rankedAgents` maps it; `cardsFromAgents` uses pairs (session usage merged once). PillView row resolve left for a later slice.
 - **Priority:** P1
 
-### - [ ] ENH-008: Cap artifact reader I/O when parity panel is closed
+### - [x] ENH-008: Cap artifact reader I/O when parity panel is closed
 
 - **Why:** `ParityPanelModel.refresh` scans Claude/Codex trees every 2s while the popover may be closed (if callers refresh aggressively). Expensive on large `~/.claude/projects`.
 - **Area:** `MenuBarController` / popover open path, `ParityPanelModel`
 - **First slice:** Only force artifact scan when popover opens or on a longer interval (e.g. 15s); keep gate agents cheap path; test refresh throttle pure if extracted.
+- **Done:** `ParityRefreshPolicy` (open 2s + artifacts / closed 15s gate-only / force full); `panelVisible` from popover appear/disappear; pure `ParityRefreshPolicyTests`.
 - **Priority:** P1
 
 ---
@@ -177,7 +178,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-007: ShannonPill suite green; PillCore 827 pass, 1 skip |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-008: ShannonPill suite green (artifact throttle); PillCore 827 pass, 1 skip |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `PYTHONPATH=python pytest tests/python/ -v` | 180 passed, 51 skipped (bare pytest needs path — see ENH-009) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

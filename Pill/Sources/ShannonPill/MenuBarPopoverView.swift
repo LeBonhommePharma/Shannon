@@ -222,7 +222,14 @@ struct MenuBarPopoverView: View {
             keepAwake.syncWithAgents(busyCount: count)
         }
         .onAppear {
+            // Full Claude/Codex scan on open; visibility drives closed throttle (ENH-008).
+            parity.panelVisible = true
             parity.refresh(gateAgents: summary.agents, force: true)
+        }
+        .onDisappear {
+            // Reused popover hosting still receives agent-count onChange when
+            // closed — gate-only / 15s path kicks in until next open.
+            parity.panelVisible = false
         }
         .onChange(of: activity.summary.agents.count) { _ in
             parity.refresh(gateAgents: summary.agents)

@@ -29,6 +29,44 @@ enum PanelSectionID: String, CaseIterable, Identifiable {
     }
 }
 
+/// Pure throttle for parity panel refresh (ENH-008).
+///
+/// While the menu-bar popover is closed, agent-count `onChange` still fires on
+/// the reused hosting controller. Scanning `~/.claude` / Codex trees every 2s
+/// is expensive; closed refreshes use a longer interval and skip disk readers.
+/// Force / open always allow full artifact I/O.
+enum ParityRefreshPolicy: Sendable {
+    /// Min wall time between non-force refreshes while the panel is visible.
+    static let openMinInterval: TimeInterval = 2.0
+    /// Min wall time between non-force refreshes while the panel is hidden.
+    static let closedMinInterval: TimeInterval = 15.0
+
+    /// Whether a refresh should run, and whether Claude/Codex disk readers run.
+    ///
+    /// - `force`: always refresh with artifacts (popover open, stop-server, etc.).
+    /// - `panelVisible`: 2s throttle + artifacts (UI needs pulled sessions).
+    /// - closed: 15s throttle + **gate-only** (`includeArtifacts == false`) so
+    ///   roster meta can still update from live gate agents without tree walks.
+    static func decision(
+        now: Date,
+        lastRefresh: Date,
+        force: Bool,
+        panelVisible: Bool
+    ) -> (shouldRefresh: Bool, includeArtifacts: Bool) {
+        if force {
+            return (true, true)
+        }
+        let elapsed = now.timeIntervalSince(lastRefresh)
+        if panelVisible {
+            guard elapsed >= openMinInterval else { return (false, true) }
+            return (true, true)
+        }
+        // Closed: cheap gate path only; skip Claude/Codex artifact scans.
+        guard elapsed >= closedMinInterval else { return (false, false) }
+        return (true, false)
+    }
+}
+
 /// Snapshot of additive panel data, refreshed with the activity poll.
 @MainActor
 final class ParityPanelModel: ObservableObject {
@@ -41,6 +79,11 @@ final class ParityPanelModel: ObservableObject {
     @Published var actions: [FastAction] = []
     @Published var lastActionStatus: FastActionRunStatus = .idle
     @Published var lastActionError: String?
+
+    /// True while the menu-bar popover content is on-screen (ENH-008).
+    /// Set from `MenuBarPopoverView` appear/disappear so closed thrash uses
+    /// the gate-only cheap path instead of scanning artifact trees.
+    var panelVisible: Bool = false
 
     private let registry = SessionRegistry()
     private var lastRefresh: Date = .distantPast
@@ -62,16 +105,28 @@ final class ParityPanelModel: ObservableObject {
     /// Disk / process discovery (Claude/Codex artifacts, dev servers, home
     /// routes) runs off the MainActor so opening the popover never hitch the
     /// menu bar — same discipline as `AgentActivityMonitor` hub scans.
+    ///
+    /// When `panelVisible` is false, non-force refreshes are throttled to
+    /// `ParityRefreshPolicy.closedMinInterval` and skip artifact readers
+    /// (gate-only roster meta). Open / `force` still full-scan.
     func refresh(gateAgents: [AgentActivitySnapshot], force: Bool = false) {
         let now = Date()
-        if !force, now.timeIntervalSince(lastRefresh) < 2.0 { return }
+        let decision = ParityRefreshPolicy.decision(
+            now: now,
+            lastRefresh: lastRefresh,
+            force: force,
+            panelVisible: panelVisible
+        )
+        guard decision.shouldRefresh else { return }
         lastRefresh = now
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let includeArtifacts = decision.includeArtifacts
         Task.detached(priority: .utility) { [weak self] in
             let payload = ParityPanelModel.collectParityPayload(
                 gateAgents: gateAgents,
                 now: now,
-                home: home
+                home: home,
+                includeArtifactReaders: includeArtifacts
             )
             await self?.applyParityPayload(payload)
         }

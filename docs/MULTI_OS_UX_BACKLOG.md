@@ -26,7 +26,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Platforms:** macOS (reference), iOS, iPadOS, watchOS
 - **Area:** `Packages/ShannonCore/`, `Pill/Sources/PillCore/AgentLiveSurface.swift`, phone/pad status views
 - **First slice:** Export or mirror badge vocabulary in ShannonCore; one pure test; call from one mobile surface.
-- **Done:** `AgentAttentionCopy` in ShannonCore (badge/focus/notify tokens); PillCore `badgeLabel` delegates; pad `AgentActivity.label` + GlobalNotify use it; `AgentAttentionCopyTests` + Mac attention suites green.
+- **Done:** `AgentAttentionCopy` in ShannonCore (badge/focus/notify tokens); PillCore `badgeLabel` delegates; pad `AgentActivity.label` + detail blocked headline; phone `AgentCard` + watch agent list badges; GlobalNotify uses shared notify/focus; wiring test forbids "Waiting on you" forks.
 - **Priority:** P0
 
 ### - [ ] UX-002: Fail-closed empty states when CloudKit / hub offline (phone + pad)
@@ -113,7 +113,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
-- (Loop: dated “no new items” or findings here.)
+- **2026-07-26 (loop):** `./scripts/test_apple_platforms.sh --quick` — macOS/iOS/iPad/watch builds green (unsigned). UX-001 residual dual wording closed (pad detail + phone/watch badges). Considered for new items: empty-state dual copy (phone “Can't reach iCloud” vs pad “Not syncing…”) → already **UX-002**; Confirm vs Approve verb drift → **UX-003**; pad sort vs Mac rank → **UX-004**. **No new UX-0xx** this fire.
+
 
 ## Related
 

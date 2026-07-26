@@ -189,10 +189,22 @@ struct AgentListView: View {
             LazyVStack(alignment: .leading, spacing: ShannonSpacing.sm) {
                 ForEach(model.snapshot.agents.rankedForDisplay()) { agent in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(agent.activity.glyph) \(agent.name)")
-                            .font(.system(.body, design: .rounded).weight(.semibold))
-                            .foregroundStyle(Color.shannonPrimary)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            Text("\(agent.activity.glyph) \(agent.name)")
+                                .font(.system(.body, design: .rounded).weight(.semibold))
+                                .foregroundStyle(Color.shannonPrimary)
+                                .lineLimit(1)
+                            Spacer(minLength: 2)
+                            // Shared Mac/phone/pad badge tokens (UX-001).
+                            Text(AgentAttentionCopy.badgeLabel(for: agent.activity))
+                                .font(.shannonCaption)
+                                .foregroundStyle(
+                                    agent.activity == .blocked
+                                        ? Color.shannonWarning
+                                        : Color.shannonTertiary
+                                )
+                                .lineLimit(1)
+                        }
                         // Two lines maximum per card: anything longer is
                         // unreadable at a glance on a wrist.
                         Text(agent.taskTitle.isEmpty ? "\(agent.turnCount) turns"

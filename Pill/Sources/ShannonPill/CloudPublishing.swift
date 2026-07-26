@@ -247,9 +247,9 @@ final class CloudPublisher {
         // `--demo` opens a REAL socket and serves `8.0 + 2.0*sin(n/12)`,
         // asserting `is_collapsed` on ~29% of ticks. Published raw, that lands
         // on the iPhone, Watch and iPad as `isCollapsed` (red readout) and
-        // `activity == .blocked` ("Waiting on you") — and `AgentState` has no
-        // provenance field, so `entropyLabel` renders "H 6.2" with none of the
-        // pill's `~` marking. A fabricated number must therefore not be
+        // `activity == .blocked` (shared badge: "needs you") — and `AgentState`
+        // has no provenance field, so `entropyLabel` renders "H 6.2" with none
+        // of the pill's `~` marking. A fabricated number must therefore not be
         // published at all rather than published unmarked.
         let measured = EntropyProvenance.isMeasured(
             connected: bridge.connected, displayed: status

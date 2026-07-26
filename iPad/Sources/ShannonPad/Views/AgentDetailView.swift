@@ -64,7 +64,8 @@ struct AgentDetailView: View {
 
     private func blockedPrompt(_ question: PendingConfirmation) -> some View {
         VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
-            Label("Waiting on you", systemImage: "questionmark.circle.fill")
+            // Same token as Mac notch / phone badge (UX-001).
+            Label(AgentAttentionCopy.needsYou, systemImage: "questionmark.circle.fill")
                 .shannonText(.shannonHeadline, color: .shannonWarning)
             Text(question.question)
                 .shannonText(.shannonBody)

@@ -77,7 +77,7 @@ final class StubPillBridgeServer: @unchecked Sendable {
 /// `bridge.status` to the iPhone, Apple Watch and iPad, where `isCollapsed`
 /// paints the readout `shannonError` red (iOS `HomeView.swift:264`,
 /// watchOS `ShannonFaceView.swift:165`, iPadOS `AgentCardView.swift:135`) and
-/// `activity == .blocked` reads "Waiting on you". Nothing on those devices can
+/// `activity == .blocked` reads shared badge "needs you". Nothing on those devices can
 /// tell a measurement from `--demo`'s `8.0 + 2.0*sin(n/12)` — `AgentState` has
 /// no provenance field and renders `entropyLabel` without the pill's `~`.
 @MainActor

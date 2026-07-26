@@ -253,6 +253,11 @@ struct AgentCard: View {
         }
     }
 
+    /// Capsule badge — same vocabulary as Mac notch / iPad cards (UX-001).
+    private var badgeLabel: String {
+        AgentAttentionCopy.badgeLabel(for: agent.activity)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: ShannonSpacing.xs) {
             HStack(spacing: ShannonSpacing.sm) {
@@ -261,6 +266,13 @@ struct AgentCard: View {
                     .font(.shannonHeadline)
                     .foregroundStyle(Color.shannonPrimary)
                 Spacer()
+                Text(badgeLabel)
+                    .font(.shannonCaption)
+                    .foregroundStyle(
+                        agent.activity == .blocked || agent.isCollapsed
+                            ? Color.shannonWarning
+                            : Color.shannonTertiary
+                    )
                 Text("\(agent.turnCount)")
                     .shannonNumeric()
             }
@@ -281,6 +293,8 @@ struct AgentCard: View {
             }
         }
         .shannonCard()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(agent.name), \(badgeLabel)")
         .contextMenu {
             Button("Copy last action") {
                 UIPasteboard.general.string = agent.lastAction

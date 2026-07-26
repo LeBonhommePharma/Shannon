@@ -2,7 +2,37 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pet_codex_motion as pcm
+
+# Shared with Pill PetCodexMotionTests — fail closed if missing or labels drift.
+_GOLDEN_PATH = Path(__file__).resolve().parent / "fixtures" / "pet_codex_motion_matrix.json"
+
+
+def _load_golden_cases() -> list[dict]:
+    if not _GOLDEN_PATH.is_file():
+        raise FileNotFoundError(
+            f"pet codex motion golden missing (fail closed): {_GOLDEN_PATH}"
+        )
+    data = json.loads(_GOLDEN_PATH.read_text(encoding="utf-8"))
+    cases = data.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ValueError(f"golden has no cases: {_GOLDEN_PATH}")
+    return cases
+
+
+def _signals_from_case(raw: dict) -> pcm.PetMotionSignals:
+    return pcm.PetMotionSignals(
+        presence=str(raw.get("presence") or "observed"),
+        status=str(raw.get("status") or "idle"),
+        has_pending_ask=bool(raw.get("has_pending_ask", False)),
+        last_outcome=raw.get("last_outcome"),
+        just_approved=bool(raw.get("just_approved", False)),
+        entropy_collapse=bool(raw.get("entropy_collapse", False)),
+        celebrate_as_jump=bool(raw.get("celebrate_as_jump", False)),
+    )
 
 
 class TestCoreVocabulary:
@@ -150,3 +180,25 @@ class TestMoodBridge:
 
     def test_idle_to_idle(self):
         assert pcm.companion_mood_to_motion("resting") == "idle"
+
+class TestMotionMatrixGolden:
+    """T2 — shared Swift ↔ Python matrix; both sides must match expected labels."""
+
+    def test_golden_file_exists(self):
+        assert _GOLDEN_PATH.is_file(), f"missing golden (fail closed): {_GOLDEN_PATH}"
+
+    def test_matrix_matches_map_pet_motion(self):
+        cases = _load_golden_cases()
+        mismatches: list[str] = []
+        for case in cases:
+            case_id = case.get("id", "<missing-id>")
+            signals = _signals_from_case(case["signals"])
+            got = pcm.map_pet_motion(signals)
+            expected = case["expected"]
+            if got != expected:
+                mismatches.append(f"{case_id}: got {got!r} expected {expected!r}")
+        assert not mismatches, (
+            "Python map_pet_motion drifted from golden matrix:\n"
+            + "\n".join(mismatches)
+        )
+

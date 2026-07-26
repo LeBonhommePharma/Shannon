@@ -675,6 +675,114 @@ final class PetCodexMotionTests: XCTestCase {
         XCTAssertEqual(PetCodexMotion.from(mood: .wary), .failed)
         XCTAssertEqual(PetCodexMotion.from(mood: .happy), .waving)
     }
+
+    /// T2 — shared golden with hub/tests/fixtures/pet_codex_motion_matrix.json.
+    /// Fail closed if the file is missing or any expected label drifts.
+    func testMotionMatrixGoldenMatchesSwiftMap() throws {
+        let url = try Self.petCodexMotionGoldenURL()
+        let data = try Data(contentsOf: url)
+        let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let cases = root?["cases"] as? [[String: Any]], !cases.isEmpty else {
+            return XCTFail("golden has no cases: \(url.path)")
+        }
+
+        var mismatches: [String] = []
+        for caseObj in cases {
+            let caseId = caseObj["id"] as? String ?? "<missing-id>"
+            guard let signalsRaw = caseObj["signals"] as? [String: Any] else {
+                mismatches.append("\(caseId): missing signals")
+                continue
+            }
+            guard let expectedRaw = caseObj["expected"] as? String,
+                  let expected = PetCodexMotion(rawValue: expectedRaw) else {
+                mismatches.append("\(caseId): bad expected \(caseObj["expected"] ?? "nil")")
+                continue
+            }
+            let signals = try Self.signals(fromGolden: signalsRaw, caseId: caseId)
+            let got = PetCodexMotion.map(signals)
+            if got != expected {
+                mismatches.append("\(caseId): got \(got.rawValue) expected \(expected.rawValue)")
+            }
+        }
+        XCTAssertTrue(
+            mismatches.isEmpty,
+            "Swift PetCodexMotion.map drifted from golden matrix:\n" + mismatches.joined(separator: "\n")
+        )
+    }
+
+    private static func petCodexMotionGoldenURL() throws -> URL {
+        // Pill/Tests/PillCoreTests → repo root → hub/tests/fixtures/...
+        let thisFile = URL(fileURLWithPath: #filePath)
+        let repoRoot = thisFile
+            .deletingLastPathComponent() // PillCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // Pill
+            .deletingLastPathComponent() // repo
+        let url = repoRoot
+            .appendingPathComponent("hub/tests/fixtures/pet_codex_motion_matrix.json")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw NSError(
+                domain: "PetCodexMotionTests",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "pet codex motion golden missing (fail closed): \(url.path)",
+                ]
+            )
+        }
+        return url
+    }
+
+    private static func signals(
+        fromGolden raw: [String: Any],
+        caseId: String
+    ) throws -> PetCodexMotion.Signals {
+        let presenceRaw = (raw["presence"] as? String ?? "observed").lowercased()
+        guard let presence = AgentPresence(rawValue: presenceRaw) else {
+            throw NSError(
+                domain: "PetCodexMotionTests",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "\(caseId): unknown presence \(presenceRaw)"]
+            )
+        }
+        let statusRaw = (raw["status"] as? String ?? "idle")
+        let status: AgentRunStatus
+        switch statusRaw.lowercased().replacingOccurrences(of: "-", with: "_") {
+        case "active": status = .active
+        case "mid_task": status = .midTask
+        case "idle": status = .idle
+        case "blocked": status = .blocked
+        case "unknown": status = .unknown
+        default:
+            throw NSError(
+                domain: "PetCodexMotionTests",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "\(caseId): unknown status \(statusRaw)"]
+            )
+        }
+        let lastOutcome: String?
+        if raw["last_outcome"] is NSNull || raw["last_outcome"] == nil {
+            lastOutcome = nil
+        } else if let s = raw["last_outcome"] as? String {
+            lastOutcome = s
+        } else {
+            throw NSError(
+                domain: "PetCodexMotionTests",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "\(caseId): bad last_outcome"]
+            )
+        }
+        return PetCodexMotion.Signals(
+            presence: presence,
+            status: status,
+            hasPendingAsk: raw["has_pending_ask"] as? Bool ?? false,
+            lastOutcome: lastOutcome,
+            justApproved: raw["just_approved"] as? Bool ?? false,
+            entropyCollapse: raw["entropy_collapse"] as? Bool ?? false,
+            celebrateAsJump: raw["celebrate_as_jump"] as? Bool ?? false
+        )
+    }
+
 }
 
 // MARK: - Atlas frame selection

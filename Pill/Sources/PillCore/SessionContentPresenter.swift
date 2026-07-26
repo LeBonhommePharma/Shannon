@@ -113,6 +113,30 @@ public struct SessionContentCard: Sendable, Equatable, Identifiable {
     public var showsApproveHint: Bool { canAnswerInline }
 }
 
+// MARK: - Companion board density (macOS 14+ expanded path)
+
+/// Optional meta + usage for one companion board row.
+///
+/// Fail-closed: both fields nil when no session/usage source reported them.
+/// Shared by pure assembly and `CompanionBoardView` so the macOS 14+ path
+/// cannot silently drop project/branch/model/usage that `agentRow` already shows.
+public struct CompanionBoardDensity: Sendable, Equatable {
+    public var metaLine: String?
+    public var usageLabel: String?
+
+    public init(metaLine: String? = nil, usageLabel: String? = nil) {
+        self.metaLine = Self.nonEmpty(metaLine)
+        self.usageLabel = Self.nonEmpty(usageLabel)
+    }
+
+    public var isEmpty: Bool { metaLine == nil && usageLabel == nil }
+
+    private static func nonEmpty(_ s: String?) -> String? {
+        guard let s, !s.isEmpty else { return nil }
+        return s
+    }
+}
+
 // MARK: - Pure presenter
 
 /// Assembles session cards and collapsed status from real local signals only.
@@ -195,6 +219,49 @@ public enum SessionContentPresenter {
             let meta = metaLine(agentId: agent.id, sessionsByAgent: sessionsByAgent)
             return (agent, surface, meta)
         }
+    }
+
+    /// Optional project/branch/model + usage labels for the **macOS 14+** companion board.
+    ///
+    /// Fail-closed: empty map when no session fields or usage exist. Pure so tests
+    /// prove `CompanionBoardView` density cannot be dropped without this map going empty.
+    public static func companionBoardDensityByAgent(
+        sessionsByAgent: [String: AgentSession],
+        usageByAgent: [String: AgentUsageSnapshot] = [:]
+    ) -> [String: CompanionBoardDensity] {
+        let merged = mergedUsageByAgent(
+            usageByAgent: usageByAgent,
+            sessionsByAgent: sessionsByAgent
+        )
+        var ids = Set(sessionsByAgent.keys)
+        ids.formUnion(merged.keys)
+        var out: [String: CompanionBoardDensity] = [:]
+        for id in ids {
+            let meta = metaLine(agentId: id, sessionsByAgent: sessionsByAgent)
+            let usage = merged[id]?.shortLabel
+            let density = CompanionBoardDensity(metaLine: meta, usageLabel: usage)
+            if !density.isEmpty {
+                out[id] = density
+            }
+        }
+        return out
+    }
+
+    /// Density overlay from `listedSurfaces` rows (same path the #else agentRow uses).
+    public static func companionBoardDensity(
+        from listed: [(agent: AgentActivitySnapshot, surface: AgentLiveSurface, metaLine: String?)]
+    ) -> [String: CompanionBoardDensity] {
+        var out: [String: CompanionBoardDensity] = [:]
+        for pair in listed {
+            let density = CompanionBoardDensity(
+                metaLine: pair.metaLine,
+                usageLabel: pair.surface.usage?.shortLabel
+            )
+            if !density.isEmpty {
+                out[pair.agent.id] = density
+            }
+        }
+        return out
     }
 
     /// Resolve live surface for one session (identity + gate activity + asks).

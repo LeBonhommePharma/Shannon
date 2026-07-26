@@ -229,15 +229,26 @@ public struct CompanionBadge: View {
 /// The mood word and the status line always appear together. The companion
 /// restates the agent's state more softly; it is never the only place that
 /// state appears, and it never says something `statusLine` does not support.
+///
+/// Optional `density` (project · branch · model + usage) comes from the same
+/// `SessionContentPresenter` path as the macOS 13 `agentRow` fallback — never
+/// invent tokens or meta when sessions omit them.
 @available(macOS 14.0, *)
 public struct CompanionRow: View {
     public let state: CompanionState
     /// Desktop-pet handoff (E4): true when this row matches the focused agent.
     public var isFocused: Bool
+    /// Fail-closed session density (meta + usage short label).
+    public var density: CompanionBoardDensity
 
-    public init(state: CompanionState, isFocused: Bool = false) {
+    public init(
+        state: CompanionState,
+        isFocused: Bool = false,
+        density: CompanionBoardDensity = CompanionBoardDensity()
+    ) {
         self.state = state
         self.isFocused = isFocused
+        self.density = density
     }
 
     private var style: AgentStyle { AgentStyleCatalog.style(for: state.agent.id) }
@@ -262,6 +273,13 @@ public struct CompanionRow: View {
                             .padding(.vertical, 1)
                             .background(Capsule().fill(style.palette.wash))
                     }
+
+                    if let usage = density.usageLabel {
+                        Text(usage)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
                 }
 
                 // The evidence, verbatim, never the pet's opinion of it.
@@ -269,6 +287,15 @@ public struct CompanionRow: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                // Project · branch · model — only when a session source reported them.
+                if let meta = density.metaLine {
+                    Text(meta)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
 
             Spacer(minLength: 4)
@@ -293,8 +320,15 @@ public struct CompanionRow: View {
                 )
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(state.accessibilityLine))
+        .accessibilityLabel(Text(accessibilityCombined))
         .accessibilityAddTraits(isFocused ? .isSelected : [])
+    }
+
+    private var accessibilityCombined: String {
+        var parts = [state.accessibilityLine]
+        if let usage = density.usageLabel { parts.append(usage) }
+        if let meta = density.metaLine { parts.append(meta) }
+        return parts.joined(separator: ", ")
     }
 
     /// Quiet tertiary only when both procedural mood and codex motion are idle-ish.
@@ -319,21 +353,29 @@ public struct CompanionRow: View {
 ///
 /// Renders nothing when there are no agents, so dropping it into the board
 /// costs zero pixels on a quiet machine.
+///
+/// `densityByAgent` is the AgentNotch/AgentPeek-class session content overlay
+/// (project · branch · model + usage). Built by `SessionContentPresenter` from
+/// real sessions only — never invents fields.
 @available(macOS 14.0, *)
 public struct CompanionBoardView: View {
     public let states: [CompanionState]
     public let maxRows: Int
     /// Desktop-pet handoff (E4): agent id to highlight, if any.
     public var focusedAgentId: String?
+    /// Per-agent meta + usage from sessions (fail-closed).
+    public var densityByAgent: [String: CompanionBoardDensity]
 
     public init(
         states: [CompanionState],
         maxRows: Int = 6,
-        focusedAgentId: String? = nil
+        focusedAgentId: String? = nil,
+        densityByAgent: [String: CompanionBoardDensity] = [:]
     ) {
         self.states = states
         self.maxRows = maxRows
         self.focusedAgentId = focusedAgentId
+        self.densityByAgent = densityByAgent
     }
 
     /// Convenience: build straight from an activity summary.
@@ -346,7 +388,8 @@ public struct CompanionBoardView: View {
                 lastOutcomes: [String: String] = [:],
                 activity: [GateDBReader.ActivityEvent] = [],
                 maxRows: Int = 6,
-                focusedAgentId: String? = nil) {
+                focusedAgentId: String? = nil,
+                densityByAgent: [String: CompanionBoardDensity] = [:]) {
         self.states = CompanionRoster.build(from: summary,
                                             now: now,
                                             approvals: approvals,
@@ -357,6 +400,7 @@ public struct CompanionBoardView: View {
                                             activity: activity)
         self.maxRows = maxRows
         self.focusedAgentId = focusedAgentId
+        self.densityByAgent = densityByAgent
     }
 
     public var body: some View {
@@ -370,7 +414,8 @@ public struct CompanionBoardView: View {
                         isFocused: DesktopCompanionHandoff.isFocusedRow(
                             rowAgentId: state.id,
                             focusedAgentId: focusedAgentId
-                        )
+                        ),
+                        density: densityByAgent[state.id] ?? CompanionBoardDensity()
                     )
                 }
                 if states.count > maxRows {

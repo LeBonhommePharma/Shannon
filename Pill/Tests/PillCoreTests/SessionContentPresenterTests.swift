@@ -268,6 +268,59 @@ final class SessionContentPresenterTests: XCTestCase {
         ))
     }
 
+    /// ENH-012: chip follows primary surface only — needs-you without usage
+    /// must not scavenge ctx% from a lower-ranked working agent.
+    func testCollapsedUsageChipPrefersPrimaryOnlyNotSecondaryWorking() {
+        let needs = agent(id: "claude_code", name: "Claude Code", status: .idle, presence: .live)
+        let working = agent(id: "codex", name: "Codex", status: .midTask, task: "build")
+        let ask = GateDBReader.PendingAsk(
+            interactionId: "ask1",
+            agentId: "claude_code",
+            prompt: "Approve deploy?",
+            createdAt: now
+        )
+        let activity = [
+            event(agent: "codex", type: "tool_call", label: "Edited Package.swift"),
+        ]
+        let usageBy: [String: AgentUsageSnapshot] = [
+            // Primary (needs-you) has no usage entry.
+            "codex": AgentUsageSnapshot(contextPercent: 47),
+        ]
+        let primary = AgentLiveSurfaceLogic.primarySurface(
+            agents: [needs, working],
+            pendingAsks: [ask],
+            activity: activity,
+            usageByAgent: usageBy,
+            now: now
+        )
+        XCTAssertEqual(primary?.agentId, "claude_code")
+        XCTAssertEqual(primary?.attention, .needsYou)
+        XCTAssertNil(primary?.usage)
+
+        let chip = SessionContentPresenter.collapsedUsageChip(
+            agents: [needs, working],
+            pendingAsks: [ask],
+            activity: activity,
+            usageByAgent: usageBy,
+            now: now
+        )
+        // Product choice: prefer primary only — nil, not "ctx 47%" from codex.
+        XCTAssertNil(chip)
+
+        // Control: when primary itself has usage, chip appears.
+        let withPrimaryUsage = SessionContentPresenter.collapsedUsageChip(
+            agents: [needs, working],
+            pendingAsks: [ask],
+            activity: activity,
+            usageByAgent: [
+                "claude_code": AgentUsageSnapshot(contextPercent: 12),
+                "codex": AgentUsageSnapshot(contextPercent: 47),
+            ],
+            now: now
+        )
+        XCTAssertEqual(withPrimaryUsage, "ctx 12%")
+    }
+
     // MARK: - Badge wording shared with AgentLiveSurfaceLogic
 
     func testBadgeLabelMatchesSurfaceLogic() {

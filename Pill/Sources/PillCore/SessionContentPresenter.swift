@@ -327,6 +327,10 @@ public enum SessionContentPresenter {
     }
 
     /// Compact usage chip for collapsed pill — only when a real source provided it.
+    ///
+    /// **Primary-only:** the chip follows `primarySurface` (needs-you first).
+    /// If the primary agent has no usage but a lower-ranked working agent does,
+    /// the chip stays nil — never scavenge secondary agents for density (ENH-012).
     public static func collapsedUsageChip(
         agents: [AgentActivitySnapshot],
         pendingAsks: [GateDBReader.PendingAsk] = [],

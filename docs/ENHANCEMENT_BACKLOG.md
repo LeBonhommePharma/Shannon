@@ -115,11 +115,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 - **Done:** Changed to `let` during thorough test pass (still green).
 - **Priority:** P2 (polish)
 
-### - [ ] ENH-012: Pure unit test for `collapsedUsageChip` multi-agent ranking
+### - [x] ENH-012: Pure unit test for `collapsedUsageChip` multi-agent ranking
 
 - **Why:** Usage chip follows `primarySurface` (needs-you first). When needs-you agent has no usage but a working agent has ctx%, chip is nil — may be intentional; pin the product choice with a test so UI density does not regress silently.
 - **Area:** `SessionContentPresenterTests`
 - **First slice:** Fixture needs-you without usage + working with contextPercent → assert chip nil or document “prefer primary only” in comment + assert.
+- **Done:** Documented primary-only on `collapsedUsageChip`; test asserts nil when needs-you has no usage + working has ctx 47%; control asserts primary's own ctx% shows.
 - **Priority:** P2
 
 ---
@@ -180,7 +181,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-010: PillCore 827 pass, 1 skip; Xcode + SPM probe 0 class-dupe lines |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-012: SessionContentPresenterTests 28 pass (primary-only usage chip pinned) |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `pytest tests/python/ -q` | 2026-07-26 ENH-009: 180 passed, 51 skipped (pythonpath wired; bare pytest works) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

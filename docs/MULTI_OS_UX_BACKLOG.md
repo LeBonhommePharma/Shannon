@@ -145,10 +145,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `GateInlineCard` uses `needsApproval` / `approve` / `deny` / `sending`; Core wiring test forbids hard-coded capsule string.
 - **Priority:** P2
 
+### - [x] UX-014: Watch gate + empty agent list use shared Core copy
+
+- **Why:** Watch hard-coded Approve/Deny/Sending and “No agents” while phone/pad/Mac use `GateAskActionCopy` / `CompanionEmptyStateCopy`.
+- **Platforms:** watchOS (macOS/iOS/iPadOS reference)
+- **Area:** `watchOS/Sources/ShannonWatch/WatchRootView.swift`
+- **First slice:** Wire gate buttons + sending line + empty list to Core tokens; pure wiring test.
+- **Done:** Gate `approve`/`deny`/`sending` + empty list `CompanionEmptyStateCopy.idleTitle`; wiring test forbids hard-coded Approve/Deny/No agents.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 10):** `--quick` all PASS. Backlog empty; watch gate/empty dual wording. Claimed **UX-014**. Considered: face “Sending answer…” delivery prose (OK as status narrative, not primary verb); Mac “No agents running” already matches Core idleTitle. **No additional UX-0xx**.
 - **2026-07-26 (loop 9):** `--quick` all PASS. Backlog empty; residual dual wording on Mac `GateInlineCard`. Claimed **UX-013**. Considered: no other grounded dual-string forks in shipped surfaces. **No additional UX-0xx**.
 - **2026-07-26 (loop 8):** `--quick` ios/ipad/watch PASS; macOS FAIL (pet prefs WIP). Claimed **UX-012** (pad Confirm→Approve). Considered: GateInlineCard hard-coded needs approval → optional follow-up; no new P0. **No new UX-0xx**.
 - **2026-07-26 (loop 7):** `--quick` macOS FAIL (pet `moodDisplayWord` WIP — not multi-OS UX claim); iPad FAIL (UX-009 `dashboard` missing `return` on multi-statement `some View`). Claimed **UX-011** residual (Mac age → SharedRelativeAge) + iPad compile fix. Considered: pad Confirm verb → **UX-012**; GateInlineCard hard-code needs approval → covered by GateAskActionCopy if wired later. **No third item.**

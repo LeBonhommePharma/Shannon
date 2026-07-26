@@ -131,6 +131,42 @@ final class GateAskActionCopyTests: XCTestCase {
         )
     }
 
+    /// UX-014: watch gate Approve/Deny/Sending share Core tokens.
+    func testWatchGateWiresSharedApproveDenySending() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let watch = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "watchOS/Sources/ShannonWatch/WatchRootView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(watch.contains("GateAskActionCopy.approve"))
+        XCTAssertTrue(watch.contains("GateAskActionCopy.deny"))
+        XCTAssertTrue(watch.contains("GateAskActionCopy.sending"))
+        XCTAssertFalse(
+            watch.contains("gateButton(\"Approve\""),
+            "watch must not hard-code Approve string"
+        )
+        XCTAssertFalse(
+            watch.contains("gateButton(\"Deny\""),
+            "watch must not hard-code Deny string"
+        )
+        XCTAssertTrue(
+            watch.contains("CompanionEmptyStateCopy.idleTitle"),
+            "watch empty agent list must use shared idle empty title"
+        )
+        XCTAssertFalse(
+            watch.contains("Text(\"No agents\")"),
+            "watch must not hard-code dual-OS No agents empty string"
+        )
+    }
+
     /// UX-013: menu-bar GateInlineCard shares tokens with GateAskCard / phone / pad.
     func testMacGateInlineCardWiresSharedCopy() {
         let root = URL(fileURLWithPath: #filePath)

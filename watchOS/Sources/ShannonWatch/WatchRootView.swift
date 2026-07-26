@@ -122,12 +122,21 @@ struct GateApprovalView: View {
 
     private var buttons: some View {
         HStack(spacing: ShannonSpacing.sm) {
-            gateButton("Deny", system: "xmark", armed: model.gateChoice == .deny,
-                       tint: .shannonNeutral) {
+            // UX-014: same Approve/Deny tokens as Mac GateAskCard / phone / pad.
+            gateButton(
+                GateAskActionCopy.deny,
+                system: "xmark",
+                armed: model.gateChoice == .deny,
+                tint: .shannonNeutral
+            ) {
                 model.answer(.denied, source: .tap)
             }
-            gateButton("Approve", system: "checkmark", armed: model.gateChoice == .approve,
-                       tint: .shannonAccent) {
+            gateButton(
+                GateAskActionCopy.approve,
+                system: "checkmark",
+                armed: model.gateChoice == .approve,
+                tint: .shannonAccent
+            ) {
                 model.answer(.confirmed, source: .tap)
             }
             // Double Tap submits the crown-armed choice, never a blind yes.
@@ -165,7 +174,7 @@ struct GateApprovalView: View {
                 .font(.shannonCaption)
                 .foregroundStyle(Color.shannonTertiary)
         case .sending:
-            Text("Sending…")
+            Text(GateAskActionCopy.sending)
                 .font(.shannonCaption)
                 .foregroundStyle(Color.shannonSecondary)
         case .sent:
@@ -223,7 +232,8 @@ struct AgentListView: View {
                 }
 
                 if model.snapshot.agents.isEmpty {
-                    Text("No agents")
+                    // UX-014: same idle empty token as phone/pad (not dual "No agents").
+                    Text(CompanionEmptyStateCopy.idleTitle)
                         .font(.shannonCaption)
                         .foregroundStyle(Color.shannonTertiary)
                 }

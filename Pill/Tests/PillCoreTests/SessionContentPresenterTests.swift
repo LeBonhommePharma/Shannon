@@ -480,10 +480,91 @@ final class SessionContentPresenterTests: XCTestCase {
         let focus = SessionContentPresenter.collapsedStatusLine(
             agents: agents, activity: activity, now: now
         )
-        // Primary is one working agent line, not a noisy empty dashboard.
-        XCTAssertFalse(focus.isEmpty)
+        // ENH-015: multi working → "N agents · <primary tool fragment>"
+        XCTAssertTrue(focus.hasPrefix("3 agents ·"), focus)
+        XCTAssertTrue(
+            focus.lowercased().contains("edit") || focus.contains("a"),
+            focus
+        )
         XCTAssertNotEqual(focus, "Shannon · idle")
-        XCTAssertTrue(focus.contains("·"), focus)
+    }
+
+    /// ENH-015: several working agents → "N agents ·" + primary activity fragment.
+    func testCollapsedStatusMultiWorkingAgentsPrefix() {
+        let claude = agent(id: "claude_code", name: "Claude Code", status: .midTask)
+        let codex = agent(id: "codex", name: "Codex", status: .midTask)
+        let activity = [
+            event(agent: "claude_code", type: "tool_call", label: "Edited Package.swift"),
+            event(agent: "codex", type: "tool_call", label: "Ran npm test"),
+        ]
+        let line = SessionContentPresenter.collapsedStatusLine(
+            agents: [claude, codex],
+            activity: activity,
+            now: now
+        )
+        XCTAssertTrue(line.hasPrefix("2 agents ·"), line)
+        XCTAssertTrue(line.contains("Package.swift") || line.lowercased().contains("editing"), line)
+        // Pure helper mirrors the same fail-closed rules.
+        let primary = AgentLiveSurfaceLogic.primarySurface(
+            agents: [claude, codex], activity: activity, now: now
+        )
+        XCTAssertEqual(primary?.attention, .working)
+        XCTAssertEqual(
+            SessionContentPresenter.multiAgentCollapsedLabel(activeCount: 2, primary: primary!),
+            line
+        )
+    }
+
+    /// ENH-015: needs-you primary stays personal even when fleet count > 1.
+    func testCollapsedStatusMultiNeedsYouKeepsPersonalWording() {
+        let needs = agent(id: "claude_code", name: "Claude Code", status: .idle, presence: .live)
+        let working = agent(id: "codex", name: "Codex", status: .midTask, task: "build")
+        let ask = GateDBReader.PendingAsk(
+            interactionId: "ask1",
+            agentId: "claude_code",
+            prompt: "Approve deploy?",
+            createdAt: now
+        )
+        let activity = [
+            event(agent: "codex", type: "tool_call", label: "Edited Package.swift"),
+        ]
+        let line = SessionContentPresenter.collapsedStatusLine(
+            agents: [needs, working],
+            pendingAsks: [ask],
+            activity: activity,
+            now: now
+        )
+        XCTAssertEqual(line, "Needs you · Claude Code")
+        XCTAssertFalse(line.contains("agents"), line)
+        XCTAssertNil(
+            SessionContentPresenter.multiAgentCollapsedLabel(
+                activeCount: 2,
+                primary: AgentLiveSurfaceLogic.primarySurface(
+                    agents: [needs, working],
+                    pendingAsks: [ask],
+                    activity: activity,
+                    now: now
+                )!
+            )
+        )
+    }
+
+    /// ENH-015: single working agent keeps name · activity (no "N agents" prefix).
+    func testCollapsedStatusSingleWorkingUnchanged() {
+        let a = agent(id: "claude_code", name: "Claude Code", status: .midTask)
+        let activity = [
+            event(agent: "claude_code", type: "tool_call", label: "Edited Package.swift"),
+        ]
+        let line = SessionContentPresenter.collapsedStatusLine(
+            agents: [a], activity: activity, now: now
+        )
+        XCTAssertFalse(line.hasPrefix("1 agents"), line)
+        XCTAssertFalse(line.contains("agents ·"), line)
+        XCTAssertTrue(line.contains("Claude Code"), line)
+        XCTAssertTrue(
+            line.contains("Package.swift") || line.lowercased().contains("editing"),
+            line
+        )
     }
 
     // MARK: - Finished + idle fixtures from plan scenarios

@@ -294,6 +294,11 @@ public enum SessionContentPresenter {
     ///
     /// Returns the primary focus line only (chips are separate UI). When nothing
     /// actionable is happening, returns `"Shannon · idle"`.
+    ///
+    /// **Multi-agent (ENH-015):** when `collapsedActiveCount > 1` and the primary
+    /// attention is working or finished (never needs-you), re-prefix the real
+    /// activity fragment as `"N agents · \(activityLine)"`. Does not invent tool
+    /// text — empty activity falls back to the single-agent `collapsedFocus`.
     public static func collapsedStatusLine(
         agents: [AgentActivitySnapshot],
         pendingAsks: [GateDBReader.PendingAsk] = [],
@@ -301,16 +306,47 @@ public enum SessionContentPresenter {
         usageByAgent: [String: AgentUsageSnapshot] = [:],
         now: Date = Date()
     ) -> String {
-        if let focus = AgentLiveSurfaceLogic.primaryFocus(
+        guard let surface = AgentLiveSurfaceLogic.primarySurface(
             agents: agents,
             pendingAsks: pendingAsks,
             activity: activity,
             usageByAgent: usageByAgent,
             now: now
-        ) {
-            return focus
+        ) else {
+            return "Shannon · idle"
         }
-        return "Shannon · idle"
+
+        let activeCount = collapsedActiveCount(
+            agents: agents,
+            pendingAsks: pendingAsks,
+            activity: activity,
+            now: now
+        )
+        if let multi = multiAgentCollapsedLabel(
+            activeCount: activeCount,
+            primary: surface
+        ) {
+            return multi
+        }
+        return surface.collapsedFocus
+    }
+
+    /// `"N agents · <activity>"` when several agents need a glance and primary
+    /// is working/finished with a real activity line. Fail-closed otherwise.
+    public static func multiAgentCollapsedLabel(
+        activeCount: Int,
+        primary: AgentLiveSurface
+    ) -> String? {
+        guard activeCount > 1 else { return nil }
+        switch primary.attention {
+        case .working, .finished:
+            break
+        case .needsYou, .idle, .unknown:
+            return nil
+        }
+        let fragment = primary.activityLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fragment.isEmpty else { return nil }
+        return "\(activeCount) agents · \(fragment)"
     }
 
     /// Compact usage chip for collapsed pill — only when a real source provided it.

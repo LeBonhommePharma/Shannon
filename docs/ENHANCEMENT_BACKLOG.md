@@ -143,11 +143,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 - **Done:** `UsageSnapshot` + `UsageBridge` in UsageCore; PillCore `typealias AgentUsageSnapshot`; Claude reader `usageSnapshot`; presenter delegates; Codex still via session tokens only.
 - **Priority:** P2
 
-### - [ ] ENH-015: Collapsed multi-agent label “N agents” like AgentNotch marketing
+### - [x] ENH-015: Collapsed multi-agent label “N agents” like AgentNotch marketing
 
 - **Why:** Shannon shows a numeric capsule when `collapsedActiveCount > 1` but the primary line is still a single agent focus. Optional: when count > 1 and no needs-you, primary line could be `3 agents · Editing…` (still one focus agent for the tool line).
 - **Area:** `SessionContentPresenter.collapsedStatusLine`, `PillView`
 - **First slice:** Pure string builder + tests; only when count > 1 and attention is working/finished (never invent).
+- **Done:** `collapsedStatusLine` / `multiAgentCollapsedLabel` prefix `"N agents · \(activityLine)"` when activeCount > 1 and primary is working/finished with a real activity fragment; needs-you and single-agent lines unchanged. PillView still uses presenter API.
 - **Priority:** P2
 
 ---
@@ -183,7 +184,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-014: UsageCore + UsageBridge; related 71 pass (UsageCore/presenter/artifact/surface) |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-015: multi-agent collapsed “N agents ·” line; SessionContentPresenterTests green |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `pytest tests/python/ -q` | 2026-07-26 ENH-009: 180 passed, 51 skipped (pythonpath wired; bare pytest works) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

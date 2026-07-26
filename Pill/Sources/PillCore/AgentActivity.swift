@@ -1,4 +1,5 @@
 import Foundation
+import ShannonCore
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -222,13 +223,8 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
     public func relativeAge(at now: Date) -> String { Self.age(since: updatedAt, now: now) }
 
     public static func age(since date: Date, now: Date = Date()) -> String {
-        guard date > .distantPast else { return "never" }
-        let s = now.timeIntervalSince(date)
-        if s < 5 { return "now" }
-        if s < 60 { return "\(Int(s))s" }
-        if s < 3600 { return "\(Int(s / 60))m" }
-        if s < 86_400 { return "\(Int(s / 3600))h" }
-        return "\(Int(s / 86_400))d"
+        // UX-011: single source with widget / companions (`SharedRelativeAge.fine`).
+        SharedRelativeAge.fine(since: date, now: now)
     }
 
     /// Coarse age for **publish gating only** — not drawn in the UI.
@@ -238,14 +234,11 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
     /// pill and menu-bar popover and looked like a pop in/out. Buckets keep
     /// ages eventually live (resource ticks + other data still re-render)
     /// without forcing a structural invalidation every second.
+    ///
+    /// **UX-011:** delegates to `SharedRelativeAge.bucketed` so Mac cannot drift
+    /// from the widget glance buckets (UX-008).
     public static func signatureAge(since date: Date, now: Date = Date()) -> String {
-        guard date > .distantPast else { return "never" }
-        let s = now.timeIntervalSince(date)
-        if s < 15 { return "now" }
-        if s < 60 { return "\(Int(s / 15) * 15)s" } // 15 / 30 / 45
-        if s < 3600 { return "\(Int(s / 60))m" }
-        if s < 86_400 { return "\(Int(s / 3600))h" }
-        return "\(Int(s / 86_400))d"
+        SharedRelativeAge.bucketed(since: date, now: now)
     }
 
     /// Honest one-liner for a status column: never claims work we cannot prove.

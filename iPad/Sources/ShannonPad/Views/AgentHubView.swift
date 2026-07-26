@@ -127,7 +127,8 @@ struct AgentHubView: View {
             isCompact: layout.isCompact,
             hasPendingAsk: !hub.pendingConfirmations.isEmpty
         )
-        DashboardGridView(
+        // Explicit return: multi-statement `some View` bodies need it.
+        return DashboardGridView(
             hub: hub,
             width: width,
             showsSidePanelCards: showsSidePanelCards,

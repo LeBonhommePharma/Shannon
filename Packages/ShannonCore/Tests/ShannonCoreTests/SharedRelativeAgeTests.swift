@@ -65,6 +65,30 @@ final class SharedRelativeAgeTests: XCTestCase {
         XCTAssertEqual(SharedRelativeAge.bucketSeconds, 15)
     }
 
+    /// UX-011: Mac PillCore `AgentActivity.swift` must not reimplement bucket math.
+    func testMacPillCoreDelegatesSignatureAgeToSharedRelativeAge() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let mac = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Pill/Sources/PillCore/AgentActivity.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            mac.contains("SharedRelativeAge.bucketed"),
+            "Mac signatureAge must delegate to SharedRelativeAge.bucketed"
+        )
+        XCTAssertTrue(
+            mac.contains("SharedRelativeAge.fine"),
+            "Mac age must delegate to SharedRelativeAge.fine"
+        )
+    }
+
     func testFineIsSecondResolutionUnderAMinute() {
         XCTAssertEqual(
             SharedRelativeAge.fine(since: now.addingTimeInterval(-3), now: now),

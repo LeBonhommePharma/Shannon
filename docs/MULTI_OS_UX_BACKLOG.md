@@ -118,10 +118,28 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `StatusLegendCopy` in ShannonCore (amber=approval · red=collapse); Mac `PillChromePolicy.statusLegend` delegates; phone `EmptyStateView` footer; pure + wiring tests.
 - **Priority:** P2
 
+### - [x] UX-011: Mac signatureAge delegates to SharedRelativeAge (no dual bucket math)
+
+- **Why:** UX-008 put 15 s buckets in Core for widgets, but Mac `AgentActivitySnapshot.signatureAge` still reimplemented the same math — drift risk.
+- **Platforms:** macOS, iOS widget (reference)
+- **Area:** `Pill/Sources/PillCore/AgentActivity.swift`, `Packages/ShannonCore/SharedRelativeAge.swift`
+- **First slice:** `signatureAge` / `age` → `SharedRelativeAge.bucketed` / `.fine`; existing Mac age tests green.
+- **Done:** PillCore `signatureAge` + `age` call Core; iPad UX-009 multi-statement `dashboard` explicit `return` (compile fix).
+- **Priority:** P2
+
+### - [ ] UX-012: Pad Confirm buttons use GateAskActionCopy.approve (Mac/phone parity)
+
+- **Why:** Phone uses Approve via `GateAskActionCopy`; iPad detail / notification panel / palette still say “Confirm”.
+- **Platforms:** iPadOS, iOS (reference)
+- **Area:** `AgentDetailView`, `NotificationPanelView`, `PaletteCatalogue`
+- **First slice:** Replace hard-coded Confirm labels with `GateAskActionCopy.approve`; pure wiring test.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 7):** `--quick` macOS FAIL (pet `moodDisplayWord` WIP — not multi-OS UX claim); iPad FAIL (UX-009 `dashboard` missing `return` on multi-statement `some View`). Claimed **UX-011** residual (Mac age → SharedRelativeAge) + iPad compile fix. Considered: pad Confirm verb → **UX-012**; GateInlineCard hard-code needs approval → covered by GateAskActionCopy if wired later. **No third item.**
 - **2026-07-26 (loop 6):** `--quick` failed (missing `AgentListSkim` while phone required it). Residual **UX-006** shipped: Core skim + phone fleet chip/rows. Next open **UX-008**. **No new UX-0xx**.
 - **2026-07-26 (loop 5):** `--quick` all PASS. Claimed **UX-005** (watch primary focus only when actionable). Considered: phone skim (UX-006), Reduce Motion (UX-007), widget age buckets (UX-008). **No new UX-0xx**.
 - **2026-07-26 (loop 4):** `--quick` all PASS. Claimed **UX-004** (needs-you rank Mac parity). Considered: watch idle face (UX-005), phone skim (UX-006, ranking now shared), Reduce Motion (UX-007). **No new UX-0xx**.

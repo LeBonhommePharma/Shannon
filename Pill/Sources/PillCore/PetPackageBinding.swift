@@ -7,7 +7,8 @@ public enum PetPackageBinding {
         "science": "shannon", "cursor": "bonhomme-cat", "codex": "shannon",
         "claude_code": "shannon", "design": "firebear", "chatgpt": "shannon",
         "cowork": "bonhomme", "dispatch": "firebear", "terminal": "shannon",
-        "browser": "shannon", "vscode": "shannon", "dataset_runner": "shannon",
+        "browser": "shannon", "vscode": "shannon", "xcode": "shannon",
+        "dataset_runner": "shannon",
     ]
     public static let packageIdByStylePet: [String: String] = [
         "raven": "grok", "cat": "bonhomme-cat", "owl": "shannon", "fox": "shannon",

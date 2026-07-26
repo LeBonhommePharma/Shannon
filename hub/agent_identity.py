@@ -220,6 +220,18 @@ IDENTITIES.update(
             pet="cat",
             pet_symbol="cat.circle",
         ),
+        # Xcode — AgentIngest maps com.apple.dt.xcode here (never claude_code).
+        "xcode": AgentIdentity(
+            id="xcode",
+            display_name="Xcode",
+            short_name="Xcode",
+            emoji="🛠️",
+            color_rgb=(0.20, 0.55, 0.95),
+            system_image="hammer.fill",
+            auth_kind="local",
+            pet="hammer",
+            pet_symbol="hammer.fill",
+        ),
         # Design + OpenCode — Shannon skill handrail for multi-TUI orchestration.
         "design": AgentIdentity(
             id="design",

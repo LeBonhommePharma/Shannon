@@ -115,6 +115,11 @@ public enum AgentStyleCatalog {
               systemImage: "chevron.left.forwardslash.chevron.right", emoji: "💙",
               red: 0.20, green: 0.50, blue: 0.90,
               pet: "ladybug", petSymbol: "ladybug.fill"),
+        // Apple Xcode — first-class IDE like Cursor / VS Code (not Claude Code).
+        .init(id: "xcode", displayName: "Xcode", shortName: "Xcode",
+              systemImage: "hammer.fill", emoji: "🛠️",
+              red: 0.20, green: 0.55, blue: 0.95,
+              pet: "hammer", petSymbol: "hammer.fill"),
         .init(id: "dataset_runner", displayName: "DatasetRunner", shortName: "DR",
               systemImage: "tablecells", emoji: "📊",
               red: 0.15, green: 0.70, blue: 0.80,

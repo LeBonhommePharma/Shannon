@@ -203,3 +203,13 @@ class TestCursorIdentity:
         assert "vscode" in IDENTITIES
         assert "cursor" in sg.VALID_AGENTS
         assert "vscode" in sg.VALID_AGENTS
+
+    def test_xcode_and_grok_build_are_valid_agents(self):
+        from agent_identity import IDENTITIES
+
+        assert "xcode" in IDENTITIES
+        assert "xcode" in sg.VALID_AGENTS
+        assert IDENTITIES["xcode"].id == "xcode"
+        assert "claude" not in IDENTITIES["xcode"].display_name.lower()
+        assert "grok_build" in IDENTITIES
+        assert "grok_build" in sg.VALID_AGENTS

@@ -205,7 +205,7 @@ public enum AgentAppMapper {
     public static let knownIDs: Set<String> = [
         "claude_code", "cowork", "dispatch", "science", "design",
         "grok_build", "codex", "dataset_runner", "local_test",
-        "chatgpt", "browser", "terminal", "cursor", "vscode", "opencode",
+        "chatgpt", "browser", "terminal", "cursor", "vscode", "xcode", "opencode",
     ]
 
     /// Best-effort identity for an app, or `nil` when the app is not an agent
@@ -375,7 +375,16 @@ public enum AgentAppMapper {
                 bundleHint: bid
             )
         }
-        if name.contains("code") || name.contains("vscode") {
+        // Xcode BEFORE bare "code" — "xcode".contains("code") is true and must
+        // not collapse into VS Code / Claude Code.
+        if name == "xcode" || name.contains("xcode") {
+            return withCatalogStyle(
+                .init(id: "xcode", displayName: "Xcode", source: "ide"),
+                bundleHint: bid
+            )
+        }
+        // VS Code app name is often just "Code" on macOS.
+        if name.contains("vscode") || name.contains("visual studio code") || name == "code" {
             return withCatalogStyle(
                 .init(id: "vscode", displayName: "VS Code", source: "ide"),
                 bundleHint: bid
@@ -476,7 +485,10 @@ public enum AgentAppMapper {
             ("com.todesktop.", .init(id: "cursor", displayName: "Cursor", source: "ide")), // prefix match below
             ("com.microsoft.vscode", .init(id: "vscode", displayName: "VS Code", source: "ide")),
             ("com.microsoft.VSCode", .init(id: "vscode", displayName: "VS Code", source: "ide")),
-            ("com.apple.dt.xcode", .init(id: "claude_code", displayName: "Xcode", source: "ide")),
+            // Xcode is its own IDE identity — never Claude Code (⌘D attach must
+            // not rewrite Claude pets when the user focuses Xcode).
+            ("com.apple.dt.xcode", .init(id: "xcode", displayName: "Xcode", source: "ide")),
+            ("com.apple.dt.Xcode", .init(id: "xcode", displayName: "Xcode", source: "ide")),
             // Browsers — only used when tab probe could not identify a web agent.
             ("com.apple.safari", .init(id: "browser", displayName: "Safari", source: "browser")),
             ("com.google.chrome", .init(id: "browser", displayName: "Chrome", source: "browser")),

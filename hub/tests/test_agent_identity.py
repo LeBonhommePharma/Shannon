@@ -69,6 +69,26 @@ class TestCoreSixIdentities:
         assert u.id == "not_a_real_agent"
         assert u.emoji
 
+    def test_ide_agents_are_first_class(self):
+        """Cursor / VS Code / Xcode must be VALID_AGENTS so ⌘D attach works."""
+        for aid, name, image in (
+            ("cursor", "Cursor", "cursorarrow.rays"),
+            ("vscode", "VS Code", "chevron.left.forwardslash.chevron.right"),
+            ("xcode", "Xcode", "hammer.fill"),
+            ("grok_build", "Grok Build", "sparkles"),
+        ):
+            assert aid in IDENTITIES, f"missing {aid}"
+            ident = IDENTITIES[aid]
+            assert name in ident.display_name
+            assert ident.system_image == image
+        # Xcode must never share Claude Code's identity.
+        assert IDENTITIES["xcode"].id != "claude_code"
+        assert IDENTITIES["xcode"].emoji != IDENTITIES["claude_code"].emoji
+        assert IDENTITIES["xcode"].system_image != IDENTITIES["claude_code"].system_image
+        # Grok Build ≠ Science
+        assert IDENTITIES["grok_build"].id != "science"
+        assert IDENTITIES["grok_build"].emoji != IDENTITIES["science"].emoji
+
 
 class TestStatusFromPayload:
     @pytest.mark.parametrize("agent_id", list(CORE_AGENT_IDS))

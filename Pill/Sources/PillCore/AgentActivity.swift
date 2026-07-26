@@ -883,7 +883,7 @@ public enum AgentActivityReader {
         switch id {
         case "terminal": return "terminal"
         case "browser": return "browser"
-        case "cursor", "vscode": return "ide"
+        case "cursor", "vscode", "xcode": return "ide"
         case "claude_code", "chatgpt", "codex", "grok_build", "science", "design": return "chat"
         default: return "other"
         }

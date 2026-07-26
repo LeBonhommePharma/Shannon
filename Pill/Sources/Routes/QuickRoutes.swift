@@ -74,6 +74,11 @@ public enum QuickRouteCatalog {
                 .init(key: "skills", label: "Skills", relativePath: ".cursor/skills"),
                 .init(key: "mcp", label: "MCP", relativePath: ".cursor/mcp.json"),
             ]
+        case "xcode":
+            return [
+                .init(key: "derived", label: "DerivedData", relativePath: "Library/Developer/Xcode/DerivedData"),
+                .init(key: "shannon", label: "Shannon pets", relativePath: ".shannon/pets/xcode"),
+            ]
         default:
             return [
                 .init(key: "shannon", label: "Shannon pets", relativePath: ".shannon/pets/\(agentId)"),
@@ -103,7 +108,7 @@ public enum QuickRouteCatalog {
 
     /// All catalog agents we surface by default.
     public static let defaultAgentIds: [String] = [
-        "claude_code", "codex", "grok_build", "science", "design", "cursor",
+        "claude_code", "codex", "grok_build", "science", "design", "cursor", "xcode",
     ]
 
     public static func allRoutes(

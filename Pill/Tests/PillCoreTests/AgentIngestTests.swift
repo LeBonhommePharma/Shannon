@@ -180,7 +180,7 @@ final class AgentIngestTests: XCTestCase {
     func testAppleAppsThatAreRealAgentSurfacesStillResolve() throws {
         XCTAssertEqual(AgentAppMapper.map(bundleID: "com.apple.Terminal", appName: "Terminal")?.id, "terminal")
         XCTAssertEqual(AgentAppMapper.map(bundleID: "com.apple.Safari", appName: "Safari")?.id, "browser")
-        XCTAssertEqual(AgentAppMapper.map(bundleID: "com.apple.dt.Xcode", appName: "Xcode")?.id, "claude_code")
+        XCTAssertEqual(AgentAppMapper.map(bundleID: "com.apple.dt.Xcode", appName: "Xcode")?.id, "xcode")
         // …and a system service hosting an agent CLI is still that agent.
         let inside = try XCTUnwrap(AgentAppMapper.map(
             bundleID: "com.apple.Terminal", appName: "Terminal",
@@ -196,6 +196,7 @@ final class AgentIngestTests: XCTestCase {
         let gateValid: Set<String> = [
             "science", "grok_build", "claude_code", "design", "codex", "dispatch", "cowork",
             "chatgpt", "dataset_runner", "local_test", "terminal", "browser", "opencode",
+            "cursor", "vscode", "xcode",
         ]
         for rule in TerminalAgentProbe.rules {
             XCTAssertTrue(
@@ -203,6 +204,88 @@ final class AgentIngestTests: XCTestCase {
                 "TerminalAgentProbe emits \(rule.agentID), which the gate would reject"
             )
         }
+        // IDE agents must also be gate-valid (⌘D attach path).
+        for id in ["grok_build", "cursor", "xcode"] {
+            XCTAssertTrue(gateValid.contains(id), "\(id) must be gate-valid")
+            XCTAssertTrue(AgentAppMapper.knownIDs.contains(id), "\(id) must be knownIDs")
+        }
+    }
+
+    /// Grok Build, Cursor, and Xcode are first-class — never collapse into
+    /// Claude Code / Science / each other.
+    func testFirstClassGrokBuildCursorXcode() throws {
+        // ── Grok Build (native app + terminal CLI + browser) ──────────────
+        let grokApp = try XCTUnwrap(AgentAppMapper.map(
+            bundleID: "com.xai.grok", appName: "Grok"
+        ))
+        XCTAssertEqual(grokApp.id, "grok_build")
+        XCTAssertEqual(grokApp.displayName, "Grok Build")
+        XCTAssertNotEqual(grokApp.id, "science")
+
+        let grokName = try XCTUnwrap(AgentAppMapper.map(
+            bundleID: "com.example.unsigned", appName: "SuperGrok"
+        ))
+        XCTAssertEqual(grokName.id, "grok_build")
+
+        let grokTerm = try XCTUnwrap(AgentAppMapper.map(
+            bundleID: "com.mitchellh.ghostty", appName: "Ghostty",
+            terminal: .init(
+                agentID: "grok_build", displayName: "Grok Build",
+                executable: "grok", pid: 42, emulatorName: "Ghostty"
+            )
+        ))
+        XCTAssertEqual(grokTerm.id, "grok_build")
+        XCTAssertEqual(TerminalAgentProbe.classify(executable: "grok")?.agentID, "grok_build")
+
+        let grokStyle = AgentStyleCatalog.style(for: "grok_build")
+        XCTAssertEqual(grokStyle.displayName, "Grok Build")
+        XCTAssertEqual(grokStyle.systemImage, "sparkles")
+        XCTAssertEqual(grokStyle.emoji, "🟣")
+
+        // ── Cursor (ToDesktop prefix + name) ───────────────────────────────
+        let cursor = try XCTUnwrap(AgentAppMapper.map(
+            bundleID: "com.todesktop.230313mzl4w4u92", appName: "Cursor"
+        ))
+        XCTAssertEqual(cursor.id, "cursor")
+        XCTAssertEqual(cursor.displayName, "Cursor")
+        XCTAssertNotEqual(cursor.id, "claude_code")
+        XCTAssertNotEqual(cursor.id, "vscode")
+
+        let cursorName = try XCTUnwrap(AgentAppMapper.map(
+            bundleID: "com.example.unknown", appName: "Cursor"
+        ))
+        XCTAssertEqual(cursorName.id, "cursor")
+
+        let cursorStyle = AgentStyleCatalog.style(for: "cursor")
+        XCTAssertEqual(cursorStyle.displayName, "Cursor")
+        XCTAssertEqual(cursorStyle.systemImage, "cursorarrow.rays")
+
+        // ── Xcode (must not be Claude Code) ────────────────────────────────
+        let xcode = try XCTUnwrap(AgentAppMapper.map(
+            bundleID: "com.apple.dt.Xcode", appName: "Xcode"
+        ))
+        XCTAssertEqual(xcode.id, "xcode")
+        XCTAssertEqual(xcode.displayName, "Xcode")
+        XCTAssertNotEqual(xcode.id, "claude_code", "Xcode must never map to Claude Code")
+        XCTAssertNotEqual(xcode.id, "vscode", "Xcode must never map to VS Code")
+        XCTAssertNotEqual(xcode.id, "science")
+
+        let xcodeName = try XCTUnwrap(AgentAppMapper.map(
+            bundleID: "com.example.unknown", appName: "Xcode"
+        ))
+        XCTAssertEqual(xcodeName.id, "xcode")
+        XCTAssertNotEqual(xcodeName.id, "vscode")
+
+        let xcodeStyle = AgentStyleCatalog.style(for: "xcode")
+        XCTAssertEqual(xcodeStyle.displayName, "Xcode")
+        XCTAssertEqual(xcodeStyle.systemImage, "hammer.fill")
+        XCTAssertEqual(xcodeStyle.emoji, "🛠️")
+
+        // Distinct brand cues across the three.
+        XCTAssertNotEqual(grokStyle.systemImage, cursorStyle.systemImage)
+        XCTAssertNotEqual(grokStyle.systemImage, xcodeStyle.systemImage)
+        XCTAssertNotEqual(cursorStyle.systemImage, xcodeStyle.systemImage)
+        XCTAssertNotEqual(grokStyle.emoji, xcodeStyle.emoji)
     }
 
     /// Claude Design must not collapse into Claude Code (name, bundle, terminal, tab).

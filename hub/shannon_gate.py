@@ -59,12 +59,15 @@ of enforcing is measurable BEFORE you enforce.
 
   SHANNON_BEHAVIOR=off|observe|enforce       (default enforce)
       PRIMARY gate signal: behavioural action-type entropy
-      (BehavioralMonitor — per-agent baselines, KL, burstiness, low efficiency).
-      In observe mode, anomalous / low-H readings are logged on gate_reasons as
-      behavior_observe:... but the verdict is unchanged. In enforce mode, high
-      anomaly or collapsed action repertoire escalates pass→flagged (never
-      silent). Tunables: SHANNON_BEHAVIOR_FLAG_SCORE (default 1.0),
-      SHANNON_BEHAVIOR_LOW_EFF (default 0.15).
+      (BehavioralMonitor — per-agent baselines, KL, burstiness, novelty).
+      In observe mode, anomalous readings and low-efficiency notes are logged
+      on gate_reasons (behavior_observe:… / behavior_low_H:…) but the verdict
+      is unchanged. In enforce mode, only a high anomaly score
+      (baseline_ready && score ≥ SHANNON_BEHAVIOR_FLAG_SCORE) escalates
+      pass→flagged — never silent. Absolute low efficiency alone does NOT
+      escalate (status-only agents are legitimate monotypes). Low-efficiency
+      is still annotated for audit/HUD. Tunables: SHANNON_BEHAVIOR_FLAG_SCORE
+      (default 1.0), SHANNON_BEHAVIOR_LOW_EFF (default 0.15, observe annotate).
 
   SHANNON_TEXT_PROXY=off|observe|enforce     (default observe)
       Legacy combined_entropy (≈ 0.7·log₂(n_words) + 0.3·char H) — a verbosity
@@ -592,18 +595,19 @@ ECHO_MODE: str = os.environ.get("SHANNON_ECHO", "decision").strip().lower()
 
 # ── Behavioural entropy (SHANNON_BEHAVIOR) — PRIMARY decision signal ──────────
 # Action-type distribution monitor (see behavioral_entropy.BehavioralMonitor).
-# Default enforce: per-agent KL / burst / novelty anomaly OR low action
-# efficiency (collapsed repertoire) may escalate pass→flagged. Observe logs
-# only; off disables the monitor. Text-proxy combined_H is NOT primary.
+# Default enforce: per-agent KL / burst / novelty anomaly may escalate
+# pass→flagged when score ≥ FLAG. Absolute low efficiency is observe-only
+# annotation (never escalates alone — monotype agents are legitimate).
+# Text-proxy combined_H is NOT primary.
 BEHAVIOR_MODE: str = os.environ.get("SHANNON_BEHAVIOR", "enforce").strip().lower()
 BEHAVIOR_FLAG_SCORE: float = float(
     os.environ.get("SHANNON_BEHAVIOR_FLAG_SCORE", "1.0")
 )
-# Efficiency H/log₂(K) at or below this (with a warm baseline) = collapse danger.
+# Efficiency ≤ this (after MIN_N events) → behavior_low_H reason only (no escalate).
 BEHAVIOR_LOW_EFF: float = float(
     os.environ.get("SHANNON_BEHAVIOR_LOW_EFF", "0.15")
 )
-# Min events before low-efficiency can escalate (avoid cold-start red).
+# Min events before low-efficiency is annotated (avoid cold-start noise).
 BEHAVIOR_LOW_EFF_MIN_N: int = int(
     os.environ.get("SHANNON_BEHAVIOR_LOW_EFF_MIN_N", "16")
 )

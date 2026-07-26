@@ -147,8 +147,10 @@ class TestBehavioralWireSmoke:
             reasons=[],
             computed_H=6.0,  # verbose text proxy (would look "healthy" if inverted)
             computed_D=0.0,
-            behavior_entropy_bits=1.2,  # collapsed repertoire
+            behavior_entropy_bits=1.2,  # low but non-degenerate repertoire
             behavior_n_events=8,
+            behavior_efficiency=0.25,  # K≥2 informative alphabet
+            behavior_score=0.0,
         )
         assert sg.registry_entropy_score(d) == pytest.approx(1.2)
 
@@ -161,8 +163,59 @@ class TestBehavioralWireSmoke:
             computed_D=0.0,
             behavior_entropy_bits=0.0,
             behavior_n_events=1,
+            behavior_efficiency=0.0,
+            behavior_score=0.0,
         )
         assert sg.registry_entropy_score(d) == pytest.approx(3.2)
+
+    def test_registry_monotype_stream_does_not_false_collapse(self, tmp_path, monkeypatch):
+        """2+ identical action types ⇒ behaviour H≡0; must not wipe healthy computed_H.
+
+        Skeptic regression: n_events>=2 alone is not enough — K=1 monotype
+        (status-only) is degenerate, not token-distribution collapse.
+        """
+        monkeypatch.setattr(sg, "BEHAVIOR_MODE", "enforce")
+        monkeypatch.setattr(sg, "TEXT_PROXY_MODE", "off")
+        monkeypatch.setattr(sg, "ATTEST_MODE", "off")
+        monkeypatch.setattr(sg, "VOLUME_MODE", "off")
+        monkeypatch.setattr(sg, "UNSCORED_MODE", "off")
+        gate = sg.ShannonGate(sg.AuditDB(tmp_path / "mono.db"))
+        if gate._behavior is None:
+            pytest.skip("BehavioralMonitor unavailable")
+
+        last = None
+        text = "alpha beta gamma delta epsilon"  # non-trivial text-proxy H
+        for i in range(5):
+            last = gate.evaluate(
+                _msg(
+                    message_type="status",
+                    text=text,
+                    timestamp_ns=(i + 1) * 1_000_000_000,
+                )
+            )
+        assert last is not None
+        assert last.behavior_n_events >= 2
+        assert last.behavior_entropy_bits == pytest.approx(0.0)
+        assert (last.behavior_efficiency or 0.0) == pytest.approx(0.0)
+        assert last.behavior_score == pytest.approx(0.0)
+        reg = sg.registry_entropy_score(last)
+        # Must keep gate text measurement — not permanent HUD zero.
+        assert reg == pytest.approx(last.computed_H)
+        assert reg > 1.0, f"monotype must not force registry to 0; got {reg}"
+
+    def test_registry_unit_monotype_decision_falls_through(self):
+        """Pure unit: K=1 history (eff=0, score=0, H=0, n>=2) → computed_H."""
+        d = sg.GateDecision(
+            decision="pass",
+            reasons=[],
+            computed_H=3.5,
+            computed_D=0.0,
+            behavior_entropy_bits=0.0,
+            behavior_n_events=8,
+            behavior_efficiency=0.0,
+            behavior_score=0.0,
+        )
+        assert sg.registry_entropy_score(d) == pytest.approx(3.5)
 
     def test_registry_prefers_core_collapse_h(self):
         d = sg.GateDecision(

@@ -41,10 +41,11 @@ def registry_entropy_score(decision: "GateDecision") -> float:
 
     1. Core token-distribution H when the message carried logprobs/logits
        (``core_collapse_H``).
-    2. Behavioural action-type entropy bits (``behavior_entropy_bits``) —
-       collapsed repertoires sit low; diverse agents sit high.
-    3. Text-proxy ``computed_H`` only as a last resort (verbosity proxy;
-       demoted — see SHANNON_TEXT_PROXY / ENTROPY_AUDIT_2026-07-23.md).
+    2. Behavioural action-type entropy bits when the action alphabet is
+       informative (efficiency > 0 ⇒ K≥2) **or** behaviour_score > 0
+       (anomaly). Monotype streams (H≡0 by construction) fall through.
+    3. Text-proxy ``computed_H`` as last resort (verbosity proxy; demoted —
+       see SHANNON_TEXT_PROXY / ENTROPY_AUDIT_2026-07-23.md).
     """
     core = getattr(decision, "core_collapse_H", None)
     if core is not None:
@@ -54,16 +55,26 @@ def registry_entropy_score(decision: "GateDecision") -> float:
                 return max(0.0, h)
         except (TypeError, ValueError):
             pass
-    # Behavioural action H only after a real history exists. A single status
-    # event has H=0 by construction and must not wipe the HUD with a false
-    # "collapse" zero (entropy integrity: store gate measurement, not noise).
+    # Behavioural action H only when the action alphabet is *informative*.
+    # A monotype stream (K=1, e.g. status-only) has H≡0 and efficiency≡0 by
+    # construction; writing that to the HUD permanently zeros a healthy
+    # computed_H. Prefer behaviour H when:
+    #   • efficiency > 0  → at least two action types (non-degenerate), or
+    #   • behavior_score > 0 → anomaly (e.g. collapse after diversity, KL spike)
+    #     so a true mono collapse after a broad repertoire still paints red.
     beh = getattr(decision, "behavior_entropy_bits", None)
     beh_n = int(getattr(decision, "behavior_n_events", 0) or 0)
     if beh is not None and beh_n >= 2:
         try:
             h = float(beh)
+            eff_raw = getattr(decision, "behavior_efficiency", None)
+            score = float(getattr(decision, "behavior_score", 0.0) or 0.0)
             if math.isfinite(h):
-                return max(0.0, h)
+                eff = float(eff_raw) if eff_raw is not None else None
+                informative = (eff is not None and math.isfinite(eff) and eff > 0.0)
+                anomalous = math.isfinite(score) and score > 0.0
+                if informative or anomalous:
+                    return max(0.0, h)
         except (TypeError, ValueError):
             pass
     h = float(decision.computed_H)

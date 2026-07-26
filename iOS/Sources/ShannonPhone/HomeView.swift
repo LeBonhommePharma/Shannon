@@ -94,7 +94,8 @@ struct HomeView: View {
             }
             .scrollTargetBehavior(.viewAligned)
             .background(Color.shannonBackground.ignoresSafeArea())
-            .navigationTitle("Shannon")
+            // UX-025: brand title shares Core quietShort.
+            .navigationTitle(CompanionFocusCopy.quietShort)
             .navigationBarTitleDisplayMode(.inline)
             .refreshable { await model.store.refresh() }
             .toolbar {

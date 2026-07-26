@@ -101,7 +101,8 @@ struct ShannonWidgetView: View {
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text("Shannon").font(.caption2.weight(.semibold))
+                    // UX-025: brand title shares Core quietShort.
+                    Text(CompanionFocusCopy.quietShort).font(.caption2.weight(.semibold))
                     Spacer(minLength: 0)
                     Text(glanceAge)
                         .font(.caption2.monospacedDigit())

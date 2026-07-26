@@ -265,7 +265,8 @@ struct MenuBarPopoverView: View {
                 .font(.shannonMenuTitle)
                 .foregroundStyle(collapseAlarm ? Color.shannonError : Color.shannonAccent)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Shannon")
+                // UX-025: brand title shares Core quietShort (pill/watch parity).
+                Text(CompanionFocusCopy.quietShort)
                     .font(.shannonMenuTitle)
                     .foregroundStyle(Color.shannonPrimary)
                 Text(headerSubtitle)
@@ -280,7 +281,9 @@ struct MenuBarPopoverView: View {
         }
         .frame(height: 36)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Shannon. \(headerSubtitle). \(hubStatusText)")
+        .accessibilityLabel(
+            "\(CompanionFocusCopy.quietShort). \(headerSubtitle). \(hubStatusText)"
+        )
     }
 
     /// One-line founder scan: collapse > busy agents > live FlexAIDdS run > hub state.

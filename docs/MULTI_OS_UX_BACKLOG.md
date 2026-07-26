@@ -246,10 +246,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** Pill + WatchScreen face title → `CompanionFocusCopy.quietShort`; CompanionFocusCopyTests wiring.
 - **Priority:** P2
 
+### - [x] UX-025: Widget / complication / menu bar / phone brand chrome use quietShort
+
+- **Why:** UX-024 closed pill + watch face titles; residual hard-coded `Text("Shannon")` / nav title on widget, complication, menu-bar popover, phone Home.
+- **Platforms:** iOS widget, watchOS complication, macOS menu bar, iOS phone
+- **Area:** `ShannonWidget`, `ShannonComplication`, `MenuBarPopoverView`, `HomeView`
+- **First slice:** Wire brand chrome to `CompanionFocusCopy.quietShort`; pure multi-surface wiring test.
+- **Done:** All four surfaces + a11y menu label; CompanionFocusCopyTests glance/menu wiring.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 20):** `--quick` all PASS. Backlog empty; residual brand `"Shannon"` on widget/complication/menu/phone. Claimed **UX-025**. Considered: widget docking `"Idle"` (not brand token — leave); theme preview + Settings titles OK product chrome. **No additional UX-0xx**.
 - **2026-07-26 (loop 19):** `--quick` all PASS. Backlog empty; Mac/watch dual quiet `"Shannon"`. Claimed **UX-024**. Considered: widget `"Idle"` docking-empty (different context — not quiet brand token); pad feed empty prose OK. **No additional UX-0xx**.
 - **2026-07-26 (loop 18):** `--quick` all PASS. Backlog empty; watch face vs gate delivery dual strings. Claimed **UX-023**. Considered: widget `"Idle"` docking-empty (different context); PillView header `"Shannon"` quietShort (optional); pad notification empty prose OK. **No additional UX-0xx**.
 - **2026-07-26 (loop 17):** `--quick` all PASS. Backlog empty; pad empty missing StatusLegend. Claimed **UX-022**. Considered: widget `"Idle"` docking-empty (different context); watch face `"Sending answer…"` delivery narrative vs `GateAskActionCopy.sending`; PillView header `"Shannon"` quietShort family (optional). **No additional UX-0xx**.

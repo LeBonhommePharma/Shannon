@@ -173,4 +173,42 @@ final class CompanionFocusCopyTests: XCTestCase {
             "watch face title must not hard-code dual quiet short literal"
         )
     }
+
+    /// UX-025: residual glance/menu brand chrome uses quietShort (not dual "Shannon").
+    func testGlanceAndMenuBrandChromeWireQuietShort() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let surfaces: [(String, String)] = [
+            ("iOS/Sources/ShannonWidget/ShannonWidget.swift", "widget rect header"),
+            (
+                "watchOS/Sources/ShannonWatchComplication/ShannonComplication.swift",
+                "complication quiet brand"
+            ),
+            ("Pill/Sources/ShannonPill/MenuBarPopoverView.swift", "menu-bar header"),
+            ("iOS/Sources/ShannonPhone/HomeView.swift", "phone navigation title"),
+        ]
+        for (rel, label) in surfaces {
+            let text = (try? String(
+                contentsOf: root.appendingPathComponent(rel),
+                encoding: .utf8
+            )) ?? ""
+            XCTAssertTrue(
+                text.contains("CompanionFocusCopy.quietShort"),
+                "\(label) (\(rel)) must use CompanionFocusCopy.quietShort"
+            )
+            XCTAssertFalse(
+                text.contains("Text(\"Shannon\")"),
+                "\(label) must not hard-code Text(\"Shannon\")"
+            )
+            XCTAssertFalse(
+                text.contains("navigationTitle(\"Shannon\")"),
+                "\(label) must not hard-code navigationTitle Shannon"
+            )
+        }
+    }
 }

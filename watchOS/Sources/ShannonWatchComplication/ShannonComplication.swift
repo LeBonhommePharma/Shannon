@@ -197,7 +197,8 @@ struct ComplicationView: View {
                             .font(.caption2.weight(.semibold))
                             .lineLimit(1)
                     } else {
-                        Text("Shannon").font(.caption2.weight(.semibold))
+                        // UX-025: quiet brand when no agent — Core quietShort.
+                        Text(CompanionFocusCopy.quietShort).font(.caption2.weight(.semibold))
                     }
                     Spacer(minLength: 0)
                     if let entropy = agent?.entropyBits {

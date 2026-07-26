@@ -4,7 +4,9 @@ cask "shannon-pill" do
   # real sha after publishing Shannon-<version>.zip. All-zero sha256 is deliberate:
   # Homebrew will refuse a remote cask install rather than silently fetching junk.
   # Local path (recommended while unsigned): ./scripts/package_pill.sh --install
-  sha256 "cca703620ec14ef715fd68dca517088d65cb5c29e3bf3d24c77d4974beaa046d"
+  # Digest of the published GitHub release asset (not a local rebuild):
+  #   curl -fsSL .../v2.1.0/Shannon-2.1.0.zip | shasum -a 256
+  sha256 "16a029b7f2b85b2611bea0b2a02573357adae3b6b97470a3327d7f357793aea4"
 
   # ZIP is the cask asset (reproducible sha256). DMG is also published for humans.
   url "https://github.com/LeBonhommePharma/Shannon/releases/download/v#{version}/Shannon-#{version}.zip",

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import warnings
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 # Backend selection: C++ accelerated or Python fallback
 # Follows FlexAIDdS _HAS_CORE graceful degradation pattern

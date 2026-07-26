@@ -4,6 +4,15 @@ All notable changes to Shannon are documented in this file.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-07-25
+
+### Added
+
+- **Claude Code ↔ Codex pair planner** — Shannon-owned half-and-half implement + cross-review via `agent_manager pair --pair-mode` (dry-run plans; skill docs under `skills/shannon/`)
+- **Codex-aligned companion pets** — pure signal→motion map (`idle` / `running` / `waiting` / `failed` / `review`), 8×11 atlas frame selection, optional `~/.codex/pets` v2 package resolve with procedural Canvas fallback
+- **Companion roster wiring** — pending gate asks and recent activity drive waiting/review motions; package resolve cached (no per-frame disk hits)
+- **Global notify/response + multi-platform HUD sync** — OS-agnostic notify paths, shared telemetry binding, multi-agent entropy memory (prior 2.0.x mainline polish rolled into this cut)
+
 ### Fixed
 
 - **Homebrew (macOS production path)** — hardened monorepo tap installers:
@@ -14,6 +23,7 @@ All notable changes to Shannon are documented in this file.
   - `scripts/update_homebrew_artifacts.sh`: post-tag formula/cask checksum helper
   - CI: `.github/workflows/homebrew.yml` (style + HEAD install + test on macOS/Linux); release workflow publishes agent tarballs + app ZIP/DMG
   - Pill packaging build fixes: `PillCore` depends on ShannonCore/Theme; `@Bindable` for `@Observable` PetStore
+- **PyPI** — package version aligned to **2.1.0** for sdist + pure `py3-none-any` wheel publish
 
 ## [2.0.0] — 2026-07-16
 

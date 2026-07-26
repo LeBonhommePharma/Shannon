@@ -7,7 +7,7 @@ name = "shannon-entropy"
 # Static version (keep in sync with python/shannon/__init__.py and CMake project VERSION).
 # Do NOT use dynamic version via package import — that pulls numpy and produces
 # UNKNOWN-0.0.0 wheels on clean / older pip builds.
-version = "2.0.0"
+version = "2.1.0"
 description = "Shannon Entropy Collapse Detection — physics-grounded LLM safety primitive"
 readme = "README.md"
 license = "Apache-2.0"

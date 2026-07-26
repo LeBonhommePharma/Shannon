@@ -523,6 +523,40 @@ final class AgentIngestTests: XCTestCase {
         XCTAssertEqual(reg.first?["id"] as? String, "terminal")
     }
 
+    /// Re-⌘D without a new pid must not wipe process-attach evidence (stickiness).
+    func testEnsurePetPreservesAttachEvidenceOnMerge() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-attach-merge-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let old = ProcessInfo.processInfo.environment["SHANNON_LOG_DIR"]
+        setenv("SHANNON_LOG_DIR", root.path, 1)
+        defer {
+            if let old { setenv("SHANNON_LOG_DIR", old, 1) }
+            else { unsetenv("SHANNON_LOG_DIR") }
+        }
+
+        let (url, _) = try PetBootstrap.ensurePet(
+            agentID: "grok_build",
+            displayName: "Grok Build",
+            task: "first",
+            attachPid: 12345,
+            attachBundle: "com.mitchellh.ghostty"
+        )
+        // Second write without attach fields — must merge prior pid/bundle.
+        _ = try PetBootstrap.ensurePet(
+            agentID: "grok_build",
+            displayName: "Grok Build",
+            task: "second"
+        )
+        let data = try Data(contentsOf: url.appendingPathComponent("state.json"))
+        let obj = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(obj["attach_pid"] as? Int, 12345)
+        XCTAssertEqual(obj["attach_bundle"] as? String, "com.mitchellh.ghostty")
+        XCTAssertEqual(obj["last_task"] as? String, "second")
+    }
+
     // MARK: - Capture path: a refusal must write nothing at all
 
     /// Redirect `~/.shannon` into a temp dir and point the gate notifier at a

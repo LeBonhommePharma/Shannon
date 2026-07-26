@@ -152,6 +152,9 @@ public final class FrontmostAppTracker {
 
     public private(set) var lastBundleID: String?
     public private(set) var lastAppName: String?
+    /// Process id of the last non-Shannon frontmost app — used for ⌘D attach
+    /// when the status item steals focus (front is Shannon, not Ghostty/Cursor).
+    public private(set) var lastProcessID: Int32?
     private var observer: NSObjectProtocol?
 
     private init() {}
@@ -188,6 +191,8 @@ public final class FrontmostAppTracker {
         if bid == "com.apple.loginwindow" { return }
         lastBundleID = bid.isEmpty ? nil : bid
         lastAppName = app.localizedName
+        let pid = app.processIdentifier
+        lastProcessID = pid > 0 ? pid : nil
     }
     #endif
 }
@@ -706,25 +711,45 @@ public enum PetBootstrap {
 
         let now = Date().timeIntervalSince1970
         let hasTask = !(task ?? "").isEmpty
+        // Merge prior state so a re-⌘D without a resolved CLI pid never wipes
+        // attach_pid / attach_bundle / history_count (process stickiness).
+        var prior: [String: Any] = [:]
+        if let data = try? Data(contentsOf: state),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            prior = obj
+        }
+        let priorHist = (prior["history_count"] as? Int)
+            ?? (prior["history_count"] as? NSNumber)?.intValue
+            ?? 0
+        let priorPid = (prior["attach_pid"] as? Int).map { Int32($0) }
+            ?? (prior["attach_pid"] as? Int32)
+        let priorBundle = (prior["attach_bundle"] as? String)
+            .flatMap { $0.isEmpty ? nil : $0 }
+
         // Process-attach evidence. AgentActivityReader re-checks pid/bundle each
         // poll: still running → presence **live** (attached); quit → offline.
         // Status on disk stays non-busy — only the gate may claim active work.
         var stateObj: [String: Any] = [
             "status": "observed",
             "source": "process",
-            "last_task": task ?? "",
-            "last_cf_delta": NSNull(),
+            "last_task": task ?? (prior["last_task"] as? String) ?? "",
+            "last_cf_delta": prior["last_cf_delta"] ?? NSNull(),
             "memory_size": (try? Data(contentsOf: memory).count) ?? 0,
-            "history_count": 0,
+            "history_count": priorHist,
             "updated_at": now,
-            "resumable": hasTask,
+            "resumable": hasTask || (prior["resumable"] as? Bool ?? false),
         ]
-        if let attachPid, attachPid > 0 {
-            stateObj["attach_pid"] = Int(attachPid)
-        }
-        if let attachBundle, !attachBundle.isEmpty {
-            stateObj["attach_bundle"] = attachBundle
-        }
+        let resolvedPid: Int32? = {
+            if let attachPid, attachPid > 0 { return attachPid }
+            if let priorPid, priorPid > 0 { return priorPid }
+            return nil
+        }()
+        let resolvedBundle: String? = {
+            if let attachBundle, !attachBundle.isEmpty { return attachBundle }
+            return priorBundle
+        }()
+        if let resolvedPid { stateObj["attach_pid"] = Int(resolvedPid) }
+        if let resolvedBundle { stateObj["attach_bundle"] = resolvedBundle }
         try JSONSerialization.data(withJSONObject: stateObj, options: [.prettyPrinted, .sortedKeys])
             .write(to: state, options: .atomic)
 
@@ -860,7 +885,16 @@ public final class AgentIngestService: ObservableObject {
         // agentID for a terminal that is only running a shell.
         let terminal: TerminalAgentProbe.Context? =
             TerminalAgentProbe.probe(bundleID: bid, appName: name)
-        let hostPid = front?.processIdentifier
+        // Prefer the tracked non-Shannon host: ⌘D from the status item leaves
+        // Shannon frontmost, so `front?.processIdentifier` would attach to us.
+        let frontBid = front?.bundleIdentifier ?? ""
+        let frontIsShannon = frontBid.hasPrefix("com.lebonhommepharma.shannon")
+        let hostPid: Int32? = {
+            if !frontIsShannon, let p = front?.processIdentifier, p > 0 { return p }
+            if let p = tracked.lastProcessID, p > 0 { return p }
+            if let p = front?.processIdentifier, p > 0 { return p }
+            return nil
+        }()
         #else
         let bid: String? = nil
         let name: String? = nil

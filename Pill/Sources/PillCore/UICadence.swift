@@ -68,6 +68,43 @@ public enum UICadence: Sendable {
         return false
     }
 
+    /// Pure content signature for the menu-bar status glyph.
+    ///
+    /// `MenuBarController` compares successive signatures; only a change
+    /// yields `shouldAllowTimerChromePaint(contentChanged: true)`. Keeping
+    /// the format here means thrash tests drive the same helper the app uses.
+    public static func menuBarGlyphSignature(
+        pendingCount: Int,
+        collapseBits: Double?,
+        busyCount: Int,
+        primaryBusyName: String,
+        liveCount: Int,
+        bridgeConnected: Bool,
+        constrainedKey: String,
+        coresKey: String
+    ) -> String {
+        [
+            "p\(pendingCount)",
+            collapseBits.map { String(format: "c%.1f", $0) } ?? "-",
+            "b\(busyCount)",
+            primaryBusyName,
+            "l\(liveCount)",
+            bridgeConnected ? "1" : "0",
+            constrainedKey,
+            coresKey,
+        ].joined(separator: "|")
+    }
+
+    /// Combine signature equality with the thrash guard — the shipped menu-bar
+    /// paint decision for one timer tick.
+    public static func shouldPaintMenuBarGlyph(
+        previousSignature: String?,
+        nextSignature: String
+    ) -> Bool {
+        let changed = previousSignature != nextSignature
+        return shouldAllowTimerChromePaint(contentChanged: changed)
+    }
+
     /// Equality-gate wrapper for shared telemetry snapshots (notch + menu bar).
     public static func shouldPublishSharedTelemetry(
         previous: SharedTelemetrySnapshot?,

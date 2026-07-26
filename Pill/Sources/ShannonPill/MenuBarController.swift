@@ -214,18 +214,22 @@ final class MenuBarController: NSObject {
         )
         let constrainedKey = constrained.map { "\($0.kind.rawValue):\($0.percent.rounded())" } ?? "-"
 
-        // Cheap signature of everything the icon depends on; bail when unchanged.
-        let signature = [
-            "p\(pendingCount)",
-            collapse.map { String(format: "c%.1f", $0.bits) } ?? "-",
-            "b\(summary.busyCount)",
-            summary.busy.first?.displayName ?? "",
-            "l\(summary.connected.count)",
-            bridge.connected ? "1" : "0",
-            constrainedKey,
-            coresKey,
-        ].joined(separator: "|")
-        guard signature != lastRendered else { return }
+        // Cheap signature of everything the icon depends on; thrash-guard via
+        // UICadence so continuous resource/agent ticks never re-paint fixed chrome.
+        let signature = UICadence.menuBarGlyphSignature(
+            pendingCount: pendingCount,
+            collapseBits: collapse?.bits,
+            busyCount: summary.busyCount,
+            primaryBusyName: summary.busy.first?.displayName ?? "",
+            liveCount: summary.connected.count,
+            bridgeConnected: bridge.connected,
+            constrainedKey: constrainedKey,
+            coresKey: coresKey
+        )
+        guard UICadence.shouldPaintMenuBarGlyph(
+            previousSignature: lastRendered,
+            nextSignature: signature
+        ) else { return }
         lastRendered = signature
 
         if pendingCount > 0 {

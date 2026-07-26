@@ -72,21 +72,40 @@ public enum ProcessAttach: Sendable {
     ///     to skip the bundle check.
     ///   - pidAlive: injectable pid check (tests).
     /// - Returns:
-    ///   - `.live` when pid is alive or host bundle is running
-    ///   - `.offline` when evidence proves the process/app is gone
+    ///   - `.live` when pid is alive **or** (pid dead/unknown but host bundle still running)
+    ///   - `.offline` when evidence proves both process and host app are gone
     ///   - `.observed` when we have no process evidence to re-check
+    ///
+    /// Electron/IDE hosts restart often (new PID, same bundle). Treating a dead
+    /// attach PID as hard offline while Cursor/Ghostty is still open made ⌘D
+    /// agents flap offline→live and thrash the menu bar every full scan.
     public static func presence(
         attachPid: Int32?,
         attachBundle: String?,
         runningBundleIDs: Set<String>?,
         pidAlive: (Int32) -> Bool = ProcessAttach.isProcessAlive
     ) -> AgentPresence {
-        if let pid = attachPid, pid > 0 {
-            return pidAlive(pid) ? .live : .offline
+        let pidLive: Bool? = {
+            guard let pid = attachPid, pid > 0 else { return nil }
+            return pidAlive(pid)
+        }()
+        if pidLive == true { return .live }
+
+        let bundle = attachBundle?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasBundle = !(bundle ?? "").isEmpty
+        if let running = runningBundleIDs, let bundle, hasBundle {
+            if running.contains(bundle) { return .live }
+            // Host quit (and pid dead or unknown) → offline.
+            return .offline
         }
-        if let running = runningBundleIDs,
-           let bundle = attachBundle?.lowercased(), !bundle.isEmpty {
-            return running.contains(bundle) ? .live : .offline
+        // Pid was known and is dead, but we cannot re-check the host bundle
+        // (nil running set) — fail closed only when we *know* the process died
+        // and have no bundle to fall back on.
+        if pidLive == false, !hasBundle { return .offline }
+        if pidLive == false, runningBundleIDs == nil {
+            // Bundle known but no running set this tick: keep observed so we
+            // do not thrash offline until the next NSWorkspace sample.
+            return hasBundle ? .observed : .offline
         }
         // No process evidence — cannot claim live or offline.
         return .observed
@@ -150,6 +169,10 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
     /// connected and silent must keep an honest "last seen 20m" while still
     /// being reported live.
     public var heartbeatAt: Date?
+    /// ⌘D process evidence — carried so gate-only polls can re-check liveness
+    /// without a full pets disk walk (keeps attach sticky between full scans).
+    public var attachPid: Int32?
+    public var attachBundle: String?
 
     public init(
         id: String,
@@ -161,7 +184,9 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
         resumable: Bool,
         historyCount: Int,
         presence: AgentPresence = .observed,
-        heartbeatAt: Date? = nil
+        heartbeatAt: Date? = nil,
+        attachPid: Int32? = nil,
+        attachBundle: String? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -173,6 +198,8 @@ public struct AgentActivitySnapshot: Sendable, Equatable, Identifiable {
         self.historyCount = historyCount
         self.presence = presence
         self.heartbeatAt = heartbeatAt
+        self.attachPid = attachPid
+        self.attachBundle = attachBundle
     }
 
     /// Short line for the collapsed pill.
@@ -457,10 +484,24 @@ public enum AgentActivityReader {
         let runningLower = runningBundleIDs.map { Set($0.map { $0.lowercased() }) }
 
         if skipPetsScan {
-            // Gate-only path: keep last full-scan agents as base (process-attach
-            // stays live until the next full pets+registry scan).
+            // Gate-only path: seed from last full scan, but re-check process
+            // attach every tick so dead apps drop and host restarts stay live
+            // without waiting for the pets interval (avoids thrash lag).
+            // When no running-bundle sample is available this tick, keep prior
+            // presence — demoting to `.observed` would thrash the menu bar.
             if let previousAgents {
-                for a in previousAgents {
+                for var a in previousAgents {
+                    if let runningLower,
+                       a.attachPid != nil || a.attachBundle != nil {
+                        let p = ProcessAttach.presence(
+                            attachPid: a.attachPid,
+                            attachBundle: a.attachBundle,
+                            runningBundleIDs: runningLower
+                        )
+                        a.presence = p
+                        if p == .live { a.updatedAt = now }
+                        if p != .live { a.status = .idle }
+                    }
                     byID[a.id] = a
                 }
             }
@@ -494,7 +535,9 @@ public enum AgentActivityReader {
                         updatedAt: presence == .live ? now : updated,
                         resumable: false,
                         historyCount: 0,
-                        presence: presence
+                        presence: presence,
+                        attachPid: nil,
+                        attachBundle: bundle
                     )
                 }
             }
@@ -555,7 +598,9 @@ public enum AgentActivityReader {
                         updatedAt: trackingUpdated,
                         resumable: resumable,
                         historyCount: hist,
-                        presence: presence
+                        presence: presence,
+                        attachPid: (statePid ?? 0) > 0 ? statePid : nil,
+                        attachBundle: stateBundle
                     )
                 }
             }
@@ -632,9 +677,20 @@ public enum AgentActivityReader {
             }
         }
 
-        // Process-attach outranks a hung-up gate socket.
-        if !gateStillLive, let existing, existing.presence == .live {
-            presence = .live
+        // Process-attach outranks a hung-up gate socket. Prefer re-checking
+        // attach evidence when present so a restarted host app stays live.
+        let attachPid = existing?.attachPid ?? row.attachPid
+        let attachBundle = existing?.attachBundle ?? row.attachBundle
+        if !gateStillLive {
+            if attachPid != nil || attachBundle != nil {
+                // runningBundleIDs not in reconcile — use existing presence if
+                // already live, else keep offline/observed from gate path.
+                if let existing, existing.presence == .live {
+                    presence = .live
+                }
+            } else if let existing, existing.presence == .live {
+                presence = .live
+            }
         }
 
         var status = row.status
@@ -661,7 +717,9 @@ public enum AgentActivityReader {
             resumable: status.isBusy || (existing?.resumable ?? false),
             historyCount: max(existing?.historyCount ?? 0, row.historyCount),
             presence: presence,
-            heartbeatAt: gateStillLive ? row.heartbeatAt : existing?.heartbeatAt
+            heartbeatAt: gateStillLive ? row.heartbeatAt : existing?.heartbeatAt,
+            attachPid: attachPid,
+            attachBundle: attachBundle
         )
     }
 
@@ -964,13 +1022,16 @@ public final class AgentActivityMonitor: ObservableObject {
     /// - **DB mtime change:** force a full scan so asks appear immediately when
     ///   the gate writes, without waiting for the pets interval.
     ///
+    /// NSWorkspace running-app enumeration and SQLite / pets I/O run on a
+    /// utility detached task — never on the MainActor timer callback — so the
+    /// menu bar / notch stay responsive under load.
+    ///
     /// Assignments stay equality-gated so SwiftUI does not thrash on identical data.
     public func refresh() {
         guard !isPaused, !refreshing else { return }
         refreshing = true
 
         let socket = gateSocketPath
-        let bundles = currentRunningBundleIDs()
         let now = Date()
         let dbURL = AgentActivityReader.defaultGateDB
         let mtime = Self.modificationDate(of: dbURL)
@@ -983,8 +1044,15 @@ public final class AgentActivityMonitor: ObservableObject {
 
         let skipPets = !doFull
         let previous = skipPets ? summary.agents : nil
+        let cachedBundles = runningBundleIDs
+        let needBundleRefresh = now.timeIntervalSince(runningBundleIDsAt) > runningBundleTTL
+            || runningBundleIDs.isEmpty
 
         Task.detached(priority: .utility) {
+            // Host app roster is the expensive AppKit call — never on MainActor.
+            let bundles: Set<String> = needBundleRefresh
+                ? Self.enumerateRunningBundleIDs()
+                : cachedBundles
             let full = AgentActivityReader.loadFull(
                 runningBundleIDs: bundles,
                 skipPetsScan: skipPets,
@@ -992,9 +1060,23 @@ public final class AgentActivityMonitor: ObservableObject {
             )
             let socketUp = FileManager.default.fileExists(atPath: socket)
             await MainActor.run { [weak self] in
-                self?.apply(full, socketUp: socketUp)
+                guard let self else { return }
+                if needBundleRefresh {
+                    self.runningBundleIDs = bundles
+                    self.runningBundleIDsAt = now
+                }
+                self.apply(full, socketUp: socketUp)
             }
         }
+    }
+
+    /// Enumerate running app bundle ids off the main thread (AppKit-safe read).
+    nonisolated public static func enumerateRunningBundleIDs() -> Set<String> {
+        #if canImport(AppKit)
+        Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        #else
+        []
+        #endif
     }
 
     private static func modificationDate(of url: URL) -> Date? {
@@ -1063,19 +1145,16 @@ public final class AgentActivityMonitor: ObservableObject {
         lastPendingCount = newCount
     }
 
+    /// Cached running-bundle set for tests / callers that already hold MainActor.
+    /// Production refresh enumerates via `enumerateRunningBundleIDs` off-main.
     private func currentRunningBundleIDs() -> Set<String> {
-        #if canImport(AppKit)
         let now = Date()
-        if now.timeIntervalSince(runningBundleIDsAt) > runningBundleTTL {
-            runningBundleIDs = Set(
-                NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
-            )
+        if now.timeIntervalSince(runningBundleIDsAt) > runningBundleTTL
+            || runningBundleIDs.isEmpty {
+            runningBundleIDs = Self.enumerateRunningBundleIDs()
             runningBundleIDsAt = now
         }
         return runningBundleIDs
-        #else
-        return []
-        #endif
     }
 
     /// Drop a resolved ask immediately so the pill stops pulsing before the next

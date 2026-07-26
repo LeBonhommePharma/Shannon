@@ -103,6 +103,42 @@ final class UICadenceTests: XCTestCase {
         )
     }
 
+    /// Menu-bar glyph paint decision uses the thrash guard on real signatures.
+    func testMenuBarGlyphPaintIsEqualityGated() {
+        let a = UICadence.menuBarGlyphSignature(
+            pendingCount: 0, collapseBits: nil, busyCount: 0,
+            primaryBusyName: "", liveCount: 1, bridgeConnected: true,
+            constrainedKey: "cpu:12", coresKey: "c:12"
+        )
+        let same = UICadence.menuBarGlyphSignature(
+            pendingCount: 0, collapseBits: nil, busyCount: 0,
+            primaryBusyName: "", liveCount: 1, bridgeConnected: true,
+            constrainedKey: "cpu:12", coresKey: "c:12"
+        )
+        let changed = UICadence.menuBarGlyphSignature(
+            pendingCount: 1, collapseBits: nil, busyCount: 0,
+            primaryBusyName: "", liveCount: 1, bridgeConnected: true,
+            constrainedKey: "cpu:12", coresKey: "c:12"
+        )
+        XCTAssertEqual(a, same)
+        XCTAssertFalse(UICadence.shouldPaintMenuBarGlyph(previousSignature: a, nextSignature: same))
+        XCTAssertTrue(UICadence.shouldPaintMenuBarGlyph(previousSignature: a, nextSignature: changed))
+        XCTAssertTrue(UICadence.shouldPaintMenuBarGlyph(previousSignature: nil, nextSignature: a))
+    }
+
+    /// Full pets scan stays coarser than every gate tick (off-main load policy).
+    func testFullScanLessFrequentThanAgentHubTick() {
+        XCTAssertGreaterThan(
+            UICadence.agentFullScanInterval,
+            UICadence.agentHubInterval * 4
+        )
+        XCTAssertEqual(
+            AgentActivityMonitor.fullScanInterval,
+            UICadence.agentFullScanInterval,
+            accuracy: 1e-9
+        )
+    }
+
     func testSharedTelemetryPublishGateIsEqualityBased() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let snap = SharedTelemetrySnapshot(

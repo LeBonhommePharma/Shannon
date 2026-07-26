@@ -546,5 +546,13 @@ final class AgentActivityTests: XCTestCase {
         // Pets+registry scan cadence: 15–30 s (P1.9).
         XCTAssertGreaterThanOrEqual(AgentActivityMonitor.fullScanInterval, 15)
         XCTAssertLessThanOrEqual(AgentActivityMonitor.fullScanInterval, 30)
+        // Off-main bundle roster helper is the shipped entry for hub refresh.
+        let bundles = AgentActivityMonitor.enumerateRunningBundleIDs()
+        // On macOS test hosts this is non-empty; emptiness would still be valid.
+        _ = bundles
+        XCTAssertTrue(
+            UICadence.agentFullScanInterval > UICadence.agentHubInterval,
+            "full pets scan must be coarser than every gate tick"
+        )
     }
 }

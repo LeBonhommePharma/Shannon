@@ -5,10 +5,35 @@ import XCTest
 /// without claiming gate-live / busy state.
 final class ProcessAttachTests: XCTestCase {
 
-    func testDeadPidIsOffline() {
+    func testDeadPidWithoutBundleIsOffline() {
         XCTAssertEqual(
             ProcessAttach.presence(
                 attachPid: 42, attachBundle: nil, runningBundleIDs: nil,
+                pidAlive: { _ in false }
+            ),
+            .offline
+        )
+    }
+
+    /// Electron/IDE restarts: old attach PID dies but host bundle stays up →
+    /// stay **live** so ⌘D agents do not thrash the menu bar offline→live.
+    func testDeadPidWithLiveHostBundleStaysLive() {
+        let p = ProcessAttach.presence(
+            attachPid: 42,
+            attachBundle: "com.todesktop.cursor",
+            runningBundleIDs: ["com.todesktop.cursor"],
+            pidAlive: { _ in false }
+        )
+        XCTAssertEqual(p, .live)
+        XCTAssertTrue(p.canBeBusy)
+    }
+
+    func testDeadPidWithHostBundleGoneIsOffline() {
+        XCTAssertEqual(
+            ProcessAttach.presence(
+                attachPid: 99,
+                attachBundle: "com.mitchellh.ghostty",
+                runningBundleIDs: ["com.apple.Terminal"],
                 pidAlive: { _ in false }
             ),
             .offline
@@ -75,7 +100,7 @@ final class ProcessAttachTests: XCTestCase {
         XCTAssertEqual(AgentActivitySummary(agents: [snap]).busyCount, 0)
     }
 
-    func testLoadMarksDeadAttachOffline() throws {
+    func testLoadMarksDeadAttachOfflineWhenHostGone() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("process-attach-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -101,12 +126,9 @@ final class ProcessAttachTests: XCTestCase {
             gateDB: nil,
             now: Date(),
             runningBundleIDs: [],
-            // force pid dead via... we can't inject pidAlive into load.
-            // Use a pid that is almost certainly dead: INT_MAX-ish.
             gateRows: nil
         )
-        // With real kill(0) on 424242 — almost always dead → offline.
-        // If somehow alive (extremely unlikely), presence would be observed.
+        // Pid almost always dead + host not in running set → offline.
         guard let cursor = summary.agents.first(where: { $0.id == "cursor" }) else {
             return XCTFail("cursor pet missing")
         }
@@ -114,5 +136,70 @@ final class ProcessAttachTests: XCTestCase {
             XCTAssertEqual(cursor.presence, .offline)
         }
         XCTAssertFalse(cursor.status.isBusy)
+    }
+
+    /// Host still running with a stale attach PID stays live (restart stickiness).
+    func testLoadKeepsDeadPidLiveWhenHostBundleRunning() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("process-stick-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pets = root.appendingPathComponent("pets", isDirectory: true)
+        let agentDir = pets.appendingPathComponent("grok_build", isDirectory: true)
+        try FileManager.default.createDirectory(at: agentDir, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: [
+            "status": "observed", "source": "process",
+            "last_task": "build", "updated_at": Date().timeIntervalSince1970,
+            "attach_pid": 424242, "attach_bundle": "com.mitchellh.ghostty",
+            "resumable": true, "history_count": 1,
+        ] as [String: Any]).write(to: agentDir.appendingPathComponent("state.json"))
+
+        let summary = AgentActivityReader.load(
+            petsRoot: pets,
+            registryURL: root.appendingPathComponent("agents.json"),
+            gateDB: nil,
+            runningBundleIDs: ["com.mitchellh.ghostty"]
+        )
+        guard let agent = summary.agents.first(where: { $0.id == "grok_build" }) else {
+            return XCTFail("grok_build missing")
+        }
+        XCTAssertEqual(agent.presence, .live)
+        XCTAssertEqual(agent.attachBundle, "com.mitchellh.ghostty")
+        XCTAssertEqual(agent.statusLine, "live")
+    }
+
+    /// Gate-only poll re-checks attach evidence so dead hosts drop without a full pets walk.
+    func testSkipPetsScanRechecksProcessAttach() throws {
+        let previous = [
+            AgentActivitySnapshot(
+                id: "cursor", displayName: "Cursor", status: .idle,
+                lastTask: "edit", source: "ide",
+                updatedAt: Date().addingTimeInterval(-30),
+                resumable: false, historyCount: 1,
+                presence: .live,
+                attachPid: 424242,
+                attachBundle: "com.todesktop.cursor"
+            ),
+        ]
+        // Host gone → offline on gate-only tick.
+        let offline = AgentActivityReader.load(
+            petsRoot: FileManager.default.temporaryDirectory,
+            registryURL: FileManager.default.temporaryDirectory.appendingPathComponent("none.json"),
+            gateDB: nil,
+            runningBundleIDs: [],
+            skipPetsScan: true,
+            previousAgents: previous
+        )
+        XCTAssertEqual(offline.agents.first?.presence, .offline)
+
+        // Host still up → live even with dead pid.
+        let live = AgentActivityReader.load(
+            petsRoot: FileManager.default.temporaryDirectory,
+            registryURL: FileManager.default.temporaryDirectory.appendingPathComponent("none.json"),
+            gateDB: nil,
+            runningBundleIDs: ["com.todesktop.cursor"],
+            skipPetsScan: true,
+            previousAgents: previous
+        )
+        XCTAssertEqual(live.agents.first?.presence, .live)
     }
 }

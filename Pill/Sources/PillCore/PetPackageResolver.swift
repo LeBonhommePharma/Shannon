@@ -1,10 +1,10 @@
 // PetPackageResolver.swift — resolve Codex-compatible v2 pet packages.
 //
 // Package layout:
-//   ${CODEX_HOME:-~/.codex}/pets/<pet-id>/{pet.json,spritesheet.webp}
+//   <package-root>/<pet-id>/{pet.json,spritesheet.webp}
 //
-// Shannon agent memory (~/.shannon/pets/{agent_id}/) is a different root and
-// is never treated as a spritesheet store.
+// Roots come from `PetPaths` (shared with agent memory). Agent-memory roots are
+// never treated as a spritesheet store.
 
 import Foundation
 
@@ -44,36 +44,21 @@ public enum PetPackageResolver {
 
     public static let defaultPetId = "shannon"
 
-    /// Search roots (first hit wins). Never includes ~/.shannon/pets memory.
+    /// Search roots (first hit wins). Never includes agent-memory roots.
+    /// Delegates to `PetPaths.packageRootsExcludingMemory`.
     public static func defaultRoots(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         env: [String: String] = ProcessInfo.processInfo.environment
     ) -> [URL] {
-        var roots: [URL] = []
-        if let extra = env["SHANNON_CODEX_PETS"], !extra.isEmpty {
-            roots.append(URL(fileURLWithPath: (extra as NSString).expandingTildeInPath))
-        }
-        if let codexHome = env["CODEX_HOME"], !codexHome.isEmpty {
-            roots.append(
-                URL(fileURLWithPath: (codexHome as NSString).expandingTildeInPath)
-                    .appendingPathComponent("pets")
-            )
-        }
-        roots.append(home.appendingPathComponent(".codex/pets"))
-        return roots
+        PetPaths.packageRootsExcludingMemory(home: home, env: env)
     }
 
+    /// Shannon agent-memory root — never used for spritesheet discovery.
     public static func agentMemoryRoot(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         env: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL {
-        let base: URL
-        if let log = env["SHANNON_LOG_DIR"], !log.isEmpty {
-            base = URL(fileURLWithPath: (log as NSString).expandingTildeInPath)
-        } else {
-            base = home.appendingPathComponent(".shannon")
-        }
-        return base.appendingPathComponent("pets")
+        PetPaths.agentMemoryRoot(home: home, env: env)
     }
 
     /// Resolve package by id. Always succeeds: missing → procedural.
@@ -81,13 +66,16 @@ public enum PetPackageResolver {
         petId: String = defaultPetId,
         roots: [URL]? = nil,
         fileManager: FileManager = .default,
-        requireV2: Bool = false
+        requireV2: Bool = false,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        env: [String: String] = ProcessInfo.processInfo.environment
     ) -> PetPackage {
         let pid = petId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? defaultPetId
             : petId.trimmingCharacters(in: .whitespacesAndNewlines)
-        let search = roots ?? defaultRoots()
-        let memory = agentMemoryRoot().standardizedFileURL
+        let search = roots
+            ?? PetPaths.packageRootsExcludingMemory(home: home, env: env, fileManager: fileManager)
+        let memory = PetPaths.agentMemoryRoot(home: home, env: env).standardizedFileURL
 
         for root in search {
             let standardized = root.standardizedFileURL

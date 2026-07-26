@@ -4,12 +4,12 @@ pet_package.py — resolve Codex-compatible v2 pet packages (optional art).
 
 Package layout (Codex interop)::
 
-  ${CODEX_HOME:-~/.codex}/pets/<pet-id>/
+  <package-root>/<pet-id>/
     pet.json
     spritesheet.webp   # or path in pet.json spritesheetPath
 
-Shannon agent memory under ``~/.shannon/pets/{agent_id}/`` is a *different*
-root (state.json / memory.md) and is never treated as a spritesheet store.
+Roots come from ``pet_paths`` (shared with agent memory). Agent-memory roots
+are never treated as a spritesheet store. See ``SHANNON_PETS`` unified home.
 """
 
 from __future__ import annotations
@@ -20,35 +20,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Sequence
 
+import pet_paths
+
 # Default search roots (first hit wins). Memory path is deliberately excluded.
 DEFAULT_PET_ID = "shannon"
 
 
 def default_codex_pets_roots() -> list[Path]:
-    roots: list[Path] = []
-    env_extra = os.environ.get("SHANNON_CODEX_PETS")
-    if env_extra:
-        roots.append(Path(env_extra).expanduser())
-    codex_home = os.environ.get("CODEX_HOME")
-    if codex_home:
-        roots.append(Path(codex_home).expanduser() / "pets")
-    roots.append(Path.home() / ".codex" / "pets")
-    # Optional in-repo mirror (hub/<id> or project pets/) — best-effort.
-    here = Path(__file__).resolve().parent
-    roots.append(here)  # hub/bonhomme, hub/shannon, …
-    roots.append(here.parent / "pets")
-    return roots
+    """Package roots via unified ``pet_paths`` policy."""
+    return pet_paths.package_roots_excluding_memory(include_repo_mirrors=True)
 
 
 def agent_memory_pets_root() -> Path:
     """Shannon agent-memory root — never used for spritesheet discovery."""
-    base = Path(
-        os.environ.get(
-            "SHANNON_LOG_DIR",
-            os.environ.get("FLEXAIDDS_LOG_DIR", str(Path.home() / ".shannon")),
-        )
-    )
-    return base / "pets"
+    return pet_paths.agent_memory_root()
 
 
 @dataclass(frozen=True)

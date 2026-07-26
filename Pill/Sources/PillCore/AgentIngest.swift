@@ -648,14 +648,12 @@ public enum AgentAppMapper {
 // MARK: - Pet filesystem (Swift, no Python required)
 
 public enum PetBootstrap {
-    public static var shannonHome: URL {
-        if let env = ProcessInfo.processInfo.environment["SHANNON_LOG_DIR"], !env.isEmpty {
-            return URL(fileURLWithPath: env, isDirectory: true)
-        }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".shannon")
-    }
+    /// Shannon home for registry / logs (`PetPaths.shannonHome`).
+    public static var shannonHome: URL { PetPaths.shannonHome() }
 
-    public static var petsRoot: URL { shannonHome.appendingPathComponent("pets", isDirectory: true) }
+    /// Per-agent memory root — same policy as Python `pet_manager` / `PetPaths`.
+    /// Defaults to `~/.shannon/pets`; under `$SHANNON_PETS` becomes `$SHANNON_PETS/agents`.
+    public static var petsRoot: URL { PetPaths.agentMemoryRoot() }
     public static var registryURL: URL { shannonHome.appendingPathComponent("agents.json") }
 
     /// Ensure pet directory layout exists. Returns (path, createdNew).

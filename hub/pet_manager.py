@@ -2,11 +2,15 @@
 """
 pet_manager.py — Shannon Hub Pet System (Python side)
 ======================================================
-Manages per-agent persistent identity under ~/.shannon/pets/{agent_id}/.
+Manages per-agent persistent identity under the unified agent-memory root
+(see pet_paths.py / SHANNON_PETS).
+
+Default: ~/.shannon/pets/{agent_id}/
+With SHANNON_PETS: $SHANNON_PETS/agents/{agent_id}/
 
 Directory layout per agent
 --------------------------
-  ~/.shannon/pets/{agent_id}/
+  <agents-root>/{agent_id}/
       memory.md      — accumulated knowledge, past results, hypotheses
       config.json    — behavioural preferences, voice settings, thresholds
       history.jsonl  — per-turn messages, decisions, entropy scores
@@ -45,12 +49,23 @@ from pathlib import Path
 from typing import Optional
 
 # ── Configuration ─────────────────────────────────────────────────────────────
+# Agent memory path shares policy with Codex packages via pet_paths
+# (SHANNON_PETS unified home → $SHANNON_PETS/agents; else ~/.shannon/pets).
 
-SHANNON_DIR: Path = Path(os.environ.get("SHANNON_LOG_DIR",
-    os.environ.get("FLEXAIDDS_LOG_DIR",
-    str(Path.home() / ".shannon"))))
-PETS_DIR: Path    = SHANNON_DIR / "pets"
-DB_PATH:  Path    = SHANNON_DIR / "agent_hub.db"
+try:
+    import pet_paths as _pet_paths
+except ImportError:  # pragma: no cover — flat script invocation edge
+    _pet_paths = None  # type: ignore
+
+if _pet_paths is not None:
+    SHANNON_DIR: Path = _pet_paths.shannon_home()
+    PETS_DIR: Path = _pet_paths.agent_memory_root()
+else:
+    SHANNON_DIR = Path(os.environ.get("SHANNON_LOG_DIR",
+        os.environ.get("FLEXAIDDS_LOG_DIR",
+        str(Path.home() / ".shannon"))))
+    PETS_DIR = SHANNON_DIR / "pets"
+DB_PATH: Path = SHANNON_DIR / "agent_hub.db"
 
 ALL_AGENTS = [
     "claude_code", "cowork", "dispatch", "science", "design",

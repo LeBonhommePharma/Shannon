@@ -44,6 +44,15 @@ public struct NowPlayingSnapshot: CloudSyncable, Codable, Hashable {
 
     public var isIdle: Bool { title.isEmpty && artist.isEmpty }
 
+    /// Empty media chrome on pad card / watch Now Playing (UX-029).
+    public static let idleTitle = "Nothing playing"
+
+    /// Title line for companion media chrome; idle placeholder when title empty.
+    public var displayTitle: String {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? Self.idleTitle : t
+    }
+
     /// 0.0...1.0 scrubber position.
     public var progress: Double {
         guard duration > 0 else { return 0 }

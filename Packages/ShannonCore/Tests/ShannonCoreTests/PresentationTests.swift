@@ -63,6 +63,62 @@ final class PresentationTests: XCTestCase {
         )
     }
 
+    /// UX-029: pad/watch empty media chrome share idleTitle / displayTitle.
+    func testNowPlayingDisplayTitleIdleAndTrack() {
+        XCTAssertEqual(NowPlayingSnapshot.idleTitle, "Nothing playing")
+        XCTAssertEqual(
+            NowPlayingSnapshot(title: "", artist: "").displayTitle,
+            NowPlayingSnapshot.idleTitle
+        )
+        XCTAssertEqual(
+            NowPlayingSnapshot(title: "   ", artist: "x").displayTitle,
+            NowPlayingSnapshot.idleTitle
+        )
+        XCTAssertEqual(
+            NowPlayingSnapshot(title: "Blue in Green", artist: "Miles").displayTitle,
+            "Blue in Green"
+        )
+    }
+
+    func testPadAndWatchWireNowPlayingIdleTitle() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let pad = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/NowPlayingCardView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            pad.contains("displayTitle") || pad.contains("NowPlayingSnapshot.idleTitle"),
+            "pad NowPlayingCardView must use displayTitle / idleTitle"
+        )
+        XCTAssertFalse(
+            pad.contains("\"Nothing playing\""),
+            "pad must not hard-code dual Nothing playing string"
+        )
+
+        let watch = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "watchOS/Sources/ShannonWatch/WatchRootView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            watch.contains("NowPlayingSnapshot.idleTitle"),
+            "watch Now Playing empty must use NowPlayingSnapshot.idleTitle"
+        )
+        XCTAssertFalse(
+            watch.contains("Text(\"Nothing playing\")"),
+            "watch must not hard-code dual Nothing playing Text"
+        )
+    }
+
     func testTimerRemainingNeverGoesNegative() {
         let expired = TimerState(label: "Tea", fireAt: fixedDate.addingTimeInterval(-90))
         XCTAssertEqual(expired.remaining(now: fixedDate), 0)

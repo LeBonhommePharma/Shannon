@@ -282,10 +282,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `HeadGestureCopy` + ConfirmationPromptView Approve/Deny; phone Label; ConfirmationAndVoiceTests.
 - **Priority:** P1
 
+### - [x] UX-029: Pad + watch Now Playing idle share NowPlayingSnapshot.idleTitle
+
+- **Why:** Pad `NowPlayingCardView` and watch media empty both hard-coded `"Nothing playing"` — dual empty-media chrome.
+- **Platforms:** iPadOS, watchOS
+- **Area:** `NowPlayingSnapshot`, `NowPlayingCardView`, `WatchRootView`
+- **First slice:** Core `idleTitle` / `displayTitle`; wire pad + watch; pure wiring test.
+- **Done:** `NowPlayingSnapshot.idleTitle` + `displayTitle`; pad/watch wired; PresentationTests.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 24):** `--quick` all PASS. Backlog empty after UX-028. Residual pad/watch dual `"Nothing playing"`. Claimed **UX-029**. Considered: widget docking `"Idle"` (leave); desktop `"Open in Shannon"` a11y brand (optional); watch `"No notifications"` / `"iPhone away"` (surface-specific). **No additional UX-0xx**.
 - **2026-07-26 (loop 23):** `--quick` all PASS. Backlog empty after UX-027. Residual Mac ConfirmationPrompt Yes/No vs gate Approve/Deny + dual gesture coaching. Claimed **UX-028**. Considered: widget docking `"Idle"` (leave); pad/watch `"Nothing playing"` dual (optional); desktop `"Open in Shannon"` a11y brand (optional). **No additional UX-0xx**.
 - **2026-07-26 (loop 22):** `--quick` all PASS. Backlog empty after UX-026. Residual Mac menu-bar `"Gate · approve"` dual + status-item a11y `"Shannon"`. Claimed **UX-027**. Considered: widget docking `"Idle"` (not brand/gate); `configurationDisplayName` catalog (leave); theme preview product chrome OK; phone head-gesture “Nod to confirm” (gesture copy, not primary Approve verb). **No additional UX-0xx**.
 - **2026-07-26 (loop 21):** `--quick` all PASS. Backlog empty after UX-025. Residual pad hub brand `"Shannon"` nav titles + unknown-agent fallbacks. Claimed **UX-026**. Considered: widget docking `"Idle"` (not brand); widget/complication `configurationDisplayName` (system catalog — leave); theme preview product chrome OK; Mac menu-bar symbol a11y `"Shannon"` (status item, not nav brand). **No additional UX-0xx**.

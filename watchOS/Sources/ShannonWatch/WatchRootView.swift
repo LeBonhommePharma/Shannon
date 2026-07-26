@@ -303,7 +303,8 @@ struct WatchNowPlayingView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.shannonPrimary)
             } else {
-                Text("Nothing playing")
+                // UX-029: idle chrome shares NowPlayingSnapshot.idleTitle (pad parity).
+                Text(NowPlayingSnapshot.idleTitle)
                     .font(.shannonCaption)
                     .foregroundStyle(Color.shannonTertiary)
             }

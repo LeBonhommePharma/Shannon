@@ -23,7 +23,8 @@ struct NowPlayingCardView: View {
                     .frame(width: isCompact ? 48 : 64, height: isCompact ? 48 : 64)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(media.title.isEmpty ? "Nothing playing" : media.title)
+                    // UX-029: idle chrome shares NowPlayingSnapshot.displayTitle.
+                    Text(media.displayTitle)
                         .shannonText(.shannonHeadline)
                         .lineLimit(1)
                     Text(media.artist)

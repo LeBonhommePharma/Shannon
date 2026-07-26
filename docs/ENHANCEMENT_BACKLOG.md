@@ -16,11 +16,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 ## P0 — correctness / dual-HUD risk
 
-### - [ ] ENH-001: Include gate activity in `SharedTelemetrySnapshot`
+### - [x] ENH-001: Include gate activity in `SharedTelemetrySnapshot`
 
 - **Why:** `SharedTelemetryBinding.primaryFocus` / `agentViews` call `AgentLiveSurfaceLogic` with **empty** `activity: []`, so multi-consumer identity tests and any future shared HUD path cannot agree with the live pill on tool lines (working “Editing …”). Pill + menu bar already pass `recentActivity` directly; the *shared* snapshot path is incomplete.
 - **Area:** `Pill/Sources/PillCore/SharedTelemetryBinding.swift`, `AgentActivityMonitor` capture site, `SharedTelemetryBindingTests`
 - **First slice:** Add `recentActivity: [GateDBReader.ActivityEvent]` to the snapshot; wire capture; pass into `resolve` / `primaryFocus`; extend agreement tests with a tool_call fixture.
+- **Done:** Snapshot + capture carry `recentActivity`; `agentViews`/`primaryFocus`/`displayEqual` use it; tool_call + republish tests added.
 - **Priority:** P0
 
 ### - [x] ENH-002: Fix Swift 6 `Sendable` capture warning in `ParityPanelModel.refresh`
@@ -171,7 +172,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-002: build clean (no Sendable self-capture warn); ShannonPill 32 pass; PillCore 808 pass, 1 skip |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-001: build clean; ShannonPill 32 pass; PillCore 810 pass, 1 skip |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `PYTHONPATH=python pytest tests/python/ -v` | 180 passed, 51 skipped (bare pytest needs path — see ENH-009) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

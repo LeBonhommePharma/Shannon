@@ -14,6 +14,8 @@ import Foundation
 public struct SharedTelemetrySnapshot: Sendable, Equatable {
     public var agents: [AgentActivitySnapshot]
     public var pendingAsks: [GateDBReader.PendingAsk]
+    /// Gate `agent_activity` rows — required so shared HUD matches live pill tool lines.
+    public var recentActivity: [GateDBReader.ActivityEvent]
     public var agentEntropy: [EntropyMeasurement]
     public var bridgeConnected: Bool
     /// Backend label only — synthetic backends remain visible but not measured.
@@ -28,6 +30,7 @@ public struct SharedTelemetrySnapshot: Sendable, Equatable {
     public init(
         agents: [AgentActivitySnapshot] = [],
         pendingAsks: [GateDBReader.PendingAsk] = [],
+        recentActivity: [GateDBReader.ActivityEvent] = [],
         agentEntropy: [EntropyMeasurement] = [],
         bridgeConnected: Bool = false,
         bridgeBackend: String? = nil,
@@ -39,6 +42,7 @@ public struct SharedTelemetrySnapshot: Sendable, Equatable {
     ) {
         self.agents = agents
         self.pendingAsks = pendingAsks
+        self.recentActivity = recentActivity
         self.agentEntropy = agentEntropy
         self.bridgeConnected = bridgeConnected
         self.bridgeBackend = bridgeBackend
@@ -57,6 +61,7 @@ public struct SharedTelemetrySnapshot: Sendable, Equatable {
     public static func capture(
         agents: [AgentActivitySnapshot],
         pendingAsks: [GateDBReader.PendingAsk],
+        recentActivity: [GateDBReader.ActivityEvent] = [],
         agentEntropy: [EntropyMeasurement],
         bridgeConnected: Bool,
         bridgeStatus: ShannonStatus?,
@@ -78,6 +83,7 @@ public struct SharedTelemetrySnapshot: Sendable, Equatable {
         return SharedTelemetrySnapshot(
             agents: agents,
             pendingAsks: pendingAsks,
+            recentActivity: recentActivity,
             agentEntropy: agentEntropy,
             bridgeConnected: bridgeConnected,
             bridgeBackend: status?.backend,
@@ -141,7 +147,7 @@ public enum SharedTelemetryBinding {
             let surface = AgentLiveSurfaceLogic.resolve(
                 agent: agent,
                 pendingAsks: snap.pendingAsks,
-                activity: [],
+                activity: snap.recentActivity,
                 now: now
             )
             let reading = EntropyProvenance.resolveForAgent(
@@ -250,6 +256,7 @@ public enum SharedTelemetryBinding {
     ) -> Bool {
         a.agents == b.agents
             && a.pendingAsks == b.pendingAsks
+            && a.recentActivity == b.recentActivity
             && a.agentEntropy == b.agentEntropy
             && a.bridgeConnected == b.bridgeConnected
             && a.bridgeBackend == b.bridgeBackend
@@ -267,7 +274,7 @@ public enum SharedTelemetryBinding {
         AgentLiveSurfaceLogic.primaryFocus(
             agents: snap.agents,
             pendingAsks: snap.pendingAsks,
-            activity: [],
+            activity: snap.recentActivity,
             now: now
         )
     }

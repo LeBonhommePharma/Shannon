@@ -211,4 +211,73 @@ final class SharedTelemetryBindingTests: XCTestCase {
         XCTAssertFalse(UICadence.shouldAllowTimerChromePaint(contentChanged: false))
         XCTAssertTrue(UICadence.shouldAllowTimerChromePaint(contentChanged: true))
     }
+
+    // MARK: - Gate activity on shared snapshot (ENH-001)
+
+    func testSharedPathSurfacesToolCallActivityLine() {
+        let edit = GateDBReader.ActivityEvent(
+            id: 1,
+            agentId: "claude_code",
+            at: now.addingTimeInterval(-2),
+            type: "tool_call",
+            label: "Edited lib/license/store.ts",
+            output: ""
+        )
+        let snap = SharedTelemetrySnapshot.capture(
+            agents: [agent(id: "claude_code", task: "Wiring license claim")],
+            pendingAsks: [],
+            recentActivity: [edit],
+            agentEntropy: [],
+            bridgeConnected: false,
+            bridgeStatus: nil,
+            gateAvailable: true,
+            scannedAt: now
+        )
+
+        let views = SharedTelemetryBinding.agentViews(in: snap, now: now)
+        let line = views["claude_code"]?.activityLine ?? ""
+        XCTAssertEqual(views["claude_code"]?.attention, .working)
+        XCTAssertTrue(
+            line.lowercased().contains("edit"),
+            "shared path must pass gate activity so tool lines match live pill; got \(line)"
+        )
+
+        // Multi-consumer identity on the activity-derived line.
+        let notch = SharedTelemetryBinding.agentViews(in: snap, now: now)
+        let menuBar = SharedTelemetryBinding.agentViews(in: snap, now: now)
+        XCTAssertEqual(notch["claude_code"]?.activityLine, menuBar["claude_code"]?.activityLine)
+        XCTAssertTrue(SharedTelemetryBinding.consumersAgree([snap, snap], now: now))
+
+        let focus = SharedTelemetryBinding.primaryFocus(in: snap, now: now) ?? ""
+        XCTAssertTrue(
+            focus.lowercased().contains("edit") || focus.contains("claude_code"),
+            "primaryFocus should reflect working tool surface; got \(focus)"
+        )
+    }
+
+    func testActivityChangeForcesPublish() {
+        let base = SharedTelemetrySnapshot.capture(
+            agents: [agent(id: "claude_code")],
+            pendingAsks: [],
+            recentActivity: [],
+            agentEntropy: [],
+            bridgeConnected: false,
+            bridgeStatus: nil,
+            gateAvailable: true,
+            scannedAt: now
+        )
+        var withTool = base
+        withTool.recentActivity = [
+            GateDBReader.ActivityEvent(
+                id: 2,
+                agentId: "claude_code",
+                at: now.addingTimeInterval(-1),
+                type: "tool_call",
+                label: "Edited store.ts",
+                output: ""
+            ),
+        ]
+        XCTAssertFalse(SharedTelemetryBinding.displayEqual(base, withTool))
+        XCTAssertTrue(SharedTelemetryBinding.shouldPublish(previous: base, next: withTool))
+    }
 }

@@ -1120,6 +1120,7 @@ public final class AgentActivityMonitor: ObservableObject {
         let joint = SharedTelemetrySnapshot.capture(
             agents: summary.agents,
             pendingAsks: pendingAsks,
+            recentActivity: recentActivity,
             agentEntropy: agentEntropy,
             bridgeConnected: false, // bridge is a separate object; consumers merge
             bridgeStatus: nil,

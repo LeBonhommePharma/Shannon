@@ -1,5 +1,6 @@
 import SwiftUI
 import PillCore
+import ShannonCore
 import AppKit
 
 // MARK: - GateAskCard
@@ -10,6 +11,8 @@ import AppKit
 /// or denying writes back over the gate socket via `GateApprovalClient`, using
 /// the row's own `interaction_id` — the gate matches on that id and will not
 /// clear the row for anything else.
+///
+/// **UX-003:** Approve/Deny + offline copy via `GateAskActionCopy` (shared with phone).
 struct GateAskCard: View {
     let ask: GateDBReader.PendingAsk
     /// True while this ask's approval is being written to the gate — buttons are
@@ -25,14 +28,22 @@ struct GateAskCard: View {
 
     private var style: AgentStyle { AgentStyleCatalog.style(for: ask.agentId) }
 
+    private var affordance: GateAskActionCopy.Affordance {
+        GateAskActionCopy.macGateAffordance(
+            gateAvailable: gateAvailable,
+            errorText: errorText
+        )
+    }
+
     var body: some View {
+        let a = affordance
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Text(style.emoji).font(.shannonMenuBody)
                 Text(style.displayName)
                     .font(.shannonMenuBody)
                     .foregroundStyle(style.palette.ink)
-                Text("needs approval")
+                Text(GateAskActionCopy.needsApproval)
                     .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonWarning)
                     .padding(.horizontal, 5)
@@ -47,16 +58,12 @@ struct GateAskCard: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let errorText {
-                Text(errorText)
+            if let status = a.statusMessage {
+                Text(status)
                     .font(.shannonMenuFootnote)
-                    .foregroundStyle(Color.shannonError)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if !gateAvailable {
-                Text("Hub offline — start the gate to approve from here")
-                    .font(.shannonMenuFootnote)
-                    .foregroundStyle(Color.shannonWarning)
+                    .foregroundStyle(
+                        errorText != nil ? Color.shannonError : Color.shannonWarning
+                    )
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -67,15 +74,25 @@ struct GateAskCard: View {
                 if isResolving {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Sending…")
+                    Text(GateAskActionCopy.sending)
                         .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonSecondary)
                     Spacer(minLength: 0)
                 } else {
-                    answerButton("Approve", systemImage: "checkmark", tint: .shannonSuccess) {
+                    answerButton(
+                        a.approveLabel,
+                        systemImage: "checkmark",
+                        tint: .shannonSuccess,
+                        enabled: a.canInteract
+                    ) {
                         onAnswer(true)
                     }
-                    answerButton("Deny", systemImage: "xmark", tint: .shannonError) {
+                    answerButton(
+                        a.denyLabel,
+                        systemImage: "xmark",
+                        tint: .shannonError,
+                        enabled: a.canInteract
+                    ) {
                         onAnswer(false)
                     }
                     Spacer(minLength: 0)
@@ -90,7 +107,11 @@ struct GateAskCard: View {
     }
 
     private func answerButton(
-        _ title: String, systemImage: String, tint: Color, action: @escaping () -> Void
+        _ title: String,
+        systemImage: String,
+        tint: Color,
+        enabled: Bool,
+        action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
@@ -99,11 +120,11 @@ struct GateAskCard: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
-            .background(Capsule().fill(gateAvailable ? tint : tint.opacity(0.4)))
+            .background(Capsule().fill(enabled ? tint : tint.opacity(0.4)))
             .foregroundStyle(.white)
         }
         .buttonStyle(.plain)
-        .disabled(!gateAvailable)
+        .disabled(!enabled)
         .help("\(title) this request — sends interaction_id \(ask.interactionId) to the gate")
         .onHover { h in
             if h { NSCursor.pointingHand.push() } else { NSCursor.pop() }

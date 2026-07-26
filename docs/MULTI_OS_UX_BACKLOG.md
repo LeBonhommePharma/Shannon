@@ -38,12 +38,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `CompanionEmptyStateCopy` in ShannonCore (idle vs hub offline titles/detail/chip/symbol); phone `EmptyStateView` + `DisconnectedPill` + pad `EmptyHubState` wired; orphan pad centre column passes `lastError`; pure + wiring tests.
 - **Priority:** P0
 
-### - [ ] UX-003: Approve/Deny primary action affordance parity (Mac ask card ↔ phone)
+### - [x] UX-003: Approve/Deny primary action affordance parity (Mac ask card ↔ phone)
 
 - **Why:** Gate asks must surface the prompt + approve/deny (or honest “open Mac”) on phone the same conceptual way as `GateAskCard` / `GateInlineCard`.
 - **Platforms:** macOS, iOS
 - **Area:** Phone confirmation UI, `ShannonCore` confirmation models, Mac `GateAskCard`
 - **First slice:** Audit phone path vs Mac; fix missing disabled-state copy when gate unreachable.
+- **Done:** `GateAskActionCopy` (Approve/Deny verbs + companion/mac offline affordances); phone banner disables + status when hub offline/expired (no more dual-OS “Confirm”); Mac `GateAskCard` uses shared offline/action copy; pure + wiring tests.
 - **Priority:** P0
 
 ---
@@ -114,6 +115,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (loop 3):** `--quick` all PASS. Claimed **UX-003** (Approve/Deny + disabled hub-offline copy). Considered: pad attention rank (UX-004), watch idle face (UX-005), Reduce Motion (UX-007). **No new UX-0xx**.
 - **2026-07-26 (loop 2):** `--quick` all PASS. Claimed **UX-002** (shared fail-closed empty states). Considered: Confirm/Approve verb (UX-003), pad rank (UX-004), watch idle focus (UX-005). **No new UX-0xx**.
 - **2026-07-26 (loop):** `./scripts/test_apple_platforms.sh --quick` — macOS/iOS/iPad/watch builds green (unsigned). UX-001 residual dual wording closed (pad detail + phone/watch badges). Considered for new items: empty-state dual copy (phone “Can't reach iCloud” vs pad “Not syncing…”) → already **UX-002**; Confirm vs Approve verb drift → **UX-003**; pad sort vs Mac rank → **UX-004**. **No new UX-0xx** this fire.
 

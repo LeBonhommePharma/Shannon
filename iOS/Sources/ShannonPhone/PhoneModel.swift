@@ -86,7 +86,15 @@ public final class PhoneModel {
     /// tears the motion session down the moment it is answered — CoreMotion
     /// updates are a real battery cost to leave running.
     private func updateGestureArming(for snapshot: ShannonSnapshot) {
-        let awaiting = snapshot.isAwaitingConfirmation
+        // Arm only when a pending ask is answerable (not expired / not hub offline).
+        var awaiting = snapshot.isAwaitingConfirmation
+        if awaiting, let pending = snapshot.oldestPendingConfirmation() {
+            let a = GateAskActionCopy.companionAffordance(
+                pending: pending,
+                lastError: store.lastError
+            )
+            awaiting = a.canInteract
+        }
         guard awaiting != isAwaitingConfirmation else { return }
         isAwaitingConfirmation = awaiting
 
@@ -105,6 +113,12 @@ public final class PhoneModel {
         guard let pending = store.snapshot.oldestPendingConfirmation() else { return }
         // OS-agnostic contract: expired prompts refuse the answer (no haptic success).
         guard GlobalNotifyResponse.canAnswer(pending) else { return }
+        // UX-003: hub offline — do not fake success when CloudKit cannot write back.
+        let affordance = GateAskActionCopy.companionAffordance(
+            pending: pending,
+            lastError: store.lastError
+        )
+        guard affordance.canInteract else { return }
         let accepted = store.answer(pending, answer, source: source)
         guard accepted else { return }
         lastAnswer = (answer, Date())

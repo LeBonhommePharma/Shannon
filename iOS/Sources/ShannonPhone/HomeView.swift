@@ -82,7 +82,8 @@ struct HomeView: View {
                 if let pending = snapshot.oldestPendingConfirmation() {
                     ConfirmationBanner(
                         confirmation: pending,
-                        gesturesAvailable: model.isAwaitingConfirmation
+                        gesturesAvailable: model.isAwaitingConfirmation,
+                        lastError: model.store.lastError
                     ) { answer in
                         model.answer(answer, source: .tap)
                     }
@@ -140,13 +141,26 @@ struct ShannonPressStyle: ButtonStyle {
 /// rather than a full card in the list: a translucent `.ultraThinMaterial`
 /// surface pinned above the scroll content, with the question and two inline
 /// answers. It floats over status instead of pushing it around.
+///
+/// **UX-003:** Approve/Deny verbs + disabled copy when hub offline match Mac
+/// `GateAskCard` via `GateAskActionCopy` (fail-closed — no silent dead taps).
 @available(iOS 17.0, *)
 struct ConfirmationBanner: View {
     let confirmation: PendingConfirmation
     let gesturesAvailable: Bool
+    /// `ShannonStore.lastError` — when set, answers cannot write back.
+    var lastError: String? = nil
     var onAnswer: (ConfirmationAnswer) -> Void
 
+    private var affordance: GateAskActionCopy.Affordance {
+        GateAskActionCopy.companionAffordance(
+            pending: confirmation,
+            lastError: lastError
+        )
+    }
+
     var body: some View {
+        let a = affordance
         VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
             HStack(alignment: .top, spacing: ShannonSpacing.sm) {
                 Image(systemName: "questionmark.bubble.fill")
@@ -155,6 +169,9 @@ struct ConfirmationBanner: View {
                     .foregroundStyle(Color.shannonAccent)
 
                 VStack(alignment: .leading, spacing: 2) {
+                    Text(GateAskActionCopy.needsApproval)
+                        .font(.shannonCaption)
+                        .foregroundStyle(Color.shannonWarning)
                     Text(confirmation.question)
                         .font(.shannonCallout)
                         .foregroundStyle(Color.shannonPrimary)
@@ -169,16 +186,33 @@ struct ConfirmationBanner: View {
                 Spacer(minLength: 0)
             }
 
+            if let status = a.statusMessage {
+                Text(status)
+                    .font(.shannonCaption)
+                    .foregroundStyle(Color.shannonWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack(spacing: ShannonSpacing.sm) {
-                AnswerButton(title: "Deny", symbol: "xmark", tint: .shannonSecondary) {
+                AnswerButton(
+                    title: a.denyLabel,
+                    symbol: "xmark",
+                    tint: .shannonSecondary,
+                    enabled: a.canInteract
+                ) {
                     onAnswer(.denied)
                 }
-                AnswerButton(title: "Confirm", symbol: "checkmark", tint: .shannonAccent) {
+                AnswerButton(
+                    title: a.approveLabel,
+                    symbol: "checkmark",
+                    tint: .shannonAccent,
+                    enabled: a.canInteract
+                ) {
                     onAnswer(.confirmed)
                 }
             }
 
-            if gesturesAvailable {
+            if gesturesAvailable && a.canInteract {
                 Label("Nod to confirm · shake to deny", systemImage: "airpodspro")
                     .font(.shannonCaption)
                     .foregroundStyle(Color.shannonTertiary)
@@ -195,7 +229,13 @@ struct ConfirmationBanner: View {
         )
         .shadow(color: Color.shannonShadow.opacity(0.5), radius: 12, y: 4)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text("Confirmation required. \(confirmation.question)"))
+        .accessibilityLabel(
+            Text(
+                a.canInteract
+                    ? "\(GateAskActionCopy.needsApproval). \(confirmation.question)"
+                    : "\(GateAskActionCopy.needsApproval). \(confirmation.question). \(a.statusMessage ?? "")"
+            )
+        )
     }
 }
 
@@ -206,18 +246,23 @@ struct AnswerButton: View {
     let title: String
     let symbol: String
     let tint: Color
+    var enabled: Bool = true
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: symbol)
                 .font(.shannonCallout)
-                .foregroundStyle(tint)
+                .foregroundStyle(enabled ? tint : tint.opacity(0.4))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, ShannonSpacing.sm)
-                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: ShannonRadius.md))
+                .background(
+                    (enabled ? tint : tint.opacity(0.4)).opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: ShannonRadius.md)
+                )
         }
         .buttonStyle(ShannonPressStyle())
+        .disabled(!enabled)
     }
 }
 

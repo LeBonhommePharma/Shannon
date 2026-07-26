@@ -52,10 +52,6 @@ final class DesktopCompanionPanel: NSPanel {
 @MainActor
 final class DesktopCompanionModel: ObservableObject {
     @Published private(set) var presentation: DesktopCompanionPresentation
-    /// How many agents are in the desktop cycle set (top N busy).
-    @Published private(set) var cycleCount: Int = 0
-    /// Current slot within the cycle set (0-based).
-    @Published private(set) var selectedIndex: Int = 0
 
     private let activity: AgentActivityMonitor
     private let bridge: ShannonBridge
@@ -63,8 +59,6 @@ final class DesktopCompanionModel: ObservableObject {
     /// Adaptive sleepy poll (O1) — not the fixed 2 s historical tick.
     private var pollCancellable: AnyCancellable?
     private var currentPollInterval: TimeInterval?
-    /// Sticky agent id so a refresh keeps the same pet when the roster reorders.
-    private var selectedAgentId: String?
 
     /// Last scheduled wall-timer interval (tests / diagnostics).
     var scheduledPollIntervalForTesting: TimeInterval? { currentPollInterval }
@@ -72,16 +66,7 @@ final class DesktopCompanionModel: ObservableObject {
     init(activity: AgentActivityMonitor, bridge: ShannonBridge) {
         self.activity = activity
         self.bridge = bridge
-        let built = Self.makePresentation(
-            activity: activity,
-            bridge: bridge,
-            preferredId: nil,
-            fallbackIndex: 0
-        )
-        self.presentation = built.presentation
-        self.selectedIndex = built.selectedIndex
-        self.cycleCount = built.cycleCount
-        self.selectedAgentId = built.presentation.state?.id
+        self.presentation = Self.makePresentation(activity: activity, bridge: bridge)
         bind()
         ensurePollTimer()
     }
@@ -102,19 +87,14 @@ final class DesktopCompanionModel: ObservableObject {
                 DispatchQueue.main.async { self?.refresh() }
             }
             .store(in: &cancellables)
+
     }
 
     func refresh() {
-        apply(
-            Self.makePresentation(
-                activity: activity,
-                bridge: bridge,
-                preferredId: selectedAgentId,
-                fallbackIndex: selectedIndex
-            )
-        )
+        presentation = Self.makePresentation(activity: activity, bridge: bridge)
         ensurePollTimer()
     }
+
 
     /// Schedule / reschedule the sleepy poll from pure cadence policy.
     private func ensurePollTimer() {
@@ -129,45 +109,10 @@ final class DesktopCompanionModel: ObservableObject {
             .sink { [weak self] _ in self?.refresh() }
     }
 
-    /// Advance to the next top-N busy agent (click cycle). No-op when ≤1.
-    func cycleToNext() {
-        let built = Self.makePresentation(
-            activity: activity,
-            bridge: bridge,
-            preferredId: selectedAgentId,
-            fallbackIndex: selectedIndex
-        )
-        guard built.cycleCount > 1 else {
-            apply(built)
-            return
-        }
-        let next = DesktopCompanionCycle.nextIndex(
-            after: built.selectedIndex,
-            count: built.cycleCount
-        )
-        apply(
-            Self.makePresentation(
-                activity: activity,
-                bridge: bridge,
-                preferredId: nil,
-                fallbackIndex: next
-            )
-        )
-    }
-
-    private func apply(_ built: DesktopCompanionCycle.PresentResult) {
-        presentation = built.presentation
-        selectedIndex = built.selectedIndex
-        cycleCount = built.cycleCount
-        selectedAgentId = built.presentation.state?.id
-    }
-
     static func makePresentation(
         activity: AgentActivityMonitor,
-        bridge: ShannonBridge,
-        preferredId: String?,
-        fallbackIndex: Int
-    ) -> DesktopCompanionCycle.PresentResult {
+        bridge: ShannonBridge
+    ) -> DesktopCompanionPresentation {
         let summary = activity.summary
         let deltas = EntropyProvenance.companionDeltas(
             agentIds: summary.agents.map(\.id),
@@ -176,16 +121,11 @@ final class DesktopCompanionModel: ObservableObject {
             gate: activity.agentEntropy,
             gateDBAvailable: activity.gateDBAvailable
         )
-        let full = CompanionRoster.build(
-            from: summary,
+        return DesktopCompanionSelector.present(
+            summary: summary,
             entropyDeltas: deltas,
             pendingAsks: activity.pendingAsks,
             activity: activity.recentActivity
-        )
-        return DesktopCompanionCycle.present(
-            roster: full,
-            selectedIndex: fallbackIndex,
-            preferredId: preferredId
         )
     }
 }
@@ -198,7 +138,7 @@ final class DesktopCompanionWindowController {
     private var model: DesktopCompanionModel?
     private var cancellables = Set<AnyCancellable>()
     private var reassertTimer: Timer?
-    /// When false, space/screen reassert and capture flash must not resurrect the pet.
+    /// When false, space/screen reassert must not resurrect the pet.
     private var shouldBeVisible = false
 
     private let activity: AgentActivityMonitor
@@ -253,14 +193,16 @@ final class DesktopCompanionWindowController {
         let panel: DesktopCompanionPanel
         if let existing = self.panel {
             panel = existing
-            // Keep user drag position if already shown.
             if !existing.isVisible {
                 panel.setFrame(frame, display: true)
             }
         } else {
             panel = DesktopCompanionPanel(contentRect: frame)
             panel.appearance = NSAppearance(named: .darkAqua)
-            let root = DesktopCompanionHost(model: model, onActivate: { [weak self] in self?.performActivate() })
+            let root = DesktopCompanionHost(
+                model: model,
+                onActivate: { [weak self] in self?.performActivate() }
+            )
             let host = NSHostingView(rootView: root)
             host.frame = CGRect(origin: .zero, size: size)
             panel.contentView = host
@@ -354,37 +296,27 @@ struct DesktopCompanionHost: View {
     var body: some View {
         Group {
             if #available(macOS 14.0, *) {
-                DesktopCompanionView(
-                    presentation: model.presentation,
-                    cycleCount: model.cycleCount,
-                    selectedIndex: model.selectedIndex,
-                    onCycle: { model.cycleToNext() }
-                )
+                DesktopCompanionView(presentation: model.presentation)
             } else {
-                DesktopCompanionLegacyView(
-                    presentation: model.presentation,
-                    cycleCount: model.cycleCount,
-                    selectedIndex: model.selectedIndex,
-                    onCycle: { model.cycleToNext() }
-                )
+                DesktopCompanionLegacyView(presentation: model.presentation)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(8)
         .preferredColorScheme(.dark)
         .contentShape(Rectangle())
-        // E4: click bubble/pet expands notch and focuses matching agent row.
-        .onTapGesture { onActivate() }
+        .onTapGesture {
+            
+            onActivate()
+        }
         .accessibilityHint("Click to expand Shannon and focus this agent")
         .accessibilityAction(named: Text("Open in Shannon")) { onActivate() }
     }
 }
 
+/// Pre-macOS 14: SF Symbol pet + bubble (no Canvas companion art).
 struct DesktopCompanionLegacyView: View {
     let presentation: DesktopCompanionPresentation
-    var cycleCount: Int = 0
-    var selectedIndex: Int = 0
-    var onCycle: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
@@ -393,11 +325,6 @@ struct DesktopCompanionLegacyView: View {
                 .font(.system(size: 36))
                 .foregroundStyle(Color.shannonAccent)
                 .frame(width: 72, height: 72)
-            if cycleCount > 1 {
-                cycleDots(count: cycleCount, selected: selectedIndex)
-                    .contentShape(Rectangle())
-                    .onTapGesture { onCycle() }
-            }
         }
     }
 }
@@ -407,19 +334,11 @@ struct DesktopCompanionLegacyView: View {
 @available(macOS 14.0, *)
 struct DesktopCompanionView: View {
     let presentation: DesktopCompanionPresentation
-    var cycleCount: Int = 0
-    var selectedIndex: Int = 0
-    var onCycle: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
             bubbleChrome(presentation.bubble)
             petBody
-            if cycleCount > 1 {
-                cycleDots(count: cycleCount, selected: selectedIndex)
-                    .contentShape(Rectangle())
-                    .onTapGesture { onCycle() }
-            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
@@ -427,23 +346,17 @@ struct DesktopCompanionView: View {
 
     private var accessibilityLabel: String {
         let b = presentation.bubble
-        var label: String
         if let d = b.detail {
-            label = "\(b.text). \(d)"
-        } else {
-            label = b.text
+            return "\(b.text). \(d)"
         }
-        if cycleCount > 1 {
-            label += ". Agent \(selectedIndex + 1) of \(cycleCount)"
-        }
-        return label
+        return b.text
     }
 
-@ViewBuilder
+    @ViewBuilder
     private var petBody: some View {
         let size: CGFloat = 72
         if let state = presentation.state {
-            CompanionBadge(state: state, size: size, packagePetId: presentation.packagePetId)
+            CompanionBadge(state: state, size: size)
         } else if let kind = presentation.kind {
             CompanionView(
                 kind: kind,
@@ -465,21 +378,6 @@ struct DesktopCompanionView: View {
                 .frame(width: size, height: size)
         }
     }
-}
-
-// MARK: - Cycle indicator (top-N multi-agent)
-
-@ViewBuilder
-private func cycleDots(count: Int, selected: Int) -> some View {
-    HStack(spacing: 4) {
-        ForEach(0..<count, id: \.self) { i in
-            Circle()
-                .fill(i == selected ? Color.shannonAccent : Color.white.opacity(0.28))
-                .frame(width: 5, height: 5)
-        }
-    }
-    .padding(.trailing, 2)
-    .accessibilityHidden(true)
 }
 
 // MARK: - Shared bubble chrome

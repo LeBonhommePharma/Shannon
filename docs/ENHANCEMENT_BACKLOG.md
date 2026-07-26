@@ -185,7 +185,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-015: multi-agent collapsed “N agents ·” line; SessionContentPresenterTests green |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-016: CompanionRoster ≡ rankedAgents; CompanionRosterTests 6 pass |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `pytest tests/python/ -q` | 2026-07-26 ENH-009: 180 passed, 51 skipped (pythonpath wired; bare pytest works) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

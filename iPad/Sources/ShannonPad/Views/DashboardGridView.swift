@@ -381,6 +381,7 @@ private struct LinkOverlay: View {
 
 /// Shown when nothing has synced. Fail-closed (UX-002): idle vs hub offline
 /// use shared `CompanionEmptyStateCopy` so pad never looks healthy when sync is down.
+/// Status colour legend (UX-010 / UX-022) matches phone empty + Mac amber=ask / red=collapse.
 struct EmptyHubState: View {
     var error: String?
 
@@ -405,10 +406,17 @@ struct EmptyHubState: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
             }
+            // UX-022: same operator legend as phone EmptyStateView / Mac chrome.
+            Text(StatusLegendCopy.line)
+                .shannonText(.shannonCaption, color: .shannonTertiary)
+                .multilineTextAlignment(.center)
+                .accessibilityLabel(StatusLegendCopy.accessibilityLabel)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, ShannonSpacing.xxl)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(copy.title). \(copy.detail)")
+        .accessibilityLabel(
+            "\(copy.title). \(copy.detail). \(StatusLegendCopy.accessibilityLabel)"
+        )
     }
 }

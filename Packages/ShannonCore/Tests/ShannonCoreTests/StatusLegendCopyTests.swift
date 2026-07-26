@@ -52,4 +52,33 @@ final class StatusLegendCopyTests: XCTestCase {
             "phone must not hard-code dual-OS status legend"
         )
     }
+
+    /// UX-022: pad EmptyHubState must teach the same amber/red legend as phone/Mac.
+    func testPadEmptyHubWiresSharedLegend() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let pad = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/DashboardGridView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            pad.contains("StatusLegendCopy"),
+            "pad EmptyHubState must surface shared status legend"
+        )
+        XCTAssertTrue(
+            pad.contains("StatusLegendCopy.line"),
+            "pad EmptyHubState must reference StatusLegendCopy.line"
+        )
+        XCTAssertFalse(
+            pad.contains("\"Amber = approval needed"),
+            "pad must not hard-code dual-OS status legend"
+        )
+    }
 }

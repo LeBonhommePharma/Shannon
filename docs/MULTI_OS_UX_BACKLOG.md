@@ -219,10 +219,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** Detail blockedPrompt + Notification ConfirmationRow use companionAffordance; hub passes lastError; Core wiring test.
 - **Priority:** P1
 
+### - [x] UX-022: Pad empty hub shows StatusLegendCopy (phone / Mac parity)
+
+- **Why:** UX-010 put amber=approval · red=collapse on phone empty + Mac; pad `EmptyHubState` still omits `StatusLegendCopy` — dual mental-model gap.
+- **Platforms:** iPadOS (iOS / macOS reference)
+- **Area:** `DashboardGridView.EmptyHubState`, `StatusLegendCopy`
+- **First slice:** Footer legend + a11y; pure wiring test forbids pad-only omission.
+- **Done:** `EmptyHubState` footer + combined a11y; StatusLegendCopyTests pad wiring.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 17):** `--quick` all PASS. Backlog empty; pad empty missing StatusLegend. Claimed **UX-022**. Considered: widget `"Idle"` docking-empty (different context); watch face `"Sending answer…"` delivery narrative vs `GateAskActionCopy.sending`; PillView header `"Shannon"` quietShort family (optional). **No additional UX-0xx**.
 - **2026-07-26 (loop 16):** `--quick` all PASS. Backlog empty; residual pad detail/notification live Approve offline. Claimed **UX-021**. Considered: widget `"Idle"` docking-empty (different context); watch `"iPhone away"` gate chip (status narrative, not empty-roster dual); pad StatusLegend on empty (optional polish). **No additional UX-0xx**.
 - **2026-07-26 (loop 15):** `--quick` all PASS. Claimed P2 **UX-020** (watch offline empty). Considered: multi-OS dual primary verbs clean; backlog empty after this claim. **No new UX-0xx**.
 - **2026-07-26 (loop 14):** `--quick` all PASS. Claimed P1 **UX-019** (pad/watch pending badge elevate). Considered: UX-020 watch offline empty; residual dual primary verbs clean. **No new UX-0xx**.

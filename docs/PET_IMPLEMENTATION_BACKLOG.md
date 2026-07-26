@@ -69,11 +69,12 @@ Test baseline (must stay green while implementing):
   menu checkmark toggle; Settings toggle; launch honors preference; hide blocks
   reassert until show.
 
-- [ ] **E3 — Multi-agent desktop carousel or stack**  
+- [x] **E3 — Multi-agent desktop carousel or stack**  
   Observation: `DesktopCompanionSelector` shows only `roster.first` (working
   first). Secondary live agents are invisible on the floating surface (still on
   notch board).  
-  Work: click/cycle through roster, or small stack of badges for top N busy.
+  Work: click/cycle through roster, or small stack of badges for top N busy.  
+  **Done:** `DesktopCompanionCycle` pure helpers + selector extensions; `DesktopCompanionModel.cycleToNext` + dots/click; sticky agent id; unit tests.
 
 - [x] **E4 — Click bubble → expand notch / focus agent row**  
   Observation: bubble is status text only; non-goal excluded full Codex chat,
@@ -108,12 +109,18 @@ Test baseline (must stay green while implementing):
   2 s only within `nearSleepyWindow` of `sleepyAfter`; model reschedules on
   refresh; unit tests for interval selection + empty-roster quiet schedule.
 
-- [ ] **O2 — Cache `PetPackageResolver` results per process**  
+- [x] **O2 — Cache `PetPackageResolver` results per process**  
   Observation: `CompanionView.resolvePackageOnce` caches per view instance, but
   each new row re-hits disk; `list_pet_packages` / multi-surface may re-parse
   all roots.  
   Work: process-wide cache keyed by (petId, roots mtime) with invalidation on
-  path env change.
+  path env change.  
+  **Done:** `PackageResolveCache` on `PetPackageResolver` — key =
+  (petId, requireV2, roots paths, roots/package mtime, path-env fingerprint,
+  memory path); global wipe when path-env fingerprint changes; `clearResolveCache`
+  + hit/miss counters; pure cache tests in `PetPackageResolverCacheTests`.
+  `CompanionView.resolvePackageOnce` benefits via shared `resolve`.
+
 
 - [x] **O3 — Align Swift package roots with Python repo mirrors intentionally**  
   Observation: Python `package_roots` appends `hub/` and `repo/pets` mirrors;

@@ -282,6 +282,32 @@ final class DesktopCompanionSelectorTests: XCTestCase {
         let p = DesktopCompanionSelector.present(roster: [], packagePetId: "shannon")
         XCTAssertEqual(p.packagePetId, "shannon")
     }
+
+    func testPackagePetIdMapsFromPrimaryAgent() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(id: "chatgpt", status: .idle, presence: .observed, secondsAgo: 90, now: now),
+            snap(id: "grok_build", status: .active, presence: .live, secondsAgo: 1, now: now),
+        ], scannedAt: now)
+        let p = DesktopCompanionSelector.present(summary: summary, now: now)
+        XCTAssertEqual(p.state?.id, "grok_build")
+        XCTAssertEqual(p.packagePetId, "grok")
+    }
+
+    func testPackagePetIdOverrideWinsOverAgentMap() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(id: "grok_build", status: .active, presence: .live, secondsAgo: 1, now: now),
+        ], scannedAt: now)
+        let p = DesktopCompanionSelector.present(summary: summary, now: now, packagePetId: "firebear")
+        XCTAssertEqual(p.packagePetId, "firebear")
+    }
+
+    func testResolvePackagePetIdHelper() {
+        XCTAssertEqual(DesktopCompanionSelector.resolvePackagePetId(agentId: nil, packagePetId: nil), PetPackageResolver.defaultPetId)
+        XCTAssertEqual(DesktopCompanionSelector.resolvePackagePetId(agentId: "cursor", packagePetId: nil), "bonhomme-cat")
+        XCTAssertEqual(DesktopCompanionSelector.resolvePackagePetId(agentId: "cursor", packagePetId: "shannon"), "shannon")
+    }
 }
 
 // MARK: - Refresh cadence (pure, O1)
@@ -385,11 +411,9 @@ final class DesktopCompanionRefreshCadenceTests: XCTestCase {
     }
 
     func testSecondsUntilSleepy() {
-        XCTAssertEqual(
-            DesktopCompanionRefreshCadence.secondsUntilSleepy(secondsSinceSeen: 0),
-            CompanionMood.sleepyAfter,
-            accuracy: 1e-9
-        )
+        let remaining = DesktopCompanionRefreshCadence.secondsUntilSleepy(secondsSinceSeen: 0)
+        XCTAssertNotNil(remaining)
+        XCTAssertEqual(remaining!, CompanionMood.sleepyAfter, accuracy: 1e-9)
         XCTAssertNil(
             DesktopCompanionRefreshCadence.secondsUntilSleepy(
                 secondsSinceSeen: CompanionMood.sleepyAfter + 1

@@ -35,7 +35,10 @@ jobs:
         run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
 
       - name: Test
-        run: cd build && ctest --output-on-failure
+        # Hosted runners often advertise AVX512F in CPUID but still SIGILL on
+        # the first _mm512_* op (hypervisor / microcode). Skip those accuracy
+        # suites in CI; local machines with real AVX512 still run them via full ctest.
+        run: cd build && ctest --output-on-failure -E 'Avx512'
 
   # ── Python package install + tests (multi-OS / multi-version) ────────────
   python:

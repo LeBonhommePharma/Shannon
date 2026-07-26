@@ -118,7 +118,25 @@ final class SessionUIWiringTests: XCTestCase {
         )
         XCTAssertEqual(
             SessionContentPresenter.collapsedStatusLine(agents: [idle], now: now),
-            "Shannon · idle"
+            CompanionFocusCopy.quietFace
+        )
+    }
+
+    /// UX-017: presenter must not hard-code dual quiet-face string.
+    func testCollapsedStatusLineWiresCompanionFocusCopyQuietFace() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/PillCore/SessionContentPresenter.swift")
+        let text = try String(contentsOf: root, encoding: .utf8)
+        XCTAssertTrue(
+            text.contains("CompanionFocusCopy.quietFace"),
+            "collapsedStatusLine must use CompanionFocusCopy.quietFace"
+        )
+        XCTAssertFalse(
+            text.contains("return \"Shannon · idle\""),
+            "presenter must not hard-code dual quiet-face literal"
         )
     }
 }

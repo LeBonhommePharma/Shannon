@@ -92,6 +92,31 @@ final class CompanionFocusCopyTests: XCTestCase {
         XCTAssertTrue(CompanionFocusCopy.quietFace.contains("idle"))
     }
 
+    /// UX-017: Mac collapsed quiet path must share Core quietFace (not dual literal).
+    func testMacCollapsedStatusWiresQuietFace() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let presenter = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Pill/Sources/PillCore/SessionContentPresenter.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            presenter.contains("CompanionFocusCopy.quietFace"),
+            "Mac collapsedStatusLine must use CompanionFocusCopy.quietFace"
+        )
+        XCTAssertFalse(
+            presenter.contains("return \"Shannon · idle\""),
+            "Mac presenter must not hard-code dual quiet-face literal"
+        )
+    }
+
     func testWatchFaceWiresCompanionFocusCopy() {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

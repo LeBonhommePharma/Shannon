@@ -222,7 +222,7 @@ final class SessionContentPresenterTests: XCTestCase {
     func testCollapsedStatusIdleIsQuiet() {
         let a = agent(id: "codex", name: "Codex", status: .idle, presence: .live, task: "")
         let line = SessionContentPresenter.collapsedStatusLine(agents: [a], now: now)
-        XCTAssertEqual(line, "Shannon · idle")
+        XCTAssertEqual(line, CompanionFocusCopy.quietFace)
     }
 
     func testCollapsedActiveCountAndUsageChip() {
@@ -486,7 +486,7 @@ final class SessionContentPresenterTests: XCTestCase {
             focus.lowercased().contains("edit") || focus.contains("a"),
             focus
         )
-        XCTAssertNotEqual(focus, "Shannon · idle")
+        XCTAssertNotEqual(focus, CompanionFocusCopy.quietFace)
     }
 
     /// ENH-015: several working agents → "N agents ·" + primary activity fragment.
@@ -729,7 +729,7 @@ final class SessionContentPresenterTests: XCTestCase {
         )
         XCTAssertEqual(
             SessionContentPresenter.collapsedStatusLine(agents: [a], now: now),
-            "Shannon · idle"
+            CompanionFocusCopy.quietFace
         )
     }
 

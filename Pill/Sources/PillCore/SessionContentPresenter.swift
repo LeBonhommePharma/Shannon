@@ -1,4 +1,5 @@
 import Foundation
+import ShannonCore
 
 // MARK: - Session content card (AgentNotch-class field assembly)
 
@@ -430,7 +431,7 @@ public enum SessionContentPresenter {
     /// Collapsed-pill status copy: primary focus, multi-agent count hint, or quiet idle.
     ///
     /// Returns the primary focus line only (chips are separate UI). When nothing
-    /// actionable is happening, returns `"Shannon · idle"`.
+    /// actionable is happening, returns ``CompanionFocusCopy/quietFace`` (watch face parity).
     ///
     /// **Multi-agent (ENH-015):** when `collapsedActiveCount > 1` and the primary
     /// attention is working or finished (never needs-you), re-prefix the real
@@ -450,7 +451,8 @@ public enum SessionContentPresenter {
             usageByAgent: usageByAgent,
             now: now
         ) else {
-            return "Shannon · idle"
+            // UX-017: same quiet token as watch face / complications.
+            return CompanionFocusCopy.quietFace
         }
 
         let activeCount = collapsedActiveCount(

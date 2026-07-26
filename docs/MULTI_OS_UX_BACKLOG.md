@@ -172,10 +172,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `CompanionBoardDensity` + `companionBoardDensity(from:)` / `companionBoardDensityByAgent`; row shows meta + usage; PillView passes `densityByAgent` from `listedAgentSurfaces`; pure + structural tests.
 - **Priority:** P0
 
+### - [x] UX-017: Mac collapsed quiet idle uses CompanionFocusCopy.quietFace
+
+- **Why:** Watch face uses Core `CompanionFocusCopy.quietFace` (`"Shannon · idle"`); Mac `SessionContentPresenter.collapsedStatusLine` hard-codes the same string — dual token drift risk.
+- **Platforms:** macOS (watchOS reference)
+- **Area:** `Pill/Sources/PillCore/SessionContentPresenter.swift`, `CompanionFocusCopy`
+- **First slice:** Return `CompanionFocusCopy.quietFace` on quiet path; pure tests assert Core token; wiring test forbids hard-coded literal in presenter.
+- **Done:** `collapsedStatusLine` quiet path → `CompanionFocusCopy.quietFace`; Core + SessionUIWiring + presenter tests forbid dual literal.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 12):** `--quick` all PASS. Backlog empty after UX-016. Residual dual quiet idle: Mac collapsedStatusLine hard-codes `"Shannon · idle"`. Claimed **UX-017**. Considered: widget `"Idle"` docking-empty (different context); PillView fallback `"Shannon"` quietShort family (optional follow-up); dual Approve/empty/status legend closed. **No additional UX-0xx**.
 - **2026-07-26 (multi-OS optimize):** UX-001…015 closed. Residual skeptic gap: macOS 14+ CompanionBoard density dead vs listedSurfaces/agentRow. Claimed **UX-016**. Dual-copy primary verbs clean after UX-014/015. **No additional UX-0xx** this fire pending multi-platform re-check.
 - **2026-07-26 (loop 11):** `--quick` all PASS. Backlog empty; residual dual empty idle title on Mac pill + menu-bar. Claimed **UX-015**. Considered: SessionContentPresenter hard-coded `"Shannon · idle"` vs `CompanionFocusCopy.quietFace` (follow-up, not this fire); widget `"Idle"` docking-empty (different context); watch delivery prose (OK). **No additional UX-0xx**.
 - **2026-07-26 (loop 10):** `--quick` all PASS. Backlog empty; watch gate/empty dual wording. Claimed **UX-014**. Considered: face “Sending answer…” delivery prose (OK as status narrative, not primary verb); Mac “No agents running” already matches Core idleTitle. **No additional UX-0xx**.

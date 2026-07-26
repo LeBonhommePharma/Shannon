@@ -165,7 +165,7 @@ final class AgentNotchAgentPeekParityTests: XCTestCase {
         )
         // Multi-agent density: "N agents · <activity>" when primary is working.
         XCTAssertTrue(line.hasPrefix("3 agents · ") || line.contains(" · "), line)
-        XCTAssertNotEqual(line, "Shannon · idle")
+        XCTAssertNotEqual(line, CompanionFocusCopy.quietFace)
         XCTAssertFalse(line.isEmpty)
 
         let cards = SessionContentPresenter.cardsFromAgents(
@@ -226,7 +226,7 @@ final class AgentNotchAgentPeekParityTests: XCTestCase {
         )
         XCTAssertEqual(
             SessionContentPresenter.collapsedStatusLine(agents: [a], now: now),
-            "Shannon · idle"
+            CompanionFocusCopy.quietFace
         )
         XCTAssertNil(SessionContentPresenter.collapsedUsageChip(
             agents: [a],

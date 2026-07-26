@@ -40,6 +40,46 @@ final class PillChromePolicyTests: XCTestCase {
         XCTAssertFalse(PillChromePolicy.allowsForeverPulse(reduceMotion: true))
     }
 
+    /// Menu-bar ask glyph: solid amber under Reduce Motion; dim half-cycle otherwise.
+    func testMenuBarAskPulseAlphaHonorsReduceMotion() {
+        XCTAssertEqual(
+            PillChromePolicy.menuBarAskPulseAlpha(reduceMotion: true, phaseOn: false),
+            1,
+            accuracy: 1e-9
+        )
+        XCTAssertEqual(
+            PillChromePolicy.menuBarAskPulseAlpha(reduceMotion: true, phaseOn: true),
+            1,
+            accuracy: 1e-9,
+            "Reduce Motion must not dim the ask glyph"
+        )
+        XCTAssertEqual(
+            PillChromePolicy.menuBarAskPulseAlpha(reduceMotion: false, phaseOn: false),
+            1,
+            accuracy: 1e-9
+        )
+        XCTAssertEqual(
+            PillChromePolicy.menuBarAskPulseAlpha(reduceMotion: false, phaseOn: true),
+            PillChromePolicy.menuBarAskPulseDimAlpha,
+            accuracy: 1e-9
+        )
+        XCTAssertGreaterThan(PillChromePolicy.menuBarAskPulseDimAlpha, 0.2)
+        XCTAssertLessThan(PillChromePolicy.menuBarAskPulseDimAlpha, 0.9)
+    }
+
+    func testShouldRunMenuBarAskPulseMatchesForeverPulsePolicy() {
+        XCTAssertTrue(PillChromePolicy.shouldRunMenuBarAskPulse(reduceMotion: false))
+        XCTAssertFalse(PillChromePolicy.shouldRunMenuBarAskPulse(reduceMotion: true))
+        XCTAssertEqual(
+            PillChromePolicy.shouldRunMenuBarAskPulse(reduceMotion: false),
+            PillChromePolicy.allowsForeverPulse(reduceMotion: false)
+        )
+        XCTAssertEqual(
+            PillChromePolicy.shouldRunMenuBarAskPulse(reduceMotion: true),
+            PillChromePolicy.allowsForeverPulse(reduceMotion: true)
+        )
+    }
+
     func testStatusLegendTeachesAmberAndRed() {
         let s = PillChromePolicy.statusLegend.lowercased()
         XCTAssertTrue(s.contains("amber"), PillChromePolicy.statusLegend)

@@ -31,20 +31,27 @@ public enum MenuBarTitleInk: Sendable {
         public var a: Double
 
         public init(r: Double, g: Double, b: Double, a: Double = 1) {
-            self.r = r
-            self.g = g
-            self.b = b
-            self.a = a
+            // Fail-closed channel clamp: non-finite → 0 so WCAG math and NSColor
+            // never see NaN/Inf from a bad caller or corrupted blend.
+            self.r = Self.clamp01(r)
+            self.g = Self.clamp01(g)
+            self.b = Self.clamp01(b)
+            self.a = Self.clamp01(a)
         }
 
         /// Relative luminance (WCAG), 0 = black, 1 = white.
         public var relativeLuminance: Double {
             func lin(_ c: Double) -> Double {
-                let x = max(0, min(1, c))
+                let x = Self.clamp01(c)
                 return x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4)
             }
             let R = lin(r), G = lin(g), B = lin(b)
             return 0.2126 * R + 0.7152 * G + 0.0722 * B
+        }
+
+        private static func clamp01(_ v: Double) -> Double {
+            guard v.isFinite else { return 0 }
+            return min(1, max(0, v))
         }
     }
 

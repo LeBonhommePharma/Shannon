@@ -36,6 +36,8 @@ final class MenuBarController: NSObject {
     /// NSStatusItem that has not changed is pure waste (and makes the tint
     /// flicker under the pulse animation).
     private var lastRendered: String?
+    /// Re-sync ask pulse when the user toggles Reduce Motion mid-session.
+    private var accessibilityObserver: NSObjectProtocol?
 
     var onShowPill: (() -> Void)?
     var onReposition: (() -> Void)?
@@ -94,6 +96,19 @@ final class MenuBarController: NSObject {
         t.tolerance = min(0.12, UICadence.menuBarBackupInterval * 0.35)
         RunLoop.main.add(t, forMode: .common)
         timer = t
+
+        // Accessibility: Reduce Motion must stop the forever ask pulse without a relaunch.
+        accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                // Force a re-render so solid vs pulsed ask attention re-evaluates.
+                self?.lastRendered = nil
+                self?.refresh()
+            }
+        }
     }
 
     /// Called from `SystemResourceMonitor.onSnapshotPublished` for sample-aligned glyph.
@@ -114,6 +129,10 @@ final class MenuBarController: NSObject {
     func stop() {
         timer?.invalidate(); timer = nil
         stopPulse()
+        if let accessibilityObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(accessibilityObserver)
+            self.accessibilityObserver = nil
+        }
         popover?.performClose(nil); popover = nil
         if let item { NSStatusBar.system.removeStatusItem(item) }
         item = nil
@@ -217,10 +236,11 @@ final class MenuBarController: NSObject {
                 text: pendingCount > 1 ? " \(pendingCount)" : "",
                 role: .ask
             )
+            // Solid amber attention always; pulse only when motion is allowed.
             button.contentTintColor = Self.nsColor(role: .ask)
             button.setAccessibilityLabel(
                 "Shannon: \(pendingCount) gate approval\(pendingCount > 1 ? "s" : "") pending")
-            startPulse()
+            syncAskAttentionPulse()
             return
         }
         stopPulse()
@@ -365,17 +385,39 @@ final class MenuBarController: NSObject {
         return lines.joined(separator: "\n")
     }
 
-    /// Subtle attention pulse while a gate waits: the tint breathes between
-    /// full and dimmed amber. Runs only in the pending state — no idle CPU.
+    /// Ask attention on the status item: solid amber under Reduce Motion
+    /// (matches notch HUD / `PillChromePolicy.allowsForeverPulse`); otherwise a
+    /// subtle full↔dim breath so pending gates stay visible without thrashing.
+    private func syncAskAttentionPulse() {
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if PillChromePolicy.shouldRunMenuBarAskPulse(reduceMotion: reduceMotion) {
+            startPulse()
+        } else {
+            stopPulse()
+            item?.button?.contentTintColor = Self.nsColor(role: .ask)
+        }
+    }
+
+    /// Subtle attention pulse while a gate waits. Only started when policy allows.
     private func startPulse() {
         guard pulseTimer == nil else { return }
         let full = Self.nsColor(role: .ask)
-        let dim = full.withAlphaComponent(0.45)
         let t = Timer(timeInterval: 0.6, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let button = self.item?.button else { return }
+                // Mid-session Reduce Motion toggle: drop to solid amber immediately.
+                let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                if !PillChromePolicy.shouldRunMenuBarAskPulse(reduceMotion: reduceMotion) {
+                    self.stopPulse()
+                    button.contentTintColor = full
+                    return
+                }
                 self.pulsePhase.toggle()
-                button.contentTintColor = self.pulsePhase ? dim : full
+                let alpha = PillChromePolicy.menuBarAskPulseAlpha(
+                    reduceMotion: false,
+                    phaseOn: self.pulsePhase
+                )
+                button.contentTintColor = full.withAlphaComponent(alpha)
             }
         }
         RunLoop.main.add(t, forMode: .common)

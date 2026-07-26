@@ -77,4 +77,22 @@ final class MenuBarTitleInkTests: XCTestCase {
         // Low is not full emergency red.
         XCTAssertLessThan(low.r - max(low.g, low.b), 0.2)
     }
+
+    /// Non-finite channels must not poison WCAG luminance or NSColor construction.
+    func testSRGBInitClampsNonFiniteAndOutOfRange() {
+        let nanInk = MenuBarTitleInk.SRGB(r: .nan, g: .infinity, b: -.infinity, a: .nan)
+        XCTAssertEqual(nanInk.r, 0, accuracy: 1e-12)
+        XCTAssertEqual(nanInk.g, 0, accuracy: 1e-12)
+        XCTAssertEqual(nanInk.b, 0, accuracy: 1e-12)
+        XCTAssertEqual(nanInk.a, 0, accuracy: 1e-12)
+        XCTAssertTrue(nanInk.relativeLuminance.isFinite)
+        XCTAssertEqual(nanInk.relativeLuminance, 0, accuracy: 1e-12)
+
+        let high = MenuBarTitleInk.SRGB(r: 2, g: -0.5, b: 0.5, a: 1.5)
+        XCTAssertEqual(high.r, 1, accuracy: 1e-12)
+        XCTAssertEqual(high.g, 0, accuracy: 1e-12)
+        XCTAssertEqual(high.b, 0.5, accuracy: 1e-12)
+        XCTAssertEqual(high.a, 1, accuracy: 1e-12)
+        XCTAssertTrue(high.relativeLuminance.isFinite)
+    }
 }

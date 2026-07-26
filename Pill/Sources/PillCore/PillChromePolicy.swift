@@ -33,6 +33,28 @@ public enum PillChromePolicy {
         !reduceMotion
     }
 
+    /// Dim alpha for the menu-bar ask glyph pulse half-cycle (production default).
+    public static let menuBarAskPulseDimAlpha: Double = 0.45
+
+    /// Menu-bar status-item ask attention alpha.
+    ///
+    /// Under Reduce Motion the glyph stays solid full-strength amber (attention
+    /// without a forever pulse). When motion is allowed, `phaseOn` toggles the
+    /// dim half of the breath so AppKit can apply `withAlphaComponent`.
+    public static func menuBarAskPulseAlpha(
+        reduceMotion: Bool,
+        phaseOn: Bool
+    ) -> Double {
+        if !allowsForeverPulse(reduceMotion: reduceMotion) { return 1 }
+        return phaseOn ? menuBarAskPulseDimAlpha : 1
+    }
+
+    /// Whether the menu-bar should run a repeating ask pulse timer.
+    /// Solid tint is still applied when this is false.
+    public static func shouldRunMenuBarAskPulse(reduceMotion: Bool) -> Bool {
+        allowsForeverPulse(reduceMotion: reduceMotion)
+    }
+
     /// Idle waveform TimelineView motion — off under Reduce Motion or recessive quiet.
     public static func shouldAnimateWaveform(reduceMotion: Bool, isRecessive: Bool) -> Bool {
         !reduceMotion && !isRecessive

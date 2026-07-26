@@ -12,12 +12,15 @@ public struct CodexSessionReader: SessionProviding {
     public var archivedRoot: URL?
     public var maxSessions: Int
     public var maxLinesPerFile: Int
+    /// Optional override for branch resolution (tests inject; production uses git).
+    public var resolveBranch: @Sendable (String?) -> String?
 
     public init(
         sessionsRoot: URL? = nil,
         archivedRoot: URL? = nil,
         maxSessions: Int = 24,
-        maxLinesPerFile: Int = 300
+        maxLinesPerFile: Int = 300,
+        resolveBranch: (@Sendable (String?) -> String?)? = nil
     ) {
         let home = FileManager.default.homeDirectoryForCurrentUser
         self.sessionsRoot = sessionsRoot
@@ -25,6 +28,7 @@ public struct CodexSessionReader: SessionProviding {
         self.archivedRoot = archivedRoot
         self.maxSessions = max(0, maxSessions)
         self.maxLinesPerFile = max(1, maxLinesPerFile)
+        self.resolveBranch = resolveBranch ?? { GitBranchProbe.branch(for: $0) }
     }
 
     public func fetchSessions(now: Date) -> [AgentSession] {
@@ -33,7 +37,8 @@ public struct CodexSessionReader: SessionProviding {
             archivedRoot: archivedRoot,
             now: now,
             maxSessions: maxSessions,
-            maxLinesPerFile: maxLinesPerFile
+            maxLinesPerFile: maxLinesPerFile,
+            resolveBranch: resolveBranch
         )
     }
 
@@ -42,22 +47,36 @@ public struct CodexSessionReader: SessionProviding {
         archivedRoot: URL? = nil,
         now: Date = Date(),
         maxSessions: Int = 24,
-        maxLinesPerFile: Int = 300
+        maxLinesPerFile: Int = 300,
+        resolveBranch: (@Sendable (String?) -> String?)? = nil
     ) -> [AgentSession] {
+        let branchOf: @Sendable (String?) -> String? =
+            resolveBranch ?? { GitBranchProbe.branch(for: $0) }
         var files: [URL] = []
         files.append(contentsOf: collectJSONL(under: sessionsRoot))
         if let archivedRoot {
             files.append(contentsOf: collectJSONL(under: archivedRoot))
         }
         var sessions: [AgentSession] = []
+        // Cache branch per cwd across rollouts in the same collect pass.
+        var branchCache: [String: String?] = [:]
         for file in files {
-            if let s = parseRollout(
+            guard var s = parseRollout(
                 url: file,
                 now: now,
                 maxLines: maxLinesPerFile
-            ) {
-                sessions.append(s)
+            ) else { continue }
+            // Resolve after parse (cwd only known from JSONL; never inside line loop).
+            if let cwd = s.cwd {
+                if let cached = branchCache[cwd] {
+                    s.branch = cached
+                } else {
+                    let b = branchOf(cwd)
+                    branchCache[cwd] = b
+                    s.branch = b
+                }
             }
+            sessions.append(s)
         }
         sessions.sort { $0.updatedAt > $1.updatedAt }
         if sessions.count > maxSessions {
@@ -90,7 +109,8 @@ public struct CodexSessionReader: SessionProviding {
     public static func parseRollout(
         url: URL,
         now: Date,
-        maxLines: Int
+        maxLines: Int,
+        branch: String? = nil
     ) -> AgentSession? {
         guard let data = try? Data(contentsOf: url), !data.isEmpty,
               let text = String(data: data, encoding: .utf8) else {
@@ -197,6 +217,7 @@ public struct CodexSessionReader: SessionProviding {
             stateLabel: stateLabel,
             lastTask: (lastTask ?? lastEvent).map { AgentActivitySnapshot.shorten($0, max: 120) },
             model: model,
+            branch: branch,
             tokensIn: tokensIn,
             tokensOut: tokensOut,
             sourcePath: url.path,

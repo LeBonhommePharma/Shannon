@@ -127,11 +127,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 ## P2 — product extensions (keep fail-closed)
 
-### - [ ] ENH-013: Branch field from git in session readers when cwd known
+### - [x] ENH-013: Branch field from git in session readers when cwd known
 
 - **Why:** AgentNotch shows branch; Shannon has `AgentSession.branch` but readers rarely set it. A best-effort `git -C cwd rev-parse --abbrev-ref HEAD` (timeout, fail-closed) would unlock meta chips without inventing data.
 - **Area:** `AgentReaders/`, optional shared `GitBranchProbe` pure helper
 - **First slice:** Injectable runner for tests; nil on failure; never block MainActor — call from detached parity collect only.
+- **Done:** `GitBranchProbe` (injectable runner, timeout ~0.75s, reject empty/`HEAD`); Claude + Codex readers fill `AgentSession.branch` via `resolveBranch` with per-cwd cache; pure unit tests, no real git required.
 - **Priority:** P2
 
 ### - [ ] ENH-014: Replace `UsageCoreStub` with real provider-agnostic usage model

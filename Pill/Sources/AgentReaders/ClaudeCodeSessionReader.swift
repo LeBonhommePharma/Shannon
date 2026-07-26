@@ -12,17 +12,21 @@ public struct ClaudeCodeSessionReader: SessionProviding {
     public var projectsRoot: URL
     public var maxSessions: Int
     public var maxLinesPerFile: Int
+    /// Optional override for branch resolution (tests inject; production uses git).
+    public var resolveBranch: @Sendable (String?) -> String?
 
     public init(
         projectsRoot: URL? = nil,
         maxSessions: Int = 24,
-        maxLinesPerFile: Int = 400
+        maxLinesPerFile: Int = 400,
+        resolveBranch: (@Sendable (String?) -> String?)? = nil
     ) {
         let home = FileManager.default.homeDirectoryForCurrentUser
         self.projectsRoot = projectsRoot
             ?? home.appendingPathComponent(".claude/projects", isDirectory: true)
         self.maxSessions = max(0, maxSessions)
         self.maxLinesPerFile = max(1, maxLinesPerFile)
+        self.resolveBranch = resolveBranch ?? { GitBranchProbe.branch(for: $0) }
     }
 
     public func fetchSessions(now: Date) -> [AgentSession] {
@@ -30,7 +34,8 @@ public struct ClaudeCodeSessionReader: SessionProviding {
             projectsRoot: projectsRoot,
             now: now,
             maxSessions: maxSessions,
-            maxLinesPerFile: maxLinesPerFile
+            maxLinesPerFile: maxLinesPerFile,
+            resolveBranch: resolveBranch
         )
     }
 
@@ -38,8 +43,11 @@ public struct ClaudeCodeSessionReader: SessionProviding {
         projectsRoot: URL,
         now: Date = Date(),
         maxSessions: Int = 24,
-        maxLinesPerFile: Int = 400
+        maxLinesPerFile: Int = 400,
+        resolveBranch: (@Sendable (String?) -> String?)? = nil
     ) -> [AgentSession] {
+        let branchOf: @Sendable (String?) -> String? =
+            resolveBranch ?? { GitBranchProbe.branch(for: $0) }
         let fm = FileManager.default
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: projectsRoot.path, isDirectory: &isDir), isDir.boolValue else {
@@ -52,6 +60,8 @@ public struct ClaudeCodeSessionReader: SessionProviding {
         ) else { return [] }
 
         var sessions: [AgentSession] = []
+        // Cache branch per cwd so multi-session projects spawn git once.
+        var branchCache: [String: String?] = [:]
         for dir in projectDirs {
             var dirFlag: ObjCBool = false
             guard fm.fileExists(atPath: dir.path, isDirectory: &dirFlag), dirFlag.boolValue else {
@@ -59,6 +69,12 @@ public struct ClaudeCodeSessionReader: SessionProviding {
             }
             let cwd = decodeProjectDirectoryName(dir.lastPathComponent)
             let projectName = (cwd as NSString).lastPathComponent
+            let branch: String? = {
+                if let cached = branchCache[cwd] { return cached }
+                let b = branchOf(cwd)
+                branchCache[cwd] = b
+                return b
+            }()
             guard let files = try? fm.contentsOfDirectory(
                 at: dir,
                 includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
@@ -71,7 +87,8 @@ public struct ClaudeCodeSessionReader: SessionProviding {
                     cwd: cwd,
                     projectName: projectName,
                     now: now,
-                    maxLines: maxLinesPerFile
+                    maxLines: maxLinesPerFile,
+                    branch: branch
                 ) {
                     sessions.append(session)
                 }
@@ -112,7 +129,8 @@ public struct ClaudeCodeSessionReader: SessionProviding {
         cwd: String?,
         projectName: String?,
         now: Date,
-        maxLines: Int
+        maxLines: Int,
+        branch: String? = nil
     ) -> AgentSession? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
@@ -189,6 +207,7 @@ public struct ClaudeCodeSessionReader: SessionProviding {
             cwd: cwd,
             stateLabel: "artifact",
             lastTask: task.map { AgentActivitySnapshot.shorten($0, max: 120) },
+            branch: branch,
             tokensIn: tokensIn,
             tokensOut: tokensOut,
             sourcePath: url.path,

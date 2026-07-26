@@ -182,6 +182,135 @@ final class AgentArtifactReaderTests: XCTestCase {
         XCTAssertEqual(outOnly?.tokensOut, 9)
     }
 
+    // MARK: - Git branch probe (ENH-013)
+
+    func testGitBranchProbeValidName() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-git-branch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let branch = GitBranchProbe.branch(for: dir.path, runner: { _ in "feat/hud" })
+        XCTAssertEqual(branch, "feat/hud")
+    }
+
+    func testGitBranchProbeFailClosed() throws {
+        XCTAssertNil(GitBranchProbe.branch(for: nil, runner: { _ in "main" }))
+        XCTAssertNil(GitBranchProbe.branch(for: "", runner: { _ in "main" }))
+        XCTAssertNil(GitBranchProbe.branch(for: "   ", runner: { _ in "main" }))
+        XCTAssertNil(GitBranchProbe.branch(
+            for: "/tmp/shannon-no-such-dir-\(UUID().uuidString)",
+            runner: { _ in "main" }
+        ))
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-git-branch-bad-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        XCTAssertNil(GitBranchProbe.branch(for: dir.path, runner: { _ in nil }))
+        XCTAssertNil(GitBranchProbe.branch(for: dir.path, runner: { _ in "" }))
+        XCTAssertNil(GitBranchProbe.branch(for: dir.path, runner: { _ in "   " }))
+        XCTAssertNil(GitBranchProbe.branch(for: dir.path, runner: { _ in "HEAD" }))
+        // Whitespace-stripped valid name
+        XCTAssertEqual(
+            GitBranchProbe.branch(for: dir.path, runner: { _ in "  main\n" }),
+            "main"
+        )
+    }
+
+    func testClaudeCodeReaderInjectedBranch() {
+        let projects = fixturesRoot
+            .appendingPathComponent("claude/projects", isDirectory: true)
+        let sessions = ClaudeCodeSessionReader.readSessions(
+            projectsRoot: projects,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10,
+            resolveBranch: { _ in "feat/hud" }
+        )
+        XCTAssertFalse(sessions.isEmpty)
+        for s in sessions {
+            XCTAssertEqual(s.branch, "feat/hud", "injected branch should apply to \(s.id)")
+        }
+    }
+
+    func testClaudeCodeReaderNilBranchWhenProbeFails() {
+        let projects = fixturesRoot
+            .appendingPathComponent("claude/projects", isDirectory: true)
+        let sessions = ClaudeCodeSessionReader.readSessions(
+            projectsRoot: projects,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10,
+            resolveBranch: { _ in nil }
+        )
+        XCTAssertFalse(sessions.isEmpty)
+        for s in sessions {
+            XCTAssertNil(s.branch, "fail-closed probe must leave branch nil for \(s.id)")
+        }
+    }
+
+    func testCodexReaderInjectedBranch() {
+        let root = fixturesRoot
+            .appendingPathComponent("codex/sessions", isDirectory: true)
+        let sessions = CodexSessionReader.readSessions(
+            sessionsRoot: root,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10,
+            resolveBranch: { cwd in
+                // Only fill when cwd known (fixture has /Users/test/DemoApp)
+                cwd == nil ? nil : "feat/hud"
+            }
+        )
+        XCTAssertFalse(sessions.isEmpty)
+        let withCwd = sessions.filter { $0.cwd != nil }
+        XCTAssertFalse(withCwd.isEmpty)
+        for s in withCwd {
+            XCTAssertEqual(s.branch, "feat/hud")
+        }
+    }
+
+    func testCodexReaderNilBranchWhenProbeFails() {
+        let root = fixturesRoot
+            .appendingPathComponent("codex/sessions", isDirectory: true)
+        let sessions = CodexSessionReader.readSessions(
+            sessionsRoot: root,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10,
+            resolveBranch: { _ in nil }
+        )
+        XCTAssertFalse(sessions.isEmpty)
+        for s in sessions {
+            XCTAssertNil(s.branch)
+        }
+    }
+
+    func testFixtureSessionsLeaveBranchNilWithoutInjection() {
+        // Default path uses real git against fixture cwds (non-repos / missing) → nil.
+        let projects = fixturesRoot
+            .appendingPathComponent("claude/projects", isDirectory: true)
+        let claude = ClaudeCodeSessionReader.readSessions(
+            projectsRoot: projects,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10
+        )
+        XCTAssertFalse(claude.isEmpty)
+        for s in claude {
+            XCTAssertNil(s.branch, "fixture cwd should not invent a branch for \(s.id)")
+        }
+
+        let codexRoot = fixturesRoot
+            .appendingPathComponent("codex/sessions", isDirectory: true)
+        let codex = CodexSessionReader.readSessions(
+            sessionsRoot: codexRoot,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10
+        )
+        XCTAssertFalse(codex.isEmpty)
+        for s in codex {
+            XCTAssertNil(s.branch, "fixture cwd should not invent a branch for \(s.id)")
+        }
+    }
+
     func testCodexExtractTokenCountFailClosed() {
         XCTAssertNil(CodexSessionReader.extractTokenCount(from: [:]))
         XCTAssertNil(CodexSessionReader.extractTokenCount(from: [

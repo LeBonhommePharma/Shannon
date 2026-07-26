@@ -7,8 +7,7 @@ import ShannonCore
 ///
 /// **Ship path:** this is the only menu-bar HUD launched by `./scripts/shannon`
 /// / Homebrew (`ShannonPill`). Do **not** also run `hub/AgentHubApp.swift` —
-/// that is a legacy dual status-item. The stale `agent_hub/` tree is archive
-/// only; live gate code is `hub/`.
+/// that is a legacy dual status-item. Live gate code is only under `hub/`.
 ///
 /// Left-click opens a SwiftUI popover (agent summary, inline gate approval,
 /// recent activity, hub status). Right-click or ⌥-click opens the utility

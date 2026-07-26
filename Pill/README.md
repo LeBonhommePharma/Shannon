@@ -12,8 +12,9 @@ idle state (and Now Playing only when media is active and no agent is busy).
 
 > **Status:** Notch + menu bar + ⌘D agent capture ship with `./scripts/shannon`.
 > **ShannonPill is the only shipped menu-bar HUD.** Do not also launch
-> `hub/AgentHubApp.swift` (legacy dual status-item). The `agent_hub/` directory
-> is a STALE archive — production gate code is `hub/` + `~/.shannon/agent_hub.db`.
+> `hub/AgentHubApp.swift` (legacy dual status-item). Production gate code is
+> `hub/` + SQLite at `~/.shannon/agent_hub.db` (filename only — there is no
+> second package tree).
 > Now Playing for *other* apps is still entitlement-gated on current macOS —
 > see [BLOCKED.md](BLOCKED.md). Notification mirroring, Focus/DND, AirDrop and
 > the file shelf are **not** implemented.

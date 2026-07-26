@@ -18,6 +18,32 @@ struct MenuBarPopoverView: View {
     static let chromeWidth: CGFloat = 320
     static let chromeHeight: CGFloat = 448
 
+    /// Minimum Quit hit target — wide enough for the power glyph + "Quit" label
+    /// and never compressed by a long multi-device footer line.
+    static let quitMinWidth: CGFloat = 58
+    static let quitMinHeight: CGFloat = 26
+
+    /// Footer action row height (icons + Quit). Fixed so status ticks above
+    /// cannot reflow the hit targets.
+    static let footerActionRowHeight: CGFloat = 26
+
+    /// Shipped popover content size. Controllers must use this instead of
+    /// SwiftUI intrinsic size so live body growth never resizes chrome.
+    static var fixedContentSize: CGSize {
+        CGSize(width: chromeWidth, height: chromeHeight)
+    }
+
+    /// Ignore thrash-driven intrinsic proposals — always pin to fixed chrome.
+    ///
+    /// Called when the hosting controller or popover would otherwise adopt a
+    /// content-sized frame after a metric tick. Wild widths/heights (empty
+    /// body, huge agent list) must not move the Quit affordance.
+    static func clampedContentSize(proposed: CGSize) -> CGSize {
+        // Intentional: discard `proposed` — fixed chrome is the product rule.
+        _ = proposed
+        return fixedContentSize
+    }
+
     @ObservedObject var activity: AgentActivityMonitor
     @ObservedObject var bridge: ShannonBridge
     @ObservedObject var battery: BatteryMonitor
@@ -574,9 +600,12 @@ struct MenuBarPopoverView: View {
                     .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.75)
+                    .truncationMode(.tail)
+                    // Status text yields width first so Quit never clips.
+                    .layoutPriority(0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityLabel(multiDeviceFooterLine)
-                Spacer(minLength: 4)
                 footerIconButton("doc.text", label: "Open hub log", action: onOpenHubLog)
                 footerIconButton("gearshape", label: "Settings", action: onOpenSettings)
                 // Labeled Quit — power-only glyph was easy to miss and sat on a
@@ -584,7 +613,7 @@ struct MenuBarPopoverView: View {
                 // it under the cursor and readable.
                 quitButton
             }
-            .frame(height: 26)
+            .frame(height: Self.footerActionRowHeight)
         }
         .overlay(alignment: .top) {
             LinearGradient(
@@ -612,7 +641,8 @@ struct MenuBarPopoverView: View {
             }
             .foregroundStyle(Color.shannonSecondary)
             .padding(.horizontal, 8)
-            .frame(height: 26)
+            .frame(minWidth: Self.quitMinWidth, minHeight: Self.quitMinHeight)
+            .frame(height: Self.quitMinHeight)
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Color.white.opacity(0.08))
@@ -623,6 +653,10 @@ struct MenuBarPopoverView: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
+        // Never compress below the labeled minimum — long multi-device lines
+        // must truncate, not steal Quit's hit target.
+        .fixedSize(horizontal: true, vertical: true)
+        .layoutPriority(10)
         .buttonStyle(ShannonQuietButtonStyle())
         .help("Quit Shannon")
         .accessibilityLabel("Quit Shannon")
@@ -662,12 +696,22 @@ struct MenuBarPopoverView: View {
 
 /// Quiet press feedback for popover chrome.
 ///
-/// No scaleEffect — scaling the Quit control made the hit target shrink under
-/// the cursor and felt like the button was "escaping" mid-click.
+/// Press must not scale the control — scaling the Quit hit target under the
+/// cursor felt like the button was "escaping" mid-click. Opacity-only feedback
+/// keeps geometry fixed; `pressedScale` is the shipped invariant (always 1.0).
 struct ShannonQuietButtonStyle: ButtonStyle {
+    /// Identity scale when pressed. Product rule: must stay 1.0 so Quit's
+    /// hit target never shrinks under the pointer.
+    static let pressedScale: CGFloat = 1.0
+    /// Dim on press without changing layout bounds.
+    static let pressedOpacity: Double = 0.72
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .opacity(configuration.isPressed ? 0.72 : 1.0)
+            .opacity(configuration.isPressed ? Self.pressedOpacity : 1.0)
+            // Explicit scaleEffect(pressedScale): documents the contract and
+            // keeps tests/product in lockstep. pressedScale == 1.0 → no shrink.
+            .scaleEffect(configuration.isPressed ? Self.pressedScale : 1.0)
             .animation(nil, value: configuration.isPressed)
     }
 }

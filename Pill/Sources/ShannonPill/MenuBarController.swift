@@ -499,22 +499,21 @@ final class MenuBarController: NSObject {
             // Fixed preferred size — never let intrinsic content thrash the
             // popover frame (that shoved Quit out from under the cursor).
             host.sizingOptions = []
-            host.preferredContentSize = NSSize(
-                width: MenuBarPopoverView.chromeWidth,
-                height: MenuBarPopoverView.chromeHeight
-            )
-            p.contentSize = host.preferredContentSize
+            let chrome = MenuBarPopoverView.fixedContentSize
+            host.preferredContentSize = chrome
+            p.contentSize = chrome
             p.contentViewController = host
             popover = p
             pop = p
         }
         // Re-assert fixed chrome size every open (hosting view can reset).
+        // Clamp any thrash-driven proposal so Quit stays pinned under the cursor.
         if let host = pop.contentViewController as? NSHostingController<MenuBarPopoverView> {
-            host.preferredContentSize = NSSize(
-                width: MenuBarPopoverView.chromeWidth,
-                height: MenuBarPopoverView.chromeHeight
+            let chrome = MenuBarPopoverView.clampedContentSize(
+                proposed: host.preferredContentSize
             )
-            pop.contentSize = host.preferredContentSize
+            host.preferredContentSize = chrome
+            pop.contentSize = chrome
         }
         // Do not re-assign rootView on every open — that tears down SwiftUI
         // state and flashes the whole popover. Models are ObservedObject so

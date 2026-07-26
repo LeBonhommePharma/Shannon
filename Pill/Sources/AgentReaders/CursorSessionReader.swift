@@ -100,17 +100,39 @@ public struct CursorSessionReader: SessionProviding {
     }
 
     /// Decode project folder name into a best-effort cwd / project label.
-    /// Cursor uses path-like slugs (`Users-lp-more-Projects-Foo`) or free labels.
-    public static func projectLabel(fromProjectDir name: String) -> (cwd: String?, project: String?) {
+    ///
+    /// Cursor uses path-like slugs (`Users-lp-more-Projects-Foo`). A naive
+    /// replace-all `-` → `/` corrupts dotted usernames (`lp.more` → `lp/more`).
+    /// Prefer home-encoded decode (same idea as ClaudeCodeSessionReader); when
+    /// home does not match, fail-closed: `cwd = nil`, project = last path segment
+    /// of the slug (best-effort basename only).
+    public static func projectLabel(
+        fromProjectDir name: String,
+        home: String = FileManager.default.homeDirectoryForCurrentUser.path
+    ) -> (cwd: String?, project: String?) {
         if name.isEmpty || name == "empty-window" {
             return (nil, name.isEmpty ? nil : name)
         }
-        if name.hasPrefix("Users-") || name.hasPrefix("var-") || name.hasPrefix("private-") {
-            let path = "/" + name.replacingOccurrences(of: "-", with: "/")
+        // Home-encoded prefix: /Users/lp.more → Users-lp-more (dots and slashes → -)
+        let encodedHome = home
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+        if name == encodedHome {
+            return (home, (home as NSString).lastPathComponent)
+        }
+        if name.hasPrefix(encodedHome + "-") {
+            let rest = String(name.dropFirst(encodedHome.count + 1))
+            // Only restore path separators for the remainder under home — never
+            // re-split the username (already consumed as encodedHome).
+            let path = home + "/" + rest.replacingOccurrences(of: "-", with: "/")
             let project = (path as NSString).lastPathComponent
             return (path, project.isEmpty ? name : project)
         }
-        return (nil, name)
+        // Fail-closed cwd: free labels or foreign homes stay display-only.
+        // Basename: last `-` segment of the slug (e.g. …-Projects-Shannon → Shannon).
+        let basename = name.split(separator: "-").last.map(String.init) ?? name
+        return (nil, basename.isEmpty ? name : basename)
     }
 
     public static func parseTranscript(

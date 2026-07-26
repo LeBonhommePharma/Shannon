@@ -113,12 +113,17 @@ public enum AgentLiveSurfaceLogic {
     ) -> AgentLiveSurface {
         let style = AgentStyleCatalog.style(for: agent.id)
         let name = agent.displayName.isEmpty ? style.displayName : agent.displayName
-        let needs = pendingAsks.contains { $0.agentId == agent.id }
+        let gateAsk = pendingAsks.contains { $0.agentId == agent.id }
+        // Artifact/session "your turn" (e.g. Kimi wait markers) — elevate needsYou
+        // without inventing a gate ask. canAnswerInline stays false when no ask.
+        let sessionWait = agent.status == .blocked
+        let needs = gateAsk || sessionWait
         let mine = activity.filter { $0.agentId == agent.id }
         let latest = mine.max(by: { $0.at < $1.at })
         let tool = classifyTool(event: latest)
         let finished = isCompletion(event: latest, now: now)
         let workingBusy = agent.status.isBusy && agent.presence.canBeBusy
+            && !sessionWait  // blocked wait is needs-you, not "working"
         let taskFresh = !agent.lastTask.isEmpty
             && now.timeIntervalSince(agent.updatedAt) <= taskFreshSeconds
         let activityFresh = latest.map {
@@ -129,14 +134,29 @@ public enum AgentLiveSurfaceLogic {
         // Finished is checked before workingBusy so a fresh `task_complete`
         // beats a stale mid_task / busy status left on the agent row.
         if needs {
-            let prompt = pendingAsks.first(where: { $0.agentId == agent.id })?.prompt ?? ""
+            let prompt: String = {
+                if let gate = pendingAsks.first(where: { $0.agentId == agent.id })?.prompt,
+                   !gate.isEmpty {
+                    return gate
+                }
+                // Session wait: prefer lastTask / activity line from the snapshot.
+                if !agent.lastTask.isEmpty { return agent.lastTask }
+                return ""
+            }()
             let short = AgentActivitySnapshot.shorten(prompt, max: 40)
+            let line: String = {
+                if !short.isEmpty { return short }
+                if sessionWait && !gateAsk {
+                    return "Waiting — answer in terminal"
+                }
+                return "Waiting for approval"
+            }()
             return AgentLiveSurface(
                 agentId: agent.id,
                 displayName: name,
                 attention: .needsYou,
                 toolKind: .none,
-                activityLine: short.isEmpty ? "Waiting for approval" : short,
+                activityLine: line,
                 usage: usageIfReal(usage),
                 needsYou: true,
                 isFinished: false

@@ -167,14 +167,84 @@ final class AgentArtifactReaderTests: XCTestCase {
             maxSessions: 10
         )
         XCTAssertFalse(sessions.isEmpty)
-        let s = sessions[0]
+        let s = sessions.first { $0.id.contains("bbbb-2222") } ?? sessions[0]
         XCTAssertEqual(s.agentId, "kimi")
         XCTAssertEqual(s.displayName, "Kimi")
         XCTAssertEqual(s.model, "kimi-k2")
+        // Idle multi-turn fixture is not a wait.
+        XCTAssertEqual(s.status, .idle)
         // Wait state is observational — never invents Approve capability.
         XCTAssertFalse((s.stateLabel ?? "").lowercased().contains("approve"))
         let missing = URL(fileURLWithPath: "/tmp/shannon-no-kimi-\(UUID().uuidString)")
         XCTAssertTrue(KimiSessionReader.readSessions(roots: [missing]).isEmpty)
+    }
+
+    func testKimiWaitingStatusElevatesNeedsYouWithoutApprove() {
+        let root = fixturesRoot.appendingPathComponent("kimi/sessions", isDirectory: true)
+        let sessions = KimiSessionReader.readSessions(
+            roots: [root],
+            now: Date(timeIntervalSince1970: 1_721_500_300),
+            maxSessions: 10
+        )
+        let s = sessions.first { $0.id.contains("wait-cccc") }
+        XCTAssertNotNil(s, "expected wait fixture sess-kimi-wait-cccc-3333")
+        guard let s else { return }
+        // After user+assistant history, status=waiting_for_user must still block.
+        XCTAssertEqual(s.status, .blocked)
+        XCTAssertTrue(
+            (s.stateLabel ?? "").lowercased().contains("waiting"),
+            "stateLabel=\(s.stateLabel ?? "nil")"
+        )
+        XCTAssertFalse((s.stateLabel ?? "").lowercased().contains("approve"))
+        // Card path: needsYou elevated from session.blocked; no gate ask → no inline Approve.
+        let card = SessionContentPresenter.card(session: s, pendingAsks: [], now: Date())
+        XCTAssertTrue(card.needsYou, "blocked session must elevate needsYou")
+        XCTAssertEqual(card.attention, .needsYou)
+        XCTAssertFalse(card.canAnswerInline, "Kimi must not fake Approve without gate ask")
+        XCTAssertNil(card.pendingPrompt)
+        // Surface resolve agrees.
+        let surface = SessionContentPresenter.resolveSurface(session: s)
+        XCTAssertTrue(surface.needsYou)
+        XCTAssertEqual(surface.attention, .needsYou)
+    }
+
+    func testCursorProjectLabelPreservesDottedUsernameHome() {
+        let home = "/Users/lp.more"
+        let label = CursorSessionReader.projectLabel(
+            fromProjectDir: "Users-lp-more-Projects-Shannon",
+            home: home
+        )
+        XCTAssertEqual(label.cwd, "/Users/lp.more/Projects/Shannon")
+        XCTAssertEqual(label.project, "Shannon")
+        // Must NOT split the username into lp/more.
+        XCTAssertFalse(label.cwd?.contains("/lp/more/") == true)
+        XCTAssertFalse(label.cwd?.hasPrefix("/Users/lp/more") == true)
+
+        // Fixture path uses Users-test-DemoApp — home won't match → cwd fail-closed nil.
+        let foreign = CursorSessionReader.projectLabel(
+            fromProjectDir: "Users-test-DemoApp",
+            home: home
+        )
+        XCTAssertNil(foreign.cwd, "foreign home must not invent a broken cwd")
+        XCTAssertEqual(foreign.project, "DemoApp")
+    }
+
+    func testCursorReaderFixtureWithDottedHomeSlug() {
+        let root = fixturesRoot.appendingPathComponent("cursor/projects", isDirectory: true)
+        let sessions = CursorSessionReader.readSessions(
+            projectsRoot: root,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10,
+            resolveBranch: { _ in nil }
+        )
+        // When home is the real machine home, Shannon slug should decode if username matches.
+        if let shannon = sessions.first(where: { $0.id.contains("dotted-2222") }) {
+            XCTAssertEqual(shannon.agentId, "cursor")
+            // Either home-decoded cwd or fail-closed project basename — never /Users/lp/more/...
+            if let cwd = shannon.cwd {
+                XCTAssertFalse(cwd.contains("/lp/more/"), "cwd corrupted: \(cwd)")
+            }
+        }
     }
 
     func testPanelRegistryRegistersWorksWithReaders() throws {

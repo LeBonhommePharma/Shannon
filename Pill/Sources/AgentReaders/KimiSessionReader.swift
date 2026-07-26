@@ -122,6 +122,10 @@ public struct KimiSessionReader: SessionProviding {
         var cwd: String?
         var lineCount = 0
         var lastTs: Date?
+        /// Explicit "your turn" from session status — not inferred from message order alone.
+        /// Survives user+assistant history when a later line marks wait/ask/needs_input.
+        var waitingOnYou = false
+        var waitPrompt: String?
 
         for line in text.split(omittingEmptySubsequences: true, whereSeparator: \.isNewline) {
             lineCount += 1
@@ -142,23 +146,43 @@ public struct KimiSessionReader: SessionProviding {
             let textBit = extractText(obj)
             if role.contains("user") || role == "human", let textBit {
                 lastUser = textBit
+                // New user message after a wait clears the wait (agent may have continued).
+                waitingOnYou = false
+                waitPrompt = nil
             } else if role.contains("assistant") || role == "model", let textBit {
                 lastAssistant = textBit
             }
             // Waiting-on-user markers from various CLIs (observational only).
+            // Explicit flag — do NOT rely on lastUser ?? after assistant already spoke.
             if let status = (obj["status"] as? String)?.lowercased(),
-               status.contains("wait") || status.contains("ask") || status == "needs_input" {
-                lastUser = lastUser ?? textBit ?? "waiting on you"
+               status.contains("wait") || status.contains("ask") || status == "needs_input"
+                || status.contains("needs_you") || status == "paused_for_user" {
+                waitingOnYou = true
+                waitPrompt = textBit ?? lastAssistant ?? lastUser ?? "waiting on you"
+            }
+            // Assistant left an unanswered question (common Kimi/Claude-style end).
+            if (role.contains("assistant") || role == "model"),
+               let textBit,
+               textBit.contains("?")
+                || textBit.lowercased().contains("choose")
+                || textBit.lowercased().contains("confirm") {
+                // Only sticky if no later user reply (user branch clears waitingOnYou).
+                waitingOnYou = true
+                waitPrompt = textBit
             }
         }
 
-        guard lastUser != nil || lastAssistant != nil || lineCount > 0 else { return nil }
+        guard lastUser != nil || lastAssistant != nil || lineCount > 0 || waitingOnYou else {
+            return nil
+        }
         let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))
             .flatMap(\.contentModificationDate) ?? now
         let updated = lastTs ?? mtime
-        let task = lastUser ?? lastAssistant
-        let waiting = (lastUser != nil && lastAssistant == nil)
-            || (task?.lowercased().contains("waiting") == true)
+        // Prefer wait prompt when waiting so the row shows the question, not stale user text.
+        let task = waitingOnYou
+            ? (waitPrompt ?? lastAssistant ?? lastUser)
+            : (lastUser ?? lastAssistant)
+        let waiting = waitingOnYou || (lastUser != nil && lastAssistant == nil)
 
         return AgentSession(
             id: "kimi:\(sessionId)",

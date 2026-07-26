@@ -1,0 +1,3 @@
+{"role":"user","content":"Run the migration","timestamp":1721500000}
+{"role":"assistant","content":"I can run it for you.","timestamp":1721500100,"model":"kimi-k2"}
+{"role":"assistant","content":"Apply schema migration to production?","status":"waiting_for_user","timestamp":1721500200,"model":"kimi-k2"}

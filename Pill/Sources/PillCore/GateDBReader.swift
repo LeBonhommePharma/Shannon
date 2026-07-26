@@ -541,10 +541,14 @@ public enum GateDBReader {
         public let type: String
         public let label: String
         public let output: String
+        /// Optional structured kind from gate (`read|edit|shell|test|browse|other`).
+        /// Nil/empty when column absent or gate did not stamp a kind.
+        public let toolKind: String?
 
         public init(
             id: Int64, agentId: String, at: Date,
-            type: String, label: String, output: String
+            type: String, label: String, output: String,
+            toolKind: String? = nil
         ) {
             self.id = id
             self.agentId = agentId
@@ -552,6 +556,7 @@ public enum GateDBReader {
             self.type = type
             self.label = label
             self.output = output
+            self.toolKind = toolKind
         }
 
         public var relativeAge: String { relativeAge(at: Date()) }
@@ -609,30 +614,57 @@ public enum GateDBReader {
 
     private static func activityRows(_ db: OpaquePointer, limit: Int) -> [ActivityEvent] {
         guard limit > 0 else { return [] }
-        let sql = """
+        let lim = max(1, limit)
+        // Prefer structured tool_kind when the gate has migrated; fall back so
+        // older DBs without the column still read (prepare fails → legacy SQL).
+        let sqlWithKind = """
+            SELECT id, agent_id,
+                   CAST(event_at_ns / 1000000000.0 AS REAL),
+                   event_type, event_label, COALESCE(event_output, ''),
+                   COALESCE(tool_kind, '')
+            FROM agent_activity
+            ORDER BY event_at_ns DESC, id DESC
+            LIMIT \(lim);
+            """
+        let sqlLegacy = """
             SELECT id, agent_id,
                    CAST(event_at_ns / 1000000000.0 AS REAL),
                    event_type, event_label, COALESCE(event_output, '')
             FROM agent_activity
             ORDER BY event_at_ns DESC, id DESC
-            LIMIT \(max(1, limit));
+            LIMIT \(lim);
             """
+        if let rows = activityRowsQuery(db, sql: sqlWithKind, hasToolKind: true) {
+            return rows
+        }
+        return activityRowsQuery(db, sql: sqlLegacy, hasToolKind: false) ?? []
+    }
+
+    private static func activityRowsQuery(
+        _ db: OpaquePointer, sql: String, hasToolKind: Bool
+    ) -> [ActivityEvent]? {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-            return []
+            return nil
         }
         defer { sqlite3_finalize(stmt) }
 
         var out: [ActivityEvent] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let ts = sqlite3_column_double(stmt, 2)
+            let kindRaw: String? = {
+                guard hasToolKind else { return nil }
+                let k = string(stmt, 6)
+                return k.isEmpty ? nil : k
+            }()
             out.append(ActivityEvent(
                 id: sqlite3_column_int64(stmt, 0),
                 agentId: string(stmt, 1),
                 at: ts > 0 ? Date(timeIntervalSince1970: ts) : .distantPast,
                 type: string(stmt, 3),
                 label: AgentActivitySnapshot.shorten(string(stmt, 4), max: 120),
-                output: AgentActivitySnapshot.shorten(string(stmt, 5), max: 120)
+                output: AgentActivitySnapshot.shorten(string(stmt, 5), max: 120),
+                toolKind: kindRaw
             ))
         }
         return out

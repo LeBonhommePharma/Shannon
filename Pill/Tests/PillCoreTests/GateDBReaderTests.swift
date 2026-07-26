@@ -318,6 +318,26 @@ final class GateDBReaderTests: XCTestCase {
         XCTAssertEqual(feed[0].label, "approved: ask-1")
         XCTAssertEqual(feed[1].type, "tool_call")
         XCTAssertEqual(feed[2].relativeAge, "5m")
+        // Legacy schema without tool_kind column: toolKind stays nil.
+        XCTAssertNil(feed[0].toolKind)
+        XCTAssertNil(feed[1].toolKind)
+    }
+
+    /// ENH-017: when tool_kind is present, reader maps it; empty → nil.
+    func testActivityFeedReadsOptionalToolKind() throws {
+        try exec("""
+        ALTER TABLE agent_activity ADD COLUMN tool_kind TEXT;
+        INSERT INTO agent_activity
+            (agent_id, event_at_ns, event_type, event_label, event_output, tool_kind)
+        VALUES ('codex', \(ns(5)), 'tool_call', 'patch store.ts', 'ok', 'edit'),
+               ('science', \(ns(15)), 'tool_call', 'ls', 'done', NULL);
+        """)
+        let feed = GateDBReader.readRecentActivity(path: dbPath, limit: 5)
+        XCTAssertEqual(feed.count, 2)
+        XCTAssertEqual(feed[0].agentId, "codex")
+        XCTAssertEqual(feed[0].toolKind, "edit")
+        XCTAssertEqual(feed[1].agentId, "science")
+        XCTAssertNil(feed[1].toolKind)
     }
 
     // MARK: - Robustness

@@ -163,11 +163,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 - **Done:** `CompanionRoster.build` orders via `AgentLiveSurfaceLogic.rankedAgents`; tests pin id order == rankedAgents (incl. working before finished).
 - **Priority:** P3
 
-### - [ ] ENH-017: Hub gate: emit structured tool kind on activity rows
+### - [x] ENH-017: Hub gate: emit structured tool kind on activity rows
 
 - **Why:** Pill classifies tools from free-text blobs (`toolKindFromBlob`). Structured `tool` / `kind` columns from the gate would reduce misclassification (edit vs shell).
 - **Area:** `hub/shannon_gate.py`, `GateDBReader.ActivityEvent`, `AgentLiveSurfaceLogic.classifyTool`
 - **First slice:** Optional column; reader maps if present else legacy blob; tests both paths.
+- **Done:** `agent_activity.tool_kind` (migrate + CREATE); `log_activity_event(..., tool_kind=)`; Pill `ActivityEvent.toolKind` + classifyTool prefers structured kind, falls back to blob.
 - **Priority:** P3
 
 ---
@@ -185,8 +186,8 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-016: CompanionRoster ≡ rankedAgents; CompanionRosterTests 6 pass |
-| `pytest hub/tests/ -v` | 673 passed, 8 skipped |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-017: structured tool_kind; AgentLiveSurface + GateDBReader paths |
+| `pytest hub/tests/ -v` | 2026-07-26 ENH-017: 685 passed, 8 skipped (tool_kind migration + classify) |
 | `pytest tests/python/ -q` | 2026-07-26 ENH-009: 180 passed, 51 skipped (pythonpath wired; bare pytest works) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |
 

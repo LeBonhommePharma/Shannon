@@ -32,7 +32,8 @@ final class AgentLiveSurfaceTests: XCTestCase {
         agent: String = "claude_code",
         type: String,
         label: String,
-        secondsAgo: TimeInterval = 2
+        secondsAgo: TimeInterval = 2,
+        toolKind: String? = nil
     ) -> GateDBReader.ActivityEvent {
         GateDBReader.ActivityEvent(
             id: id,
@@ -40,7 +41,8 @@ final class AgentLiveSurfaceTests: XCTestCase {
             at: now.addingTimeInterval(-secondsAgo),
             type: type,
             label: label,
-            output: ""
+            output: "",
+            toolKind: toolKind
         )
     }
 
@@ -93,6 +95,42 @@ final class AgentLiveSurfaceTests: XCTestCase {
             AgentLiveSurfaceLogic.toolKindFromBlob("bash cargo build"),
             .shell
         )
+    }
+
+    /// ENH-017: structured tool_kind from gate wins over ambiguous free-text labels.
+    func testClassifyToolPrefersStructuredToolKind() {
+        let ambiguous = event(
+            type: "tool_call",
+            label: "working on command path",
+            toolKind: "edit"
+        )
+        // Blob alone would lean shell/other ("command"); structured says edit.
+        XCTAssertEqual(AgentLiveSurfaceLogic.classifyTool(event: ambiguous), .edit)
+
+        let bashAlias = event(
+            type: "tool_call",
+            label: "something vague",
+            toolKind: "bash"
+        )
+        XCTAssertEqual(AgentLiveSurfaceLogic.classifyTool(event: bashAlias), .shell)
+    }
+
+    /// ENH-017: missing tool_kind still uses free-text blob path.
+    func testClassifyToolFallsBackToBlobWithoutToolKind() {
+        let edit = event(type: "tool_call", label: "Edited lib/license/store.ts")
+        XCTAssertNil(edit.toolKind)
+        XCTAssertEqual(AgentLiveSurfaceLogic.classifyTool(event: edit), .edit)
+
+        let shell = event(type: "tool_call", label: "bash cargo build")
+        XCTAssertEqual(AgentLiveSurfaceLogic.classifyTool(event: shell), .shell)
+    }
+
+    func testToolKindFromStructuredKnownAndUnknown() {
+        XCTAssertEqual(AgentLiveSurfaceLogic.toolKindFromStructured("edit"), .edit)
+        XCTAssertEqual(AgentLiveSurfaceLogic.toolKindFromStructured("BASH"), .shell)
+        XCTAssertNil(AgentLiveSurfaceLogic.toolKindFromStructured(nil))
+        XCTAssertNil(AgentLiveSurfaceLogic.toolKindFromStructured(""))
+        XCTAssertNil(AgentLiveSurfaceLogic.toolKindFromStructured("StrReplace"))
     }
 
     func testFailClosedWhenNoLiveSignal() {

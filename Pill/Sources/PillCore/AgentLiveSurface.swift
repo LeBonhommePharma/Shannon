@@ -424,6 +424,15 @@ public enum AgentLiveSurfaceLogic {
         if t.contains("approval") { return .none }
         if t == "task_complete" || t == "completed" || t == "done" { return .none }
 
+        // Prefer gate-stamped structured kind when present (ENH-017).
+        if let structured = toolKindFromStructured(event.toolKind) {
+            return structured
+        }
+        // event_type may itself be a known kind (edit, bash, …).
+        if let fromType = toolKindFromStructured(t) {
+            return fromType
+        }
+
         if t.contains("tool") || t == "tool_call" || t == "tool_result" {
             return toolKindFromBlob(blob)
         }
@@ -431,6 +440,21 @@ public enum AgentLiveSurfaceLogic {
             return toolKindFromBlob(blob)
         }
         return toolKindFromBlob(blob)
+    }
+
+    /// Map an explicit structured token to `AgentToolKind`, or nil if unknown.
+    public static func toolKindFromStructured(_ raw: String?) -> AgentToolKind? {
+        guard let raw else { return nil }
+        let v = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !v.isEmpty else { return nil }
+        if let kind = AgentToolKind(rawValue: v), kind != .none {
+            return kind
+        }
+        // Same aliases the gate normalizes (bash → shell).
+        if v == "bash" || v == "terminal" {
+            return .shell
+        }
+        return nil
     }
 
     public static func toolKindFromBlob(_ blob: String) -> AgentToolKind {

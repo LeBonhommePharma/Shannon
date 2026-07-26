@@ -121,6 +121,49 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+# Structured tool kinds for agent_activity.tool_kind (match Pill AgentToolKind).
+KNOWN_TOOL_KINDS = frozenset({"read", "edit", "shell", "test", "browse", "other"})
+_TOOL_KIND_ALIASES = {
+    "bash": "shell",
+    "terminal": "shell",
+}
+
+
+def normalize_tool_kind(value: Any) -> Optional[str]:
+    """Map an explicit value to a known tool kind, or None (fail-closed).
+
+    Does not invent kinds from free-text labels — only exact known tokens and
+    a small set of event-type aliases (e.g. bash → shell).
+    """
+    if value is None:
+        return None
+    raw = str(value).strip().lower()
+    if not raw:
+        return None
+    if raw in KNOWN_TOOL_KINDS:
+        return raw
+    return _TOOL_KIND_ALIASES.get(raw)
+
+
+def resolve_activity_tool_kind(
+    payload: Optional[dict[str, Any]] = None,
+    event_type: Optional[str] = None,
+) -> Optional[str]:
+    """Pick structured tool_kind from explicit payload/event fields only."""
+    payload = payload or {}
+    for key in ("tool_kind", "event_tool_kind"):
+        if key in payload:
+            kind = normalize_tool_kind(payload.get(key))
+            if kind is not None:
+                return kind
+    # ``tool`` only when it is already a known kind token (not free-text names).
+    if "tool" in payload:
+        kind = normalize_tool_kind(payload.get("tool"))
+        if kind is not None:
+            return kind
+    return normalize_tool_kind(event_type)
+
+
 # ── Optional dependency ────────────────────────────────────────────────────────
 try:
     from aiohttp import web as _aiohttp_web
@@ -1338,7 +1381,8 @@ class AuditDB:
                     event_at_ns  INTEGER NOT NULL,
                     event_type   TEXT NOT NULL,   -- 'tool_call' | 'dock' | 'build' | 'edit' | 'bash'
                     event_label  TEXT NOT NULL,   -- e.g. "Dock(1SG0)"
-                    event_output TEXT             -- e.g. "CF=−187.3, RMSD=1.14Å"
+                    event_output TEXT,            -- e.g. "CF=−187.3, RMSD=1.14Å"
+                    tool_kind    TEXT             -- optional: read|edit|shell|test|browse|other
                 );
                 CREATE INDEX IF NOT EXISTS idx_activity_agent
                     ON agent_activity(agent_id, event_at_ns);
@@ -1423,6 +1467,16 @@ class AuditDB:
                     )
                 except sqlite3.OperationalError:
                     pass  # already present (race between processes)
+
+        # Structured tool kind for Pill classifyTool (optional; NULL = use blob).
+        activity_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(agent_activity)").fetchall()
+        }
+        if "tool_kind" not in activity_cols:
+            try:
+                conn.execute("ALTER TABLE agent_activity ADD COLUMN tool_kind TEXT")
+            except sqlite3.OperationalError:
+                pass  # already present (race between processes)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path), timeout=10)
@@ -1952,16 +2006,24 @@ class AuditDB:
         event_type: str,
         event_label: str,
         event_output: Optional[str] = None,
+        tool_kind: Optional[str] = None,
     ) -> None:
-        """Record a Vibe Island-style tool-call event for the HUD activity feed."""
+        """Record a Vibe Island-style tool-call event for the HUD activity feed.
+
+        ``tool_kind`` is optional structured classification for live surfaces
+        (``read|edit|shell|test|browse|other``). Unknown values are stored as
+        NULL so the Pill can fall back to free-text blob classification.
+        """
+        kind = normalize_tool_kind(tool_kind)
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO agent_activity
-                    (agent_id, event_at_ns, event_type, event_label, event_output)
-                VALUES (?, ?, ?, ?, ?)
+                    (agent_id, event_at_ns, event_type, event_label,
+                     event_output, tool_kind)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (agent_id, time.time_ns(), event_type, event_label, event_output),
+                (agent_id, time.time_ns(), event_type, event_label, event_output, kind),
             )
 
     def insert_delegation(
@@ -3238,6 +3300,9 @@ class AgentHub:
             status_upd.event_type,
             status_upd.event_label,
             event_output=json.dumps(msg.payload)[:2000],
+            tool_kind=resolve_activity_tool_kind(
+                msg.payload, status_upd.event_type
+            ),
         )
 
         # Update shared benchmark state

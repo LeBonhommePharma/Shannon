@@ -1,16 +1,22 @@
 # Shannon enhancement / optimization backlog
 
 Open work units for a follow-up Grok Build (or human) session.  
-**Claim one item per ~10‑minute loop.** Do not re-derive context — each item is self-contained.
+**Claim one implement item per ~10‑minute loop.** Investigation may **append** new items first.
 
-**How to use**
+**How to use (implementation loop)**
 
-1. Pick the first unchecked item still open (or any P0 first).
-2. Implement only that item; leave others untouched.
-3. Mark `- [x]` when done and tests for that area stay green.
-4. Prefer pure logic + unit tests; no invented telemetry/tokens/H.
+1. **Investigate** (optional every fire): run a health sample; add 0–3 new open items grounded in tests/warnings/code (next free `ENH-0xx` id). Pets go in `docs/PET_IMPLEMENTATION_BACKLOG.md`.
+2. Pick the first unchecked high-priority item still open (or any P0 first).
+3. Implement only that item; leave others untouched.
+4. Mark `- [x]` when done and tests for that area stay green.
+5. Prefer pure logic + unit tests; no invented telemetry/tokens/H.
 
-Discovered during the 2026-07-26 thorough test pass (Pill session-content / live-surface work + full suite runs).
+Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surface).  
+**ENH-001–017 closed.** New work continues from **ENH-018**.
+
+## Investigation notes
+
+- (Loop fills dated “no new items” or bullet findings here when the backlog is not extended.)
 
 ---
 

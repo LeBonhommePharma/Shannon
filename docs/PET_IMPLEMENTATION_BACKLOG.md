@@ -1,9 +1,13 @@
 # Shannon pet — implementation backlog
 
-Chunked TODOs discovered during the thorough pet test pass (2026-07-26).
+Chunked TODOs for the Shannon 10‑minute loop (investigate → append → implement).
 Each item is grounded in suite runs, live `~/.codex/pets` resolve, or shipped
 source inspection. **Do not treat this as a design doc** — pick from the top
 when scheduling work.
+
+**Loop protocol:** each fire may add 0–3 new open items (B/E/O/T) from evidence,
+then implements **one** open item (prefer B → E → O → T). Cross-cutting
+Pill/session work goes to `docs/ENHANCEMENT_BACKLOG.md` (ENH-018+).
 
 Test baseline (must stay green while implementing):
 

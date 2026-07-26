@@ -635,3 +635,34 @@ final class DesktopCompanionPackageResolveTests: XCTestCase {
         XCTAssertEqual(mode, .procedural, "draw path must not use non-v2 packages")
     }
 }
+
+// MARK: - Desktop companion handoff (E4)
+
+final class DesktopCompanionHandoffTests: XCTestCase {
+    func testExpandsNotchOnActivate() {
+        XCTAssertTrue(DesktopCompanionHandoff.expandsNotchOnActivate)
+    }
+    func testFocusAgentIdNilWhenEmptyRoster() {
+        let p = DesktopCompanionSelector.present(roster: [])
+        XCTAssertNil(DesktopCompanionHandoff.focusAgentId(from: p))
+    }
+    func testFocusAgentIdMatchesPrimaryAgent() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(id: "chatgpt", status: .idle, presence: .observed, secondsAgo: 90, now: now),
+            snap(id: "science", status: .active, presence: .live, secondsAgo: 1, now: now),
+        ], scannedAt: now)
+        let p = DesktopCompanionSelector.present(summary: summary, now: now)
+        XCTAssertEqual(DesktopCompanionHandoff.focusAgentId(from: p), "science")
+    }
+    func testFocusAgentIdTrimsBlank() {
+        XCTAssertNil(DesktopCompanionHandoff.focusAgentId("   "))
+        XCTAssertNil(DesktopCompanionHandoff.focusAgentId(nil as String?))
+        XCTAssertEqual(DesktopCompanionHandoff.focusAgentId("  science  "), "science")
+    }
+    func testIsFocusedRow() {
+        XCTAssertTrue(DesktopCompanionHandoff.isFocusedRow(rowAgentId: "science", focusedAgentId: "science"))
+        XCTAssertFalse(DesktopCompanionHandoff.isFocusedRow(rowAgentId: "science", focusedAgentId: "chatgpt"))
+        XCTAssertFalse(DesktopCompanionHandoff.isFocusedRow(rowAgentId: "science", focusedAgentId: nil))
+    }
+}

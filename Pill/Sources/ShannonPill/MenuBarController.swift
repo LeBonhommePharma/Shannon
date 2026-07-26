@@ -45,8 +45,10 @@ final class MenuBarController: NSObject {
     private var accessibilityObserver: NSObjectProtocol?
 
     var onShowPill: (() -> Void)?
-    /// Re-assert the floating desktop pet + chat bubble (always-on-top).
-    var onShowDesktopCompanion: (() -> Void)?
+    /// Toggle hide/show of the floating desktop pet + chat bubble (persisted).
+    var onToggleDesktopCompanion: (() -> Void)?
+    /// Current desktop companion preference (for menu checkmark). Defaults to pure store.
+    var isDesktopCompanionVisible: (() -> Bool)?
     var onReposition: (() -> Void)?
     var onAddAgent: (() -> Void)?
     /// Opens the real Settings window (not only Finder on ~/.shannon).
@@ -566,13 +568,18 @@ final class MenuBarController: NSObject {
         show.target = self
         menu.addItem(show)
 
+        let petVisible = isDesktopCompanionVisible?()
+            ?? ShannonPreferences.showDesktopCompanion()
         let pet = NSMenuItem(
             title: "Show Desktop Pet",
-            action: #selector(showDesktopCompanion),
+            action: #selector(toggleDesktopCompanion),
             keyEquivalent: "e"
         )
         pet.target = self
-        pet.toolTip = "Bring the floating pet and status bubble above other windows"
+        pet.state = petVisible ? .on : .off
+        pet.toolTip = petVisible
+            ? "Hide the floating pet and status bubble"
+            : "Show the floating pet and status bubble above other windows"
         menu.addItem(pet)
 
         let repo = NSMenuItem(title: "Reposition on Screen", action: #selector(reposition), keyEquivalent: "r")
@@ -590,7 +597,10 @@ final class MenuBarController: NSObject {
     @objc private func togglePause() { activity.isPaused.toggle() }
     @objc private func openLog() { Self.openHubLog() }
     @objc private func showPill() { onShowPill?() }
-    @objc private func showDesktopCompanion() { onShowDesktopCompanion?() }
+    @objc private func toggleDesktopCompanion() { onToggleDesktopCompanion?() }
+
+    /// Builds the right-click utility menu (tests inspect checkmark state).
+    func makeContextMenuForTesting() -> NSMenu { buildContextMenu() }
     @objc private func addAgent() { onAddAgent?() }
     @objc private func reposition() { onReposition?() }
     @objc private func quit() { NSApp.terminate(nil) }

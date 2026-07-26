@@ -52,6 +52,10 @@ final class DesktopCompanionPanel: NSPanel {
 @MainActor
 final class DesktopCompanionModel: ObservableObject {
     @Published private(set) var presentation: DesktopCompanionPresentation
+    /// How many agents are in the desktop cycle set (top N busy).
+    @Published private(set) var cycleCount: Int = 0
+    /// Current slot within the cycle set (0-based).
+    @Published private(set) var selectedIndex: Int = 0
 
     private let activity: AgentActivityMonitor
     private let bridge: ShannonBridge
@@ -59,6 +63,8 @@ final class DesktopCompanionModel: ObservableObject {
     /// Adaptive sleepy poll (O1) — not the fixed 2 s historical tick.
     private var pollCancellable: AnyCancellable?
     private var currentPollInterval: TimeInterval?
+    /// Sticky agent id so a refresh keeps the same pet when the roster reorders.
+    private var selectedAgentId: String?
 
     /// Last scheduled wall-timer interval (tests / diagnostics).
     var scheduledPollIntervalForTesting: TimeInterval? { currentPollInterval }
@@ -66,7 +72,16 @@ final class DesktopCompanionModel: ObservableObject {
     init(activity: AgentActivityMonitor, bridge: ShannonBridge) {
         self.activity = activity
         self.bridge = bridge
-        self.presentation = Self.makePresentation(activity: activity, bridge: bridge)
+        let built = Self.makePresentation(
+            activity: activity,
+            bridge: bridge,
+            preferredId: nil,
+            fallbackIndex: 0
+        )
+        self.presentation = built.presentation
+        self.selectedIndex = built.selectedIndex
+        self.cycleCount = built.cycleCount
+        self.selectedAgentId = built.presentation.state?.id
         bind()
         ensurePollTimer()
     }
@@ -87,14 +102,19 @@ final class DesktopCompanionModel: ObservableObject {
                 DispatchQueue.main.async { self?.refresh() }
             }
             .store(in: &cancellables)
-
     }
 
     func refresh() {
-        presentation = Self.makePresentation(activity: activity, bridge: bridge)
+        apply(
+            Self.makePresentation(
+                activity: activity,
+                bridge: bridge,
+                preferredId: selectedAgentId,
+                fallbackIndex: selectedIndex
+            )
+        )
         ensurePollTimer()
     }
-
 
     /// Schedule / reschedule the sleepy poll from pure cadence policy.
     private func ensurePollTimer() {
@@ -109,10 +129,45 @@ final class DesktopCompanionModel: ObservableObject {
             .sink { [weak self] _ in self?.refresh() }
     }
 
+    /// Advance to the next top-N busy agent (click cycle). No-op when ≤1.
+    func cycleToNext() {
+        let built = Self.makePresentation(
+            activity: activity,
+            bridge: bridge,
+            preferredId: selectedAgentId,
+            fallbackIndex: selectedIndex
+        )
+        guard built.cycleCount > 1 else {
+            apply(built)
+            return
+        }
+        let next = DesktopCompanionCycle.nextIndex(
+            after: built.selectedIndex,
+            count: built.cycleCount
+        )
+        apply(
+            Self.makePresentation(
+                activity: activity,
+                bridge: bridge,
+                preferredId: nil,
+                fallbackIndex: next
+            )
+        )
+    }
+
+    private func apply(_ built: DesktopCompanionCycle.PresentResult) {
+        presentation = built.presentation
+        selectedIndex = built.selectedIndex
+        cycleCount = built.cycleCount
+        selectedAgentId = built.presentation.state?.id
+    }
+
     static func makePresentation(
         activity: AgentActivityMonitor,
-        bridge: ShannonBridge
-    ) -> DesktopCompanionPresentation {
+        bridge: ShannonBridge,
+        preferredId: String?,
+        fallbackIndex: Int
+    ) -> DesktopCompanionCycle.PresentResult {
         let summary = activity.summary
         let deltas = EntropyProvenance.companionDeltas(
             agentIds: summary.agents.map(\.id),
@@ -121,11 +176,16 @@ final class DesktopCompanionModel: ObservableObject {
             gate: activity.agentEntropy,
             gateDBAvailable: activity.gateDBAvailable
         )
-        return DesktopCompanionSelector.present(
-            summary: summary,
+        let full = CompanionRoster.build(
+            from: summary,
             entropyDeltas: deltas,
             pendingAsks: activity.pendingAsks,
             activity: activity.recentActivity
+        )
+        return DesktopCompanionCycle.present(
+            roster: full,
+            selectedIndex: fallbackIndex,
+            preferredId: preferredId
         )
     }
 }
@@ -138,6 +198,8 @@ final class DesktopCompanionWindowController {
     private var model: DesktopCompanionModel?
     private var cancellables = Set<AnyCancellable>()
     private var reassertTimer: Timer?
+    /// When false, space/screen reassert and capture flash must not resurrect the pet.
+    private var shouldBeVisible = false
 
     private let activity: AgentActivityMonitor
     private let bridge: ShannonBridge
@@ -154,6 +216,9 @@ final class DesktopCompanionWindowController {
     }
 
     var isVisible: Bool { panel?.isVisible == true }
+
+    /// Whether the companion is intended to be shown (preference + last show/hide).
+    var wantsVisible: Bool { shouldBeVisible }
 
     /// Panel instance when shown (tests / diagnostics).
     var panelForTesting: DesktopCompanionPanel? { panel }
@@ -178,6 +243,7 @@ final class DesktopCompanionWindowController {
     }
 
     func show() {
+        shouldBeVisible = true
         let model = self.model ?? DesktopCompanionModel(activity: activity, bridge: bridge)
         self.model = model
 
@@ -194,10 +260,7 @@ final class DesktopCompanionWindowController {
         } else {
             panel = DesktopCompanionPanel(contentRect: frame)
             panel.appearance = NSAppearance(named: .darkAqua)
-            let root = DesktopCompanionHost(
-                model: model,
-                onActivate: { [weak self] in self?.performActivate() }
-            )
+            let root = DesktopCompanionHost(model: model, onActivate: { [weak self] in self?.performActivate() })
             let host = NSHostingView(rootView: root)
             host.frame = CGRect(origin: .zero, size: size)
             panel.contentView = host
@@ -216,22 +279,29 @@ final class DesktopCompanionWindowController {
             }
         }
 
-        reassertVisibility()
+        applyFrontIfWanted()
         startLaunchReassertBurst()
     }
 
     func hide() {
+        shouldBeVisible = false
         reassertTimer?.invalidate()
         reassertTimer = nil
         panel?.orderOut(nil)
     }
 
-    /// Force the companion on top. Safe to call repeatedly.
+    /// Force the companion on top when the user wants it visible. No-op when hidden.
     func reassertVisibility() {
-        guard let panel else {
+        guard shouldBeVisible else { return }
+        guard panel != nil else {
             show()
             return
         }
+        applyFrontIfWanted()
+    }
+
+    private func applyFrontIfWanted() {
+        guard shouldBeVisible, let panel else { return }
         panel.applyAlwaysOnTopPolicy()
         panel.orderFrontRegardless()
         panel.contentView?.needsLayout = true
@@ -278,7 +348,7 @@ final class DesktopCompanionWindowController {
 /// Adaptive host for the window (macOS 13 package floor; Canvas pet on 14+).
 struct DesktopCompanionHost: View {
     @ObservedObject var model: DesktopCompanionModel
-    /// E4: expand notch / focus agent (optional).
+    /// E4 handoff: expand notch + focus current agent.
     var onActivate: () -> Void = {}
 
     var body: some View {
@@ -287,13 +357,15 @@ struct DesktopCompanionHost: View {
                 DesktopCompanionView(
                     presentation: model.presentation,
                     cycleCount: model.cycleCount,
-                    selectedIndex: model.selectedIndex
+                    selectedIndex: model.selectedIndex,
+                    onCycle: { model.cycleToNext() }
                 )
             } else {
                 DesktopCompanionLegacyView(
                     presentation: model.presentation,
                     cycleCount: model.cycleCount,
-                    selectedIndex: model.selectedIndex
+                    selectedIndex: model.selectedIndex,
+                    onCycle: { model.cycleToNext() }
                 )
             }
         }
@@ -301,26 +373,18 @@ struct DesktopCompanionHost: View {
         .padding(8)
         .preferredColorScheme(.dark)
         .contentShape(Rectangle())
-        .onTapGesture {
-            // E4 handoff first; E3 multi-agent cycle when more than one.
-            onActivate()
-            if model.cycleCount > 1 {
-                model.cycleToNext()
-            }
-        }
-        .accessibilityHint(
-            model.cycleCount > 1
-                ? "Click to open in Shannon and show next agent"
-                : "Click to open in Shannon"
-        )
+        // E4: click bubble/pet expands notch and focuses matching agent row.
+        .onTapGesture { onActivate() }
+        .accessibilityHint("Click to expand Shannon and focus this agent")
+        .accessibilityAction(named: Text("Open in Shannon")) { onActivate() }
     }
 }
 
-/// Pre-macOS 14: SF Symbol pet + bubble (no Canvas companion art).
 struct DesktopCompanionLegacyView: View {
     let presentation: DesktopCompanionPresentation
     var cycleCount: Int = 0
     var selectedIndex: Int = 0
+    var onCycle: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
@@ -331,6 +395,8 @@ struct DesktopCompanionLegacyView: View {
                 .frame(width: 72, height: 72)
             if cycleCount > 1 {
                 cycleDots(count: cycleCount, selected: selectedIndex)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onCycle() }
             }
         }
     }
@@ -343,6 +409,7 @@ struct DesktopCompanionView: View {
     let presentation: DesktopCompanionPresentation
     var cycleCount: Int = 0
     var selectedIndex: Int = 0
+    var onCycle: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
@@ -350,6 +417,8 @@ struct DesktopCompanionView: View {
             petBody
             if cycleCount > 1 {
                 cycleDots(count: cycleCount, selected: selectedIndex)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onCycle() }
             }
         }
         .accessibilityElement(children: .combine)

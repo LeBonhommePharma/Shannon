@@ -17,6 +17,8 @@ public enum ShannonPreferences {
         case expandPillOnLaunch = "shannon.prefs.expandPillOnLaunch"
         /// Pause agent monitoring after launch (user must resume).
         case startWithMonitoringPaused = "shannon.prefs.startWithMonitoringPaused"
+        /// Floating desktop companion (pet + bubble). Default on; menu/Settings can hide.
+        case showDesktopCompanion = "shannon.prefs.showDesktopCompanion"
     }
 
     /// Snapshot of all product preferences (value type for UI + tests).
@@ -25,17 +27,20 @@ public enum ShannonPreferences {
         public var firstRunDone: Bool
         public var expandPillOnLaunch: Bool
         public var startWithMonitoringPaused: Bool
+        public var showDesktopCompanion: Bool
 
         public init(
             autoKeepAwakeWithAgents: Bool = true,
             firstRunDone: Bool = false,
             expandPillOnLaunch: Bool = true,
-            startWithMonitoringPaused: Bool = false
+            startWithMonitoringPaused: Bool = false,
+            showDesktopCompanion: Bool = true
         ) {
             self.autoKeepAwakeWithAgents = autoKeepAwakeWithAgents
             self.firstRunDone = firstRunDone
             self.expandPillOnLaunch = expandPillOnLaunch
             self.startWithMonitoringPaused = startWithMonitoringPaused
+            self.showDesktopCompanion = showDesktopCompanion
         }
     }
 
@@ -61,6 +66,11 @@ public enum ShannonPreferences {
                 defaults,
                 key: .startWithMonitoringPaused,
                 fallback: factoryDefaults.startWithMonitoringPaused
+            ),
+            showDesktopCompanion: bool(
+                defaults,
+                key: .showDesktopCompanion,
+                fallback: factoryDefaults.showDesktopCompanion
             )
         )
     }
@@ -70,6 +80,7 @@ public enum ShannonPreferences {
         defaults.set(snap.firstRunDone, forKey: Key.firstRunDone.rawValue)
         defaults.set(snap.expandPillOnLaunch, forKey: Key.expandPillOnLaunch.rawValue)
         defaults.set(snap.startWithMonitoringPaused, forKey: Key.startWithMonitoringPaused.rawValue)
+        defaults.set(snap.showDesktopCompanion, forKey: Key.showDesktopCompanion.rawValue)
     }
 
     // MARK: Individual accessors (monitors call these)
@@ -100,6 +111,18 @@ public enum ShannonPreferences {
 
     public static func setStartWithMonitoringPaused(_ value: Bool, defaults: UserDefaults = .standard) {
         defaults.set(value, forKey: Key.startWithMonitoringPaused.rawValue)
+    }
+
+    public static func showDesktopCompanion(defaults: UserDefaults = .standard) -> Bool {
+        bool(
+            defaults,
+            key: .showDesktopCompanion,
+            fallback: factoryDefaults.showDesktopCompanion
+        )
+    }
+
+    public static func setShowDesktopCompanion(_ value: Bool, defaults: UserDefaults = .standard) {
+        defaults.set(value, forKey: Key.showDesktopCompanion.rawValue)
     }
 
     public static func firstRunDone(defaults: UserDefaults = .standard) -> Bool {

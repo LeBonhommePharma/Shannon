@@ -41,12 +41,14 @@ Test baseline (must stay green while implementing):
 
 
 
-- [ ] **B3 — Board companions always atlas-bind package id `"shannon"`**  
+- [x] **B3 — Board companions always atlas-bind package id `"shannon"`**  
   Observation: `CompanionGlyph` passes `packagePetId: PetPackageResolver.defaultPetId`
   for every agent. Live packages include `grok`, `bonhomme`, `firebear`, etc.,
   but per-agent surfaces never select them.  
   Work: map agent id / style → preferred package id (with procedural fallback);
-  optional preference override.
+  optional preference override.  
+  **Done:** `PetPackageBinding` + `PetPackageResolver.preferredPackageId`;
+  `CompanionGlyph`/`Badge` map per agent; desktop selector agent map + override.
 
 ---
 
@@ -59,10 +61,13 @@ Test baseline (must stay green while implementing):
   Work: `ShannonPreferences.desktopPetId` + Settings picker fed by
   `list_pet_packages` / Swift list helper; persist and re-resolve on change.
 
-- [ ] **E2 — Toggle hide/show desktop companion (persisted)**  
+- [x] **E2 — Toggle hide/show desktop companion (persisted)**  
   Observation: desktop pet always shows on launch; menu only has “Show Desktop
   Pet” reassert, no hide / no Settings toggle.  
-  Work: preference + menu checkmark; honor at launch.
+  Work: preference + menu checkmark; honor at launch.  
+  **Done:** `ShannonPreferences.showDesktopCompanion` (default true) + store;
+  menu checkmark toggle; Settings toggle; launch honors preference; hide blocks
+  reassert until show.
 
 - [ ] **E3 — Multi-agent desktop carousel or stack**  
   Observation: `DesktopCompanionSelector` shows only `roster.first` (working
@@ -70,11 +75,15 @@ Test baseline (must stay green while implementing):
   notch board).  
   Work: click/cycle through roster, or small stack of badges for top N busy.
 
-- [ ] **E4 — Click bubble → expand notch / focus agent row**  
+- [x] **E4 — Click bubble → expand notch / focus agent row**  
   Observation: bubble is status text only; non-goal excluded full Codex chat,
   but a light “surface handoff” is missing.  
   Work: click bubble or pet → `PillWindowController.expand()` + scroll/highlight
-  matching agent if any.
+  matching agent if any.  
+  **Done:** `DesktopCompanionHandoff` focus-id helper; desktop click →
+  `performActivate` → `PillWindowController.expand(focusAgentId:)`; board row
+  highlight via `CompanionBoardView.focusedAgentId`.
+
 
 - [x] **E5 — Document `SHANNON_PETS` unified home for operators**  
   Observation: `PetPaths` / `pet_paths` support `SHANNON_PETS` (packages at root,

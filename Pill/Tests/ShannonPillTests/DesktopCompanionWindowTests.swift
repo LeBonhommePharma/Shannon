@@ -124,4 +124,66 @@ final class DesktopCompanionWindowTests: XCTestCase {
             "legacy 2 s always-on timer must not remain the default"
         )
     }
+    /// E2: hide sticks — reassert must not resurrect a deliberately hidden pet.
+    func testHideBlocksReassertUntilShow() {
+        let activity = AgentActivityMonitor()
+        let bridge = ShannonBridge()
+        let ctl = DesktopCompanionWindowController(activity: activity, bridge: bridge)
+        XCTAssertFalse(ctl.wantsVisible)
+        ctl.show()
+        defer { ctl.hide() }
+        XCTAssertTrue(ctl.wantsVisible)
+        ctl.hide()
+        XCTAssertFalse(ctl.wantsVisible)
+        ctl.reassertVisibility()
+        XCTAssertFalse(ctl.wantsVisible)
+        XCTAssertFalse(ctl.isVisible)
+        ctl.show()
+        XCTAssertTrue(ctl.wantsVisible)
+        XCTAssertTrue(ctl.isVisible)
+    }
+
+
+
+    func testPerformActivateInvokesCallbackWithFocusId() {
+        let activity = AgentActivityMonitor()
+        let bridge = ShannonBridge()
+        let ctl = DesktopCompanionWindowController(activity: activity, bridge: bridge)
+        var called = false
+        var received: String? = "sentinel"
+        ctl.onActivate = { id in
+            called = true
+            received = id
+        }
+        ctl.show()
+        defer { ctl.hide() }
+        ctl.performActivate()
+        XCTAssertTrue(called)
+        XCTAssertNil(received)
+        XCTAssertTrue(DesktopCompanionHandoff.expandsNotchOnActivate)
+    }
+
+    func testExpandSetsFocusedAgentId() {
+        let activity = AgentActivityMonitor()
+        let bridge = ShannonBridge()
+        let nowPlaying = NowPlayingModel(provider: StubNowPlayingProvider())
+        let battery = BatteryMonitor(provider: IOKitBatteryProvider())
+        let idle = IdleTelemetryPublisher()
+        let confirm = ConfirmationController(
+            provider: StubHeadphoneMotionProvider(),
+            feedback: SystemConfirmationFeedback()
+        )
+        let ingest = AgentIngestService()
+        let resources = SystemResourceMonitor(interval: 60, smoothAlpha: 1)
+        let pill = PillWindowController(
+            nowPlaying: nowPlaying, battery: battery, bridge: bridge, idle: idle,
+            confirmation: confirm, ingest: ingest, activity: activity, resources: resources
+        )
+        pill.expand(focusAgentId: "science")
+        XCTAssertTrue(pill.presentation.isExpanded)
+        XCTAssertEqual(pill.presentation.focusedAgentId, "science")
+        pill.expand(focusAgentId: "  ")
+        XCTAssertNil(pill.presentation.focusedAgentId)
+    }
+
 }

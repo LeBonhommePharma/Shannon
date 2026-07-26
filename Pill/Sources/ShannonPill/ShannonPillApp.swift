@@ -127,7 +127,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             multiDeviceStatus: cloudPub.multiDeviceStatus
         )
         menu.onShowPill = { [weak ctl] in ctl?.reassertVisibility(); ctl?.expand() }
-        menu.onShowDesktopCompanion = { [weak desk] in desk?.reassertVisibility() }
+        menu.isDesktopCompanionVisible = { [weak prefs] in
+            prefs?.showDesktopCompanion ?? ShannonPreferences.showDesktopCompanion()
+        }
+        menu.onToggleDesktopCompanion = { [weak prefs] in
+            guard let prefs else { return }
+            prefs.showDesktopCompanion.toggle()
+        }
         menu.onReposition = { [weak ctl] in ctl?.reposition() }
         menu.onAddAgent = { [weak self] in self?.addAgentFromFrontApp() }
         menu.onOpenSettings = { [weak settings] in settings?.show() }

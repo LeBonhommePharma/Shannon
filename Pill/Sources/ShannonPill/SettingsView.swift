@@ -22,6 +22,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     keepAwakeSection
                     pillSection
+                    desktopSection
                     agentsSection
                     tipsSection
                     dataSection
@@ -95,6 +96,23 @@ struct SettingsView: View {
                         .font(.shannonMenuBody)
                         .foregroundStyle(Color.shannonPrimary)
                     Text("Brief hello board, then tuck into the notch")
+                        .font(.shannonMenuFootnote)
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+    }
+
+    private var desktopSection: some View {
+        settingsCard(title: "Desktop companion") {
+            Toggle(isOn: $store.showDesktopCompanion) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show desktop pet")
+                        .font(.shannonMenuBody)
+                        .foregroundStyle(Color.shannonPrimary)
+                    Text("Floating pet and status bubble (menu ⌥-click also toggles)")
                         .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonTertiary)
                 }

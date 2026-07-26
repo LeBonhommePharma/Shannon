@@ -29,10 +29,21 @@ public final class ShannonPreferencesStore: ObservableObject {
         }
     }
 
+    @Published public var showDesktopCompanion: Bool {
+        didSet {
+            guard showDesktopCompanion != oldValue else { return }
+            ShannonPreferences.setShowDesktopCompanion(showDesktopCompanion, defaults: defaults)
+            onShowDesktopCompanionChanged?(showDesktopCompanion)
+        }
+    }
+
     @Published public private(set) var firstRunDone: Bool
 
     /// Optional sink so KeepAwakeMonitor stays in sync without polling.
     public var onAutoKeepAwakeChanged: ((Bool) -> Void)?
+
+    /// Optional sink so the floating desktop companion show/hide tracks Settings/menu.
+    public var onShowDesktopCompanionChanged: ((Bool) -> Void)?
 
     private let defaults: UserDefaults
 
@@ -42,6 +53,7 @@ public final class ShannonPreferencesStore: ObservableObject {
         self.autoKeepAwakeWithAgents = snap.autoKeepAwakeWithAgents
         self.expandPillOnLaunch = snap.expandPillOnLaunch
         self.startWithMonitoringPaused = snap.startWithMonitoringPaused
+        self.showDesktopCompanion = snap.showDesktopCompanion
         self.firstRunDone = snap.firstRunDone
     }
 
@@ -50,6 +62,7 @@ public final class ShannonPreferencesStore: ObservableObject {
         autoKeepAwakeWithAgents = snap.autoKeepAwakeWithAgents
         expandPillOnLaunch = snap.expandPillOnLaunch
         startWithMonitoringPaused = snap.startWithMonitoringPaused
+        showDesktopCompanion = snap.showDesktopCompanion
         firstRunDone = snap.firstRunDone
     }
 
@@ -69,7 +82,8 @@ public final class ShannonPreferencesStore: ObservableObject {
             autoKeepAwakeWithAgents: autoKeepAwakeWithAgents,
             firstRunDone: firstRunDone,
             expandPillOnLaunch: expandPillOnLaunch,
-            startWithMonitoringPaused: startWithMonitoringPaused
+            startWithMonitoringPaused: startWithMonitoringPaused,
+            showDesktopCompanion: showDesktopCompanion
         )
     }
 }

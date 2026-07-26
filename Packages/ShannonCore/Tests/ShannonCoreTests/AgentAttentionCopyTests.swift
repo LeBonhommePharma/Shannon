@@ -76,6 +76,15 @@ final class AgentAttentionCopyTests: XCTestCase {
         XCTAssertEqual(AgentAttentionCopy.activityLabel(for: .finished), "done")
         XCTAssertEqual(AgentAttentionCopy.activityLabel(for: .idle), "live")
         XCTAssertEqual(AgentAttentionCopy.activityLabel(for: .errored), "errored")
+        // UX-019: mid-task + open confirmation elevates to needs-you.
+        XCTAssertEqual(
+            AgentAttentionCopy.activityLabel(for: .running, hasPendingConfirmation: true),
+            "needs you"
+        )
+        XCTAssertEqual(
+            AgentAttentionCopy.badgeLabel(for: .running, hasPendingConfirmation: true),
+            "needs you"
+        )
     }
 
     func testNeedsYouFocusAndNotifyTitles() {
@@ -148,6 +157,32 @@ final class AgentAttentionCopyTests: XCTestCase {
         )
         XCTAssertFalse(padDetail.contains("Label(\"Waiting"))
 
+        // UX-019: pad + watch pass hasPendingConfirmation into badge APIs.
+        XCTAssertTrue(
+            padTheme.contains("hasPendingConfirmation"),
+            "pad activity label must accept hasPendingConfirmation"
+        )
+        let padCard = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/AgentCardView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            padCard.contains("hasPendingConfirmation"),
+            "AgentCardView must elevate badge for open confirmations"
+        )
+        let padGrid = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/DashboardGridView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            padGrid.contains("hasPendingConfirmation: pendingAgentIDs.contains"),
+            "dashboard must pass pendingAgentIDs into cards"
+        )
+
         let watch = (try? String(
             contentsOf: root.appendingPathComponent(
                 "watchOS/Sources/ShannonWatch/WatchRootView.swift"
@@ -155,6 +190,14 @@ final class AgentAttentionCopyTests: XCTestCase {
             encoding: .utf8
         )) ?? ""
         XCTAssertTrue(watch.contains("AgentAttentionCopy"), "watch agent list must use shared badges")
+        XCTAssertTrue(
+            watch.contains("hasPendingConfirmation"),
+            "watch agent list must elevate badge when confirmation is open"
+        )
+        XCTAssertTrue(
+            watch.contains("pendingAgentIDs") || watch.contains("HubCompactNeedsYouChrome"),
+            "watch must resolve open confirmation agent ids"
+        )
 
         let macSurface = (try? String(
             contentsOf: root.appendingPathComponent(

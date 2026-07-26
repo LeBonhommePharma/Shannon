@@ -21,12 +21,16 @@ enum PaletteCatalogue {
             ) { hub.select(.overview) }
         )
 
+        let pendingIDs = HubCompactNeedsYouChrome.pendingAgentIDs(
+            from: hub.pendingConfirmations
+        )
         for agent in hub.visibleAgents {
+            let pending = pendingIDs.contains(agent.id)
             actions.append(
                 PaletteAction(
                     id: "agent-\(agent.id)",
                     title: agent.name,
-                    subtitle: "\(agent.activity.label) · \(agent.turnCount) turns"
+                    subtitle: "\(agent.activity.label(hasPendingConfirmation: pending)) · \(agent.turnCount) turns"
                         + (agent.entropyLabel.map { " · \($0)" } ?? ""),
                     symbol: agent.activity.symbolName,
                     kind: .agent

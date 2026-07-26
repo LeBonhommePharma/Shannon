@@ -193,10 +193,16 @@ struct GateApprovalView: View {
 struct AgentListView: View {
     let model: WatchModel
 
+    /// Open confirmation agent ids — elevates badge to needs-you (UX-019).
+    private var pendingAgentIDs: Set<String> {
+        HubCompactNeedsYouChrome.pendingAgentIDs(from: model.snapshot.confirmations)
+    }
+
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: ShannonSpacing.sm) {
                 ForEach(model.snapshot.agentsRankedForDisplay()) { agent in
+                    let pending = pendingAgentIDs.contains(agent.id)
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
                             Text("\(agent.activity.glyph) \(agent.name)")
@@ -204,11 +210,16 @@ struct AgentListView: View {
                                 .foregroundStyle(Color.shannonPrimary)
                                 .lineLimit(1)
                             Spacer(minLength: 2)
-                            // Shared Mac/phone/pad badge tokens (UX-001).
-                            Text(AgentAttentionCopy.badgeLabel(for: agent.activity))
+                            // Shared Mac/phone/pad badge tokens (UX-001 / UX-019).
+                            Text(
+                                AgentAttentionCopy.badgeLabel(
+                                    for: agent.activity,
+                                    hasPendingConfirmation: pending
+                                )
+                            )
                                 .font(.shannonCaption)
                                 .foregroundStyle(
-                                    agent.activity == .blocked
+                                    pending || agent.activity == .blocked
                                         ? Color.shannonWarning
                                         : Color.shannonTertiary
                                 )

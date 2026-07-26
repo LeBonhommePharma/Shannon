@@ -44,7 +44,25 @@ extension AgentActivity {
     }
 
     /// Activity badge — same tokens as Mac notch (`AgentAttentionCopy` / UX-001).
-    var label: String {
-        AgentAttentionCopy.activityLabel(for: self)
+    ///
+    /// **UX-019:** open confirmations elevate to needs-you even when activity is
+    /// still `.running` / `.idle` (CloudKit mirrors asks separately).
+    func label(hasPendingConfirmation: Bool = false) -> String {
+        AgentAttentionCopy.activityLabel(
+            for: self,
+            hasPendingConfirmation: hasPendingConfirmation
+        )
+    }
+
+    /// Semantic tint elevated for open asks (warning amber = needs you).
+    func tint(hasPendingConfirmation: Bool = false) -> Color {
+        if hasPendingConfirmation { return .shannonWarning }
+        return tint
+    }
+
+    /// Status-dot state elevated for open asks.
+    func dotState(hasPendingConfirmation: Bool = false) -> ShannonStatusDot.State {
+        if hasPendingConfirmation { return .warning }
+        return dotState
     }
 }

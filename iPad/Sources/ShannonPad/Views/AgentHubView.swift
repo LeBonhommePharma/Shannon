@@ -291,14 +291,23 @@ struct AgentSidebar: View {
 
             Section("Agents · \(hub.snapshot.agents.runningCount) running") {
                 ForEach(Array(hub.visibleAgents.enumerated()), id: \.element.id) { index, agent in
+                    let pending = HubCompactNeedsYouChrome
+                        .pendingAgentIDs(from: hub.pendingConfirmations)
+                        .contains(agent.id)
                     HStack(spacing: ShannonSpacing.sm) {
-                        ShannonStatusDot(state: agent.activity.dotState, diameter: 8)
+                        ShannonStatusDot(
+                            state: agent.activity.dotState(hasPendingConfirmation: pending),
+                            diameter: 8
+                        )
                         VStack(alignment: .leading, spacing: 1) {
                             Text(agent.name)
                                 .shannonText(.shannonCallout)
                                 .lineLimit(1)
                             if !isRail {
-                                Text(agent.entropyLabel ?? agent.activity.label)
+                                Text(
+                                    agent.entropyLabel
+                                        ?? agent.activity.label(hasPendingConfirmation: pending)
+                                )
                                     .shannonNumeric(color: .shannonTertiary)
                                     .lineLimit(1)
                             }

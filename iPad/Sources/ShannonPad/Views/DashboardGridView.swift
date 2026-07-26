@@ -143,6 +143,7 @@ struct DashboardGridView: View {
             isPinned: hub.isPinned(agent.id),
             isDropTarget: dropTargetID == agent.id,
             upstreamNames: upstreamNames(of: agent.id),
+            hasPendingConfirmation: pendingAgentIDs.contains(agent.id),
             onSelect: { hub.select(.agent(agent.id)) },
             onAnnotate: { onAnnotate(.agent(agent.id, agent.name)) },
             onPin: { hub.togglePin(agent.id) },
@@ -177,8 +178,9 @@ struct DashboardGridView: View {
         #if canImport(UIKit)
         // The Mac reads the shared pasteboard through Universal Clipboard, so
         // writing locally is the whole operation.
+        let pending = pendingAgentIDs.contains(agent.id)
         UIPasteboard.general.string = """
-        \(agent.name) — \(agent.activity.label)
+        \(agent.name) — \(agent.activity.label(hasPendingConfirmation: pending))
         \(agent.taskTitle)
         \(agent.lastAction)
         turns: \(agent.turnCount)\(agent.entropyLabel.map { " · \($0)" } ?? "")

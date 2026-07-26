@@ -24,6 +24,8 @@ struct AgentCardView: View {
     var isDropTarget: Bool
     var upstreamNames: [String]
     var isCompact: Bool = false
+    /// UX-019: open CloudKit confirmation elevates badge to needs-you.
+    var hasPendingConfirmation: Bool = false
 
     var onSelect: () -> Void
     var onAnnotate: () -> Void
@@ -97,8 +99,15 @@ struct AgentCardView: View {
 
     private var header: some View {
         HStack(spacing: ShannonSpacing.sm) {
-            ShannonStatusDot(state: agent.activity.dotState, diameter: 8)
-                .modifier(PulseIfRunning(isRunning: agent.activity == .running))
+            ShannonStatusDot(
+                state: agent.activity.dotState(hasPendingConfirmation: hasPendingConfirmation),
+                diameter: 8
+            )
+            .modifier(
+                PulseIfRunning(
+                    isRunning: agent.activity == .running && !hasPendingConfirmation
+                )
+            )
 
             Text(agent.name)
                 .shannonText(.shannonHeadline)
@@ -137,8 +146,11 @@ struct AgentCardView: View {
 
             Spacer()
 
-            Text(agent.activity.label)
-                .shannonText(.shannonCaption, color: agent.activity.tint)
+            Text(agent.activity.label(hasPendingConfirmation: hasPendingConfirmation))
+                .shannonText(
+                    .shannonCaption,
+                    color: agent.activity.tint(hasPendingConfirmation: hasPendingConfirmation)
+                )
         }
         .labelStyle(.titleAndIcon)
     }

@@ -192,12 +192,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** GateCardView `companionAffordance` + disabled buttons/status; hub `answer` / `answerPendingConfirmation` fail-closed; Core wiring test.
 - **Priority:** P1
 
-### - [ ] UX-019: Pad + watch badges elevate open pending confirmation
+### - [x] UX-019: Pad + watch badges elevate open pending confirmation
 
 - **Why:** Open confirmation can still badge as “working” if activity is mid-task; Mac attention elevates needs-you.
 - **Platforms:** iPadOS, watchOS (macOS reference)
 - **Area:** pad `AgentActivity.label`, watch `badgeLabel(for:)`
 - **First slice:** Pass `hasPendingConfirmation` into badge; pure test with pending id set.
+- **Done:** Pad `label/tint/dotState(hasPendingConfirmation:)` + card/sidebar/palette; watch list `badgeLabel(..., hasPendingConfirmation:)`; pure + wiring tests.
 - **Priority:** P1
 
 ### - [ ] UX-020: Watch empty list uses offline empty copy when phone unreachable
@@ -212,6 +213,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (loop 14):** `--quick` all PASS. Claimed P1 **UX-019** (pad/watch pending badge elevate). Considered: UX-020 watch offline empty; residual dual primary verbs clean. **No new UX-0xx**.
 - **2026-07-26 (loop 13):** `--quick` all PASS. Open P1 **UX-018** claimed (pad GateCard offline). Considered: UX-019 pending badge elevate; UX-020 watch offline empty; residual detail/notification buttons inherit VM guard. **No new UX-0xx**.
 - **2026-07-26 (swarm multi-device):** Exploration swarm + host audit. Filed **UX-018…020** (pad/watch honesty). Dual primary-verb strings clean. Builds green unsigned.
 - **2026-07-26 (loop 12):** `--quick` all PASS. Backlog empty after UX-016. Residual dual quiet idle: Mac collapsedStatusLine hard-codes `"Shannon · idle"`. Claimed **UX-017**. Considered: widget `"Idle"` docking-empty (different context); PillView fallback `"Shannon"` quietShort family (optional follow-up); dual Approve/empty/status legend closed. **No additional UX-0xx**.

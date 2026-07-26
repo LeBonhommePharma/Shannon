@@ -44,11 +44,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 - **Done:** `SessionMerge.prefer` always fills meta from loser; `byAgentId` + `ParityPayload.sessionsByAgent`; Pulled stays artifact-only.
 - **Priority:** P1
 
-### - [ ] ENH-004: Parse Claude Code / Codex token usage when present on disk
+### - [x] ENH-004: Parse Claude Code / Codex token usage when present on disk
 
 - **Why:** `AgentSession.tokensIn/Out` and `UsageCore` exist, but readers never populate tokens. Collapsed usage chips stay empty even when JSONL/rollouts contain usage events. Fail-closed still applies when absent.
 - **Area:** `Pill/Sources/AgentReaders/ClaudeCodeSessionReader.swift`, `CodexSessionReader.swift`, `UsageCore/` (replace stub), fixture tests under `Pill/Tests/PillCoreTests/`
 - **First slice:** Extract input/output tokens from known event shapes only; map to `AgentSession`; assert fixture file with tokens → non-nil usage; empty fixture → nil.
+- **Done:** Readers populate `tokensIn`/`tokensOut` from Claude `message.usage` (sum input+cache keys) and Codex `token_count.total_token_usage` (plain `input_tokens` only); UsageCore stub left for ENH-014; fixtures+tests for usage and fail-closed nil.
 - **Priority:** P1
 
 ### - [ ] ENH-005: Deduplicate agent roster vs pulled-sessions double listing
@@ -173,7 +174,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-003: ShannonPill 32 pass; PillCore 814 pass, 1 skip |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-004: ShannonPill 32 pass; PillCore 818 pass, 1 skip |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `PYTHONPATH=python pytest tests/python/ -v` | 180 passed, 51 skipped (bare pytest needs path — see ENH-009) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

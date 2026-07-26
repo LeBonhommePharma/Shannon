@@ -1,0 +1,6 @@
+{"timestamp":"2026-07-01T11:00:00.000Z","type":"session_meta","payload":{"id":"cccccccc-cccc-cccc-cccc-cccccccccccc","timestamp":"2026-07-01T11:00:00.000Z","cwd":"/Users/test/DemoApp","originator":"Codex CLI","cli_version":"0.1.0","source":"cli","model_provider":"openai"}}
+{"timestamp":"2026-07-01T11:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}
+{"timestamp":"2026-07-01T11:00:05.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Token-usage fixture turn"}}
+{"timestamp":"2026-07-01T11:01:00.000Z","type":"turn_context","payload":{"turn_id":"t1","cwd":"/Users/test/DemoApp","model":"gpt-5"}}
+{"timestamp":"2026-07-01T11:01:30.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"output_tokens":40,"reasoning_output_tokens":10,"total_tokens":1040},"last_token_usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":5,"reasoning_output_tokens":1,"total_tokens":105},"model_context_window":258400}}}
+{"timestamp":"2026-07-01T11:02:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"t1"}}

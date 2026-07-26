@@ -126,6 +126,8 @@ public struct ClaudeCodeSessionReader: SessionProviding {
         var lastTimestamp: Date?
         var firstTimestamp: Date?
         var lastAssistantSnippet: String?
+        var tokensIn: Int?
+        var tokensOut: Int?
         var lineCount = 0
 
         for line in text.split(omittingEmptySubsequences: true, whereSeparator: \.isNewline) {
@@ -140,6 +142,11 @@ public struct ClaudeCodeSessionReader: SessionProviding {
             if let ts = parseTimestamp(obj["timestamp"]) {
                 if firstTimestamp == nil { firstTimestamp = ts }
                 lastTimestamp = ts
+            }
+            // Latest known usage wins; missing/malformed stays nil (fail-closed).
+            if let usage = extractUsage(from: obj) {
+                if let tin = usage.tokensIn { tokensIn = tin }
+                if let tout = usage.tokensOut { tokensOut = tout }
             }
             let type = (obj["type"] as? String)?.lowercased() ?? ""
             switch type {
@@ -182,10 +189,62 @@ public struct ClaudeCodeSessionReader: SessionProviding {
             cwd: cwd,
             stateLabel: "artifact",
             lastTask: task.map { AgentActivitySnapshot.shorten($0, max: 120) },
+            tokensIn: tokensIn,
+            tokensOut: tokensOut,
             sourcePath: url.path,
             startedAt: firstTimestamp,
             activitySummary: activity.map { AgentActivitySnapshot.shorten($0, max: 120) }
         )
+    }
+
+    /// Extract token usage from a Claude Code JSONL line.
+    ///
+    /// Prefers `message.usage`, then top-level `usage`.
+    /// - `tokensOut` = non-negative `output_tokens` when present
+    /// - `tokensIn` = sum of present non-negative ints among
+    ///   `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`
+    ///   (only keys that exist; no invented fields)
+    /// Returns nil when no usage dict or no usable token keys.
+    public static func extractUsage(from obj: [String: Any]) -> (tokensIn: Int?, tokensOut: Int?)? {
+        let usage: [String: Any]?
+        if let message = obj["message"] as? [String: Any],
+           let nested = message["usage"] as? [String: Any] {
+            usage = nested
+        } else if let top = obj["usage"] as? [String: Any] {
+            usage = top
+        } else {
+            return nil
+        }
+        guard let usage else { return nil }
+
+        let inputKeys = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+        var inSum: Int?
+        for key in inputKeys {
+            guard usage[key] != nil, let v = nonNegativeInt(usage[key]) else { continue }
+            inSum = (inSum ?? 0) + v
+        }
+        let out = usage["output_tokens"] != nil ? nonNegativeInt(usage["output_tokens"]) : nil
+        if inSum == nil && out == nil { return nil }
+        return (tokensIn: inSum, tokensOut: out)
+    }
+
+    /// Fail-closed non-negative integer from JSONSerialization values.
+    public static func nonNegativeInt(_ value: Any?) -> Int? {
+        if let i = value as? Int {
+            return i >= 0 ? i : nil
+        }
+        if let n = value as? NSNumber {
+            // Bool is an NSNumber subclass on Apple platforms — reject.
+            if CFGetTypeID(n as CFTypeRef) == CFBooleanGetTypeID() { return nil }
+            let d = n.doubleValue
+            guard d >= 0, d == floor(d), d <= Double(Int.max) else { return nil }
+            return n.intValue
+        }
+        if let d = value as? Double {
+            guard d >= 0, d == floor(d), d <= Double(Int.max) else { return nil }
+            return Int(d)
+        }
+        return nil
     }
 
     private static func parseTimestamp(_ value: Any?) -> Date? {

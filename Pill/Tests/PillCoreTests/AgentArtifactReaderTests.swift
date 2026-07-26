@@ -24,7 +24,8 @@ final class AgentArtifactReaderTests: XCTestCase {
             maxSessions: 10
         )
         XCTAssertFalse(sessions.isEmpty, "expected at least one Claude session from fixtures at \(projects.path)")
-        let s = sessions[0]
+        // No-usage fixture must stay fail-closed (usage fixture is sess-bbbb-2222).
+        let s = sessions.first { $0.id.contains("sess-aaaa-1111") } ?? sessions[0]
         XCTAssertEqual(s.agentId, "claude_code")
         XCTAssertEqual(s.sourceKind, .artifact)
         XCTAssertEqual(s.presence, .observed)
@@ -54,7 +55,8 @@ final class AgentArtifactReaderTests: XCTestCase {
             maxSessions: 10
         )
         XCTAssertFalse(sessions.isEmpty, "expected Codex session from fixtures at \(root.path)")
-        let s = sessions[0]
+        // No-usage fixture must stay fail-closed (usage fixture is cccccccc-…).
+        let s = sessions.first { $0.id.contains("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb") } ?? sessions[0]
         XCTAssertEqual(s.agentId, "codex")
         XCTAssertEqual(s.displayName, "Codex")
         XCTAssertEqual(s.sourceKind, .artifact)
@@ -99,5 +101,127 @@ final class AgentArtifactReaderTests: XCTestCase {
         let encoded = "-Users-lp-more-Documents-PhD-Programs-FlexAIDdS"
         let path = ClaudeCodeSessionReader.decodeProjectDirectoryName(encoded, home: home)
         XCTAssertEqual(path, "/Users/lp.more/Documents/PhD/Programs/FlexAIDdS")
+    }
+
+    // MARK: - Token usage (ENH-004)
+
+    func testClaudeCodeReaderParsesUsageFromFixture() {
+        let projects = fixturesRoot
+            .appendingPathComponent("claude/projects", isDirectory: true)
+        let sessions = ClaudeCodeSessionReader.readSessions(
+            projectsRoot: projects,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10
+        )
+        let s = sessions.first { $0.id.contains("sess-bbbb-2222") }
+        XCTAssertNotNil(s, "expected Claude usage fixture sess-bbbb-2222")
+        // input_tokens 100 + cache_read_input_tokens 50 (+ cache_creation 0) = 150
+        XCTAssertEqual(s?.tokensIn, 150)
+        XCTAssertEqual(s?.tokensOut, 25)
+
+        guard let session = s else { return }
+        let usage = SessionContentPresenter.usageFromSession(session)
+        XCTAssertNotNil(usage)
+        XCTAssertEqual(usage?.tokensUsed, 175)
+    }
+
+    func testCodexReaderParsesTokenCountFromFixture() {
+        let root = fixturesRoot
+            .appendingPathComponent("codex/sessions", isDirectory: true)
+        let sessions = CodexSessionReader.readSessions(
+            sessionsRoot: root,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10
+        )
+        let s = sessions.first { $0.id.contains("cccccccc-cccc-cccc-cccc-cccccccccccc") }
+        XCTAssertNotNil(s, "expected Codex usage fixture cccccccc-…")
+        // plain input_tokens only (cached_input_tokens not double-counted)
+        XCTAssertEqual(s?.tokensIn, 1000)
+        XCTAssertEqual(s?.tokensOut, 40)
+
+        guard let session = s else { return }
+        let usage = SessionContentPresenter.usageFromSession(session)
+        XCTAssertNotNil(usage)
+        XCTAssertEqual(usage?.tokensUsed, 1040)
+    }
+
+    func testClaudeExtractUsageFailClosed() {
+        XCTAssertNil(ClaudeCodeSessionReader.extractUsage(from: [:]))
+        XCTAssertNil(ClaudeCodeSessionReader.extractUsage(from: [
+            "type": "assistant",
+            "message": ["role": "assistant", "content": "hi"],
+        ]))
+        XCTAssertNil(ClaudeCodeSessionReader.extractUsage(from: [
+            "usage": ["input_tokens": -1, "output_tokens": -5],
+        ]))
+        // message.usage preferred
+        let u = ClaudeCodeSessionReader.extractUsage(from: [
+            "usage": ["input_tokens": 1, "output_tokens": 1],
+            "message": [
+                "usage": [
+                    "input_tokens": 10,
+                    "cache_creation_input_tokens": 20,
+                    "cache_read_input_tokens": 30,
+                    "output_tokens": 4,
+                ] as [String: Any],
+            ] as [String: Any],
+        ])
+        XCTAssertEqual(u?.tokensIn, 60)
+        XCTAssertEqual(u?.tokensOut, 4)
+        // top-level usage fallback
+        let top = ClaudeCodeSessionReader.extractUsage(from: [
+            "usage": ["input_tokens": 7, "output_tokens": 3],
+        ])
+        XCTAssertEqual(top?.tokensIn, 7)
+        XCTAssertEqual(top?.tokensOut, 3)
+        // only output present
+        let outOnly = ClaudeCodeSessionReader.extractUsage(from: [
+            "usage": ["output_tokens": 9],
+        ])
+        XCTAssertNil(outOnly?.tokensIn)
+        XCTAssertEqual(outOnly?.tokensOut, 9)
+    }
+
+    func testCodexExtractTokenCountFailClosed() {
+        XCTAssertNil(CodexSessionReader.extractTokenCount(from: [:]))
+        XCTAssertNil(CodexSessionReader.extractTokenCount(from: [
+            "type": "token_count",
+            "info": [:] as [String: Any],
+        ]))
+        XCTAssertNil(CodexSessionReader.extractTokenCount(from: [
+            "type": "token_count",
+            "info": [
+                "total_token_usage": ["input_tokens": -3, "output_tokens": -1],
+            ] as [String: Any],
+        ]))
+        // prefers total over last; does not add cached_input_tokens
+        let u = CodexSessionReader.extractTokenCount(from: [
+            "type": "token_count",
+            "info": [
+                "total_token_usage": [
+                    "input_tokens": 1000,
+                    "cached_input_tokens": 200,
+                    "output_tokens": 40,
+                ] as [String: Any],
+                "last_token_usage": [
+                    "input_tokens": 1,
+                    "output_tokens": 1,
+                ] as [String: Any],
+            ] as [String: Any],
+        ])
+        XCTAssertEqual(u?.tokensIn, 1000)
+        XCTAssertEqual(u?.tokensOut, 40)
+        // fall back to last when total missing
+        let last = CodexSessionReader.extractTokenCount(from: [
+            "type": "token_count",
+            "info": [
+                "last_token_usage": [
+                    "input_tokens": 12,
+                    "output_tokens": 3,
+                ] as [String: Any],
+            ] as [String: Any],
+        ])
+        XCTAssertEqual(last?.tokensIn, 12)
+        XCTAssertEqual(last?.tokensOut, 3)
     }
 }

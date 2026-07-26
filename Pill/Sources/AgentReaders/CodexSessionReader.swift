@@ -104,6 +104,8 @@ public struct CodexSessionReader: SessionProviding {
         var lastEvent: String?
         var startedAt: Date?
         var updatedAt: Date?
+        var tokensIn: Int?
+        var tokensOut: Int?
         var completed = false
         var started = false
         var lineCount = 0
@@ -135,6 +137,11 @@ public struct CodexSessionReader: SessionProviding {
                 let et = (payload["type"] as? String)?.lowercased() ?? ""
                 if et == "task_started" { started = true }
                 if et == "task_complete" || et == "task_completed" { completed = true }
+                // Latest token_count wins; prefer total_token_usage over last.
+                if et == "token_count", let usage = extractTokenCount(from: payload) {
+                    if let tin = usage.tokensIn { tokensIn = tin }
+                    if let tout = usage.tokensOut { tokensOut = tout }
+                }
                 if let msg = payload["message"] as? String, !msg.isEmpty {
                     lastTask = msg
                     lastEvent = msg
@@ -190,10 +197,55 @@ public struct CodexSessionReader: SessionProviding {
             stateLabel: stateLabel,
             lastTask: (lastTask ?? lastEvent).map { AgentActivitySnapshot.shorten($0, max: 120) },
             model: model,
+            tokensIn: tokensIn,
+            tokensOut: tokensOut,
             sourcePath: url.path,
             startedAt: startedAt,
             activitySummary: lastTask.map { AgentActivitySnapshot.shorten($0, max: 120) }
         )
+    }
+
+    /// Extract tokens from a Codex `event_msg` payload with `type == "token_count"`.
+    ///
+    /// Prefers `info.total_token_usage` over `info.last_token_usage`.
+    /// - `tokensIn` = non-negative `input_tokens` only (does **not** add
+    ///   `cached_input_tokens` — Codex already reports input separately from cached)
+    /// - `tokensOut` = non-negative `output_tokens` when present
+    /// Fail-closed: missing/malformed → nil.
+    public static func extractTokenCount(from payload: [String: Any]) -> (tokensIn: Int?, tokensOut: Int?)? {
+        let info = payload["info"] as? [String: Any]
+        let totals: [String: Any]?
+        if let total = info?["total_token_usage"] as? [String: Any] {
+            totals = total
+        } else if let last = info?["last_token_usage"] as? [String: Any] {
+            totals = last
+        } else {
+            return nil
+        }
+        guard let totals else { return nil }
+
+        let tin = totals["input_tokens"] != nil ? nonNegativeInt(totals["input_tokens"]) : nil
+        let tout = totals["output_tokens"] != nil ? nonNegativeInt(totals["output_tokens"]) : nil
+        if tin == nil && tout == nil { return nil }
+        return (tokensIn: tin, tokensOut: tout)
+    }
+
+    /// Fail-closed non-negative integer from JSONSerialization values.
+    public static func nonNegativeInt(_ value: Any?) -> Int? {
+        if let i = value as? Int {
+            return i >= 0 ? i : nil
+        }
+        if let n = value as? NSNumber {
+            if CFGetTypeID(n as CFTypeRef) == CFBooleanGetTypeID() { return nil }
+            let d = n.doubleValue
+            guard d >= 0, d == floor(d), d <= Double(Int.max) else { return nil }
+            return n.intValue
+        }
+        if let d = value as? Double {
+            guard d >= 0, d == floor(d), d <= Double(Int.max) else { return nil }
+            return Int(d)
+        }
+        return nil
     }
 
     public static func sessionIdFromFilename(_ name: String) -> String? {

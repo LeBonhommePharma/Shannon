@@ -290,29 +290,26 @@ public struct DesktopCompanionPresentation: Sendable, Equatable {
 
 public enum DesktopCompanionSelector {
 
-    /// Pick the board-leading companion (working / waiting first) for the
-    /// floating pet. Empty roster → watching bubble, no work claim.
     public static func present(
         roster: [CompanionState],
-        packagePetId: String = PetPackageResolver.defaultPetId
+        packagePetId: String? = nil
     ) -> DesktopCompanionPresentation {
         guard let primary = roster.first else {
             return DesktopCompanionPresentation(
                 state: nil,
                 bubble: CompanionBubbleText.emptyRoster(),
-                packagePetId: packagePetId,
+                packagePetId: resolvePackagePetId(agentId: nil, packagePetId: packagePetId),
                 fallbackKind: .owl
             )
         }
         return DesktopCompanionPresentation(
             state: primary,
             bubble: CompanionBubbleText.derive(from: primary),
-            packagePetId: packagePetId,
+            packagePetId: resolvePackagePetId(agentId: primary.agent.id, packagePetId: packagePetId),
             fallbackKind: primary.kind ?? .owl
         )
     }
 
-    /// Build from activity summary (same inputs as CompanionBoardView).
     public static func present(
         summary: AgentActivitySummary,
         now: Date = Date(),
@@ -322,18 +319,26 @@ public enum DesktopCompanionSelector {
         pendingAsks: [GateDBReader.PendingAsk] = [],
         lastOutcomes: [String: String] = [:],
         activity: [GateDBReader.ActivityEvent] = [],
-        packagePetId: String = PetPackageResolver.defaultPetId
+        packagePetId: String? = nil
     ) -> DesktopCompanionPresentation {
         let roster = CompanionRoster.build(
-            from: summary,
-            now: now,
-            approvals: approvals,
-            entropyDeltas: entropyDeltas,
-            entropyDelta: entropyDelta,
-            pendingAsks: pendingAsks,
-            lastOutcomes: lastOutcomes,
-            activity: activity
+            from: summary, now: now, approvals: approvals,
+            entropyDeltas: entropyDeltas, entropyDelta: entropyDelta,
+            pendingAsks: pendingAsks, lastOutcomes: lastOutcomes, activity: activity
         )
         return present(roster: roster, packagePetId: packagePetId)
+    }
+
+    public static func resolvePackagePetId(
+        agentId: String?,
+        packagePetId: String? = nil
+    ) -> String {
+        if let raw = packagePetId?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            return raw
+        }
+        if let agentId {
+            return PetPackageResolver.preferredPackageId(forAgentId: agentId)
+        }
+        return PetPackageResolver.defaultPetId
     }
 }

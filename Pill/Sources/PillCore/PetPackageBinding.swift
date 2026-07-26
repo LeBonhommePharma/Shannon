@@ -43,6 +43,4 @@ public extension PetPackageResolver {
             forAgentId: agentId, preferenceOverride: preferenceOverride, style: style
         )
     }
-    static var packageIdByAgentId: [String: String] { PetPackageBinding.packageIdByAgentId }
-    static var packageIdByStylePet: [String: String] { PetPackageBinding.packageIdByStylePet }
 }

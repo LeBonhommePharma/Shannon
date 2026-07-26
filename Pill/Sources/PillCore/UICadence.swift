@@ -31,6 +31,15 @@ public enum UICadence: Sendable {
     public static let agentFullScanIntervalMin: TimeInterval = 12
     public static let agentFullScanIntervalMax: TimeInterval = 30
 
+    // MARK: Detector bridge (pill.sock)
+
+    /// Poll period for `ShannonBridge` → live token H when a detector is attached.
+    /// Tighter than the historical 1.0 s default so collapse alarms surface faster
+    /// without matching the resource tick (avoids thrash co-firing).
+    public static let bridgeInterval: TimeInterval = 0.75
+    public static let bridgeIntervalMin: TimeInterval = 0.5
+    public static let bridgeIntervalMax: TimeInterval = 2.0
+
     // MARK: Menu-bar status item backup timer
 
     /// Fallback paint when resource `onSnapshotPublished` is quiet.
@@ -127,6 +136,10 @@ public enum UICadence: Sendable {
         min(max(raw, menuBarBackupIntervalMin), 2.0)
     }
 
+    public static func clampBridgeInterval(_ raw: TimeInterval) -> TimeInterval {
+        min(max(raw, bridgeIntervalMin), bridgeIntervalMax)
+    }
+
     public static func clampSmoothAlpha(_ raw: Double) -> Double {
         min(1, max(0.15, raw))
     }
@@ -145,5 +158,10 @@ public enum UICadence: Sendable {
     /// Policy: menu-bar backup is at least as fast as the resource default.
     public static func menuBarKeepsPaceWithResources() -> Bool {
         menuBarBackupInterval <= resourceInterval + 0.1
+    }
+
+    /// Policy: bridge poll is snappier than the legacy 1 s detector tick.
+    public static func bridgeFasterThanLegacyOneSecond() -> Bool {
+        bridgeInterval < 1.0 && bridgeInterval >= bridgeIntervalMin
     }
 }

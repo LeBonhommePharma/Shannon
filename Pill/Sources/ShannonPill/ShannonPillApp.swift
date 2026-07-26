@@ -139,8 +139,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sysRes.onSnapshotPublished = { [weak menu] in
             menu?.refreshFromResources()
         }
-        bootstrapDefaultPets()
-        sanitizePollutedTasks()
         cloudPub.start()
 
         nowPlaying = np; battery = bat; bridge = br; idle = idlePub
@@ -150,9 +148,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesStore = prefs; settingsWindow = settings
         controller = ctl; menuBar = menu
 
-        // Auto-attach Shannon hub (gate) so ⌘D process attach can register
-        // agents without a manual "start gate" ritual. Best-effort, off main.
-        Self.ensureHubAttached()
+        // Pets bootstrap + secret scrub + hub ensure: all off MainActor so
+        // launch does not hitch on disk walks or a gate spawn (macOS 27 glass
+        // menu bar is especially sensitive to first-frame jank).
+        Self.bootstrapPetsAndHubOffMain { [weak self] in
+            self?.activity?.refresh()
+        }
 
         if Self.useDemo {
             injectDemoMedia()
@@ -179,35 +180,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Best-effort hub ensure on launch. Never blocks the UI thread.
-    private static func ensureHubAttached() {
+    /// Pets skeleton + junk scrub + hub ensure — utility queue only.
+    /// Calls `onReady` on MainActor when the gate is up (or already was) so
+    /// the menu bar flips hub-online without waiting a full agent poll.
+    private static func bootstrapPetsAndHubOffMain(onReady: @escaping @MainActor () -> Void) {
         Task.detached(priority: .utility) {
-            // Repo root for developers: env or sibling of common checkouts.
+            Self.bootstrapDefaultPets()
+            Self.sanitizePollutedTasks()
+
             var env = ProcessInfo.processInfo.environment
-            if env["SHANNON_ROOT"] == nil {
-                // Prefer the monorepo if Shannon is opened from a known path.
-                let candidates = [
-                    "/Users/lp.more/Projects/Shannon",
-                    FileManager.default.homeDirectoryForCurrentUser
-                        .appendingPathComponent("Projects/Shannon").path,
-                ]
-                for c in candidates {
-                    let gate = (c as NSString).appendingPathComponent("hub/shannon_gate.py")
-                    if FileManager.default.fileExists(atPath: gate) {
-                        env["SHANNON_ROOT"] = c
-                        break
-                    }
-                }
+            if env["SHANNON_ROOT"] == nil, let root = Self.discoverShannonRoot() {
+                env["SHANNON_ROOT"] = root
             }
             let result = HubEnsure.ensureRunning(environment: env)
             #if DEBUG
             print("Shannon hub ensure: \(result.shortLabel)")
             #endif
-            // Nudge activity so socket-up is noticed quickly after a start.
+            // Brief settle so a just-spawned gate can bind the socket, then
+            // force an activity poll so gateAvailable updates immediately.
+            if result == .started {
+                try? await Task.sleep(nanoseconds: 180_000_000)
+            }
             if result.isUp {
-                try? await Task.sleep(nanoseconds: 200_000_000)
+                await MainActor.run { onReady() }
             }
         }
+    }
+
+    /// Walk common roots for `hub/shannon_gate.py` without hardcoding a user.
+    private nonisolated static func discoverShannonRoot(
+        fileManager: FileManager = .default
+    ) -> String? {
+        var candidates: [String] = []
+        let home = fileManager.homeDirectoryForCurrentUser.path
+        candidates.append(home + "/Projects/Shannon")
+        candidates.append(home + "/Developer/Shannon")
+        // Walk up from the running app bundle (…/Shannon/Pill/build/….app).
+        var url = Bundle.main.bundleURL
+        for _ in 0..<8 {
+            url = url.deletingLastPathComponent()
+            candidates.append(url.path)
+        }
+        candidates.append(fileManager.currentDirectoryPath)
+        for c in candidates {
+            let gate = (c as NSString).appendingPathComponent("hub/shannon_gate.py")
+            if fileManager.fileExists(atPath: gate) { return c }
+        }
+        return nil
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -257,7 +276,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// One-shot cleanup for pets polluted by earlier clipboard leaks (API keys, etc.).
-    private func sanitizePollutedTasks() {
+    /// Safe off the main thread (disk only).
+    private nonisolated static func sanitizePollutedTasks() {
         let root = PetBootstrap.petsRoot
         guard let kids = try? FileManager.default.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil
@@ -293,7 +313,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func bootstrapDefaultPets() {
+    /// Idle skeleton pets only — does not clobber an active capture.
+    private nonisolated static func bootstrapDefaultPets() {
         let defaults = [
             ("science", "Claude Science"),
             ("claude_code", "Claude"),
@@ -307,7 +328,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ("dataset_runner", "DatasetRunner"),
         ]
         for (id, name) in defaults {
-            // task: nil → idle skeleton only (does not clobber an active capture).
             let dir = PetBootstrap.petsRoot.appendingPathComponent(id)
             if FileManager.default.fileExists(atPath: dir.path) { continue }
             _ = try? PetBootstrap.ensurePet(agentID: id, displayName: name, task: nil)

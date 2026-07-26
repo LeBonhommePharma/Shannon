@@ -106,19 +106,61 @@ public struct NotchGeometry {
 
     /// Best screen for the pill on the current machine layout.
     public static func preferredScreen() -> NSScreen {
-        // 1. Screen under the mouse (multi-monitor UX).
         let mouse = NSEvent.mouseLocation
-        if let underMouse = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) {
-            return underMouse
+        let screens = NSScreen.screens
+        if let pick = Self.pickPreferredScreen(
+            mouse: mouse,
+            screens: screens.map { ($0, $0.frame, $0.safeAreaInsets.top) },
+            main: NSScreen.main.map { ($0, $0.frame, $0.safeAreaInsets.top) }
+        ) {
+            return pick.0
         }
-        // 2. Main screen (menu-bar owning display) — usually the notched laptop.
-        if let main = NSScreen.main { return main }
-        // 3. First notched screen.
-        if let notched = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
-            return notched
-        }
-        // 4. Anything.
         return NSScreen.screens.first ?? NSScreen.main!
+    }
+
+    /// Pure multi-monitor ranking (unit-tested without AppKit display hardware).
+    ///
+    /// 1. Screen under the mouse  
+    /// 2. Main (menu-bar owning) display  
+    /// 3. First notched screen (`safeAreaInsets.top > 0`)  
+    /// 4. First listed screen  
+    public static func pickPreferredScreenIndex(
+        mouse: CGPoint,
+        screenFrames: [CGRect],
+        safeAreaTops: [CGFloat],
+        mainIndex: Int?
+    ) -> Int? {
+        guard !screenFrames.isEmpty else { return nil }
+        // 1. Under mouse
+        for (i, frame) in screenFrames.enumerated() where frame.contains(mouse) {
+            return i
+        }
+        // 2. Main
+        if let mainIndex, mainIndex >= 0, mainIndex < screenFrames.count {
+            return mainIndex
+        }
+        // 3. First notched
+        if let i = safeAreaTops.firstIndex(where: { $0 > 0 }) {
+            return i
+        }
+        // 4. First
+        return 0
+    }
+
+    private static func pickPreferredScreen(
+        mouse: CGPoint,
+        screens: [(NSScreen, CGRect, CGFloat)],
+        main: (NSScreen, CGRect, CGFloat)?
+    ) -> (NSScreen, CGRect, CGFloat)? {
+        guard !screens.isEmpty else { return nil }
+        let mainIndex = main.flatMap { m in screens.firstIndex(where: { $0.0 === m.0 }) }
+        guard let idx = pickPreferredScreenIndex(
+            mouse: mouse,
+            screenFrames: screens.map(\.1),
+            safeAreaTops: screens.map(\.2),
+            mainIndex: mainIndex
+        ) else { return nil }
+        return screens[idx]
     }
 
     /// Window frame for the pill at a given content size, centred on the notch

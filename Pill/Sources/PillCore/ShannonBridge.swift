@@ -297,9 +297,12 @@ public final class ShannonBridge: ObservableObject {
         return "\(home)/.shannon/pill.sock"
     }
 
-    public init(socketPath: String = ShannonBridge.defaultSocketPath, interval: TimeInterval = 1.0) {
+    public init(
+        socketPath: String = ShannonBridge.defaultSocketPath,
+        interval: TimeInterval = UICadence.bridgeInterval
+    ) {
         self.socketPath = socketPath
-        self.interval = interval
+        self.interval = UICadence.clampBridgeInterval(interval)
     }
 
     public func start() {

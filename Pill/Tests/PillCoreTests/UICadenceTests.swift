@@ -25,6 +25,18 @@ final class UICadenceTests: XCTestCase {
         )
     }
 
+    /// Detector bridge tighter than legacy 1 s so collapse alarms surface faster.
+    func testBridgeFasterThanLegacyOneSecond() {
+        XCTAssertTrue(UICadence.bridgeFasterThanLegacyOneSecond())
+        XCTAssertLessThan(UICadence.bridgeInterval, 1.0)
+        XCTAssertGreaterThanOrEqual(UICadence.bridgeInterval, UICadence.bridgeIntervalMin)
+        XCTAssertEqual(
+            UICadence.clampBridgeInterval(0.01),
+            UICadence.bridgeIntervalMin,
+            accuracy: 1e-9
+        )
+    }
+
     func testFullScanFasterThanLegacyTwenty() {
         XCTAssertLessThan(UICadence.agentFullScanInterval, 20)
         XCTAssertGreaterThanOrEqual(

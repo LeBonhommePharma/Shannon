@@ -67,9 +67,14 @@ final class CloudPublisher {
     /// Operator-facing label for the multi-device path.
     static func statusLabel(for backend: ShannonSyncBackend) -> String {
         let name = String(describing: type(of: backend))
-        if name.contains("CloudKit") { return "on" }
-        let optIn = ProcessInfo.processInfo.environment["SHANNON_ICLOUD"] == "1"
-        return optIn ? "off" : "in-memory"
+        let cloudKit = name.contains("CloudKit")
+        let optIn = MultiDeviceBackendPolicy.optInFromEnvironment()
+        let profile = MultiDeviceBackendPolicy.hasEmbeddedProvisioningProfile()
+        return MultiDeviceBackendPolicy.status(
+            optIn: optIn,
+            hasProvisioningProfile: profile,
+            cloudKitConstructed: cloudKit
+        ).rawValue
     }
 
     /// Default backend is **always** in-memory unless the user opts into iCloud
@@ -79,28 +84,19 @@ final class CloudPublisher {
     /// when the container id is not in the app's entitlements. That is a hard
     /// process kill, not a catchable Swift error — so we must never construct
     /// `CloudKitSyncBackend` from an ad-hoc / Homebrew / `swift run` build.
-    /// The previous code used `#if canImport(CloudKit)` which is true whenever
-    /// the SDK is present, and crashed Shannon.app on every launch.
+    /// Policy is pure in `MultiDeviceBackendPolicy` (unit-tested).
     private static func defaultBackend() -> ShannonSyncBackend {
         #if canImport(CloudKit)
-        let optIn = ProcessInfo.processInfo.environment["SHANNON_ICLOUD"] == "1"
-        if optIn, hasICloudEntitlement() {
+        let optIn = MultiDeviceBackendPolicy.optInFromEnvironment()
+        let profile = MultiDeviceBackendPolicy.hasEmbeddedProvisioningProfile()
+        if MultiDeviceBackendPolicy.shouldUseCloudKit(
+            optIn: optIn,
+            hasProvisioningProfile: profile
+        ) {
             return CloudKitSyncBackend()
         }
         #endif
         return InMemorySyncBackend()
-    }
-
-    /// True only for a Developer-ID / App Store signed build that still ships
-    /// an embedded provisioning profile with the iCloud capability. Ad-hoc
-    /// Homebrew installs never have this file, so they always stay on the
-    /// in-memory backend and never touch CKContainer.
-    private static func hasICloudEntitlement() -> Bool {
-        let candidates = [
-            Bundle.main.bundlePath + "/Contents/embedded.provisionprofile",
-            Bundle.main.bundlePath + "/embedded.provisionprofile",
-        ]
-        return candidates.contains { FileManager.default.fileExists(atPath: $0) }
     }
 
     func start() {

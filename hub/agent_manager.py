@@ -288,6 +288,295 @@ def handrail_roster() -> list[dict[str, Any]]:
     return out
 
 
+# ── FlexAIDdS benchmark campaign ownership (Shannon-owned orchestration) ─────
+
+# Serial heavy classic arms on one Mac. Shannon owns the campaign plan; agents
+# are only delegated through this handrail (skill + CLI).
+BENCHMARK_PHASES: tuple[str, ...] = ("A", "B0", "B")
+
+# Only these agents may own a heavy docking arm (benchmark_update / DatasetRunner).
+HEAVY_DOCKING_OWNER_IDS: frozenset[str] = frozenset({"dataset_runner"})
+
+# Role → default hub agent id for campaign delegation.
+CAMPAIGN_ROLE_DEFAULTS: dict[str, str] = {
+    "docking_owner": "dataset_runner",
+    "owner": "dataset_runner",
+    "dataset_runner": "dataset_runner",
+    "science_analyst": "science",
+    "analyst": "science",
+    "science": "science",
+    "code_claude": "claude_code",
+    "claude_code": "claude_code",
+    "code_codex": "codex",
+    "codex": "codex",
+    "code_grok": "grok_build",
+    "grok_build": "grok_build",
+    "coordinator": "dispatch",
+    "dispatch": "dispatch",
+    "design": "design",
+    "cowork": "cowork",
+    "opencode": "opencode",
+}
+
+
+@dataclass(frozen=True)
+class CampaignPlan:
+    """Shannon-owned FlexAIDdS campaign plan — pure, dry-runable, no gate."""
+
+    action: str  # always "campaign"
+    campaign: str
+    task_id: str
+    phases: tuple[str, ...]
+    owner_agent_id: str
+    owner_role: str
+    delegations: tuple[dict[str, Any], ...]
+    refused: bool = False
+    refuse_reason: str = ""
+    existing_heavy_owner: str = ""
+    notes: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "action": self.action,
+            "campaign": self.campaign,
+            "task_id": self.task_id,
+            "phases": list(self.phases),
+            "owner_agent_id": self.owner_agent_id,
+            "owner_role": self.owner_role,
+            "delegations": [dict(d) for d in self.delegations],
+            "refused": self.refused,
+            "refuse_reason": self.refuse_reason or None,
+            "existing_heavy_owner": self.existing_heavy_owner or None,
+            "notes": list(self.notes),
+            "ok": not self.refused,
+            # Never invent science metrics.
+            "fabricated_entropy": None,
+            "fabricated_cf": None,
+        }
+
+
+def resolve_campaign_role(role: str, agent_id: Optional[str] = None) -> tuple[str, str]:
+    """Return (role_key, canonical_agent_id) for a campaign role."""
+    key = (role or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if agent_id:
+        return key or "custom", normalize_agent_id(agent_id)
+    if key in CAMPAIGN_ROLE_DEFAULTS:
+        return key, CAMPAIGN_ROLE_DEFAULTS[key]
+    # Treat bare agent ids as roles that map to themselves.
+    aid = normalize_agent_id(key)
+    return key or aid, aid
+
+
+def is_heavy_docking_owner(agent_id: str) -> bool:
+    return normalize_agent_id(agent_id) in HEAVY_DOCKING_OWNER_IDS
+
+
+def find_existing_heavy_owner(
+    connected: Optional[list[str]] = None,
+    *,
+    agent_tasks: Optional[dict[str, str]] = None,
+    campaign_task_id: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Pure: if monitor state already shows a heavy docking owner, return their id.
+
+    When ``agent_tasks`` + ``campaign_task_id`` are provided, only owners whose
+    task shares the campaign prefix are counted (same campaign). Without task
+    attribution, any connected heavy owner blocks a second heavy spawn.
+    """
+    connected = connected or []
+    agent_tasks = agent_tasks or {}
+    campaign_prefix = ""
+    if campaign_task_id:
+        # flexaidds_redpair_YYYYMMDD_xxx → flexaidds_redpair_YYYYMMDD
+        parts = campaign_task_id.split("_")
+        campaign_prefix = "_".join(parts[:3]) if len(parts) >= 3 else campaign_task_id
+
+    for raw in connected:
+        aid = normalize_agent_id(str(raw))
+        if not is_heavy_docking_owner(aid):
+            continue
+        if campaign_prefix and agent_tasks:
+            tid = agent_tasks.get(aid) or agent_tasks.get(raw) or ""
+            if tid and campaign_prefix not in tid and tid != campaign_task_id:
+                continue
+        return aid
+    return None
+
+
+def plan_delegate(
+    role: str,
+    task_id: str,
+    *,
+    agent_id: Optional[str] = None,
+    mode: str = "socket",
+    reason: str = "campaign_delegate",
+    monitor_connected: Optional[list[str]] = None,
+    agent_tasks: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    """
+    Plan a single role delegation (spawn) under Shannon ownership.
+
+    Refuses when the role is a heavy docking owner and monitor already shows one.
+    Analyst/coder roles always succeed (pure plan).
+    """
+    role_key, aid = resolve_campaign_role(role, agent_id)
+    existing = None
+    if is_heavy_docking_owner(aid):
+        existing = find_existing_heavy_owner(
+            monitor_connected,
+            agent_tasks=agent_tasks,
+            campaign_task_id=task_id,
+        )
+        if existing:
+            return {
+                "action": "delegate",
+                "role": role_key,
+                "agent_id": aid,
+                "task_id": task_id,
+                "refused": True,
+                "ok": False,
+                "refuse_reason": (
+                    f"Heavy docking arm already owned by {existing} — "
+                    "monitor first; one heavy arm at a time (A→B0→B)."
+                ),
+                "existing_heavy_owner": existing,
+                "plan": None,
+            }
+    spawn = plan_spawn(
+        aid,
+        task_id,
+        mode=mode,
+        reason=reason,
+        details={"campaign_role": role_key, "shannon_owned": True},
+    )
+    return {
+        "action": "delegate",
+        "role": role_key,
+        "agent_id": aid,
+        "task_id": task_id,
+        "refused": False,
+        "ok": True,
+        "refuse_reason": None,
+        "existing_heavy_owner": None,
+        "plan": spawn.as_dict(),
+    }
+
+
+def plan_benchmark_campaign(
+    campaign: str = "red-pair",
+    task_id: Optional[str] = None,
+    *,
+    owner: str = "dataset_runner",
+    analysts: Optional[list[str]] = None,
+    coders: Optional[list[str]] = None,
+    coordinator: str = "dispatch",
+    mode: str = "socket",
+    monitor_connected: Optional[list[str]] = None,
+    agent_tasks: Optional[dict[str, str]] = None,
+    phases: Optional[tuple[str, ...]] = None,
+) -> CampaignPlan:
+    """
+    Shannon-owned FlexAIDdS campaign plan.
+
+    Owns orchestration: stable task id, serial phases A→B0→B, single docking
+    owner (default ``dataset_runner``), and delegated analyst/coder/coordinator
+    roles. Pure — no gate, no fabricated CF/entropy.
+
+    Dual-owner rule: if ``monitor_connected`` already lists a heavy owner for
+    this campaign, the plan is **refused** (ok=False) and includes no owner
+    spawn; non-owner roles may still appear as refused-owner-only failure.
+    """
+    camp = (campaign or "red-pair").strip().lower().replace(" ", "_")
+    tid = task_id or default_task_id(f"flexaidds_{camp}")
+    owner_role, owner_aid = resolve_campaign_role("docking_owner", owner)
+    phase_tuple = phases or BENCHMARK_PHASES
+
+    existing = find_existing_heavy_owner(
+        monitor_connected,
+        agent_tasks=agent_tasks,
+        campaign_task_id=tid,
+    )
+    notes = (
+        "Shannon owns this campaign plan — agents only act via skill/CLI lifecycle.",
+        "Heavy docking owner is dataset_runner (or explicit alias); one arm at a time.",
+        "No fabricated CF, RMSD, or entropy in the plan — those come from live results only.",
+        "monitor first before any second docking owner spawn.",
+    )
+
+    if existing and is_heavy_docking_owner(owner_aid):
+        return CampaignPlan(
+            action="campaign",
+            campaign=camp,
+            task_id=tid,
+            phases=phase_tuple,
+            owner_agent_id=owner_aid,
+            owner_role=owner_role,
+            delegations=(),
+            refused=True,
+            refuse_reason=(
+                f"Heavy docking arm already owned by {existing} — "
+                "do not dual-launch; wait or kill existing owner first."
+            ),
+            existing_heavy_owner=existing,
+            notes=notes,
+        )
+
+    delegations: list[dict[str, Any]] = []
+
+    def _add(role: str, agent: Optional[str] = None) -> None:
+        d = plan_delegate(
+            role,
+            tid,
+            agent_id=agent,
+            mode=mode,
+            reason=f"campaign:{camp}",
+            monitor_connected=monitor_connected,
+            agent_tasks=agent_tasks,
+        )
+        delegations.append(d)
+
+    _add("docking_owner", owner_aid)
+    for a in analysts or ["science"]:
+        _add("science_analyst" if normalize_agent_id(a) == "science" else a, a)
+    for c in coders or []:
+        _add(c, c)
+    if coordinator:
+        _add("coordinator", coordinator)
+
+    # If any heavy-owner delegation refused mid-list, mark campaign refused.
+    refused_owner = any(
+        d.get("refused") and is_heavy_docking_owner(str(d.get("agent_id") or ""))
+        for d in delegations
+    )
+    existing2 = existing or next(
+        (
+            str(d.get("existing_heavy_owner"))
+            for d in delegations
+            if d.get("existing_heavy_owner")
+        ),
+        "",
+    )
+
+    return CampaignPlan(
+        action="campaign",
+        campaign=camp,
+        task_id=tid,
+        phases=phase_tuple,
+        owner_agent_id=owner_aid,
+        owner_role=owner_role,
+        delegations=tuple(delegations),
+        refused=refused_owner,
+        refuse_reason=(
+            f"Heavy docking arm already owned by {existing2}"
+            if refused_owner
+            else ""
+        ),
+        existing_heavy_owner=existing2 or "",
+        notes=notes,
+    )
+
+
 def format_monitor_report(
     connected: list[str],
     recent: list[dict[str, Any]],
@@ -534,6 +823,64 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     pref.add_argument("--busy-threshold", type=float, default=85.0)
 
+    # Shannon-owned FlexAIDdS campaign (skill surface — dry-run never needs gate).
+    camp = sub.add_parser(
+        "campaign",
+        parents=[common],
+        help="Plan a Shannon-owned FlexAIDdS benchmark campaign (delegate agents)",
+    )
+    camp.add_argument(
+        "--campaign",
+        default="red-pair",
+        help="Campaign name (default red-pair)",
+    )
+    camp.add_argument("--task", default=None, help="Stable task id (auto if omitted)")
+    camp.add_argument(
+        "--owner",
+        default="dataset_runner",
+        help="Heavy docking owner agent id (default dataset_runner)",
+    )
+    camp.add_argument(
+        "--analysts",
+        default="science",
+        help="Comma-separated analyst agent ids (default science)",
+    )
+    camp.add_argument(
+        "--coders",
+        default="",
+        help="Comma-separated coder agent ids (e.g. claude_code,codex,grok_build)",
+    )
+    camp.add_argument(
+        "--coordinator",
+        default="dispatch",
+        help="Coordinator agent id (default dispatch)",
+    )
+    camp.add_argument(
+        "--connected",
+        default="",
+        help="Synthetic monitor roster (comma-separated agent ids already online)",
+    )
+    camp.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print pure plan only (always safe; no gate)",
+    )
+
+    dlg = sub.add_parser(
+        "delegate",
+        parents=[common],
+        help="Plan one role delegation under Shannon ownership",
+    )
+    dlg.add_argument("role", help="Role or agent id (docking_owner, science, codex, …)")
+    dlg.add_argument("--agent", default=None, help="Override agent id for the role")
+    dlg.add_argument("--task", required=True, help="Campaign task id")
+    dlg.add_argument(
+        "--connected",
+        default="",
+        help="Synthetic monitor roster (comma ids) for dual-owner check",
+    )
+    dlg.add_argument("--dry-run", action="store_true")
+
     args = p.parse_args(argv)
     mgr = AgentManager(mode=args.mode, http_url=args.http_url, socket_path=args.socket)
 
@@ -627,6 +974,42 @@ def main(argv: Optional[list[str]] = None) -> int:
                 )
             )
             return 0
+
+        if args.cmd == "campaign":
+            def _split(s: str) -> list[str]:
+                return [x.strip() for x in (s or "").split(",") if x.strip()]
+
+            connected = _split(getattr(args, "connected", "") or "")
+            plan = plan_benchmark_campaign(
+                args.campaign,
+                args.task,
+                owner=args.owner,
+                analysts=_split(args.analysts) or ["science"],
+                coders=_split(args.coders),
+                coordinator=args.coordinator,
+                mode=args.mode,
+                monitor_connected=connected or None,
+            )
+            # Campaign planning is always pure; --dry-run is the supported path.
+            # Live multi-TUI launch is out of scope — always emit the plan.
+            out(plan.as_dict())
+            return 0 if not plan.refused else 3
+
+        if args.cmd == "delegate":
+            connected = [
+                x.strip()
+                for x in (getattr(args, "connected", "") or "").split(",")
+                if x.strip()
+            ]
+            result = plan_delegate(
+                args.role,
+                args.task,
+                agent_id=args.agent,
+                mode=args.mode,
+                monitor_connected=connected or None,
+            )
+            out(result)
+            return 0 if result.get("ok") else 3
     except ConnectionError as exc:
         out({"ok": False, "error": f"gate offline: {exc}"})
         return 1

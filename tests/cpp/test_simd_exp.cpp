@@ -18,8 +18,33 @@
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
+#if defined(__GNUC__) || defined(__clang__)
+#include <cpuid.h>
+#endif
 
 namespace {
+
+// Compile-time ISA flags do not mean the host CPU can execute those ops
+// (GitHub ubuntu runners often compile with AVX512 enabled but SIGILL at run).
+inline bool cpu_has_avx2() {
+#if defined(__GNUC__) || defined(__clang__)
+    unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+    if (!__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) return false;
+    return (ebx & (1u << 5)) != 0;  // AVX2
+#else
+    return true;  // assume OK when we cannot probe
+#endif
+}
+
+inline bool cpu_has_avx512f() {
+#if defined(__GNUC__) || defined(__clang__)
+    unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+    if (!__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) return false;
+    return (ebx & (1u << 16)) != 0;  // AVX512F
+#else
+    return true;
+#endif
+}
 
 // Evaluate the vector exp for a single scalar input by broadcasting.
 #if defined(__AVX512F__)
@@ -138,23 +163,28 @@ TEST(SimdExpAvx512, SubnormalRangeFiniteAndSmall) {
 
 #if defined(__AVX2__)
 TEST(SimdExpAvx2, MaxRelativeErrorUnder1e12) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_LT(max_rel_error(eval_avx2), 1e-12);
 }
 TEST(SimdExpAvx2, ExactAtZero) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_EQ(eval_avx2(0.0), 1.0);
 }
 TEST(SimdExpAvx2, FlushToZeroBelowUnderflow) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_EQ(eval_avx2(-745.5), 0.0);
     EXPECT_EQ(eval_avx2(-800.0), 0.0);
     EXPECT_EQ(eval_avx2(-1000.0), 0.0);
 }
 TEST(SimdExpAvx2, DeepNegativeSaturatesToZero) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     for (double x : {-709.0, -1418.0, -1420.0, -2000.0, -1e6, -1e300}) {
         EXPECT_EQ(eval_avx2(x), 0.0) << "x=" << x;
         EXPECT_FALSE(std::signbit(eval_avx2(x))) << "must be +0, x=" << x;
     }
 }
 TEST(SimdExpAvx2, NoNaNAnywhereOnNegativeDomain) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     for (double x = 0.0; x >= -1000.0; x -= 0.7) {
         const double v = eval_avx2(x);
         EXPECT_FALSE(std::isnan(v)) << "NaN at x=" << x;
@@ -180,12 +210,15 @@ TEST(SimdLog2Avx512, ExactAtPowersOfTwo) {
 
 #if defined(__AVX2__)
 TEST(SimdLog2Avx2, MaxRelativeErrorUnder1e12) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_LT(max_rel_error_log2(eval_log2_avx2), 1e-12);
 }
 TEST(SimdLog2Avx2, ExactAtOne) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_EQ(eval_log2_avx2(1.0), 0.0);
 }
 TEST(SimdLog2Avx2, ExactAtPowersOfTwo) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_NEAR(eval_log2_avx2(0.5), -1.0, 1e-14);
     EXPECT_NEAR(eval_log2_avx2(0.25), -2.0, 1e-14);
     EXPECT_NEAR(eval_log2_avx2(1e-300), std::log2(1e-300), 1e-12 * 997.0);

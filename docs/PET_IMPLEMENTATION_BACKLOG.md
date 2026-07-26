@@ -149,11 +149,13 @@ Test baseline (must stay green while implementing):
   **Done:** `testLiveShannonSpritesheetDrawableIfPresent` in PetPackageResolverTests;
   XCTSkip when sheet/AppKit missing so CI without pets stays green.
 
-- [ ] **T2 — Swift ↔ Python motion matrix golden file**  
+- [x] **T2 — Swift ↔ Python motion matrix golden file**  
   Observation: both sides claim parallel precedence; no shared fixture asserts
   identical labels for the same signal table.  
   Work: JSON cases consumed by both `PetCodexMotionTests` and
-  `test_pet_codex_motion.py`.
+  `test_pet_codex_motion.py`.  
+  **Done:** Shared golden `hub/tests/fixtures/pet_codex_motion_matrix.json`;
+  Python `TestMotionMatrixGolden` + Swift `testMotionMatrixGoldenMatchesSwiftMap`.
 
 - [x] **T3 — Bubble honesty when motion is review/failed but mood is idle**  
   Observation: matrix tests cover Signals; fewer cases build from real

@@ -47,3 +47,9 @@ Category parity (defining mechanics), not pixel clones. All fields fail-closed.
 
 - `AgentNotchAgentPeekParityTests` — scenarios (a)–(e) + optional fields + dual-HUD tokens
 - `SessionContentPresenterTests`, `AgentLiveSurfaceTests`, `SessionUIWiringTests`
+
+## Works-with residual (2026-07-26)
+
+Disk session providers registered on `PanelSectionRegistry.collectParityPayload`:
+`CoworkSessionReader`, `CursorSessionReader`, `KimiSessionReader` (plus existing Claude Code + Codex).
+Kimi never claims remote Approve (answer in terminal). Terminal hosts Ghostty/iTerm/Warp classify `kimi` / `cursor-agent` CLIs.

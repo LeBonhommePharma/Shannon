@@ -196,7 +196,7 @@ final class AgentIngestTests: XCTestCase {
         let gateValid: Set<String> = [
             "science", "grok_build", "claude_code", "design", "codex", "dispatch", "cowork",
             "chatgpt", "dataset_runner", "local_test", "terminal", "browser", "opencode",
-            "cursor", "vscode", "xcode",
+            "cursor", "kimi", "vscode", "xcode",
         ]
         for rule in TerminalAgentProbe.rules {
             XCTAssertTrue(

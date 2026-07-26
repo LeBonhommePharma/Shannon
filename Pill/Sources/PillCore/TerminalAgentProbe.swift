@@ -191,6 +191,11 @@ public enum TerminalAgentProbe {
               agentID: "dispatch", displayName: "Dispatch"),
         .init(executables: ["chatgpt"],
               agentID: "chatgpt", displayName: "ChatGPT"),
+        // AgentNotch works-with: Kimi CLI + Cursor agent CLI under Ghostty/iTerm/Warp.
+        .init(executables: ["kimi", "kimi-cli", "moonshot", "moonshot-cli"],
+              agentID: "kimi", displayName: "Kimi"),
+        .init(executables: ["cursor-agent", "cursor-cli", "cursor_agent"],
+              agentID: "cursor", displayName: "Cursor"),
     ]
 
     /// Interpreters that tell you nothing on their own — the agent is in argv.
@@ -213,6 +218,10 @@ public enum TerminalAgentProbe {
         ("/.codex/", "codex", "Codex"),
         ("grok-cli", "grok_build", "Grok Build"),
         ("/.grok/", "grok_build", "Grok Build"),
+        ("moonshot", "kimi", "Kimi"),
+        ("/.kimi/", "kimi", "Kimi"),
+        ("kimi-cli", "kimi", "Kimi"),
+        ("cursor-agent", "cursor", "Cursor"),
     ]
 
     /// Terminal plumbing — walked *through*, never reported as an agent.

@@ -77,9 +77,15 @@ final class AgentArtifactReaderTests: XCTestCase {
     func testReadersPlugIntoSessionRegistry() {
         let projects = fixturesRoot.appendingPathComponent("claude/projects", isDirectory: true)
         let codexRoot = fixturesRoot.appendingPathComponent("codex/sessions", isDirectory: true)
+        let cursorRoot = fixturesRoot.appendingPathComponent("cursor/projects", isDirectory: true)
+        let coworkRoot = fixturesRoot.appendingPathComponent("cowork/sessions", isDirectory: true)
+        let kimiRoot = fixturesRoot.appendingPathComponent("kimi/sessions", isDirectory: true)
         let reg = SessionRegistry()
         reg.register(ClaudeCodeSessionReader(projectsRoot: projects, maxSessions: 5))
         reg.register(CodexSessionReader(sessionsRoot: codexRoot, maxSessions: 5))
+        reg.register(CursorSessionReader(projectsRoot: cursorRoot, maxSessions: 5))
+        reg.register(CoworkSessionReader(sessionsRoot: coworkRoot, maxSessions: 5))
+        reg.register(KimiSessionReader(sessionRoots: [kimiRoot], maxSessions: 5))
         // Gate live should outrank when same agent appears (science only on gate).
         reg.register(GateSessionProvider(agents: [
             AgentActivitySnapshot(
@@ -91,9 +97,103 @@ final class AgentArtifactReaderTests: XCTestCase {
         let all = reg.allSessions()
         XCTAssertTrue(all.contains { $0.agentId == "claude_code" && $0.sourceKind == .artifact })
         XCTAssertTrue(all.contains { $0.agentId == "codex" && $0.sourceKind == .artifact })
+        XCTAssertTrue(all.contains { $0.agentId == "cursor" && $0.sourceKind == .artifact })
+        XCTAssertTrue(all.contains { $0.agentId == "cowork" && $0.sourceKind == .artifact })
+        XCTAssertTrue(all.contains { $0.agentId == "kimi" && $0.sourceKind == .artifact })
         let science = all.first { $0.agentId == "science" }
         XCTAssertEqual(science?.presence, .live)
         XCTAssertEqual(science?.sourceKind, .gate)
+    }
+
+    // MARK: - AgentNotch works-with residual readers
+
+    func testCursorReaderParsesFixtureTranscript() {
+        let root = fixturesRoot.appendingPathComponent("cursor/projects", isDirectory: true)
+        let sessions = CursorSessionReader.readSessions(
+            projectsRoot: root,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10
+        )
+        XCTAssertFalse(sessions.isEmpty, "expected Cursor session at \(root.path)")
+        let s = sessions[0]
+        XCTAssertEqual(s.agentId, "cursor")
+        XCTAssertEqual(s.displayName, "Cursor")
+        XCTAssertEqual(s.sourceKind, .artifact)
+        XCTAssertTrue(s.id.contains("cursor:"))
+        XCTAssertEqual(s.status, .idle) // turn_ended success
+        XCTAssertEqual(s.project, "DemoApp")
+        let task = s.lastTask ?? s.activitySummary ?? ""
+        XCTAssertTrue(task.lowercased().contains("hud") || task.lowercased().contains("spring"),
+                      "task=\(task)")
+        XCTAssertNil(s.tokensIn)
+        XCTAssertNil(s.tokensOut)
+    }
+
+    func testCursorMissingRootReturnsEmpty() {
+        let missing = URL(fileURLWithPath: "/tmp/shannon-no-cursor-\(UUID().uuidString)")
+        XCTAssertTrue(CursorSessionReader.readSessions(projectsRoot: missing).isEmpty)
+    }
+
+    func testCoworkReaderParsesFixtureSession() {
+        let root = fixturesRoot.appendingPathComponent("cowork/sessions", isDirectory: true)
+        let sessions = CoworkSessionReader.readSessions(
+            sessionsRoot: root,
+            now: Date(timeIntervalSince1970: 1_721_500_200),
+            maxSessions: 10,
+            recentActivityWindow: 600
+        )
+        XCTAssertFalse(sessions.isEmpty, "expected Cowork session at \(root.path)")
+        let s = sessions[0]
+        XCTAssertEqual(s.agentId, "cowork")
+        XCTAssertEqual(s.displayName, "Cowork")
+        XCTAssertEqual(s.sourceKind, .artifact)
+        XCTAssertEqual(s.model, "claude-opus-test")
+        XCTAssertEqual(s.lastTask, "Sort invoice folder")
+        XCTAssertEqual(s.project, "Invoices")
+        XCTAssertEqual(s.status, .midTask) // lastActivity within window of now
+        XCTAssertNil(s.tokensIn)
+    }
+
+    func testCoworkMissingRootReturnsEmpty() {
+        let missing = URL(fileURLWithPath: "/tmp/shannon-no-cowork-\(UUID().uuidString)")
+        XCTAssertTrue(CoworkSessionReader.readSessions(sessionsRoot: missing).isEmpty)
+    }
+
+    func testKimiReaderParsesFixtureAndFailClosedEmpty() {
+        let root = fixturesRoot.appendingPathComponent("kimi/sessions", isDirectory: true)
+        let sessions = KimiSessionReader.readSessions(
+            roots: [root],
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10
+        )
+        XCTAssertFalse(sessions.isEmpty)
+        let s = sessions[0]
+        XCTAssertEqual(s.agentId, "kimi")
+        XCTAssertEqual(s.displayName, "Kimi")
+        XCTAssertEqual(s.model, "kimi-k2")
+        // Wait state is observational — never invents Approve capability.
+        XCTAssertFalse((s.stateLabel ?? "").lowercased().contains("approve"))
+        let missing = URL(fileURLWithPath: "/tmp/shannon-no-kimi-\(UUID().uuidString)")
+        XCTAssertTrue(KimiSessionReader.readSessions(roots: [missing]).isEmpty)
+    }
+
+    func testPanelRegistryRegistersWorksWithReaders() throws {
+        // Structural: ShannonPill collectParityPayload must register residual providers.
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // PillCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // Pill
+            .appendingPathComponent("Sources/ShannonPill/PanelSectionRegistry.swift")
+        let text = try String(contentsOf: root, encoding: .utf8)
+        for needle in [
+            "CoworkSessionReader",
+            "ClaudeCodeSessionReader",
+            "CodexSessionReader",
+            "CursorSessionReader",
+            "KimiSessionReader",
+        ] {
+            XCTAssertTrue(text.contains(needle), "PanelSectionRegistry must register \(needle)")
+        }
     }
 
     func testProjectDirectoryDecodePrefersHome() {

@@ -166,8 +166,14 @@ final class ParityPanelModel: ObservableObject {
         let reg = SessionRegistry()
         reg.register(GateSessionProvider(agents: gateAgents))
         if includeArtifactReaders {
+            // AgentNotch works-with order: Cowork, Claude Code, Codex, Cursor, Kimi.
+            // Conductor reuses Claude Code artifacts; Ghostty/iTerm/Warp are host
+            // labels via TerminalAgentProbe (not session providers).
+            reg.register(CoworkSessionReader(maxSessions: 12))
             reg.register(ClaudeCodeSessionReader(maxSessions: 12))
             reg.register(CodexSessionReader(maxSessions: 12))
+            reg.register(CursorSessionReader(maxSessions: 12))
+            reg.register(KimiSessionReader(maxSessions: 12))
         }
         // Full merge (gate + disk) for roster meta; Pulled stays artifact-focused.
         let all = reg.allSessions(now: now)

@@ -209,6 +209,18 @@ IDENTITIES.update(
             pet="cat",  # independent, hunts tokens
             pet_symbol="cat.fill",
         ),
+        # Kimi CLI (Moonshot) — AgentNotch works-with; terminal agent, no remote Approve.
+        "kimi": AgentIdentity(
+            id="kimi",
+            display_name="Kimi",
+            short_name="Kimi",
+            emoji="🌙",
+            color_rgb=(0.55, 0.35, 0.90),
+            system_image="moon.stars.fill",
+            auth_kind="local",
+            pet="owl",
+            pet_symbol="bird.fill",
+        ),
         "vscode": AgentIdentity(
             id="vscode",
             display_name="VS Code",

@@ -469,20 +469,36 @@ public struct CompanionState: Sendable, Equatable, Identifiable {
         self.lastOutcome    = lastOutcome
     }
 
+    /// Soft one-word mood for board / bubble adjacency copy.
+    ///
+    /// **T3 honesty:** when `codexMotion` is `.review` or `.failed`, never claim
+    /// quiet idle/sleepy words (`resting` / `sleeping`) even if procedural
+    /// `mood` is still `.idle` (outcomes drive motion, not Canvas mood).
+    public var moodDisplayWord: String {
+        switch codexMotion {
+        case .failed:
+            return CompanionMood.wary.label   // "uneasy"
+        case .review:
+            return "ready"
+        default:
+            return mood.label
+        }
+    }
+
     /// The companion's line on the board. It *restates* the agent's status more
     /// softly and is never the only place that status appears — the honest
     /// `statusLine` always sits beside it.
     ///
     /// Deliberately never phrased as a claim: "focused" is a mood word, and it
     /// is only reachable when `AgentActivitySnapshot.statusLine` already says
-    /// the agent is live and working.
+    /// the agent is live and working. Review/failed motion never reads as quiet.
     public var moodLine: String {
-        "\(petName) · \(mood.label)"
+        "\(petName) · \(moodDisplayWord)"
     }
 
     /// Full accessibility sentence, mood *and* the underlying evidence.
     public var accessibilityLine: String {
-        "\(agent.displayName), \(petName), \(mood.label). \(agent.statusLine)."
+        "\(agent.displayName), \(petName), \(moodDisplayWord). \(agent.statusLine)."
     }
 }
 

@@ -155,10 +155,13 @@ Test baseline (must stay green while implementing):
   Work: JSON cases consumed by both `PetCodexMotionTests` and
   `test_pet_codex_motion.py`.
 
-- [ ] **T3 — Bubble honesty when motion is review/failed but mood is idle**  
+- [x] **T3 — Bubble honesty when motion is review/failed but mood is idle**  
   Observation: matrix tests cover Signals; fewer cases build from real
   `CompanionState` after roster outcome merge.  
-  Work: roster + activity → bubble text golden for review/failed.
+  Work: roster + activity → bubble text golden for review/failed.  
+  **Done:** `moodDisplayWord` / moodLine never claim resting/sleeping when
+  codexMotion is review (`ready`) or failed (`uneasy`); failed bubble mood
+  always `.wary`; roster+activity goldens in CompanionBubbleHonestyT3Tests.
 
 ---
 
@@ -179,3 +182,4 @@ Test baseline (must stay green while implementing):
 | Hub `test_pet_*.py` | 111 passed (later loop: 114) |
 | Live `~/.codex/pets` | shannon/bonhomme/bonhomme-cat/collapse-cat/firebear/grok → v2 OK; oc-an/stitch → v1 only (B1) |
 | B2 (2026-07-26) | CompanionBubbleText + CompanionState lastOutcome plumb; see DesktopCompanionTests |
+| T3 (2026-07-26) | moodDisplayWord + roster/activity bubble goldens for review/failed vs idle mood |

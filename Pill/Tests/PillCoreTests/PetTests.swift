@@ -476,6 +476,28 @@ final class CompanionStateTests: XCTestCase {
         XCTAssertFalse(state.moodLine.contains("focused"))
     }
 
+    /// T3: review/failed motion must not surface idle mood words on moodLine.
+    func testMoodLineHonestWhenOutcomeDrivesReviewOrFailed() {
+        let review = CompanionState(
+            agent: snapshot(status: .idle, presence: .live, secondsAgo: 1),
+            lastOutcome: "success"
+        )
+        XCTAssertEqual(review.codexMotion, .review)
+        XCTAssertEqual(review.mood, .idle)
+        XCTAssertEqual(review.moodDisplayWord, "ready")
+        XCTAssertFalse(review.moodLine.contains("resting"))
+        XCTAssertTrue(review.accessibilityLine.contains("ready"))
+
+        let failed = CompanionState(
+            agent: snapshot(status: .idle, presence: .live, secondsAgo: 1),
+            lastOutcome: "error"
+        )
+        XCTAssertEqual(failed.codexMotion, .failed)
+        XCTAssertEqual(failed.moodDisplayWord, "uneasy")
+        XCTAssertFalse(failed.moodLine.contains("resting"))
+        XCTAssertTrue(failed.accessibilityLine.contains("uneasy"))
+    }
+
     func testHistoryCountDrivesBond() {
         XCTAssertEqual(CompanionState(agent: snapshot(historyCount: 250)).bond, .seasoned)
     }

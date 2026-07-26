@@ -102,6 +102,7 @@ public enum CompanionBubbleText {
         let mood = signals.mood
 
         // 1. Collapse / failed — outranks celebration and work claims.
+        // Mood is always wary so copy never launders as idle/resting (T3).
         if motion == .failed || mood == .wary {
             return CompanionBubbleContent(
                 text: "Something feels off",
@@ -113,7 +114,7 @@ public enum CompanionBubbleText {
                 ),
                 claimsWork: false,
                 motion: .failed,
-                mood: mood == .wary ? .wary : mood
+                mood: .wary
             )
         }
 

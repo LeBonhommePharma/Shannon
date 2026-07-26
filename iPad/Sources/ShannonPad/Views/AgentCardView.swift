@@ -145,16 +145,30 @@ struct AgentCardView: View {
 }
 
 /// The running dot breathes on the same 1.6s period as the Mac pill's border.
+/// UX-007: forever-pulse is off under Reduce Motion (solid full-opacity dot).
 private struct PulseIfRunning: ViewModifier {
     var isRunning: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulsing = false
+
+    private var shouldPulse: Bool {
+        MotionChromePolicy.shouldPulseRunningDot(
+            isRunning: isRunning,
+            reduceMotion: reduceMotion
+        )
+    }
 
     func body(content: Content) -> some View {
         content
-            .opacity(isRunning && pulsing ? 0.45 : 1)
-            .animation(isRunning ? ShannonMotion.pillPulse : .shannonSnap, value: pulsing)
-            .onAppear { pulsing = isRunning }
-            .onChange(of: isRunning) { pulsing = $0 }
+            .opacity(shouldPulse && pulsing ? 0.45 : 1)
+            .animation(shouldPulse ? ShannonMotion.pillPulse : .shannonSnap, value: pulsing)
+            .onAppear { syncPulse() }
+            .onChange(of: isRunning) { _ in syncPulse() }
+            .onChange(of: reduceMotion) { _ in syncPulse() }
+    }
+
+    private func syncPulse() {
+        pulsing = shouldPulse
     }
 }
 

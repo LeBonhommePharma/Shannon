@@ -69,20 +69,22 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `CompanionFocusCopy` (actionable filter + primaryFocusLine + quiet tokens); snapshot `complicationLine` / face use it; idle agents no longer invent busy chrome; Always-On / quiet face show `Shannon · idle`; pure + wiring tests.
 - **Priority:** P1
 
-### - [ ] UX-006: Mac collapsed multi-agent density vs phone card list skim
+### - [x] UX-006: Mac collapsed multi-agent density vs phone card list skim
 
 - **Why:** Mac has multi-agent count + primary focus; phone list should skim same priority (needs-you first) without duplicating long task junk.
 - **Platforms:** macOS, iOS
 - **Area:** `PillView`, `HomeView` / agent cards
 - **First slice:** Phone sort + badge using shared attention enum.
+- **Done:** `AgentListSkim` in ShannonCore (active fleet count Mac parity, multi-agent count label, clipped skim line, ranked rows with pending→needs-you badge); phone HomeView fleet chip + `AgentCard(row:)` one-line skim; pure + wiring tests.
 - **Priority:** P1
 
-### - [ ] UX-007: Dynamic Type / Reduce Motion respect on pad hub and phone cards
+### - [x] UX-007: Dynamic Type / Reduce Motion respect on pad hub and phone cards
 
 - **Why:** Accessibility half-dead chrome is a UX defect; Mac already has Reduce Motion gates in places.
 - **Platforms:** iOS, iPadOS
 - **Area:** Card typography, animation on entropy sparks / companions
 - **First slice:** One surface: disable nonessential animation when Reduce Motion is on; test if pure policy exists.
+- **Done:** `MotionChromePolicy` in ShannonCore (`allowsForeverPulse` / `shouldPulseRunningDot` / `allowsIdleCompanionMotion`); pad `PulseIfRunning` + phone `AgentCard` running-dot pulse gated; pad `PetRailView` idle wobble frozen under Reduce Motion; pure + wiring tests.
 - **Priority:** P1
 
 ---
@@ -97,12 +99,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Share bucketed age formatter; widget snapshot test or pure test.
 - **Priority:** P2
 
-### - [ ] UX-009: iPad compact (Slide Over) mode keeps needs-you agent reachable in one scroll
+### - [x] UX-009: iPad compact (Slide Over) mode keeps needs-you agent reachable in one scroll
 
 - **Why:** Compact layout is a first-class pad mode; needs-you buried below fold is a coordination failure.
 - **Platforms:** iPadOS
 - **Area:** `HubLayout`, `AgentHubView`, list order
 - **First slice:** Pin needs-you section header or sticky top card when any pending ask.
+- **Done:** `HubCompactNeedsYouChrome.shouldPin` pure policy + `partitionForDisplay`; compact hub elevates needs-you band (header + agents) above docking; `HubLayout.isCompact`; pure + structural wiring tests.
 - **Priority:** P2
 
 ### - [x] UX-010: Document multi-OS status legend (amber ask vs red collapse) once

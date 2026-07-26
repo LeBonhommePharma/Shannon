@@ -32,8 +32,35 @@ struct HomeView: View {
                         TimerCard(timer: timer)
                     }
 
-                    ForEach(snapshot.agentsRankedForDisplay()) { agent in
-                        AgentCard(agent: agent)
+                    // UX-006: Mac collapsed multi-agent density — count chip when
+                    // more than one agent needs a glance (needs-you + working).
+                    if let fleet = AgentListSkim.multiAgentCountLabel(
+                        activeCount: AgentListSkim.activeFleetCount(in: snapshot)
+                    ) {
+                        HStack(spacing: ShannonSpacing.xs) {
+                            Text(fleet)
+                                .font(.shannonCaption.weight(.semibold))
+                                .shannonNumeric()
+                                .foregroundStyle(Color.shannonPrimary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.shannonSurfaceElevated, in: Capsule())
+                            Text("agents need a glance")
+                                .font(.shannonCaption)
+                                .foregroundStyle(Color.shannonTertiary)
+                            Spacer(minLength: 0)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(
+                            AgentListSkim.multiAgentAccessibilityLabel(
+                                activeCount: AgentListSkim.activeFleetCount(in: snapshot)
+                            ) ?? "\(fleet) agents"
+                        )
+                    }
+
+                    // Ranked skim rows: needs-you first, shared badge, short secondary.
+                    ForEach(AgentListSkim.rows(in: snapshot)) { row in
+                        AgentCard(row: row)
                     }
 
                     // Host capacity (SSD / thermal / most-constrained) from Mac.
@@ -284,69 +311,105 @@ struct DisconnectedPill: View {
 
 // MARK: - Status cards
 
+/// Agent roster card driven by ``AgentListSkim`` (UX-006).
+///
+/// Density matches Mac collapsed: shared attention badge (pending elevates to
+/// needs-you), one short skim line (no multi-line task junk), measured entropy
+/// only when published.
 @available(iOS 17.0, *)
 struct AgentCard: View {
-    let agent: AgentState
+    let row: AgentListSkim.Row
 
     private var state: ShannonStatusDot.State {
-        switch agent.activity {
-        case .running:  return .active
-        case .blocked:  return .warning
-        case .errored:  return .error
+        if row.isNeedsYou { return .warning }
+        if row.isCollapsed { return .warning }
+        switch row.attention {
+        case .needsYou: return .warning
+        case .working: return .active
         case .finished: return .success
-        case .idle:     return .neutral
+        case .idle: return .neutral
+        case .unknown: return .error
         }
     }
 
-    /// Capsule badge — same vocabulary as Mac notch / iPad cards (UX-001).
-    private var badgeLabel: String {
-        AgentAttentionCopy.badgeLabel(for: agent.activity)
-    }
+    private var isWorking: Bool { row.attention == .working && !row.isNeedsYou }
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShannonSpacing.xs) {
             HStack(spacing: ShannonSpacing.sm) {
                 ShannonStatusDot(state: state)
-                    .modifier(PulseIfRunning(isRunning: agent.activity == .running))
-                Text(agent.name)
+                    .modifier(PulseIfRunning(isRunning: isWorking))
+                Text(row.name)
                     .font(.shannonHeadline)
                     .foregroundStyle(Color.shannonPrimary)
                 Spacer()
-                Text(badgeLabel)
+                Text(row.badge)
                     .font(.shannonCaption)
                     .foregroundStyle(
-                        agent.activity == .blocked || agent.isCollapsed
+                        row.isNeedsYou || row.isCollapsed
                             ? Color.shannonWarning
                             : Color.shannonTertiary
                     )
-                Text("\(agent.turnCount)")
+                Text("\(row.turnCount)")
                     .shannonNumeric()
             }
 
-            if !agent.taskTitle.isEmpty {
-                Text(agent.taskTitle)
+            // One skim line only — Mac collapsed density, not pad-style task walls.
+            if let skim = row.skimLine {
+                Text(skim)
                     .font(.shannonBody)
                     .foregroundStyle(Color.shannonSecondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
             }
 
-            if let entropy = agent.entropyLabel {
+            if let entropy = row.entropyLabel {
                 Text(entropy)
                     .font(.shannonMono)
                     // A collapsed distribution is the whole point of Shannon —
                     // it must read at a glance, not blend into grey text.
-                    .foregroundStyle(agent.isCollapsed ? Color.shannonError : Color.shannonTertiary)
+                    .foregroundStyle(row.isCollapsed ? Color.shannonError : Color.shannonTertiary)
             }
         }
         .shannonCard()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(agent.name), \(badgeLabel)")
+        .accessibilityLabel("\(row.name), \(row.badge)")
         .contextMenu {
-            Button("Copy last action") {
-                UIPasteboard.general.string = agent.lastAction
-                Haptics.transition()
+            if let skim = row.skimLine {
+                Button("Copy last action") {
+                    UIPasteboard.general.string = skim
+                    Haptics.transition()
+                }
             }
         }
+    }
+}
+
+/// Running status-dot breath (same 1.6s period as Mac / iPad).
+/// UX-007: forever-pulse off under Reduce Motion — solid full-opacity dot.
+@available(iOS 17.0, *)
+private struct PulseIfRunning: ViewModifier {
+    var isRunning: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulsing = false
+
+    private var shouldPulse: Bool {
+        MotionChromePolicy.shouldPulseRunningDot(
+            isRunning: isRunning,
+            reduceMotion: reduceMotion
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shouldPulse && pulsing ? 0.45 : 1)
+            .animation(shouldPulse ? ShannonMotion.pillPulse : .shannonSnap, value: pulsing)
+            .onAppear { syncPulse() }
+            .onChange(of: isRunning) { _ in syncPulse() }
+            .onChange(of: reduceMotion) { _ in syncPulse() }
+    }
+
+    private func syncPulse() {
+        pulsing = shouldPulse
     }
 }
 

@@ -11,6 +11,7 @@ import ShannonTheme
 public struct PetRailView: View {
     @Environment(PetStore.self) private var store
     @Environment(PetInteractionEngine.self) private var engine
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var entries: [PetMemoryEntry] = []
     @State private var pencilOffset: CGSize = .zero
@@ -28,6 +29,7 @@ public struct PetRailView: View {
         .padding(ShannonSpacing.md)
         .task { await loadEntries() }
         .onAppear { startIdleAnimation() }
+        .onChange(of: reduceMotion) { _ in startIdleAnimation() }
     }
 
     // MARK: Pet section
@@ -142,6 +144,13 @@ public struct PetRailView: View {
     }
 
     private func startIdleAnimation() {
+        // UX-007: decorative forever wobble is nonessential — freeze under Reduce Motion.
+        guard MotionChromePolicy.allowsIdleCompanionMotion(reduceMotion: reduceMotion) else {
+            var txn = Transaction()
+            txn.disablesAnimations = true
+            withTransaction(txn) { idleRotation = 0 }
+            return
+        }
         // Gentle idle: a subtle ±2° wobble on a 4-second loop.
         withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
             idleRotation = 2

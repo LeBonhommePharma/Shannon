@@ -370,9 +370,63 @@ public enum AgentLiveSurfaceLogic {
         }
     }
 
+    /// Rank agents with their surfaces: needs-you → working → finished → idle → unknown.
+    ///
+    /// **One `resolve` per agent** for the tick (ENH-007). Callers that need both
+    /// the snapshot and the surface (roster cards, boards) should use this instead
+    /// of `rankedAgents` + re-`resolve`.
+    public static func rankedAgentSurfaces(
+        agents: [AgentActivitySnapshot],
+        pendingAsks: [GateDBReader.PendingAsk] = [],
+        activity: [GateDBReader.ActivityEvent] = [],
+        usageByAgent: [String: AgentUsageSnapshot] = [:],
+        now: Date = Date(),
+        limit: Int = 4
+    ) -> [(agent: AgentActivitySnapshot, surface: AgentLiveSurface)] {
+        let byId = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
+        var surfaceById: [String: AgentLiveSurface] = [:]
+        surfaceById.reserveCapacity(agents.count)
+        for a in agents {
+            surfaceById[a.id] = resolve(
+                agent: a,
+                pendingAsks: pendingAsks,
+                activity: activity,
+                usage: usageByAgent[a.id],
+                now: now
+            )
+        }
+        let rankedSurfaces = agents.compactMap { surfaceById[$0.id] }.sorted { lhs, rhs in
+            let lp = rank(lhs.attention)
+            let rp = rank(rhs.attention)
+            if lp != rp { return lp < rp }
+            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
+                == .orderedAscending
+        }
+        // Fleet-useful first (same filter as `fleet`).
+        let useful = rankedSurfaces.filter {
+            $0.attention != .unknown || $0.needsYou || !$0.activityLine.isEmpty
+        }
+        var ordered: [(agent: AgentActivitySnapshot, surface: AgentLiveSurface)] = []
+        var seen = Set<String>()
+        for s in useful {
+            guard let a = byId[s.agentId], !seen.contains(a.id) else { continue }
+            ordered.append((a, s))
+            seen.insert(a.id)
+        }
+        // Quiet / unknown remainder keep input order (matches prior rankedAgents).
+        for a in agents where !seen.contains(a.id) {
+            if let s = surfaceById[a.id] {
+                ordered.append((a, s))
+                seen.insert(a.id)
+            }
+        }
+        return Array(ordered.prefix(max(0, limit)))
+    }
+
     /// Rank agents for roster/board: needs-you → working → finished → idle → unknown.
     ///
     /// Returns activity snapshots in glance order so both HUDs share one sort.
+    /// Prefer `rankedAgentSurfaces` when the caller also needs the surface.
     public static func rankedAgents(
         agents: [AgentActivitySnapshot],
         pendingAsks: [GateDBReader.PendingAsk] = [],
@@ -381,28 +435,14 @@ public enum AgentLiveSurfaceLogic {
         now: Date = Date(),
         limit: Int = 4
     ) -> [AgentActivitySnapshot] {
-        let surfaces = fleet(
+        rankedAgentSurfaces(
             agents: agents,
             pendingAsks: pendingAsks,
             activity: activity,
             usageByAgent: usageByAgent,
             now: now,
-            limit: max(limit, agents.count)
-        )
-        let byId = Dictionary(uniqueKeysWithValues: agents.map { ($0.id, $0) })
-        var ordered: [AgentActivitySnapshot] = []
-        var seen = Set<String>()
-        for s in surfaces {
-            guard let a = byId[s.agentId], !seen.contains(a.id) else { continue }
-            ordered.append(a)
-            seen.insert(a.id)
-        }
-        // Append remaining agents (quiet / unknown) after fleet hits.
-        for a in agents where !seen.contains(a.id) {
-            ordered.append(a)
-            seen.insert(a.id)
-        }
-        return Array(ordered.prefix(max(0, limit)))
+            limit: limit
+        ).map(\.agent)
     }
 
     // MARK: - Tool / completion classification (pure)

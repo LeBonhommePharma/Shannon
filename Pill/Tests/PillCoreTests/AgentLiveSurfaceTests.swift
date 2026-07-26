@@ -375,6 +375,45 @@ final class AgentLiveSurfaceTests: XCTestCase {
         XCTAssertEqual(ranked.map(\.id).contains("codex"), true)
     }
 
+    /// ENH-007: paired API matches rankedAgents order and single-resolve attention.
+    func testRankedAgentSurfacesMatchesRankedAgentsAndResolve() {
+        let working = agent(id: "codex", name: "Codex", status: .midTask)
+        let needs = agent(id: "claude_code", name: "Claude Code", status: .idle, presence: .live, task: "")
+        let idle = agent(id: "design", name: "Design", status: .idle, presence: .live, task: "")
+        let ask = GateDBReader.PendingAsk(
+            interactionId: "a", agentId: "claude_code", prompt: "Approve?", createdAt: now
+        )
+        let activity = [event(id: 3, agent: "codex", type: "tool_call", label: "Edited x")]
+        let agents = [working, needs, idle]
+        let ranked = AgentLiveSurfaceLogic.rankedAgents(
+            agents: agents,
+            pendingAsks: [ask],
+            activity: activity,
+            now: now,
+            limit: 4
+        )
+        let pairs = AgentLiveSurfaceLogic.rankedAgentSurfaces(
+            agents: agents,
+            pendingAsks: [ask],
+            activity: activity,
+            now: now,
+            limit: 4
+        )
+        XCTAssertEqual(pairs.map(\.agent.id), ranked.map(\.id))
+        XCTAssertEqual(pairs.first?.surface.attention, .needsYou)
+        for (agent, surface) in pairs {
+            let again = AgentLiveSurfaceLogic.resolve(
+                agent: agent,
+                pendingAsks: [ask],
+                activity: activity,
+                now: now
+            )
+            XCTAssertEqual(surface.attention, again.attention, agent.id)
+            XCTAssertEqual(surface.needsYou, again.needsYou, agent.id)
+            XCTAssertEqual(surface.activityLine, again.activityLine, agent.id)
+        }
+    }
+
     func testActiveFleetCountExcludesIdle() {
         let w = agent(id: "codex", name: "Codex", status: .midTask)
         let idle = agent(id: "design", name: "Design", status: .idle, presence: .live, task: "")

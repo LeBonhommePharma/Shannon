@@ -72,11 +72,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 ## P1 — performance / poll path
 
-### - [ ] ENH-007: Avoid double-resolve in `rankedAgents` + UI row surfaces
+### - [x] ENH-007: Avoid double-resolve in `rankedAgents` + UI row surfaces
 
 - **Why:** `rankedAgents` builds a full `fleet` (resolve per agent), then UI often `resolve`s again per row for badge/detail. On a 1.5s poll with many agents this is pure CPU on MainActor-adjacent paths.
 - **Area:** `AgentLiveSurface.swift`, `PillView`, `MenuBarAgentRoster` / `SessionContentPresenter.cardsFromAgents`
 - **First slice:** Return `[(AgentActivitySnapshot, AgentLiveSurface)]` or cache surface by agent id for one tick; unit test identity of attention vs current API.
+- **Done:** `rankedAgentSurfaces` one resolve/tick; `rankedAgents` maps it; `cardsFromAgents` uses pairs (session usage merged once). PillView row resolve left for a later slice.
 - **Priority:** P1
 
 ### - [ ] ENH-008: Cap artifact reader I/O when parity panel is closed
@@ -176,7 +177,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-006: ShannonPill 32 pass; PillCore 826 pass, 1 skip |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-007: ShannonPill suite green; PillCore 827 pass, 1 skip |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `PYTHONPATH=python pytest tests/python/ -v` | 180 passed, 51 skipped (bare pytest needs path — see ENH-009) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

@@ -253,28 +253,27 @@ public enum SessionContentPresenter {
         now: Date = Date(),
         limit: Int = 4
     ) -> [SessionContentCard] {
-        let ranked = AgentLiveSurfaceLogic.rankedAgents(
+        // Merge session token usage into the resolve map once so roster cards
+        // share one surface tick with rankedAgentSurfaces (ENH-007).
+        var mergedUsage = usageByAgent
+        for (id, session) in sessionsByAgent {
+            if mergedUsage[id] == nil, let u = usageFromSession(session) {
+                mergedUsage[id] = u
+            }
+        }
+        let ranked = AgentLiveSurfaceLogic.rankedAgentSurfaces(
             agents: agents,
             pendingAsks: pendingAsks,
             activity: activity,
-            usageByAgent: usageByAgent,
+            usageByAgent: mergedUsage,
             now: now,
             limit: max(limit, agents.count)
         )
         var out: [SessionContentCard] = []
-        for agent in ranked {
-            // Live agent snapshot owns attention; session only contributes
-            // optional meta (project/branch/model/tokens) fail-closed.
+        for (agent, surface) in ranked {
+            // Live surface owns attention; session only contributes
+            // optional meta (project/branch/model) fail-closed.
             let session = sessionsByAgent[agent.id]
-            let usage = usageByAgent[agent.id]
-                ?? session.flatMap { usageFromSession($0) }
-            let surface = AgentLiveSurfaceLogic.resolve(
-                agent: agent,
-                pendingAsks: pendingAsks,
-                activity: activity,
-                usage: usage,
-                now: now
-            )
             let ask = pendingAsks.first { $0.agentId == agent.id }
             out.append(SessionContentCard(
                 id: session?.id ?? "agent:\(agent.id)",

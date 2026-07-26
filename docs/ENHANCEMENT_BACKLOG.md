@@ -36,11 +36,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 ## P1 — session content / AgentNotch parity density
 
-### - [ ] ENH-003: Merge gate + artifact sessions into roster `sessionsByAgent`
+### - [x] ENH-003: Merge gate + artifact sessions into roster `sessionsByAgent`
 
 - **Why:** Menu-bar roster meta (project / branch / model) only comes from `parity.sessions`, which **filters to `.artifact`**. Live gate agents with cwd/task from the hub never get meta chips even when an artifact row exists under a different merge key, and gate-only fields are dropped.
 - **Area:** `Pill/Sources/ShannonPill/MenuBarPopoverView.swift`, `PanelSectionRegistry.swift` (`collectParityPayload`), optional `SessionMerge`
 - **First slice:** Build `sessionsByAgent` from **all** merged sessions (gate + artifact), not artifact-only; keep Pulled sessions section artifact-focused if desired; unit-test merge prefer rules for meta fill.
+- **Done:** `SessionMerge.prefer` always fills meta from loser; `byAgentId` + `ParityPayload.sessionsByAgent`; Pulled stays artifact-only.
 - **Priority:** P1
 
 ### - [ ] ENH-004: Parse Claude Code / Codex token usage when present on disk
@@ -172,7 +173,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-001: build clean; ShannonPill 32 pass; PillCore 810 pass, 1 skip |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-003: ShannonPill 32 pass; PillCore 814 pass, 1 skip |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `PYTHONPATH=python pytest tests/python/ -v` | 180 passed, 51 skipped (bare pytest needs path — see ENH-009) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

@@ -32,7 +32,10 @@ enum PanelSectionID: String, CaseIterable, Identifiable {
 /// Snapshot of additive panel data, refreshed with the activity poll.
 @MainActor
 final class ParityPanelModel: ObservableObject {
+    /// Artifact sessions for the Pulled sessions section (disk-focused).
     @Published var sessions: [AgentSession] = []
+    /// Best gate+artifact session per agent id for roster meta chips.
+    @Published var sessionsByAgent: [String: AgentSession] = [:]
     @Published var servers: [DevServer] = []
     @Published var routes: [QuickRoute] = []
     @Published var actions: [FastAction] = []
@@ -79,13 +82,17 @@ final class ParityPanelModel: ObservableObject {
     @MainActor
     private func applyParityPayload(_ payload: ParityPayload) {
         sessions = payload.sessions
+        sessionsByAgent = payload.sessionsByAgent
         servers = payload.servers
         routes = payload.routes
     }
 
     /// One snapshot of parity panel data (sessions / servers / routes).
     struct ParityPayload: Sendable {
+        /// Artifact-only rows for the Pulled sessions section.
         var sessions: [AgentSession]
+        /// Gate + artifact, prefer-merged by agent id (roster meta chips).
+        var sessionsByAgent: [String: AgentSession]
         var servers: [DevServer]
         var routes: [QuickRoute]
     }
@@ -108,15 +115,19 @@ final class ParityPanelModel: ObservableObject {
             reg.register(ClaudeCodeSessionReader(maxSessions: 12))
             reg.register(CodexSessionReader(maxSessions: 12))
         }
-        let sess = Array(
-            reg.allSessions(now: now)
-                .filter { $0.sourceKind == .artifact }
-                .prefix(8)
-        )
+        // Full merge (gate + disk) for roster meta; Pulled stays artifact-focused.
+        let all = reg.allSessions(now: now)
+        let artifact = Array(all.filter { $0.sourceKind == .artifact }.prefix(8))
+        let byAgent = SessionMerge.byAgentId(all)
         let servers = discoverServers()
         // Keep missing catalog paths so QuickRoutesSection can dim/disable them.
         let routes = QuickRouteCatalog.panelRoutes(home: home, limit: 24)
-        return ParityPayload(sessions: sess, servers: servers, routes: routes)
+        return ParityPayload(
+            sessions: artifact,
+            sessionsByAgent: byAgent,
+            servers: servers,
+            routes: routes
+        )
     }
 
     func runAction(_ action: FastAction) {

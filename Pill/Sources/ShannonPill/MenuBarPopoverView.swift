@@ -92,16 +92,10 @@ struct MenuBarPopoverView: View {
     private var ask: GateDBReader.PendingAsk? { activity.pendingAsks.first }
 
     /// Best session per agent id (project / branch / model / tokens when real).
+    ///
+    /// Built from gate + artifact during parity collect (ENH-003) — not artifact-only.
     private var sessionsByAgentId: [String: AgentSession] {
-        var best: [String: AgentSession] = [:]
-        for s in parity.sessions {
-            if let existing = best[s.agentId] {
-                best[s.agentId] = SessionMerge.prefer(existing, s)
-            } else {
-                best[s.agentId] = s
-            }
-        }
-        return best
+        parity.sessionsByAgent
     }
 
     /// Gate readiness line for the hub badge / header (P0.3).

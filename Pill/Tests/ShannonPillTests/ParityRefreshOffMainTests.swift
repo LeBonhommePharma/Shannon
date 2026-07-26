@@ -23,6 +23,10 @@ final class ParityRefreshOffMainTests: XCTestCase {
         )
         // Artifact sessions may be empty on a temp home — that is fine.
         XCTAssertTrue(payload.servers.isEmpty)
+        // Pulled section stays artifact-only; roster map still carries gate.
+        XCTAssertTrue(payload.sessions.allSatisfy { $0.sourceKind == .artifact })
+        XCTAssertEqual(payload.sessionsByAgent["science"]?.sourceKind, .gate)
+        XCTAssertEqual(payload.sessionsByAgent["science"]?.presence, .live)
         // Routes catalog still returns paths for a home (may be missing).
         XCTAssertFalse(payload.routes.isEmpty, "panel routes keep missing paths")
     }

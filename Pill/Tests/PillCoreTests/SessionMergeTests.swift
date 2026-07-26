@@ -95,6 +95,92 @@ final class SessionMergeTests: XCTestCase {
         XCTAssertEqual(snap.status, .midTask)
         XCTAssertTrue(snap.lastTask.contains("Wiring"))
     }
+
+    /// ENH-003: gate live wins but still absorbs artifact project/branch/model.
+    func testPreferFillsMetaFromLoser() {
+        let gate = AgentSession(
+            id: "gate:claude_code",
+            agentId: "claude_code",
+            displayName: "Claude Code",
+            presence: .live,
+            status: .midTask,
+            sourceKind: .gate,
+            updatedAt: now,
+            lastTask: "from gate"
+        )
+        let art = AgentSession(
+            id: "claude_code:sess1",
+            agentId: "claude_code",
+            displayName: "Claude Code",
+            presence: .observed,
+            status: .idle,
+            sourceKind: .artifact,
+            updatedAt: now.addingTimeInterval(-60),
+            project: "Shannon",
+            lastTask: "from disk",
+            model: "Sonnet",
+            branch: "feat/hud"
+        )
+        let preferred = SessionMerge.prefer(gate, art)
+        XCTAssertEqual(preferred.presence, .live)
+        XCTAssertEqual(preferred.sourceKind, .gate)
+        XCTAssertEqual(preferred.lastTask, "from gate")
+        XCTAssertEqual(preferred.project, "Shannon")
+        XCTAssertEqual(preferred.branch, "feat/hud")
+        XCTAssertEqual(preferred.model, "Sonnet")
+        // Reverse argument order must yield the same meta fill.
+        let preferredRev = SessionMerge.prefer(art, gate)
+        XCTAssertEqual(preferredRev.presence, .live)
+        XCTAssertEqual(preferredRev.project, "Shannon")
+        XCTAssertEqual(preferredRev.branch, "feat/hud")
+        XCTAssertEqual(preferredRev.model, "Sonnet")
+    }
+
+    /// ENH-003: byAgentId collapses gate + artifact into one roster meta row.
+    func testByAgentIdMergesGateAndArtifactMeta() {
+        let gate = AgentSession(
+            id: "gate:claude_code",
+            agentId: "claude_code",
+            displayName: "Claude Code",
+            presence: .live,
+            status: .midTask,
+            sourceKind: .gate,
+            updatedAt: now,
+            lastTask: "Editing Panel"
+        )
+        let art = AgentSession(
+            id: "art:1",
+            agentId: "claude_code",
+            displayName: "Claude Code",
+            presence: .observed,
+            status: .idle,
+            sourceKind: .artifact,
+            updatedAt: now.addingTimeInterval(-120),
+            project: "api",
+            model: "Opus",
+            branch: "main"
+        )
+        let other = AgentSession(
+            id: "art:codex",
+            agentId: "codex",
+            displayName: "Codex",
+            presence: .observed,
+            status: .idle,
+            sourceKind: .artifact,
+            updatedAt: now,
+            project: "other"
+        )
+        let map = SessionMerge.byAgentId([gate, art, other])
+        XCTAssertEqual(Set(map.keys), Set(["claude_code", "codex"]))
+        let claude = map["claude_code"]
+        XCTAssertEqual(claude?.presence, .live)
+        XCTAssertEqual(claude?.sourceKind, .gate)
+        XCTAssertEqual(claude?.project, "api")
+        XCTAssertEqual(claude?.branch, "main")
+        XCTAssertEqual(claude?.model, "Opus")
+        XCTAssertEqual(claude?.lastTask, "Editing Panel")
+        XCTAssertEqual(map["codex"]?.project, "other")
+    }
 }
 
 /// Test double provider.

@@ -168,23 +168,34 @@ public enum SessionMerge {
     }
 
     /// Prefer stronger presence, then stronger source, then fresher update.
+    ///
+    /// Always fill optional meta (project / branch / model / tokens / …) from the
+    /// non-winner when the winner lacks them — gate live must not drop artifact chips.
     public static func prefer(_ a: AgentSession, _ b: AgentSession) -> AgentSession {
+        let winner: AgentSession
+        let loser: AgentSession
         let pa = presenceRank(a.presence)
         let pb = presenceRank(b.presence)
-        if pa != pb { return pa < pb ? a : b }
-        if a.sourceKind.mergeRank != b.sourceKind.mergeRank {
-            return a.sourceKind.mergeRank < b.sourceKind.mergeRank ? a : b
+        if pa != pb {
+            if pa < pb { winner = a; loser = b } else { winner = b; loser = a }
+        } else if a.sourceKind.mergeRank != b.sourceKind.mergeRank {
+            if a.sourceKind.mergeRank < b.sourceKind.mergeRank {
+                winner = a; loser = b
+            } else {
+                winner = b; loser = a
+            }
+        } else if a.updatedAt != b.updatedAt {
+            if a.updatedAt >= b.updatedAt { winner = a; loser = b }
+            else { winner = b; loser = a }
+        } else {
+            // Equal rank: keep `a` as base, still absorb missing fields from `b`.
+            return fillMissing(from: a, using: b)
         }
-        if a.updatedAt != b.updatedAt {
-            return a.updatedAt >= b.updatedAt ? a : b
-        }
-        // Fill optional fields from the other when missing (fail-closed: never invent).
-        return fillMissing(from: a, using: b)
+        return fillMissing(from: winner, using: loser)
     }
 
-    /// Project merged sessions to legacy activity rows (one row per agent id,
-    /// best presence wins).
-    public static func projectToActivity(_ sessions: [AgentSession]) -> [AgentActivitySnapshot] {
+    /// One best session per `agentId` (presence → source → freshness), with meta fill.
+    public static func byAgentId(_ sessions: [AgentSession]) -> [String: AgentSession] {
         var best: [String: AgentSession] = [:]
         for s in sessions {
             if let existing = best[s.agentId] {
@@ -193,7 +204,13 @@ public enum SessionMerge {
                 best[s.agentId] = s
             }
         }
-        return best.values
+        return best
+    }
+
+    /// Project merged sessions to legacy activity rows (one row per agent id,
+    /// best presence wins).
+    public static func projectToActivity(_ sessions: [AgentSession]) -> [AgentActivitySnapshot] {
+        byAgentId(sessions).values
             .map { $0.asActivitySnapshot() }
             .sorted { lhs, rhs in
                 let lb = lhs.status.isBusy && lhs.presence.canBeBusy

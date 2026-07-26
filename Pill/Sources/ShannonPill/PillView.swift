@@ -1536,11 +1536,20 @@ struct ConfirmationPromptView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
+            // UX-028: Approve/Deny share GateAskActionCopy with gate cards / phone.
             HStack(spacing: 10) {
-                answerButton("Yes", systemImage: "checkmark", tint: .shannonSuccess) {
+                answerButton(
+                    GateAskActionCopy.approve,
+                    systemImage: "checkmark",
+                    tint: .shannonSuccess
+                ) {
                     confirmation.answer(.confirmed)
                 }
-                answerButton("No", systemImage: "xmark", tint: .shannonError) {
+                answerButton(
+                    GateAskActionCopy.deny,
+                    systemImage: "xmark",
+                    tint: .shannonError
+                ) {
                     confirmation.answer(.denied)
                 }
             }
@@ -1549,8 +1558,8 @@ struct ConfirmationPromptView: View {
                       ? "airpods.gen3" : "airpods.gen3.slash")
                     .font(.shannonMenuFootnote)
                 Text(confirmation.gesturesAvailable
-                     ? "Nod to confirm · shake to deny"
-                     : "Head gestures unavailable — \(confirmation.gestureStatus)")
+                     ? HeadGestureCopy.availableHint
+                     : HeadGestureCopy.unavailableLine(status: confirmation.gestureStatus))
                     .font(.shannonMenuFootnote)
                     .lineLimit(2)
             }

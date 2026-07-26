@@ -240,8 +240,9 @@ struct ConfirmationBanner: View {
                 }
             }
 
+            // UX-028: head-gesture coaching shares HeadGestureCopy with Mac pill.
             if gesturesAvailable && a.canInteract {
-                Label("Nod to confirm · shake to deny", systemImage: "airpodspro")
+                Label(HeadGestureCopy.availableHint, systemImage: "airpodspro")
                     .font(.shannonCaption)
                     .foregroundStyle(Color.shannonTertiary)
             }

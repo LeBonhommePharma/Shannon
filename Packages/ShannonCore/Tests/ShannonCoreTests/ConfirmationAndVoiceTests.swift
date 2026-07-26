@@ -169,6 +169,81 @@ final class ConfirmationAndVoiceTests: XCTestCase {
         XCTAssertEqual(HeadGestureDetector.angleDelta(.pi - 0.01, -.pi + 0.01), -0.02, accuracy: 1e-9)
     }
 
+    // MARK: Head-gesture affordance copy (UX-028)
+
+    func testHeadGestureCopyAvailableHint() {
+        XCTAssertEqual(
+            HeadGestureCopy.availableHint,
+            "Nod to confirm · shake to deny"
+        )
+        XCTAssertTrue(HeadGestureCopy.availableHint.localizedCaseInsensitiveContains("nod"))
+        XCTAssertTrue(HeadGestureCopy.availableHint.localizedCaseInsensitiveContains("shake"))
+        XCTAssertEqual(
+            HeadGestureCopy.unavailableLine(status: "not connected"),
+            "Head gestures unavailable — not connected"
+        )
+    }
+
+    /// Mac ConfirmationPromptView + phone banner share Approve/Deny and gesture copy.
+    func testMacAndPhoneWireHeadGestureAndApproveCopy() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let pill = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Pill/Sources/ShannonPill/PillView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            pill.contains("GateAskActionCopy.approve"),
+            "ConfirmationPromptView must use GateAskActionCopy.approve"
+        )
+        XCTAssertTrue(
+            pill.contains("GateAskActionCopy.deny"),
+            "ConfirmationPromptView must use GateAskActionCopy.deny"
+        )
+        XCTAssertTrue(
+            pill.contains("HeadGestureCopy.availableHint"),
+            "ConfirmationPromptView must use HeadGestureCopy.availableHint"
+        )
+        XCTAssertTrue(
+            pill.contains("HeadGestureCopy.unavailableLine"),
+            "ConfirmationPromptView must use HeadGestureCopy.unavailableLine"
+        )
+        XCTAssertFalse(
+            pill.contains("answerButton(\"Yes\""),
+            "ConfirmationPromptView must not hard-code dual Yes verb"
+        )
+        XCTAssertFalse(
+            pill.contains("answerButton(\"No\""),
+            "ConfirmationPromptView must not hard-code dual No verb"
+        )
+        XCTAssertFalse(
+            pill.contains("\"Nod to confirm · shake to deny\""),
+            "Mac pill must not hard-code dual gesture hint string"
+        )
+
+        let phone = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/HomeView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            phone.contains("HeadGestureCopy.availableHint"),
+            "phone confirmation must use HeadGestureCopy.availableHint"
+        )
+        XCTAssertFalse(
+            phone.contains("\"Nod to confirm · shake to deny\""),
+            "phone must not hard-code dual gesture hint string"
+        )
+    }
+
     // MARK: Confirmation records
 
     func testPendingConfirmationRoundTrips() throws {

@@ -273,10 +273,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** GateAskActionCopy roster tokens; MenuBarAgentRoster + MenuBarController wired; GateAskActionCopyTests.
 - **Priority:** P2
 
+### - [x] UX-028: Mac ConfirmationPromptView Approve/Deny + shared head-gesture copy
+
+- **Why:** Gate cards use `GateAskActionCopy` Approve/Deny; Mac `ConfirmationPromptView` still hard-coded Yes/No and dual `"Nod to confirm · shake to deny"` with phone.
+- **Platforms:** macOS, iOS
+- **Area:** `PillView.ConfirmationPromptView`, `HomeView` confirmation banner, `HeadGestureCopy`, `GateAskActionCopy`
+- **First slice:** Core gesture tokens; wire Approve/Deny + hint on Mac + phone; pure wiring test.
+- **Done:** `HeadGestureCopy` + ConfirmationPromptView Approve/Deny; phone Label; ConfirmationAndVoiceTests.
+- **Priority:** P1
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 23):** `--quick` all PASS. Backlog empty after UX-027. Residual Mac ConfirmationPrompt Yes/No vs gate Approve/Deny + dual gesture coaching. Claimed **UX-028**. Considered: widget docking `"Idle"` (leave); pad/watch `"Nothing playing"` dual (optional); desktop `"Open in Shannon"` a11y brand (optional). **No additional UX-0xx**.
 - **2026-07-26 (loop 22):** `--quick` all PASS. Backlog empty after UX-026. Residual Mac menu-bar `"Gate · approve"` dual + status-item a11y `"Shannon"`. Claimed **UX-027**. Considered: widget docking `"Idle"` (not brand/gate); `configurationDisplayName` catalog (leave); theme preview product chrome OK; phone head-gesture “Nod to confirm” (gesture copy, not primary Approve verb). **No additional UX-0xx**.
 - **2026-07-26 (loop 21):** `--quick` all PASS. Backlog empty after UX-025. Residual pad hub brand `"Shannon"` nav titles + unknown-agent fallbacks. Claimed **UX-026**. Considered: widget docking `"Idle"` (not brand); widget/complication `configurationDisplayName` (system catalog — leave); theme preview product chrome OK; Mac menu-bar symbol a11y `"Shannon"` (status item, not nav brand). **No additional UX-0xx**.
 - **2026-07-26 (loop 20):** `--quick` all PASS. Backlog empty; residual brand `"Shannon"` on widget/complication/menu/phone. Claimed **UX-025**. Considered: widget docking `"Idle"` (not brand token — leave); theme preview + Settings titles OK product chrome. **No additional UX-0xx**.

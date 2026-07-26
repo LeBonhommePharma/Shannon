@@ -27,6 +27,22 @@ public enum HeadGesture: String, Sendable, Equatable {
     }
 }
 
+// MARK: - Head-gesture affordance copy (Mac pill · iPhone)
+
+/// Shared AirPods nod/shake chrome under pending confirmations (UX-028).
+///
+/// Mac `ConfirmationPromptView` and phone confirmation banner must agree on
+/// the available-hint line so dual-OS gesture coaching cannot drift.
+public enum HeadGestureCopy: Sendable {
+    /// When AirPods tracking is live and the ask is answerable.
+    public static let availableHint = "Nod to confirm · shake to deny"
+
+    /// When tracking is unavailable (status is device-reported detail).
+    public static func unavailableLine(status: String) -> String {
+        "Head gestures unavailable — \(status)"
+    }
+}
+
 public struct HeadGestureConfig: Sendable, Equatable {
     /// Excursion required to start a candidate gesture.
     public var thresholdRadians: Double

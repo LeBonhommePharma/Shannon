@@ -856,6 +856,40 @@ final class PetAtlasFrameTests: XCTestCase {
 
 final class PetPackageResolverTests: XCTestCase {
 
+    func testPreferredPackageIdMapsKnownAgents() {
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "grok_build"), "grok")
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "Grok-Build"), "grok")
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "science"), "shannon")
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "cursor"), "bonhomme-cat")
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "design"), "firebear")
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "cowork"), "bonhomme")
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "dispatch"), "firebear")
+    }
+    func testPreferredPackageIdStylePetFallback() {
+        let ravenStyle = AgentStyle(id: "custom_raven", displayName: "Custom", shortName: "CR",
+            systemImage: "bird", emoji: "🐦", red: 0.5, green: 0.5, blue: 0.5, pet: "raven", petSymbol: "bird")
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "custom_raven", style: ravenStyle), "grok")
+        let catStyle = AgentStyle(id: "custom_cat", displayName: "Cat", shortName: "C",
+            systemImage: "cat", emoji: "🐱", red: 0.5, green: 0.5, blue: 0.5, pet: "cat", petSymbol: "cat.fill")
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "custom_cat", style: catStyle), "bonhomme-cat")
+    }
+    func testPreferredPackageIdPreferenceOverrideWins() {
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "grok_build", preferenceOverride: "firebear"), "firebear")
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "science", preferenceOverride: "  collapse-cat  "), "collapse-cat")
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "grok_build", preferenceOverride: "   "), "grok")
+    }
+    func testPreferredPackageIdUnknownFallsBackToDefault() {
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "totally_unknown_xyz"), PetPackageResolver.defaultPetId)
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: ""), PetPackageResolver.defaultPetId)
+        XCTAssertEqual(PetPackageResolver.preferredPackageId(forAgentId: "firebear"), "firebear")
+    }
+    func testPreferredPackageIdCatalogAgentsNeverBlank() {
+        for style in AgentStyleCatalog.all {
+            XCTAssertFalse(PetPackageResolver.preferredPackageId(forAgentId: style.id).isEmpty, style.id)
+        }
+    }
+
+
     func testMissingPackageUsesProcedural() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("shannon-pet-pkg-\(UUID().uuidString)")
@@ -1023,6 +1057,44 @@ final class PetPackageResolverTests: XCTestCase {
         throw XCTSkip("AppKit unavailable")
         #endif
     }
+
+    /// E1: pure package list under injected roots (no disk defaults).
+    func testListPetPackageIdsFindsV2Sorted() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-pet-list-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["zeta", "alpha"] {
+            let pkgDir = root.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: pkgDir, withIntermediateDirectories: true)
+            let meta: [String: Any] = [
+                "id": name,
+                "displayName": name,
+                "spriteVersionNumber": 2,
+                "spritesheetPath": "spritesheet.webp",
+            ]
+            try JSONSerialization.data(withJSONObject: meta)
+                .write(to: pkgDir.appendingPathComponent("pet.json"))
+            try Data("RIFF....WEBP".utf8)
+                .write(to: pkgDir.appendingPathComponent("spritesheet.webp"))
+        }
+        let v1 = root.appendingPathComponent("legacy")
+        try FileManager.default.createDirectory(at: v1, withIntermediateDirectories: true)
+        let meta1: [String: Any] = [
+            "id": "legacy",
+            "spriteVersionNumber": 1,
+            "spritesheetPath": "spritesheet.webp",
+        ]
+        try JSONSerialization.data(withJSONObject: meta1)
+            .write(to: v1.appendingPathComponent("pet.json"))
+        try Data("RIFF....WEBP".utf8)
+            .write(to: v1.appendingPathComponent("spritesheet.webp"))
+        let ids = PetPackageResolver.listPetPackageIds(roots: [root], requireV2: true)
+        XCTAssertEqual(ids, ["alpha", "zeta"])
+        let pkgs = PetPackageResolver.listPetPackages(roots: [root], requireV2: true)
+        XCTAssertEqual(pkgs.map(\.petId), ["alpha", "zeta"])
+        XCTAssertTrue(pkgs.allSatisfy { $0.isV2 && !$0.useProcedural })
+    }
+
 }
 
 // MARK: - Roster pending ask / outcome → Codex motion

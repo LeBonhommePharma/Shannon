@@ -197,6 +197,72 @@ public enum PetPackageResolver {
         return maxMs
     }
 
+
+    /// List discoverable packages under search roots (first id wins; sorted by petId).
+    /// Parity with hub `list_pet_packages`. Agent-memory roots are skipped.
+    public static func listPetPackages(
+        roots: [URL]? = nil,
+        requireV2: Bool = true,
+        fileManager: FileManager = .default,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [PetPackage] {
+        let search = roots
+            ?? PetPaths.packageRootsExcludingMemory(home: home, env: env, fileManager: fileManager)
+        let memory = PetPaths.agentMemoryRoot(home: home, env: env).standardizedFileURL
+        var found: [String: PetPackage] = [:]
+
+        for root in search {
+            let standardized = root.standardizedFileURL
+            if standardized == memory { continue }
+
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: root.path, isDirectory: &isDir),
+                  isDir.boolValue else { continue }
+
+            let children = (try? fileManager.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            var scan = children
+            scan.append(root)
+
+            for child in scan {
+                var childIsDir: ObjCBool = false
+                guard fileManager.fileExists(atPath: child.path, isDirectory: &childIsDir),
+                      childIsDir.boolValue else { continue }
+                let petId = child.lastPathComponent
+                guard let pkg = package(from: child, petId: petId, fileManager: fileManager) else {
+                    continue
+                }
+                if requireV2 && !pkg.isV2 { continue }
+                if found[pkg.petId] == nil {
+                    found[pkg.petId] = pkg
+                }
+            }
+        }
+        return found.values.sorted { $0.petId < $1.petId }
+    }
+
+    /// Package ids only — pure path for Settings pickers (E1).
+    public static func listPetPackageIds(
+        roots: [URL]? = nil,
+        requireV2: Bool = true,
+        fileManager: FileManager = .default,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String] {
+        listPetPackages(
+            roots: roots,
+            requireV2: requireV2,
+            fileManager: fileManager,
+            home: home,
+            env: env
+        ).map(\.petId)
+    }
+
+
     // MARK: - Internals
 
     private static func package(

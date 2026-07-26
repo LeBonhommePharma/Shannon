@@ -185,33 +185,37 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Done:** `consumeCommands` only returns after successful delete; SecurityTests reads `ShannonSync.swift`; confirmation overwrite + delete-fail + 60s boundary + MacDeviceState capacity round-trip tests green.
 - **Priority:** P1
 
-### - [ ] ENH-019: Publish docking / notifications / timers from Mac hub (or document “not mirrored”)
+### - [x] ENH-019: Publish docking / notifications / timers from Mac hub (or document “not mirrored”)
 
 - **Why:** `MULTI_DEVICE.md` + `ShannonStore.refresh` list `DockingProgress` / `NotificationMirror` / `TimerState`, but `CloudPublisher.publish` only mirrors media / device / one agent / confirmations — consumers may expect empty forever.
 - **Area:** `Pill/Sources/ShannonPill/CloudPublishing.swift`, store refresh, docs
 - **First slice:** Either wire sources + publish each type with pure tests, **or** document “not mirrored yet” in MULTI_DEVICE.md and stop implying full record matrix.
 - **Priority:** P1
+- **Done:** Documented path — MULTI_DEVICE.md honesty section (schema vs Mac publisher); `CloudPublishing.publish` comment lists published vs not (docking / notifications / timers). Full publish wiring deferred.
 
-### - [ ] ENH-020: Multi-agent `AgentState` roster publish (fail-closed entropy)
+### - [x] ENH-020: Multi-agent `AgentState` roster publish (fail-closed entropy)
 
 - **Why:** `agentSnapshot()` publishes a single ShannonBridge aggregate; multi-agent Mac fleet is not mirrored as `AgentState` rows (confirmations are multi-agent only).
 - **Area:** `CloudPublishing.agentSnapshot`, activity roster, `AgentState`
 - **First slice:** Publish one `AgentState` per live agent id from activity summary; entropy only when measured; retract exited agents; pure publisher test with InMemory backend.
+- **Done:** `AgentStateRosterPublish` pure builder + `CloudPublisher` multi-agent publish/retract (`publishedAgentIDs`); fail-closed via `resolveForAgent` / `.measured` only; bridge-only fallback when roster empty. Tests: `AgentStateRosterPublishTests`, `CloudPublisherRosterIntegrationTests` (+ existing provenance suite green).
 - **Priority:** P1
 
-### - [ ] ENH-021: Wire or demote `PetCloudRecord`
+### - [x] ENH-021: Wire or demote `PetCloudRecord`
 
 - **Why:** Serialize-only CloudSyncable-ish pet path exists without `allRecordTypes` / publisher / store consume — dead multi-device surface.
 - **Area:** pet cloud types, `ShannonSyncConfig.allRecordTypes`
 - **First slice:** Either register + publish/merge with tests, or remove/mark internal and drop false CloudSyncable surface.
+- **Done:** Demoted honesty: `PetCloudRecord` / `ShannonPet` docs state local-only (not hub-published, not in `allRecordTypes`); serialization kept for tests/future; pure test asserts `PetCloudRecord.recordType` absent from `ShannonSyncConfig.allRecordTypes`; `MULTI_DEVICE.md` notes not hub-published.
 - **Priority:** P2
 
-### - [ ] ENH-022: Align publisher entropy path with local `EntropyProvenance.resolve`
+### - [x] ENH-022: Align publisher entropy path with local `EntropyProvenance.resolve`
 
 - **Why:** Local UI may show gate-measured H while publisher only uses bridge `isMeasured` — devices stay fail-closed (good) but Mac vs phone diverge when demo bridge + real gate coexist.
 - **Area:** `CloudPublishing.agentSnapshot`, `EntropyProvenance`
 - **First slice:** Document divergence or share one resolve for publish; test demo+gate never publishes collapse as measured.
 - **Priority:** P2
+- **Done:** Fleet `bridgeAggregate` uses `EntropyProvenance.resolve` (bridge → gate → absent) with `activity.agentEntropy`; multi-agent rows keep `resolveForAgent` + gate map. Demo collapse never published; gate-measured H publishes when resolve falls through. Tests in `CloudPublisherProvenanceTests` (demo+gate, multi-agent resolveForAgent).
 
 ---
 

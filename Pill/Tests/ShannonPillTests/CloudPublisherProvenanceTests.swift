@@ -201,4 +201,156 @@ final class CloudPublisherProvenanceTests: XCTestCase {
         XCTAssertEqual(mirrored.entropyBits ?? 0, 9.4, accuracy: 0.001)
         XCTAssertEqual(mirrored.taskTitle, "Entropy gate (cpp)")
     }
+
+    // MARK: - ENH-022: resolve / resolveForAgent parity with the pill
+
+    /// Demo bridge + live gate score: never publish demo collapse; publish the
+    /// gate-measured H the local pill would show via `EntropyProvenance.resolve`.
+    func testDemoBridgePlusGateMeasuredDoesNotPublishDemoCollapse() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let gate = try XCTUnwrap(
+            EntropyIntegrity.accept(
+                bits: 2.86,
+                deltaH: nil,
+                collapsed: nil,
+                source: .gate(agentId: "claude_code", presence: .live),
+                measuredAt: now.addingTimeInterval(-4),
+                now: now
+            ),
+            "fixture gate measurement must construct"
+        )
+        let demo = ShannonStatus(
+            entropy: 6.2, deltaH: -1.9, collapsed: true,
+            tokenCount: 128, backend: "demo", agent: "demo"
+        )
+        let mirrored = try XCTUnwrap(
+            AgentStateRosterPublish.bridgeAggregate(
+                bridgeConnected: true,
+                bridgeStatus: demo,
+                gateEntropy: [gate],
+                gateDBAvailable: true,
+                now: now
+            )
+        )
+        XCTAssertFalse(
+            mirrored.isCollapsed,
+            "demo sine collapse must not reach devices when gate H is measured"
+        )
+        XCTAssertNotEqual(mirrored.activity, .blocked)
+        XCTAssertEqual(
+            mirrored.entropyBits ?? 0, 2.86, accuracy: 1e-9,
+            "gate-measured H must publish when resolve falls through from demo"
+        )
+        XCTAssertNil(
+            mirrored.entropyDelta,
+            "gate rows have no ΔH — must not invent demo's -1.9"
+        )
+        XCTAssertTrue(
+            mirrored.taskTitle.contains("gate:"),
+            "task title must attribute gate, not claim demo is measured"
+        )
+    }
+
+    /// Without a gate score, demo still fails closed (same as pre-ENH-022).
+    func testDemoBridgeWithoutGateStillWithholdsEntropy() throws {
+        let demo = ShannonStatus(
+            entropy: 6.2, deltaH: -1.9, collapsed: true,
+            tokenCount: 128, backend: "demo", agent: "demo"
+        )
+        let mirrored = try XCTUnwrap(
+            AgentStateRosterPublish.bridgeAggregate(
+                bridgeConnected: true,
+                bridgeStatus: demo,
+                gateEntropy: [],
+                gateDBAvailable: true
+            )
+        )
+        XCTAssertFalse(mirrored.isCollapsed)
+        XCTAssertNil(mirrored.entropyBits)
+        XCTAssertNil(mirrored.entropyDelta)
+        XCTAssertEqual(mirrored.taskTitle, "Entropy gate (simulated)")
+    }
+
+    /// Multi-agent roster: per-agent gate entropy feeds `resolveForAgent`, so a
+    /// demo fleet bridge cannot paint collapse onto a row that has real gate H.
+    func testMultiAgentDemoBridgePlusGateUsesResolveForAgent() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let gate = try XCTUnwrap(
+            EntropyIntegrity.accept(
+                bits: 3.1,
+                source: .gate(agentId: "claude_code", presence: .live),
+                measuredAt: now.addingTimeInterval(-2),
+                now: now
+            )
+        )
+        let agent = AgentActivitySnapshot(
+            id: "claude_code",
+            displayName: "Claude Code",
+            status: .active,
+            lastTask: "review PR",
+            source: "gate",
+            updatedAt: now,
+            resumable: true,
+            historyCount: 4,
+            presence: .live
+        )
+        let demo = ShannonStatus(
+            entropy: 2.0, deltaH: -6.0, collapsed: true,
+            tokenCount: 99, backend: "demo", agent: "demo"
+        )
+        let rows = AgentStateRosterPublish.snapshots(
+            activityAgents: [agent],
+            bridgeConnected: true,
+            bridgeStatus: demo,
+            gateEntropy: [gate],
+            gateDBAvailable: true,
+            entropyMemory: nil,
+            now: now
+        )
+        XCTAssertEqual(rows.count, 1)
+        let mirrored = try XCTUnwrap(rows.first)
+        XCTAssertEqual(mirrored.id, "claude_code")
+        XCTAssertFalse(
+            mirrored.isCollapsed,
+            "demo collapse must not attach to a different agent row"
+        )
+        XCTAssertEqual(
+            mirrored.entropyBits ?? 0, 3.1, accuracy: 1e-9,
+            "per-agent gate H must feed resolveForAgent and publish measured"
+        )
+        XCTAssertNotEqual(mirrored.activity, .blocked)
+    }
+
+    /// Measured real bridge still collapses the multi-agent row when named.
+    func testMultiAgentMeasuredBridgeCollapseStillPublishes() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let agent = AgentActivitySnapshot(
+            id: "codex",
+            displayName: "Codex",
+            status: .active,
+            lastTask: "build",
+            source: "gate",
+            updatedAt: now,
+            resumable: true,
+            historyCount: 2,
+            presence: .live
+        )
+        let real = ShannonStatus(
+            entropy: 2.1, deltaH: -6.0, collapsed: true,
+            tokenCount: 512, backend: "vllm", agent: "codex"
+        )
+        let rows = AgentStateRosterPublish.snapshots(
+            activityAgents: [agent],
+            bridgeConnected: true,
+            bridgeStatus: real,
+            gateEntropy: [],
+            gateDBAvailable: true,
+            now: now
+        )
+        let mirrored = try XCTUnwrap(rows.first)
+        XCTAssertTrue(mirrored.isCollapsed)
+        XCTAssertEqual(mirrored.activity, .blocked)
+        XCTAssertEqual(mirrored.entropyBits ?? 0, 2.1, accuracy: 0.001)
+        XCTAssertEqual(mirrored.entropyDelta ?? 0, -6.0, accuracy: 0.001)
+    }
 }

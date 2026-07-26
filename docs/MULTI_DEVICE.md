@@ -42,6 +42,10 @@ it does not invent data.
 
 ### Synced record types
 
+The table below is the **CloudKit schema / consumer matrix** — types companions
+may fetch and UI can render. It is **not** a claim that the Mac hub already
+publishes every row.
+
 | Record type | Contents | Record naming |
 |---|---|---|
 | `AgentState` | activity, task title, turn count, last action, entropy H and δ | `agent-<id>` |
@@ -53,6 +57,28 @@ it does not invent data.
 | `RemoteCommand` | playback command from phone/watch | `command-<uuid>` |
 | `PendingConfirmation` | question the Mac agent is blocked on, detail, expiry | `confirmation-<id>` |
 | `ConfirmationResponse` | answer, how it was given, which device | `response-<id>` |
+
+#### What Mac `CloudPublisher.publish` mirrors today
+
+**Published from the hub** (when iCloud is active):
+
+| Direction | Types |
+|---|---|
+| Mac → CloudKit | `NowPlaying`, `MacDeviceState`, `AgentState` (single bridge aggregate), `PendingConfirmation` (+ retract of cleared asks) |
+| CloudKit → Mac | `RemoteCommand` (playback), `ConfirmationResponse` (answers drained and applied to the gate) |
+
+**Not mirrored yet** by Mac `CloudPublisher.publish` (schema + `ShannonStore.refresh` still exist; fetches return **empty sets** until a publisher is wired):
+
+- `DockingProgress`
+- `NotificationMirror`
+- `TimerState`
+
+`ShannonPet` / `PetCloudRecord` is **not** hub-published (absent from
+`ShannonSyncConfig.allRecordTypes`); pet state stays device-local for now.
+
+Companion UIs may show docking / notification / timer cards when records appear;
+with the current hub they stay empty. Do not treat the full record matrix above
+as “live from the Mac hub.”
 
 `ConfirmationResponse` reuses the prompt's id, so a double-fired gesture
 overwrites rather than queueing a second contradictory answer. Answers to

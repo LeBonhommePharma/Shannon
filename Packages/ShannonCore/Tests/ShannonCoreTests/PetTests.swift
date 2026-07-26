@@ -59,7 +59,16 @@ final class PetTests: XCTestCase {
         XCTAssertEqual(pet.xpToNextLevel, 225) // threshold(3)=300, 300-75=225
     }
 
-    // MARK: - CloudKit round-trip
+    // MARK: - CloudKit round-trip / multi-device demotion (ENH-021)
+
+    /// Pet cloud shape is retained for local tests/future wire-up, but must not
+    /// be listed as a live hub-synced record type.
+    func testPetCloudRecordNotInAllRecordTypes() {
+        XCTAssertFalse(
+            ShannonSyncConfig.allRecordTypes.contains(PetCloudRecord.recordType),
+            "PetCloudRecord.recordType (\(PetCloudRecord.recordType)) must stay absent from ShannonSyncConfig.allRecordTypes — pet state is local-only / not Mac-hub mirrored"
+        )
+    }
 
     func testPetCloudRecordRoundTrips() throws {
         let rec = PetCloudRecord(

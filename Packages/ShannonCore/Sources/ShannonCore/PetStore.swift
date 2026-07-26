@@ -10,10 +10,16 @@ public extension Notification.Name {
 
 // MARK: - PetCloudRecord
 
-/// CloudKit serialisation for `ShannonPet`.
-/// Synced to `CKContainer.default().privateCloudDatabase` ONLY — never public.
-/// Excludes `memoryURL` (synced via iCloud Drive) and `mood` (recomputed).
-/// Conflict resolution: the record with the higher `level` wins.
+/// Local-only CloudKit **shape** for `ShannonPet` (serialize / deserialize).
+///
+/// **Not hub-mirrored (ENH-021):** `recordType` is intentionally **absent** from
+/// `ShannonSyncConfig.allRecordTypes`, and the Mac hub publisher does not
+/// publish or consume this type. Keep the `CloudSyncable` round-trip for unit
+/// tests and a future multi-device pet path — do not treat it as live CloudKit
+/// pet sync today.
+///
+/// Excludes `memoryURL` and `mood` (recomputed). If ever wired: private DB only,
+/// higher `level` wins on merge.
 public struct PetCloudRecord: CloudSyncable {
     public var id: String
     public var name: String
@@ -91,7 +97,8 @@ private struct PetSnapshot: Codable {
 /// Thread-safe, observable backing store for the Shannon pet.
 ///
 /// Persistence: `~/.shannon/pets/{id}/pet.json` with `FileProtection.complete`.
-/// CloudKit: private DB only — see `PetCloudRecord`.
+/// Multi-device: pet state is **local-only** — not published by the Mac hub and
+/// not listed in `ShannonSyncConfig.allRecordTypes` (see `PetCloudRecord`).
 /// On sign-out / device wipe: call `deleteAll()`.
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, *)
 @MainActor
@@ -177,15 +184,18 @@ public final class PetStore {
         )
     }
 
-    // MARK: CloudKit helpers
+    // MARK: PetCloudRecord helpers (local / future wire-up; not hub-published)
 
+    /// Build a `PetCloudRecord` snapshot of the current pet. Not written to
+    /// CloudKit by the Mac hub today — see `PetCloudRecord` demotion note.
     public var cloudRecord: PetCloudRecord {
         PetCloudRecord(id: pet.id, name: pet.name, species: pet.species.rawValue,
                        level: pet.level, xp: pet.xp, avatarSeed: pet.avatarSeed,
                        lastInteracted: pet.lastInteracted)
     }
 
-    /// Merge an incoming cloud record: higher level wins.
+    /// Merge an incoming `PetCloudRecord`: higher level wins.
+    /// Callers only — no CloudKit subscription feeds this path yet.
     public func mergeFromCloud(_ record: PetCloudRecord) {
         guard record.level > pet.level else { return }
         pet.name = record.name

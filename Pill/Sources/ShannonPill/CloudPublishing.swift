@@ -36,6 +36,10 @@ final class CloudPublisher {
     /// retracted from every device rather than lingering.
     private var publishedConfirmationIDs: Set<String> = []
 
+    /// AgentState ids currently mirrored, so agents that leave the live roster
+    /// are retracted the same way cleared confirmations are (ENH-020).
+    private var publishedAgentIDs: Set<String> = []
+
     /// Decides the `createdAt` each open ask is mirrored with — the gate's own
     /// `created_at_ns` where there is one, a stable local first-seen otherwise.
     /// See `ConfirmationCreatedAtResolver` for why both halves are needed.
@@ -114,10 +118,14 @@ final class CloudPublisher {
 
     /// One publish pass. `ShannonPublisher` suppresses unchanged records, so
     /// calling this on a timer does not burn the CloudKit request quota.
+    ///
+    /// Mirrored types: NowPlaying, MacDeviceState, AgentState (multi-agent
+    /// roster when activity is present, else bridge aggregate), PendingConfirmation.
+    /// Not mirrored yet: DockingProgress, NotificationMirror, TimerState (ENH-019).
     func publish() {
         let media = nowPlayingSnapshot()
         let device = deviceSnapshot()
-        let agent = agentSnapshot()
+        let agents = agentSnapshots()
         // The gate's open approvals, mirrored so phone/watch/iPad can answer.
         // id == interaction_id so a returning ConfirmationResponse resolves the
         // exact gate row; agentID carries what the socket write needs.
@@ -135,25 +143,38 @@ final class CloudPublisher {
                 createdAt: confirmationCreatedAt.createdAt(for: ask, now: now)
             )
         }
-        let liveIDs = Set(confirmations.map(\.id))
-        let staleIDs = publishedConfirmationIDs.subtracting(liveIDs)
-        publishedConfirmationIDs = liveIDs
+        let liveConfirmationIDs = Set(confirmations.map(\.id))
+        let staleConfirmationIDs = publishedConfirmationIDs.subtracting(liveConfirmationIDs)
+        publishedConfirmationIDs = liveConfirmationIDs
         // Drop bookkeeping for asks the gate has cleared, so this cannot grow
         // without bound and a re-used interaction id starts fresh.
-        confirmationCreatedAt.prune(keeping: liveIDs)
+        confirmationCreatedAt.prune(keeping: liveConfirmationIDs)
+
+        let liveAgentIDs = Set(agents.map(\.id))
+        let staleAgentIDs = publishedAgentIDs.subtracting(liveAgentIDs)
+        publishedAgentIDs = liveAgentIDs
 
         Task { [publisher] in
             do {
                 if let media { try await publisher.publish(nowPlaying: media) }
                 if let device { try await publisher.publish(device) }
-                if let agent { try await publisher.publish(agent) }
+
+                // One AgentState per live roster agent (or bridge-only fallback).
+                for agent in agents {
+                    try await publisher.publish(agent)
+                }
+                for id in staleAgentIDs {
+                    try await publisher.retract(
+                        AgentState(id: id, name: "", activity: .idle)
+                    )
+                }
 
                 // Mirror open approvals, and retract the ones the gate cleared so
                 // a resolved card vanishes from every device.
                 for confirmation in confirmations {
                     try await publisher.publish(confirmation)
                 }
-                for id in staleIDs {
+                for id in staleConfirmationIDs {
                     try await publisher.retract(
                         PendingConfirmation(id: id, question: "")
                     )
@@ -235,38 +256,16 @@ final class CloudPublisher {
         )
     }
 
-    /// The Shannon coordination layer currently reports one aggregate entropy
-    /// readout, which publishes as a single agent record. Per-agent records
-    /// land when the bridge exposes them.
-    private func agentSnapshot() -> AgentState? {
-        guard let bridge, let status = bridge.status else { return nil }
-        // Same provenance rule as the pill's header, border, `~H` badge and
-        // companion board (`EntropyProvenance`) — this is the surface that
-        // actually leaves the machine, so it is the one that must not lie.
-        //
-        // `--demo` opens a REAL socket and serves `8.0 + 2.0*sin(n/12)`,
-        // asserting `is_collapsed` on ~29% of ticks. Published raw, that lands
-        // on the iPhone, Watch and iPad as `isCollapsed` (red readout) and
-        // `activity == .blocked` (shared badge: "needs you") — and `AgentState`
-        // has no provenance field, so `entropyLabel` renders "H 6.2" with none
-        // of the pill's `~` marking. A fabricated number must therefore not be
-        // published at all rather than published unmarked.
-        let measured = EntropyProvenance.isMeasured(
-            connected: bridge.connected, displayed: status
-        )
-        let collapsed = measured && status.collapsed
-        return AgentState(
-            id: status.agent ?? "shannon-gate",
-            name: status.agent ?? "Shannon gate",
-            activity: collapsed ? .blocked : .running,
-            taskTitle: measured
-                ? "Entropy gate (\(status.backend))"
-                : "Entropy gate (simulated)",
-            turnCount: status.tokenCount,
-            lastAction: collapsed ? "Entropy collapse detected" : "Monitoring",
-            entropyBits: measured ? status.entropy : nil,
-            entropyDelta: measured ? status.deltaH : nil,
-            isCollapsed: collapsed
+    /// Multi-agent roster when activity has agents; otherwise the single bridge
+    /// aggregate (provenance tests + no-fleet machines).
+    private func agentSnapshots() -> [AgentState] {
+        AgentStateRosterPublish.snapshots(
+            activityAgents: activity?.summary.agents ?? [],
+            bridgeConnected: bridge?.connected ?? false,
+            bridgeStatus: bridge?.status,
+            gateEntropy: activity?.agentEntropy ?? [],
+            gateDBAvailable: activity?.gateDBAvailable ?? false,
+            entropyMemory: activity?.entropyMemory
         )
     }
 
@@ -278,6 +277,220 @@ final class CloudPublisher {
         case .togglePlayPause: nowPlaying.togglePlayPause()
         case .nextTrack:       nowPlaying.nextTrack()
         case .previousTrack:   nowPlaying.previousTrack()
+        }
+    }
+}
+
+// MARK: - Pure multi-agent AgentState roster (ENH-020)
+
+/// Builds `AgentState` rows for CloudKit from the Mac activity roster.
+///
+/// Pure and deterministic: no I/O, no wall clock (callers pass `now` only when
+/// resolving entropy). Fail-closed on entropy — only `.measured` readings may
+/// set `entropyBits` / `entropyDelta` / `isCollapsed`.
+enum AgentStateRosterPublish {
+    /// One `AgentState` per **live** agent on the Mac roster (presence `.live`,
+    /// already display-ranked in `summary.agents`). When the roster is empty,
+    /// falls back to a single ShannonBridge aggregate so provenance tests and
+    /// bridge-only machines still publish one row.
+    static func snapshots(
+        activityAgents: [AgentActivitySnapshot],
+        bridgeConnected: Bool,
+        bridgeStatus: ShannonStatus?,
+        gateEntropy: [EntropyMeasurement] = [],
+        gateDBAvailable: Bool = false,
+        entropyMemory: AgentEntropyMemory? = nil,
+        now: Date = Date()
+    ) -> [AgentState] {
+        if !activityAgents.isEmpty {
+            // Live set = presence.live, preserving summary display order.
+            // Per-agent gate entropy feeds resolveForAgent (ENH-022 / ENH-020).
+            let live = activityAgents.filter { $0.presence == .live }
+            return live.map { agent in
+                state(
+                    for: agent,
+                    bridgeConnected: bridgeConnected,
+                    bridgeStatus: bridgeStatus,
+                    gateEntropy: gateEntropy,
+                    gateDBAvailable: gateDBAvailable,
+                    entropyMemory: entropyMemory,
+                    now: now
+                )
+            }
+        }
+        // No roster: fleet-level resolve (bridge → gate → absent), same as the
+        // pill header — not bridge-only isMeasured (ENH-022).
+        if let single = bridgeAggregate(
+            bridgeConnected: bridgeConnected,
+            bridgeStatus: bridgeStatus,
+            gateEntropy: gateEntropy,
+            gateDBAvailable: gateDBAvailable,
+            now: now
+        ) {
+            return [single]
+        }
+        return []
+    }
+
+    /// Single bridge/fleet aggregate when there is no multi-agent roster.
+    ///
+    /// Uses `EntropyProvenance.resolve` — the same precedence as the pill
+    /// header / border / `~H` badge (bridge measured → else gate measured
+    /// within policy → else absent). Bridge-only `isMeasured` is deliberately
+    /// **not** used: demo + real gate would leave the phone empty while Mac
+    /// shows gate H, or (worse) would publish demo collapse as measured.
+    static func bridgeAggregate(
+        bridgeConnected: Bool,
+        bridgeStatus: ShannonStatus?,
+        gateEntropy: [EntropyMeasurement] = [],
+        gateDBAvailable: Bool = false,
+        now: Date = Date()
+    ) -> AgentState? {
+        guard let status = bridgeStatus else { return nil }
+        // `--demo` opens a REAL socket and serves `8.0 + 2.0*sin(n/12)`,
+        // asserting `is_collapsed` on ~29% of ticks. `AgentState` has no
+        // provenance field, so a fabricated number must never leave the machine
+        // as measured collapse. When a live gate score exists, resolve falls
+        // through to it and we publish that honest H instead.
+        let reading = EntropyProvenance.resolve(
+            bridgeConnected: bridgeConnected,
+            bridgeStatus: status,
+            gate: gateEntropy,
+            gateDBAvailable: gateDBAvailable,
+            now: now
+        )
+        return agentState(from: reading, bridgeStatus: status)
+    }
+
+    /// Fail-closed map from a provenance reading to CloudKit entropy fields.
+    /// Only `.measured` contributes bits / ΔH / collapse (token-domain verdict).
+    static func publishableEntropy(
+        from reading: EntropyReading
+    ) -> (bits: Double?, delta: Double?, collapsed: Bool) {
+        guard case .measured(let m) = reading else {
+            return (nil, nil, false)
+        }
+        // Gate message scores never alarm as eval-awareness collapse — same
+        // polarity as multi-agent `state(for:)` and `EntropyReading.verdict`.
+        let collapsed = reading.verdict == .collapsed
+        return (m.bits, m.deltaH, collapsed)
+    }
+
+    /// Build the fleet `AgentState` from a resolve reading + bridge frame.
+    static func agentState(
+        from reading: EntropyReading,
+        bridgeStatus status: ShannonStatus
+    ) -> AgentState {
+        let (bits, delta, collapsed) = publishableEntropy(from: reading)
+        let id: String
+        let name: String
+        let taskTitle: String
+        if case .measured(let m) = reading {
+            switch m.source {
+            case .bridge(let backend):
+                let b = backend.trimmingCharacters(in: .whitespaces)
+                id = status.agent ?? "shannon-gate"
+                name = status.agent ?? "Shannon gate"
+                taskTitle = "Entropy gate (\(b.isEmpty ? status.backend : b))"
+            case .gate(let agentId, _):
+                let gid = agentId.trimmingCharacters(in: .whitespaces)
+                id = gid.isEmpty ? (status.agent ?? "shannon-gate") : gid
+                name = id == "shannon-gate" ? "Shannon gate" : id
+                taskTitle = "Entropy gate (gate:\(id))"
+            }
+        } else if status.isSynthetic {
+            id = status.agent ?? "shannon-gate"
+            name = status.agent ?? "Shannon gate"
+            taskTitle = "Entropy gate (simulated)"
+        } else {
+            id = status.agent ?? "shannon-gate"
+            name = status.agent ?? "Shannon gate"
+            taskTitle = "Entropy gate (\(status.backend))"
+        }
+        return AgentState(
+            id: id,
+            name: name,
+            activity: collapsed ? .blocked : .running,
+            taskTitle: taskTitle,
+            turnCount: status.tokenCount,
+            lastAction: collapsed ? "Entropy collapse detected" : "Monitoring",
+            entropyBits: bits,
+            entropyDelta: delta,
+            isCollapsed: collapsed
+        )
+    }
+
+    /// One agent row: identity + activity from the roster; entropy only when
+    /// `EntropyProvenance.resolveForAgent` (or memory) yields `.measured`.
+    static func state(
+        for agent: AgentActivitySnapshot,
+        bridgeConnected: Bool,
+        bridgeStatus: ShannonStatus?,
+        gateEntropy: [EntropyMeasurement],
+        gateDBAvailable: Bool,
+        entropyMemory: AgentEntropyMemory?,
+        now: Date = Date()
+    ) -> AgentState {
+        let reading: EntropyReading = {
+            if let memory = entropyMemory, memory.latest(for: agent.id) != nil {
+                return memory.reading(
+                    for: agent.id,
+                    now: now,
+                    gateDBAvailable: gateDBAvailable
+                )
+            }
+            return EntropyProvenance.resolveForAgent(
+                agentId: agent.id,
+                bridgeConnected: bridgeConnected,
+                bridgeStatus: bridgeStatus,
+                gate: gateEntropy,
+                gateDBAvailable: gateDBAvailable,
+                now: now
+            )
+        }()
+
+        // Fail-closed: never invent H / δ / collapse for devices that cannot
+        // show provenance (`AgentState` has no ~ marker).
+        let measured = reading.isMeasured
+        let measurement = measured ? reading.measurement : nil
+        // Token-domain collapse only (gate message scores never alarm as
+        // eval-awareness collapse — same polarity as `EntropyReading.verdict`).
+        let collapsed = measured && reading.verdict == .collapsed
+
+        let task = AgentActivitySnapshot.shorten(agent.lastTask, max: 80)
+        let lastAction: String = {
+            if collapsed { return "Entropy collapse detected" }
+            if !task.isEmpty { return task }
+            return agent.statusLine(at: now)
+        }()
+
+        return AgentState(
+            id: agent.id,
+            name: agent.displayName,
+            activity: cloudActivity(for: agent, collapsed: collapsed),
+            taskTitle: task,
+            turnCount: max(0, agent.historyCount),
+            lastAction: lastAction,
+            entropyBits: measurement?.bits,
+            entropyDelta: measurement?.deltaH,
+            isCollapsed: collapsed,
+            updatedAt: agent.updatedAt
+        )
+    }
+
+    /// Map Mac presence/status onto the multi-device `AgentActivity` enum.
+    static func cloudActivity(
+        for agent: AgentActivitySnapshot,
+        collapsed: Bool
+    ) -> AgentActivity {
+        if collapsed { return .blocked }
+        switch agent.status {
+        case .blocked:
+            return .blocked
+        case .active, .midTask:
+            return .running
+        case .idle, .unknown:
+            return .idle
         }
     }
 }

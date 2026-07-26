@@ -89,7 +89,9 @@ import Observation
 /// The first-class Shannon companion — one per user (or agent identity).
 ///
 /// Stored to `~/.shannon/pets/{id}/pet.json` with `FileProtection.complete`.
-/// CloudKit syncs via `PetCloudRecord` to the **private** database only.
+/// **Local-only across devices:** `PetCloudRecord` can round-trip the shape for
+/// tests/future work, but it is not in `ShannonSyncConfig.allRecordTypes` and
+/// is not published by the Mac hub (ENH-021 demotion).
 /// `mood` is never persisted: recomputed from live `AgentState` each update.
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, *)
 @Observable

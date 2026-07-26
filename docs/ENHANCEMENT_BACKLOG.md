@@ -92,11 +92,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 ## P2 — test / DX / ops
 
-### - [ ] ENH-009: Document / wire `PYTHONPATH=python` for `tests/python/`
+### - [x] ENH-009: Document / wire `PYTHONPATH=python` for `tests/python/`
 
 - **Why:** Bare `pytest tests/python/` fails collection with `ModuleNotFoundError: No module named 'shannon'` unless `PYTHONPATH=python` or `pip install -e .`. Hub tests do not need this. CI and local DX diverge.
 - **Area:** `docs/` or `pytest.ini` / `pyproject.toml` pythonpath, `CLAUDE.md` Testing section
 - **First slice:** Add `pythonpath = ["python"]` (or equivalent) so default pytest works; re-run `pytest tests/python/ -q`.
+- **Done:** `tool.pytest.ini_options.pythonpath = ["python"]` in pyproject.toml; `tests/python/conftest.py` prepends `python/` to `PYTHONPATH` for subprocess CLI tests; CLAUDE.md Testing notes updated; bare `pytest tests/python/ -q` → 180 passed, 51 skipped.
 - **Priority:** P2
 
 ### - [ ] ENH-010: Fix ShannonPill / PillCore class duplication in installed app probe
@@ -180,7 +181,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 |---|---|
 | `cd Pill && swift build && swift test` | 2026-07-26 ENH-008: ShannonPill suite green (artifact throttle); PillCore 827 pass, 1 skip |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
-| `PYTHONPATH=python pytest tests/python/ -v` | 180 passed, 51 skipped (bare pytest needs path — see ENH-009) |
+| `pytest tests/python/ -q` | 2026-07-26 ENH-009: 180 passed, 51 skipped (pythonpath wired; bare pytest works) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |
 
 Update this table when a loop changes suite health.

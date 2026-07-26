@@ -97,6 +97,11 @@ environment = { MACOSX_DEPLOYMENT_TARGET = "12.0" }
 [tool.pytest.ini_options]
 testpaths = ["tests/python", "tests"]
 python_files = ["test_*.py"]
+# Repo-root package lives under python/ (see setuptools packages.find).
+# Without this, bare `pytest tests/python/` fails collection with
+# ModuleNotFoundError: shannon (ENH-009). Hub tests under hub/tests/ are
+# unaffected (they import hub modules from that tree / installed path).
+pythonpath = ["python"]
 # Installer / pure-Python CI paths must stay warning-clean. Intentional
 # deprecation coverage for legacy on_collapse= is filtered here; new
 # DeprecationWarnings elsewhere still surface.

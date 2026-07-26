@@ -36,7 +36,7 @@ cmake --build build --config Release -j
 ## Testing
 
 ```bash
-# Python tests (pytest, 23 tests)
+# Python tests (pytest discovers `python/` via pyproject pythonpath — no PYTHONPATH= needed)
 pytest tests/python/ -v
 
 # Single test file
@@ -62,8 +62,8 @@ Target: Python 3.10+, line length 100, ruff rules E/F/W/I/UP.
 
 - Primary languages: Python, C++20, with YAML for configuration
 - CMake build system — always run `cmake -B build` then `cmake --build build` to compile
-- Python tests via `pytest tests/python/ -v`, C++ tests via `ctest --test-dir build --output-on-failure`
-- ~23 Python tests and a GoogleTest C++ suite — all should pass before committing
+- Python tests via `pytest tests/python/ -v` (repo-root `pythonpath = ["python"]` in pyproject.toml), C++ tests via `ctest --test-dir build --output-on-failure`
+- Python + GoogleTest C++ suites — all should pass before committing
 
 ## Architecture
 

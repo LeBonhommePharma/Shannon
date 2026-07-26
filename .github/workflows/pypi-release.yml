@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'PyPI target (pypi or testpypi)'
+        description: "PyPI target (pypi or testpypi)"
         required: true
-        default: 'testpypi'
+        default: "testpypi"
         type: choice
         options:
           - pypi
@@ -47,39 +47,37 @@ jobs:
           # shellcheck disable=SC1091
           source /tmp/shannon-sdist-venv/bin/activate
           python -m pip install --upgrade pip
-          # Force pure-Python path so CI does not depend on a C++ toolchain.
           SHANNON_SKIP_CORE=1 python -m pip install dist/*.tar.gz
-          python -c "
-import shannon
-print('shannon', shannon.__version__, '_HAS_CORE=', shannon._HAS_CORE)
-assert shannon.__version__, shannon.__version__
-from shannon import ShannonCollapseDetector, shannon_entropy_from_probs
-import numpy as np
-h = shannon_entropy_from_probs(np.array([0.25, 0.25, 0.25, 0.25]))
-assert abs(h - 2.0) < 1e-9, h
-d = ShannonCollapseDetector()
-print('smoke_ok', h)
-"
+          python <<'PY'
+          import numpy as np
+          import shannon
+          from shannon import ShannonCollapseDetector, shannon_entropy_from_probs
+          assert shannon.__version__, shannon.__version__
+          print("shannon", shannon.__version__, "_HAS_CORE=", shannon._HAS_CORE)
+          h = shannon_entropy_from_probs(np.array([0.25, 0.25, 0.25, 0.25]))
+          assert abs(h - 2.0) < 1e-9, h
+          ShannonCollapseDetector()
+          print("smoke_ok", h)
+          PY
           shannon-monitor --help
-          # Version must match the static PEP 621 field in pyproject.toml
-          python -c "
-import re
-from pathlib import Path
-import shannon
-text = Path('pyproject.toml').read_text(encoding='utf-8')
-in_project = False
-found = None
-for line in text.splitlines():
-    s = line.strip()
-    if s.startswith('[') and s.endswith(']'):
-        in_project = s == '[project]'
-        continue
-    if in_project and s.startswith('version') and '=' in s:
-        found = s.split('=', 1)[1].strip().strip('\"\'')
-        break
-assert found == shannon.__version__, (found, shannon.__version__)
-print('version_ok', shannon.__version__)
-"
+          python <<'PY'
+          from pathlib import Path
+          import re
+          import shannon
+          text = Path("pyproject.toml").read_text(encoding="utf-8")
+          in_project = False
+          found = None
+          for line in text.splitlines():
+              s = line.strip()
+              if s.startswith("[") and s.endswith("]"):
+                  in_project = s == "[project]"
+                  continue
+              if in_project and s.startswith("version") and "=" in s:
+                  found = s.split("=", 1)[1].strip().strip("\"'")
+                  break
+          assert found == shannon.__version__, (found, shannon.__version__)
+          print("version_ok", shannon.__version__)
+          PY
 
       - name: Upload sdist artifact
         uses: actions/upload-artifact@v4
@@ -88,8 +86,6 @@ print('version_ok', shannon.__version__)
           path: dist/*.tar.gz
           retention-days: 5
 
-  # Guaranteed universal wheel so `pip install shannon-entropy` works without a
-  # C++ compiler on any platform (accelerated wheels are additive later).
   build-pure-wheel:
     name: Build pure-Python wheel
     runs-on: ubuntu-latest
@@ -119,16 +115,16 @@ print('version_ok', shannon.__version__)
           source /tmp/shannon-pure-venv/bin/activate
           python -m pip install --upgrade pip
           python -m pip install dist/*.whl
-          python -c "
-import shannon
-print('shannon', shannon.__version__, '_HAS_CORE=', shannon._HAS_CORE)
-assert not shannon._HAS_CORE
-from shannon import ShannonCollapseDetector
-print('import_ok')
-"
+          python <<'PY'
+          import shannon
+          from shannon import ShannonCollapseDetector
+          print("shannon", shannon.__version__, "_HAS_CORE=", shannon._HAS_CORE)
+          assert not shannon._HAS_CORE
+          ShannonCollapseDetector()
+          print("import_ok")
+          PY
           shannon-monitor --help
-          # Confirm wheel is pure py3-none-any (no platform tag).
-          python - <<'PY'
+          python <<'PY'
           from pathlib import Path
           wheels = list(Path("dist").glob("*.whl"))
           assert wheels, "no wheel built"
@@ -161,31 +157,18 @@ print('import_ok')
           path: dist
           merge-multiple: true
 
-      - name: List packages + trusted-publisher checklist
+      - name: List packages
         run: |
           set -euo pipefail
           ls -la dist/
-          python - <<'PY'
+          python <<'PY'
           from pathlib import Path
           files = sorted(Path("dist").glob("*"))
           assert files, "no artifacts to publish"
-          sdists = list(Path("dist").glob("*.tar.gz"))
-          wheels = list(Path("dist").glob("*.whl"))
-          assert sdists, "missing sdist"
-          assert wheels, "missing wheel"
+          assert list(Path("dist").glob("*.tar.gz")), "missing sdist"
+          assert list(Path("dist").glob("*.whl")), "missing wheel"
           print("\n".join(str(p) for p in files))
           PY
-          cat <<'EOF'
-          === Trusted publisher must match (pypi.org → Publishing) ===
-          Owner:             LeBonhommePharma
-          Repository:        Shannon
-          Workflow filename: pypi-release.yml
-          Environment name:  pypi
-          =======================================================================
-          Alternative: set repo secret PYPI_API_TOKEN (pypi.org API token for
-          project shannon-entropy). When that secret is non-empty, the publish
-          action uses token auth; otherwise it uses OIDC trusted publishing.
-          EOF
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -210,35 +193,21 @@ print('import_ok')
           path: dist
           merge-multiple: true
 
-      - name: List packages + trusted-publisher checklist
+      - name: List packages
         run: |
           set -euo pipefail
           ls -la dist/
-          python - <<'PY'
+          python <<'PY'
           from pathlib import Path
           files = sorted(Path("dist").glob("*"))
           assert files, "no artifacts to publish"
-          sdists = list(Path("dist").glob("*.tar.gz"))
+          assert list(Path("dist").glob("*.tar.gz")), "missing sdist"
           wheels = list(Path("dist").glob("*.whl"))
-          assert sdists, "missing sdist"
           assert wheels, "missing wheel"
           pure = [w for w in wheels if w.name.endswith("py3-none-any.whl")]
           assert pure, f"missing pure py3-none-any wheel among {[w.name for w in wheels]}"
           print("\n".join(str(p) for p in files))
           PY
-          cat <<'EOF'
-          === Trusted publisher must match (test.pypi.org → Publishing) ===
-          If the project does not exist yet, create a *pending* publisher:
-            https://test.pypi.org/manage/account/publishing/
-          Values (must match OIDC claims exactly):
-            PyPI Project Name:   shannon-entropy   (pending OK)
-            Owner:               LeBonhommePharma
-            Repository:          Shannon
-            Workflow filename:   pypi-release.yml
-            Environment name:    testpypi
-          ==================================================================
-          Alternative: set repo secret TEST_PYPI_API_TOKEN (TestPyPI API token).
-          EOF
 
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1

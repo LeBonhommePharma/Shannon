@@ -135,11 +135,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 - **Done:** `GitBranchProbe` (injectable runner, timeout ~0.75s, reject empty/`HEAD`); Claude + Codex readers fill `AgentSession.branch` via `resolveBranch` with per-cwd cache; pure unit tests, no real git required.
 - **Priority:** P2
 
-### - [ ] ENH-014: Replace `UsageCoreStub` with real provider-agnostic usage model
+### - [x] ENH-014: Replace `UsageCoreStub` with real provider-agnostic usage model
 
 - **Why:** Package target is an empty stub (`moduleName` only). Session usage is ad hoc on `AgentSession` tokens. A small `UsageSnapshot` bridge shared by readers + gate keeps one type.
 - **Area:** `Pill/Sources/UsageCore/`, `SessionContentPresenter.usageFromSession`
 - **First slice:** Move `AgentUsageSnapshot` or a typealias into UsageCore; wire one reader; leave others nil.
+- **Done:** `UsageSnapshot` + `UsageBridge` in UsageCore; PillCore `typealias AgentUsageSnapshot`; Claude reader `usageSnapshot`; presenter delegates; Codex still via session tokens only.
 - **Priority:** P2
 
 ### - [ ] ENH-015: Collapsed multi-agent label “N agents” like AgentNotch marketing
@@ -182,7 +183,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-012: SessionContentPresenterTests 28 pass (primary-only usage chip pinned) |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-014: UsageCore + UsageBridge; related 71 pass (UsageCore/presenter/artifact/surface) |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `pytest tests/python/ -q` | 2026-07-26 ENH-009: 180 passed, 51 skipped (pythonpath wired; bare pytest works) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

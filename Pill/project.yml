@@ -30,12 +30,20 @@ packages:
     path: ../Packages/ShannonTheme
 
 targets:
+  # Provider-agnostic usage (ENH-014). Static into PillCore — never dual-link.
+  UsageCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/UsageCore
+
   PillCore:
     type: framework
     platform: macOS
     sources:
       - path: Sources/PillCore
     dependencies:
+      - target: UsageCore
       - package: ShannonCore
         product: ShannonCore
       - package: ShannonTheme
@@ -59,6 +67,7 @@ targets:
       - path: Sources/AgentReaders
     dependencies:
       - target: PillCore
+      - target: UsageCore
 
   DevServers:
     type: library.static

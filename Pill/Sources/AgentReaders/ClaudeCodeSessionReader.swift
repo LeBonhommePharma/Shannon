@@ -1,12 +1,13 @@
 import Foundation
 import PillCore
+import UsageCore
 
 // MARK: - Claude Code on-disk session reader
 
 /// Reads `~/.claude/projects/<encoded-cwd>/*.jsonl` without requiring a gate socket.
 ///
 /// Fail-closed: missing roots and unparseable lines yield empty results — never
-/// invents token/quota fields.
+/// invents token/quota fields. Token rows map through `UsageBridge` (ENH-014).
 public struct ClaudeCodeSessionReader: SessionProviding {
     public let providerId = "claude_code_artifacts"
     public var projectsRoot: URL
@@ -214,6 +215,11 @@ public struct ClaudeCodeSessionReader: SessionProviding {
             startedAt: firstTimestamp,
             activitySummary: activity.map { AgentActivitySnapshot.shorten($0, max: 120) }
         )
+    }
+
+    /// Provider-agnostic usage snapshot from Claude JSONL tokens (UsageCore).
+    public static func usageSnapshot(tokensIn: Int?, tokensOut: Int?) -> UsageSnapshot? {
+        UsageBridge.fromTokens(input: tokensIn, output: tokensOut)
     }
 
     /// Extract token usage from a Claude Code JSONL line.

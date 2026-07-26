@@ -119,23 +119,10 @@ public struct SessionContentCard: Sendable, Equatable, Identifiable {
 public enum SessionContentPresenter {
 
     /// Build usage from session token fields — fail-closed when none reported.
+    ///
+    /// Delegates to `UsageBridge` (UsageCore) so readers + presenters share one map.
     public static func usageFromSession(_ session: AgentSession) -> AgentUsageSnapshot? {
-        let tin = session.tokensIn
-        let tout = session.tokensOut
-        guard tin != nil || tout != nil else { return nil }
-        let used: Int?
-        switch (tin, tout) {
-        case let (i?, o?):
-            let sum = i + o
-            used = sum > 0 ? sum : (i > 0 ? i : nil)
-        case let (i?, nil):
-            used = i > 0 ? i : nil
-        case let (nil, o?):
-            used = o > 0 ? o : nil
-        case (nil, nil):
-            used = nil
-        }
-        return AgentLiveSurfaceLogic.usageIfReal(AgentUsageSnapshot(tokensUsed: used))
+        UsageBridge.fromTokens(input: session.tokensIn, output: session.tokensOut)
     }
 
     /// Resolve live surface for one session (identity + gate activity + asks).

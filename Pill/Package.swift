@@ -16,9 +16,12 @@ let package = Package(
         .package(path: "../Packages/ShannonCore"),
     ],
     targets: [
+        // W2 — provider-agnostic usage snapshots (no PillCore dep; PillCore imports it)
+        .target(name: "UsageCore", dependencies: []),
         .target(
             name: "PillCore",
             dependencies: [
+                "UsageCore",
                 .product(name: "ShannonTheme", package: "ShannonTheme"),
                 .product(name: "ShannonCore", package: "ShannonCore"),
             ],
@@ -28,13 +31,11 @@ let package = Package(
             ]
         ),
         // W1 — vendor artifact readers (Claude Code, Codex, …)
-        .target(name: "AgentReaders", dependencies: ["PillCore"]),
+        .target(name: "AgentReaders", dependencies: ["PillCore", "UsageCore"]),
         // W3 — local dev server discovery
         .target(name: "DevServers", dependencies: ["PillCore"]),
         // W4 — Quick Routes + Fast Actions
         .target(name: "Routes", dependencies: ["PillCore"]),
-        // Declared empty for future streams (W2 / W5 / Views)
-        .target(name: "UsageCore", dependencies: ["PillCore"]),
         .target(name: "Workspaces", dependencies: ["PillCore"]),
         .target(name: "Surfaces", dependencies: ["PillCore"]),
         .executableTarget(
@@ -58,6 +59,7 @@ let package = Package(
                 "AgentReaders",
                 "DevServers",
                 "Routes",
+                "UsageCore",
             ],
             resources: [
                 .copy("Fixtures"),

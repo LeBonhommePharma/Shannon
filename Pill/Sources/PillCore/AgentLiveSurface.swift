@@ -1,6 +1,10 @@
 import Foundation
+@_exported import UsageCore
 
 // MARK: - Clean-room live agent surface (AgentNotch-class outcomes)
+
+/// PillCore name for the shared UsageCore snapshot (ENH-014).
+public typealias AgentUsageSnapshot = UsageSnapshot
 
 /// What the agent is doing **now**, derived only from local Shannon observations
 /// (gate activity rows, pending asks, agent status/task). No invented telemetry.
@@ -44,48 +48,6 @@ public enum AgentToolKind: String, Sendable, Equatable, CaseIterable {
     }
 }
 
-/// Optional usage metrics — only populated when a real local source provided them.
-public struct AgentUsageSnapshot: Sendable, Equatable {
-    public var tokensUsed: Int?
-    public var tokensLimit: Int?
-    public var contextPercent: Double?
-    public var planLabel: String?
-
-    public init(
-        tokensUsed: Int? = nil,
-        tokensLimit: Int? = nil,
-        contextPercent: Double? = nil,
-        planLabel: String? = nil
-    ) {
-        self.tokensUsed = tokensUsed.flatMap { $0 >= 0 ? $0 : nil }
-        self.tokensLimit = tokensLimit.flatMap { $0 > 0 ? $0 : nil }
-        self.contextPercent = contextPercent.flatMap {
-            $0.isFinite ? min(100, max(0, $0)) : nil
-        }
-        let p = planLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.planLabel = (p?.isEmpty == false) ? p : nil
-    }
-
-    public var hasAny: Bool {
-        tokensUsed != nil || tokensLimit != nil || contextPercent != nil || planLabel != nil
-    }
-
-    public var shortLabel: String? {
-        if let pct = contextPercent {
-            return String(format: "ctx %.0f%%", pct)
-        }
-        if let u = tokensUsed, let lim = tokensLimit, lim > 0 {
-            return "\(u)/\(lim)"
-        }
-        if let u = tokensUsed {
-            return "\(u) tok"
-        }
-        if let plan = planLabel {
-            return plan
-        }
-        return nil
-    }
-}
 
 /// One agent’s notch/menubar live surface.
 public struct AgentLiveSurface: Sendable, Equatable, Identifiable {

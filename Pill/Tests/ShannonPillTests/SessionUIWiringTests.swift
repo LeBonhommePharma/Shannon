@@ -39,6 +39,14 @@ final class SessionUIWiringTests: XCTestCase {
                 "AgentLiveSurfaceLogic.primaryFocus",
                 "PulledSessionsSection",
                 "liveAgentIds",
+                "GateInlineCard",
+            ]),
+            ("GateAskCard.swift", [
+                "GateAskActionCopy",
+            ]),
+            ("GateInlineCard.swift", [
+                "GateAskActionCopy.approve",
+                "GateAskActionCopy.deny",
             ]),
         ]
 

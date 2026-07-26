@@ -29,12 +29,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `AgentAttentionCopy` in ShannonCore (badge/focus/notify tokens); PillCore `badgeLabel` delegates; pad `AgentActivity.label` + detail blocked headline; phone `AgentCard` + watch agent list badges; GlobalNotify uses shared notify/focus; wiring test forbids "Waiting on you" forks.
 - **Priority:** P0
 
-### - [ ] UX-002: Fail-closed empty states when CloudKit / hub offline (phone + pad)
+### - [x] UX-002: Fail-closed empty states when CloudKit / hub offline (phone + pad)
 
 - **Why:** Companions must not look “all quiet / healthy” when the Mac hub or sync is down; Mac already has hub offline copy.
 - **Platforms:** iOS, iPadOS (watch relay secondary)
 - **Area:** `iOS/Sources/ShannonPhone/`, `iPad/Sources/ShannonPad/ViewModels/AgentHubViewModel.swift`
 - **First slice:** Single shared empty-state copy helper + pad or phone home empty view when no agents and sync offline.
+- **Done:** `CompanionEmptyStateCopy` in ShannonCore (idle vs hub offline titles/detail/chip/symbol); phone `EmptyStateView` + `DisconnectedPill` + pad `EmptyHubState` wired; orphan pad centre column passes `lastError`; pure + wiring tests.
 - **Priority:** P0
 
 ### - [ ] UX-003: Approve/Deny primary action affordance parity (Mac ask card ↔ phone)
@@ -113,6 +114,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (loop 2):** `--quick` all PASS. Claimed **UX-002** (shared fail-closed empty states). Considered: Confirm/Approve verb (UX-003), pad rank (UX-004), watch idle focus (UX-005). **No new UX-0xx**.
 - **2026-07-26 (loop):** `./scripts/test_apple_platforms.sh --quick` — macOS/iOS/iPad/watch builds green (unsigned). UX-001 residual dual wording closed (pad detail + phone/watch badges). Considered for new items: empty-state dual copy (phone “Can't reach iCloud” vs pad “Not syncing…”) → already **UX-002**; Confirm vs Approve verb drift → **UX-003**; pad sort vs Mac rank → **UX-004**. **No new UX-0xx** this fire.
 
 

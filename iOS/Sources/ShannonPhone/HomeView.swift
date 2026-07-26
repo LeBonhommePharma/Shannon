@@ -221,19 +221,19 @@ struct AnswerButton: View {
     }
 }
 
-/// Quiet "hub offline" chip. Subtle by design: a missed sync is worth noting,
-/// not alarming.
+/// Quiet hub-offline chip. Subtle by design: a missed sync is worth noting,
+/// not alarming. Copy shared with empty state (UX-002).
 @available(iOS 17.0, *)
 struct DisconnectedPill: View {
     var body: some View {
-        Label("Hub offline", systemImage: "bolt.horizontal.circle")
+        Label(CompanionEmptyStateCopy.offlineChip, systemImage: "bolt.horizontal.circle")
             .font(.shannonCaption)
             .foregroundStyle(Color.shannonSecondary)
             .padding(.horizontal, ShannonSpacing.sm)
             .padding(.vertical, 6)
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(Color.shannonSeparator, lineWidth: ShannonStroke.hairline))
-            .accessibilityLabel("Mac hub unreachable")
+            .accessibilityLabel(CompanionEmptyStateCopy.offlineAccessibility)
     }
 }
 
@@ -599,24 +599,28 @@ struct VoiceOverlay: View {
     }
 }
 
+/// Fail-closed empty roster (UX-002): idle vs hub offline share Core copy so
+/// phone never looks "all quiet" when CloudKit is down.
 @available(iOS 17.0, *)
 struct EmptyStateView: View {
     let error: String?
 
+    private var copy: CompanionEmptyStateCopy.Content {
+        CompanionEmptyStateCopy.content(lastError: error)
+    }
+
     var body: some View {
         VStack(spacing: ShannonSpacing.sm) {
-            Text(error == nil ? "Nothing running" : "Can't reach iCloud")
+            Text(copy.title)
                 .font(.shannonHeadline)
-                .foregroundStyle(Color.shannonSecondary)
-            Text(error == nil
-                 ? "Agent state from your Mac appears here."
-                 // An idle Mac and a broken iCloud link look identical
-                 // otherwise, and only one of them is worth acting on.
-                 : "Check that this device is signed in to iCloud.")
+                .foregroundStyle(copy.isOffline ? Color.shannonWarning : Color.shannonSecondary)
+            Text(copy.detail)
                 .font(.shannonCaption)
                 .foregroundStyle(Color.shannonTertiary)
                 .multilineTextAlignment(.center)
         }
         .padding(.horizontal, ShannonSpacing.xl)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(copy.title). \(copy.detail)")
     }
 }

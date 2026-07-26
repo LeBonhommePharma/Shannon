@@ -101,7 +101,8 @@ struct AgentHubView: View {
                     AgentDetailView(hub: hub, agent: agent, onAnnotate: { annotation = $0 })
                         .navigationTitle(agent.name)
                 } else {
-                    EmptyHubState(error: nil)
+                    // Orphan selection: surface store error if hub is offline (UX-002).
+                    EmptyHubState(error: hub.store.lastError)
                 }
 
             case .docking(let id):
@@ -111,7 +112,7 @@ struct AgentHubView: View {
                     )
                     .navigationTitle(progress.benchmarkName)
                 } else {
-                    EmptyHubState(error: nil)
+                    EmptyHubState(error: hub.store.lastError)
                 }
             }
         }

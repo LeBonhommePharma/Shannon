@@ -319,27 +319,36 @@ private struct LinkOverlay: View {
     }
 }
 
-/// Shown when nothing has synced. The distinction that matters is "no work
-/// running" versus "not talking to the Mac", so the error is named when there
-/// is one.
+/// Shown when nothing has synced. Fail-closed (UX-002): idle vs hub offline
+/// use shared `CompanionEmptyStateCopy` so pad never looks healthy when sync is down.
 struct EmptyHubState: View {
     var error: String?
 
+    private var copy: CompanionEmptyStateCopy.Content {
+        CompanionEmptyStateCopy.content(lastError: error)
+    }
+
     var body: some View {
         VStack(spacing: ShannonSpacing.md) {
-            Image(systemName: error == nil ? "moon.zzz" : "icloud.slash")
+            Image(systemName: copy.systemImage)
                 .font(.system(size: 42))
-                .foregroundStyle(Color.shannonTertiary)
-            Text(error == nil ? "No agents running" : "Not syncing with the Mac")
-                .shannonText(.shannonTitle)
-            if let error {
-                Text(error)
-                    .shannonText(.shannonCaption, color: .shannonSecondary)
+                .foregroundStyle(copy.isOffline ? Color.shannonWarning : Color.shannonTertiary)
+            Text(copy.title)
+                .shannonText(.shannonTitle, color: copy.isOffline ? .shannonWarning : .shannonPrimary)
+            Text(copy.detail)
+                .shannonText(.shannonCaption, color: .shannonSecondary)
+                .multilineTextAlignment(.center)
+            // Technical store error is secondary only — title stays canonical.
+            if let technical = CompanionEmptyStateCopy.technicalDetail(lastError: error) {
+                Text(technical)
+                    .shannonText(.shannonCaption, color: .shannonTertiary)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, ShannonSpacing.xxl)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(copy.title). \(copy.detail)")
     }
 }

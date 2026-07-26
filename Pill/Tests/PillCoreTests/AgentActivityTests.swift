@@ -135,6 +135,83 @@ final class AgentActivityTests: XCTestCase {
         )
     }
 
+    /// Pure socket agent (no attach_pid/bundle) must demote when gate is offline —
+    /// no ghost-live after hung-up socket.
+    func testPureGateOfflineDemotesWithoutAttachEvidence() {
+        let previous = [
+            AgentActivitySnapshot(
+                id: "science", displayName: "Science", status: .active,
+                lastTask: "docking", source: "gate",
+                updatedAt: Date().addingTimeInterval(-10),
+                resumable: true, historyCount: 5,
+                presence: .live,
+                attachPid: nil,
+                attachBundle: nil
+            ),
+        ]
+        let gateOffline = AgentActivitySnapshot(
+            id: "science", displayName: "Science", status: .active,
+            lastTask: "docking", source: "gate",
+            updatedAt: Date().addingTimeInterval(-10),
+            resumable: true, historyCount: 5,
+            presence: .offline
+        )
+        let summary = AgentActivityReader.load(
+            petsRoot: FileManager.default.temporaryDirectory,
+            registryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("none-\(UUID().uuidString).json"),
+            gateDB: nil,
+            runningBundleIDs: ["com.apple.Terminal"],
+            gateRows: [gateOffline],
+            skipPetsScan: true,
+            previousAgents: previous
+        )
+        XCTAssertEqual(summary.agents.count, 1)
+        XCTAssertEqual(
+            summary.agents.first?.presence, .offline,
+            "socket-only agent must not stay live after gate offline"
+        )
+        XCTAssertEqual(summary.agents.first?.status, .idle)
+        XCTAssertEqual(summary.busyCount, 0)
+    }
+
+    /// Process-attach + still-running host stays live when gate is offline.
+    func testProcessAttachStaysLiveWhenGateOfflineOnSkipPetsPath() {
+        let previous = [
+            AgentActivitySnapshot(
+                id: "cursor", displayName: "Cursor", status: .idle,
+                lastTask: "edit", source: "ide",
+                updatedAt: Date().addingTimeInterval(-5),
+                resumable: false, historyCount: 1,
+                presence: .live,
+                attachPid: 424242,
+                attachBundle: "com.todesktop.cursor"
+            ),
+        ]
+        let gateOffline = AgentActivitySnapshot(
+            id: "cursor", displayName: "Cursor", status: .active,
+            lastTask: "old", source: "gate",
+            updatedAt: Date().addingTimeInterval(-30),
+            resumable: true, historyCount: 3,
+            presence: .offline
+        )
+        let summary = AgentActivityReader.load(
+            petsRoot: FileManager.default.temporaryDirectory,
+            registryURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("none-\(UUID().uuidString).json"),
+            gateDB: nil,
+            runningBundleIDs: ["com.todesktop.cursor"],
+            gateRows: [gateOffline],
+            skipPetsScan: true,
+            previousAgents: previous
+        )
+        // skipPets re-checks attach: dead pid + live host bundle → live, then
+        // reconcile keeps process-attach over offline gate.
+        XCTAssertEqual(summary.agents.first?.presence, .live)
+        XCTAssertEqual(summary.agents.first?.status, .idle, "attach never invents busy")
+        XCTAssertEqual(summary.busyCount, 0)
+    }
+
     /// Gate offline + process still live → stay live (socket hung up, app open).
     func testProcessAttachOutranksOfflineGate() throws {
         let root = FileManager.default.temporaryDirectory

@@ -677,20 +677,18 @@ public enum AgentActivityReader {
             }
         }
 
-        // Process-attach outranks a hung-up gate socket. Prefer re-checking
-        // attach evidence when present so a restarted host app stays live.
+        // Process-attach outranks a hung-up gate socket — only when we have
+        // attach_pid / attach_bundle evidence. Pure socket agents must demote
+        // to offline when the gate hangs up (no ghost-live after disconnect).
         let attachPid = existing?.attachPid ?? row.attachPid
         let attachBundle = existing?.attachBundle ?? row.attachBundle
-        if !gateStillLive {
-            if attachPid != nil || attachBundle != nil {
-                // runningBundleIDs not in reconcile — use existing presence if
-                // already live, else keep offline/observed from gate path.
-                if let existing, existing.presence == .live {
-                    presence = .live
-                }
-            } else if let existing, existing.presence == .live {
-                presence = .live
-            }
+        let hasAttachEvidence =
+            (attachPid ?? 0) > 0 || !(attachBundle ?? "").isEmpty
+        if !gateStillLive, hasAttachEvidence,
+           let existing, existing.presence == .live {
+            // runningBundleIDs not available inside reconcile; load() re-checks
+            // pid/bundle before calling us. Keep prior live attach until then.
+            presence = .live
         }
 
         var status = row.status

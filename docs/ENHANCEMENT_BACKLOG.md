@@ -60,11 +60,12 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 - **Done:** `sessionsExcludingLiveAgents` + `cards(… liveAgentIds:)`; Pulled section hides ids already on live summary; meta still on roster via ENH-003.
 - **Priority:** P1
 
-### - [ ] ENH-006: Surface pending ask prompt on roster rows when `canAnswerInline`
+### - [x] ENH-006: Surface pending ask prompt on roster rows when `canAnswerInline`
 
 - **Why:** Cards already carry `pendingPrompt` / `canAnswerInline`, but menu-bar rows only show badge + activity line — AgentNotch peeks show the approval text before expand.
 - **Area:** `MenuBarAgentRoster.swift`, optional second line styling
 - **First slice:** If `card.needsYou`, show truncated `pendingPrompt` (or activity line already shortened from prompt — verify) with Approve deep-link only if gate available; no fake buttons when hub offline.
+- **Done:** `SessionContentCard.rosterDetailLine` prefers shortened `pendingPrompt` when `needsYou`; falls back to `activityLine`; `showsApproveHint` == `canAnswerInline` (text “Gate · approve”, no fake buttons). Menu-bar roster + a11y wired; pure unit tests.
 - **Priority:** P1
 
 ---
@@ -175,7 +176,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-005: ShannonPill 32 pass; PillCore 821 pass, 1 skip |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-006: ShannonPill 32 pass; PillCore 826 pass, 1 skip |
 | `pytest hub/tests/ -v` | 673 passed, 8 skipped |
 | `PYTHONPATH=python pytest tests/python/ -v` | 180 passed, 51 skipped (bare pytest needs path — see ENH-009) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

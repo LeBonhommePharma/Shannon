@@ -90,6 +90,27 @@ public struct SessionContentCard: Sendable, Equatable, Identifiable {
 
     /// Usage short label when a real source provided metrics.
     public var usageLabel: String? { usage?.shortLabel }
+
+    /// Detail line under roster name/badge: prefer pending ask prompt when needs-you.
+    ///
+    /// Fail-closed: never invents prompt text. When `needsYou` and a non-empty
+    /// `pendingPrompt` exist, returns a shortened prompt (~90 chars). Otherwise
+    /// falls back to `activityLine` when attention is known. Empty/unknown → nil.
+    public var rosterDetailLine: String? {
+        if needsYou, let prompt = pendingPrompt {
+            let short = AgentActivitySnapshot.shorten(prompt, max: 90)
+            if !short.isEmpty { return short }
+        }
+        if !activityLine.isEmpty, attention != .unknown {
+            return activityLine
+        }
+        return nil
+    }
+
+    /// Whether to show a tertiary "Gate · approve" hint on roster rows.
+    /// True only when the gate has a matching ask (`canAnswerInline`) — never
+    /// invent Approve affordances when the hub is offline / ask is missing.
+    public var showsApproveHint: Bool { canAnswerInline }
 }
 
 // MARK: - Pure presenter

@@ -124,10 +124,18 @@ struct MenuBarAgentRoster: View {
                         .frame(minWidth: 28, alignment: .trailing)
                 }
             }
-            if !card.activityLine.isEmpty, card.attention != .unknown {
-                Text(card.activityLine)
+            if let detail = card.rosterDetailLine {
+                Text(detail)
                     .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonSecondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            // Text-only hint — GateInlineCard owns real Approve/Deny actions.
+            if card.showsApproveHint {
+                Text("Gate · approve")
+                    .font(.shannonMenuSection)
+                    .foregroundStyle(Color.shannonTertiary)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -141,9 +149,27 @@ struct MenuBarAgentRoster: View {
         }
         .frame(minHeight: 18, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(card.displayName), \(card.badgeLabel), \(card.activityLine), \(agentReading.explain(at: Date())), \(card.relativeAge ?? "")"
-        )
+        .accessibilityLabel(rosterAccessibilityLabel(card: card, reading: agentReading))
+    }
+
+    /// Accessibility label: prefer pending ask prompt when present (ENH-006).
+    private func rosterAccessibilityLabel(card: SessionContentCard, reading: EntropyReading) -> String {
+        var parts: [String] = [card.displayName, card.badgeLabel]
+        if let prompt = card.pendingPrompt, !prompt.isEmpty {
+            parts.append(prompt)
+        } else if let detail = card.rosterDetailLine {
+            parts.append(detail)
+        } else if !card.activityLine.isEmpty {
+            parts.append(card.activityLine)
+        }
+        if card.showsApproveHint {
+            parts.append("Gate approve available")
+        }
+        parts.append(reading.explain(at: Date()))
+        if let age = card.relativeAge {
+            parts.append(age)
+        }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder

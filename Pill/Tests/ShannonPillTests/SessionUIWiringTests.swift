@@ -21,6 +21,8 @@ final class SessionUIWiringTests: XCTestCase {
             ("MenuBarAgentRoster.swift", [
                 "SessionContentPresenter.cardsFromAgents",
                 "card.badgeLabel",
+                "rosterDetailLine",
+                "showsApproveHint",
             ]),
             ("PanelSectionRegistry.swift", [
                 "SessionContentPresenter.cards",

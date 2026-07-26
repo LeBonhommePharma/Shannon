@@ -464,6 +464,96 @@ final class SessionContentPresenterTests: XCTestCase {
         XCTAssertNil(quietCard.project)
     }
 
+    // MARK: - Roster detail line (ENH-006)
+
+    func testRosterDetailLinePrefersPendingPromptWhenNeedsYou() {
+        let card = SessionContentCard(
+            id: "g:c",
+            agentId: "claude_code",
+            displayName: "Claude Code",
+            attention: .needsYou,
+            badgeLabel: "needs you",
+            activityLine: "Waiting for approval",
+            needsYou: true,
+            canAnswerInline: true,
+            pendingPrompt: "Run npm run db:migrate on production?"
+        )
+        XCTAssertEqual(
+            card.rosterDetailLine,
+            AgentActivitySnapshot.shorten(
+                "Run npm run db:migrate on production?", max: 90
+            )
+        )
+        XCTAssertTrue(card.showsApproveHint)
+    }
+
+    func testRosterDetailLineFallsBackToActivityWhenPromptEmpty() {
+        let card = SessionContentCard(
+            id: "g:c",
+            agentId: "claude_code",
+            displayName: "Claude Code",
+            attention: .needsYou,
+            badgeLabel: "needs you",
+            activityLine: "Waiting for approval",
+            needsYou: true,
+            canAnswerInline: false,
+            pendingPrompt: nil
+        )
+        XCTAssertEqual(card.rosterDetailLine, "Waiting for approval")
+        XCTAssertFalse(card.showsApproveHint)
+    }
+
+    func testRosterDetailLineActivityOnlyWhenNotNeedsYou() {
+        let card = SessionContentCard(
+            id: "g:x",
+            agentId: "codex",
+            displayName: "Codex",
+            attention: .working,
+            badgeLabel: "edit",
+            activityLine: "Editing store.ts",
+            needsYou: false,
+            canAnswerInline: false,
+            pendingPrompt: "should never surface"
+        )
+        // Not needsYou → never invent prompt as detail even if field is set.
+        XCTAssertEqual(card.rosterDetailLine, "Editing store.ts")
+        XCTAssertFalse(card.showsApproveHint)
+    }
+
+    func testRosterDetailLineNilWhenUnknownAndEmpty() {
+        let card = SessionContentCard(
+            id: "g:q",
+            agentId: "quiet",
+            displayName: "Quiet",
+            attention: .unknown,
+            badgeLabel: "seen 2m ago",
+            activityLine: "stale line",
+            needsYou: false
+        )
+        XCTAssertNil(card.rosterDetailLine)
+        XCTAssertFalse(card.showsApproveHint)
+    }
+
+    func testShowsApproveHintStrictlyFollowsCanAnswerInline() {
+        var card = SessionContentCard(
+            id: "g:c",
+            agentId: "claude_code",
+            displayName: "Claude Code",
+            attention: .needsYou,
+            badgeLabel: "needs you",
+            activityLine: "short",
+            needsYou: true,
+            canAnswerInline: false,
+            pendingPrompt: "Approve this?"
+        )
+        // Prompt may still show; Approve hint is gated on canAnswerInline.
+        XCTAssertEqual(card.rosterDetailLine, "Approve this?")
+        XCTAssertFalse(card.showsApproveHint)
+
+        card.canAnswerInline = true
+        XCTAssertTrue(card.showsApproveHint)
+    }
+
     // MARK: - Approval affordance honesty
 
     func testCanAnswerInlineOnlyWhenAskMatchesAgent() {

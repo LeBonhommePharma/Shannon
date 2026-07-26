@@ -77,7 +77,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 - **Why:** `rankedAgents` builds a full `fleet` (resolve per agent), then UI often `resolve`s again per row for badge/detail. On a 1.5s poll with many agents this is pure CPU on MainActor-adjacent paths.
 - **Area:** `AgentLiveSurface.swift`, `PillView`, `MenuBarAgentRoster` / `SessionContentPresenter.cardsFromAgents`
 - **First slice:** Return `[(AgentActivitySnapshot, AgentLiveSurface)]` or cache surface by agent id for one tick; unit test identity of attention vs current API.
-- **Done:** `rankedAgentSurfaces` one resolve/tick; `rankedAgents` maps it; `cardsFromAgents` uses pairs (session usage merged once). PillView row resolve left for a later slice.
+- **Done:** `rankedAgentSurfaces` one resolve/tick; `rankedAgents` maps it; `cardsFromAgents` uses pairs (session usage merged once). **Follow-up:** PillView `listedAgentSurfaces` passes surface into agent rows + entropy rails (no per-row re-resolve).
 - **Priority:** P1
 
 ### - [x] ENH-008: Cap artifact reader I/O when parity panel is closed
@@ -186,7 +186,7 @@ Discovered during the 2026-07-26 thorough test pass (Pill session-content / live
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-017: structured tool_kind; AgentLiveSurface + GateDBReader paths |
+| `cd Pill && swift build && swift test` | 2026-07-26 ENH-007 residual: PillView listedAgentSurfaces; ShannonPill wiring green |
 | `pytest hub/tests/ -v` | 2026-07-26 ENH-017: 685 passed, 8 skipped (tool_kind migration + classify) |
 | `pytest tests/python/ -q` | 2026-07-26 ENH-009: 180 passed, 51 skipped (pythonpath wired; bare pytest works) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

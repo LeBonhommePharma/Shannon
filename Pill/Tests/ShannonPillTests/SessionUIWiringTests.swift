@@ -30,7 +30,7 @@ final class SessionUIWiringTests: XCTestCase {
                 "liveAgentIds",
             ]),
             ("PillView.swift", [
-                "AgentLiveSurfaceLogic.rankedAgents",
+                "AgentLiveSurfaceLogic.rankedAgentSurfaces",
                 "SessionContentPresenter.collapsedActiveCount",
                 "SessionContentPresenter.collapsedUsageChip",
                 "AgentLiveChrome.badgeLabel",

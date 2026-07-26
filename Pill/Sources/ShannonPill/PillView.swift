@@ -129,17 +129,35 @@ struct PillView: View {
         )
     }
 
-    /// Agents currently listed on the board — needs-you → working → finished → idle.
-    private var listedAgents: [AgentActivitySnapshot] {
+    /// Listed board rows with **one** surface resolve per agent (ENH-007 residual).
+    ///
+    /// Order matches `rankedAgentSurfaces` / menu-bar roster. Prefer this over
+    /// `listedAgents` + per-row `resolve` so badge/detail/entropy lines share one tick.
+    private var listedAgentSurfaces: [(agent: AgentActivitySnapshot, surface: AgentLiveSurface)] {
         let limit = busy.isEmpty ? 3 : 4
-        let ranked = AgentLiveSurfaceLogic.rankedAgents(
+        let pairs = AgentLiveSurfaceLogic.rankedAgentSurfaces(
             agents: summary.agents,
             pendingAsks: activity.pendingAsks,
             activity: activity.recentActivity,
             limit: limit
         )
-        if !ranked.isEmpty { return ranked }
-        return Array((busy.isEmpty ? summary.agents.prefix(3) : busy.prefix(4)))
+        if !pairs.isEmpty { return pairs }
+        let fallback = Array((busy.isEmpty ? summary.agents.prefix(3) : busy.prefix(4)))
+        return fallback.map { a in
+            (
+                a,
+                AgentLiveSurfaceLogic.resolve(
+                    agent: a,
+                    pendingAsks: activity.pendingAsks,
+                    activity: activity.recentActivity
+                )
+            )
+        }
+    }
+
+    /// Agents currently listed on the board — needs-you → working → finished → idle.
+    private var listedAgents: [AgentActivitySnapshot] {
+        listedAgentSurfaces.map(\.agent)
     }
 
     /// Independent per-agent readings for every listed agent id.
@@ -991,8 +1009,8 @@ struct PillView: View {
                 // still deploys to 13. Falling back to the plain rows loses only
                 // the artwork, never information — the companion restates status,
                 // it is not the only place status appears.
-                ForEach(listedAgents) { agent in
-                    agentRow(agent)
+                ForEach(listedAgentSurfaces, id: \.agent.id) { pair in
+                    agentRow(pair.agent, surface: pair.surface)
                 }
             }
             // Per-agent entropy rails — each listed agent owns its own H.
@@ -1000,7 +1018,7 @@ struct PillView: View {
         }
     }
 
-    private func agentRow(_ a: AgentActivitySnapshot) -> some View {
+    private func agentRow(_ a: AgentActivitySnapshot, surface: AgentLiveSurface) -> some View {
         let reading = agentReadings[a.id]
             ?? EntropyProvenance.resolveForAgent(
                 agentId: a.id,
@@ -1024,14 +1042,14 @@ struct PillView: View {
                     Text("\(style(for: a).emoji) \(style(for: a).displayName)")
                         .font(.shannonMenuBody)
                         .foregroundStyle(ink(for: a))
-                    Text(liveBadge(for: a))
+                    Text(liveBadge(for: a, surface: surface))
                         .font(.shannonMenuSection)
-                        .foregroundStyle(liveAttentionColor(for: a))
+                        .foregroundStyle(liveAttentionColor(for: a, surface: surface))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Capsule().fill(style(for: a).palette.wash))
                         .overlay(Capsule().strokeBorder(style(for: a).palette.edge, lineWidth: 1))
-                    if let usage = liveSurface(for: a).usage?.shortLabel {
+                    if let usage = surface.usage?.shortLabel {
                         Text(usage)
                             .font(.shannonPillMono)
                             .foregroundStyle(Color.shannonTertiary)
@@ -1043,8 +1061,9 @@ struct PillView: View {
                         .foregroundStyle(Color.shannonSecondary)
                 }
                 // Live tool line (read/edit/shell) when present; else last task.
-                if !liveDetailLine(for: a).isEmpty {
-                    Text(liveDetailLine(for: a))
+                let detail = liveDetailLine(for: a, surface: surface)
+                if !detail.isEmpty {
+                    Text(detail)
                         .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonSecondary)
                         .lineLimit(1)
@@ -1057,7 +1076,7 @@ struct PillView: View {
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(
-                    liveSurface(for: a).needsYou
+                    surface.needsYou
                         ? Color.shannonWarning.opacity(0.10)
                         : Color.shannonSurfaceElevated.opacity(0.6)
                 )
@@ -1120,21 +1139,21 @@ struct PillView: View {
     /// Per-agent entropy rails. Each listed agent gets its own label + fill;
     /// when the board is empty, a single fleet-level honest readout remains.
     private var entropyStrip: some View {
-        let agents = listedAgents
+        let pairs = listedAgentSurfaces
         return VStack(alignment: .leading, spacing: 6) {
-            if agents.isEmpty {
+            if pairs.isEmpty {
                 fleetEntropyRow(fleetReading)
             } else {
-                ForEach(agents) { agent in
-                    let reading = agentReadings[agent.id]
+                ForEach(pairs, id: \.agent.id) { pair in
+                    let reading = agentReadings[pair.agent.id]
                         ?? EntropyProvenance.resolveForAgent(
-                            agentId: agent.id,
+                            agentId: pair.agent.id,
                             bridgeConnected: bridge.connected,
                             bridgeStatus: bridge.status,
                             gate: activity.agentEntropy,
                             gateDBAvailable: activity.gateDBAvailable
                         )
-                    agentEntropyRow(agent: agent, reading: reading)
+                    agentEntropyRow(agent: pair.agent, reading: reading, surface: pair.surface)
                 }
             }
         }
@@ -1156,7 +1175,11 @@ struct PillView: View {
         !summary.agents.isEmpty || !busy.isEmpty || summary.connected.count > 0
     }
 
-    private func agentEntropyRow(agent: AgentActivitySnapshot, reading: EntropyReading) -> some View {
+    private func agentEntropyRow(
+        agent: AgentActivitySnapshot,
+        reading: EntropyReading,
+        surface: AgentLiveSurface
+    ) -> some View {
         let style = style(for: agent)
         // Memory series: simultaneous H history; currency from presence+age.
         let memReading = activity.entropyMemory.latest(for: agent.id) != nil
@@ -1174,11 +1197,6 @@ struct PillView: View {
         let current = activity.entropyMemory.isCurrent(agentId: agent.id)
             || (memReading.isMeasured && agent.presence == .live)
         let series = activity.entropyMemory.series(for: agent.id).bitSeries
-        let surface = AgentLiveSurfaceLogic.resolve(
-            agent: agent,
-            pendingAsks: activity.pendingAsks,
-            activity: activity.recentActivity
-        )
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
                 Text(style.displayName)
@@ -1381,34 +1399,25 @@ struct PillView: View {
 
     // MARK: Live agent surface (clean-room AgentNotch-class)
 
-    private func liveSurface(for a: AgentActivitySnapshot) -> AgentLiveSurface {
-        AgentLiveChrome.surface(
-            agent: a,
-            pendingAsks: activity.pendingAsks,
-            activity: activity.recentActivity
-        )
-    }
-
     /// Capsule badge: needs you / working / done / live (shared with menu bar).
-    private func liveBadge(for a: AgentActivitySnapshot) -> String {
+    private func liveBadge(for a: AgentActivitySnapshot, surface: AgentLiveSurface) -> String {
         AgentLiveChrome.badgeLabel(
-            surface: liveSurface(for: a),
+            surface: surface,
             fallbackStatusLine: a.statusLine
         )
     }
 
-    private func liveDetailLine(for a: AgentActivitySnapshot) -> String {
-        let s = liveSurface(for: a)
-        if s.attention == .working || s.attention == .needsYou || s.attention == .finished {
-            return s.activityLine
+    private func liveDetailLine(for a: AgentActivitySnapshot, surface: AgentLiveSurface) -> String {
+        if surface.attention == .working || surface.attention == .needsYou || surface.attention == .finished {
+            return surface.activityLine
         }
         if !a.lastTask.isEmpty { return a.lastTask }
-        return s.activityLine
+        return surface.activityLine
     }
 
-    private func liveAttentionColor(for a: AgentActivitySnapshot) -> Color {
+    private func liveAttentionColor(for a: AgentActivitySnapshot, surface: AgentLiveSurface) -> Color {
         AgentLiveChrome.attentionColor(
-            surface: liveSurface(for: a),
+            surface: surface,
             styleInk: ink(for: a)
         )
     }

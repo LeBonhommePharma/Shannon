@@ -338,4 +338,67 @@ final class DesktopCompanionPackageResolveTests: XCTestCase {
             XCTAssertTrue(pkg.useProcedural)
         }
     }
+
+    /// Live packages with a sheet but no `spriteVersionNumber` (oc-an, stitch
+    /// on this machine) resolve as usable v1 without requireV2, but
+    /// `requireV2: true` (CompanionDrawMode / desktop atlas path) falls through
+    /// to procedural — documents the interop gap, not a blank-UI failure.
+    func testMissingSpriteVersionNumberIsV1WithoutRequireV2() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-pet-nov-\(UUID().uuidString)")
+        let pkgDir = root.appendingPathComponent("no-version-pet")
+        try FileManager.default.createDirectory(at: pkgDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meta: [String: Any] = [
+            "id": "no-version-pet",
+            "displayName": "No Version",
+            "spritesheetPath": "spritesheet.webp",
+            // deliberately omit spriteVersionNumber
+        ]
+        try JSONSerialization.data(withJSONObject: meta)
+            .write(to: pkgDir.appendingPathComponent("pet.json"))
+        try Data("RIFF....WEBP".utf8)
+            .write(to: pkgDir.appendingPathComponent("spritesheet.webp"))
+
+        let loose = PetPackageResolver.resolve(
+            petId: "no-version-pet", roots: [root], requireV2: false
+        )
+        XCTAssertFalse(loose.useProcedural, "sheet+json must resolve without requireV2")
+        XCTAssertFalse(loose.isV2, "missing version must not claim v2")
+        XCTAssertEqual(loose.spriteVersion, 1)
+
+        let strict = PetPackageResolver.resolve(
+            petId: "no-version-pet", roots: [root], requireV2: true
+        )
+        XCTAssertTrue(
+            strict.useProcedural,
+            "requireV2 must skip packages without spriteVersionNumber>=2"
+        )
+    }
+
+    /// Desktop / board atlas path always requires v2 — same as CompanionDrawMode.
+    func testCompanionDrawModeRequiresV2Package() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-draw-\(UUID().uuidString)")
+        let pkgDir = root.appendingPathComponent("v1-only")
+        try FileManager.default.createDirectory(at: pkgDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meta: [String: Any] = [
+            "id": "v1-only",
+            "displayName": "V1",
+            "spriteVersionNumber": 1,
+            "spritesheetPath": "spritesheet.webp",
+        ]
+        try JSONSerialization.data(withJSONObject: meta)
+            .write(to: pkgDir.appendingPathComponent("pet.json"))
+        try Data("RIFF....WEBP".utf8)
+            .write(to: pkgDir.appendingPathComponent("spritesheet.webp"))
+
+        let mode = CompanionDrawMode.resolve(
+            petId: "v1-only", motion: .idle, roots: [root]
+        )
+        XCTAssertEqual(mode, .procedural, "draw path must not use non-v2 packages")
+    }
 }

@@ -73,6 +73,49 @@ class TestResolveMissing:
         assert result.use_procedural is True
 
 
+class TestMissingSpriteVersion:
+    """Live packages like oc-an/stitch ship sheets without spriteVersionNumber."""
+
+    def test_missing_version_is_usable_without_require_v2(self, tmp_path: Path):
+        d = tmp_path / "no-ver"
+        d.mkdir()
+        (d / "pet.json").write_text(
+            json.dumps(
+                {
+                    "id": "no-ver",
+                    "displayName": "No Ver",
+                    "spritesheetPath": "spritesheet.webp",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (d / "spritesheet.webp").write_bytes(b"RIFF....WEBP")
+        loose = pkg.resolve_pet_package("no-ver", roots=[tmp_path], require_v2=False)
+        assert loose.use_procedural is False
+        assert loose.is_v2 is False
+        assert loose.sprite_version == 1
+
+        strict = pkg.resolve_pet_package("no-ver", roots=[tmp_path], require_v2=True)
+        assert strict.use_procedural is True
+
+    def test_live_oc_an_or_stitch_if_present(self):
+        codex = Path.home() / ".codex" / "pets"
+        for pid in ("oc-an", "stitch"):
+            meta = codex / pid / "pet.json"
+            sheet = codex / pid / "spritesheet.webp"
+            if not meta.is_file() or not sheet.is_file():
+                continue
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            if "spriteVersionNumber" in data or "sprite_version" in data:
+                continue  # not the gap under test
+            loose = pkg.resolve_pet_package(pid, require_v2=False)
+            strict = pkg.resolve_pet_package(pid, require_v2=True)
+            assert loose.use_procedural is False, pid
+            assert strict.use_procedural is True, pid
+            return
+        # No matching live package — still OK; fixture test above covers the code path.
+
+
 class TestMemoryRootIsolated:
     def test_agent_memory_root_not_used_for_sprites(self, tmp_path: Path, monkeypatch):
         # Plant a fake "package" under the memory root — must NOT resolve as art.

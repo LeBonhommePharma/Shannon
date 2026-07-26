@@ -3,11 +3,11 @@ class Shannon < Formula
   homepage "https://github.com/LeBonhommePharma/Shannon"
   license "Apache-2.0"
 
-  # Stable installs require a tagged GitHub release (vX.Y.Z). Until then, use --HEAD.
-  # After tagging, uncomment and fill sha256 (see scripts/update_homebrew_artifacts.sh):
-  # url "https://github.com/LeBonhommePharma/Shannon/archive/refs/tags/v2.0.0.tar.gz"
-  # sha256 "REPLACE_WITH_TARBALL_SHA256"
-  # version "2.0.0"
+  url "https://github.com/LeBonhommePharma/Shannon/archive/refs/tags/v2.1.0.tar.gz"
+  sha256 "ecabf9a019f0316debe2319006dcf3623386c74568807e0252d33e4a99581411"
+  version "2.1.0"
+
+
 
   head "https://github.com/LeBonhommePharma/Shannon.git", branch: "main"
 

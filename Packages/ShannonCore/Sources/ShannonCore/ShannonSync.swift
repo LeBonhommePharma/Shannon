@@ -318,16 +318,16 @@ public struct ShannonSnapshot: Codable, Equatable, Sendable {
         }
         if let run = docking.first(where: { $0.isRunning }) ?? docking.first {
             var line = run.complicationLine()
-            if let h = agents.rankedForDisplay().first?.entropyBits {
+            if let h = agentsRankedForDisplay().first?.entropyBits {
                 line += " H=\(String(format: "%.2f", h))"
             }
             return line
         }
-        if let alerting = agents.rankedForDisplay().first(where: { $0.activity.isAlerting }) {
+        if let alerting = agentsRankedForDisplay().first(where: { $0.activity.isAlerting }) {
             return alerting.compactLine()
         }
         if let media = nowPlaying?.compactLine() { return media }
-        if let agent = agents.rankedForDisplay().first { return agent.compactLine() }
+        if let agent = agentsRankedForDisplay().first { return agent.compactLine() }
         return "Shannon"
     }
 
@@ -345,7 +345,7 @@ public struct ShannonSnapshot: Codable, Equatable, Sendable {
     public func watchCards(limit: Int = 3) -> [String] {
         var cards: [String] = []
         if let pending = oldestPendingConfirmation() { cards.append("? \(pending.question)") }
-        if let agent = agents.rankedForDisplay().first { cards.append(agent.compactLine()) }
+        if let agent = agentsRankedForDisplay().first { cards.append(agent.compactLine()) }
         if let run = docking.first(where: { $0.isRunning }) ?? docking.first {
             cards.append(run.complicationLine())
         }

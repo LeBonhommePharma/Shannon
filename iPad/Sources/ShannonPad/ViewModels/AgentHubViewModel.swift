@@ -111,11 +111,12 @@ final class AgentHubViewModel: ObservableObject {
 
     // MARK: Derived collections
 
-    /// Pinned first, then the ranking every Shannon device agrees on.
+    /// Pinned first, then Mac-parity attention rank (needs-you → working → …).
+    /// Open confirmations elevate their agent even when activity is still running (UX-004).
     var visibleAgents: [AgentState] {
-        let ranked = snapshot.agents
+        let ranked = snapshot
+            .agentsRankedForDisplay()
             .filter { !dismissedAgentIDs.contains($0.id) }
-            .rankedForDisplay()
         let pinned = ranked.filter { pinnedAgentIDs.contains($0.id) }
         let rest = ranked.filter { !pinnedAgentIDs.contains($0.id) }
         return pinned + rest

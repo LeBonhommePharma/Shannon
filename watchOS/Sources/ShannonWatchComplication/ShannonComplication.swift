@@ -86,7 +86,7 @@ struct ComplicationView: View {
         snapshot.docking.first(where: { $0.isRunning }) ?? snapshot.docking.first
     }
 
-    private var agent: AgentState? { snapshot.agents.rankedForDisplay().first }
+    private var agent: AgentState? { snapshot.agentsRankedForDisplay().first }
 
     /// Unexpired gates awaiting an answer — the number worth glancing for.
     private var pendingGateCount: Int {

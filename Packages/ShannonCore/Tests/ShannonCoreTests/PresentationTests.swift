@@ -101,8 +101,64 @@ final class PresentationTests: XCTestCase {
             AgentState(id: "err", name: "Err", activity: .errored),
             AgentState(id: "block", name: "Block", activity: .blocked),
         ]
-        XCTAssertEqual(agents.rankedForDisplay().map(\.id), ["err", "block", "run", "idle"])
+        // UX-004 Mac parity: needs-you (blocked) before errored, then working → idle.
+        XCTAssertEqual(agents.rankedForDisplay().map(\.id), ["block", "err", "run", "idle"])
         XCTAssertEqual(agents.runningCount, 1)
+    }
+
+    /// Pending confirmation elevates an otherwise-running agent to needs-you (Mac roster).
+    func testRankingElevatesPendingConfirmationAgent() {
+        let agents = [
+            AgentState(id: "run", name: "Run", activity: .running, updatedAt: fixedDate),
+            AgentState(id: "ask", name: "Ask", activity: .running, updatedAt: fixedDate),
+            AgentState(id: "idle", name: "Idle", activity: .idle, updatedAt: fixedDate),
+        ]
+        XCTAssertEqual(
+            agents.rankedForDisplay(pendingAgentIDs: ["ask"]).map(\.id),
+            ["ask", "run", "idle"]
+        )
+        // Without pending ids, both running tie-break by id.
+        XCTAssertEqual(
+            agents.rankedForDisplay().map(\.id),
+            ["ask", "run", "idle"]
+        )
+    }
+
+    func testSnapshotAgentsRankedForDisplayUsesConfirmations() {
+        let snap = ShannonSnapshot(
+            agents: [
+                AgentState(id: "a", name: "A", activity: .idle, updatedAt: fixedDate),
+                AgentState(id: "b", name: "B", activity: .running, updatedAt: fixedDate),
+            ],
+            confirmations: [
+                PendingConfirmation(
+                    id: "c1",
+                    question: "Approve?",
+                    agentID: "a",
+                    createdAt: fixedDate,
+                    expiresAt: fixedDate.addingTimeInterval(600)
+                ),
+            ]
+        )
+        XCTAssertEqual(
+            snap.agentsRankedForDisplay(now: fixedDate).map(\.id),
+            ["a", "b"],
+            "idle agent with open ask must rank above running"
+        )
+    }
+
+    func testAttentionRankPriorityTokens() {
+        XCTAssertEqual(
+            AgentAttentionRank.priority(activity: .blocked),
+            0
+        )
+        XCTAssertEqual(
+            AgentAttentionRank.priority(activity: .idle, hasPendingConfirmation: true),
+            0
+        )
+        XCTAssertEqual(AgentAttentionRank.priority(activity: .running), 2)
+        XCTAssertEqual(AgentAttentionRank.priority(activity: .finished), 3)
+        XCTAssertEqual(AgentAttentionRank.priority(activity: .idle), 4)
     }
 
     /// Same activity: newer `updatedAt` wins so the agent that just moved
@@ -154,8 +210,8 @@ final class PresentationTests: XCTestCase {
         ]
         let ranked = board.rankedForDisplay().map(\.id)
         XCTAssertEqual(ranked, [
+            "block",            // needs-you first (Mac parity UX-004)
             "err-a", "err-b",   // errored, id order on equal time
-            "block",            // blocked
             "run-new", "run-old", // running by recency
             "done",             // finished
             "idle-b",           // idle

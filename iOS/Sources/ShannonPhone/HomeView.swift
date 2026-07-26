@@ -32,7 +32,7 @@ struct HomeView: View {
                         TimerCard(timer: timer)
                     }
 
-                    ForEach(snapshot.agents.rankedForDisplay()) { agent in
+                    ForEach(snapshot.agentsRankedForDisplay()) { agent in
                         AgentCard(agent: agent)
                     }
 

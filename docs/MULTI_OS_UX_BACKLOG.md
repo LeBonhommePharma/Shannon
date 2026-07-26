@@ -51,12 +51,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## P1 — density & hierarchy
 
-### - [ ] UX-004: iPad hub “needs you” sort matches Mac attention rank
+### - [x] UX-004: iPad hub “needs you” sort matches Mac attention rank
 
 - **Why:** Mac roster ranks needs-you → working → finished → idle; iPad card order may be insertion/updatedAt only.
 - **Platforms:** iPadOS, macOS (reference)
 - **Area:** `AgentHubViewModel`, shared rank helper from Core/PillCore
 - **First slice:** Pure sort helper + unit test; wire pad list.
+- **Done:** `AgentAttentionRank` + `rankedForDisplay(pendingAgentIDs:)` + `ShannonSnapshot.agentsRankedForDisplay()` (needs-you elevates open confirmations); pad `visibleAgents`, phone list, watch face/list/complication wired; pure tests for Mac-parity order.
 - **Priority:** P1
 
 ### - [ ] UX-005: Watch face shows primary focus line only when actionable
@@ -115,6 +116,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (loop 4):** `--quick` all PASS. Claimed **UX-004** (needs-you rank Mac parity). Considered: watch idle face (UX-005), phone skim (UX-006, ranking now shared), Reduce Motion (UX-007). **No new UX-0xx**.
 - **2026-07-26 (loop 3):** `--quick` all PASS. Claimed **UX-003** (Approve/Deny + disabled hub-offline copy). Considered: pad attention rank (UX-004), watch idle face (UX-005), Reduce Motion (UX-007). **No new UX-0xx**.
 - **2026-07-26 (loop 2):** `--quick` all PASS. Claimed **UX-002** (shared fail-closed empty states). Considered: Confirm/Approve verb (UX-003), pad rank (UX-004), watch idle focus (UX-005). **No new UX-0xx**.
 - **2026-07-26 (loop):** `./scripts/test_apple_platforms.sh --quick` — macOS/iOS/iPad/watch builds green (unsigned). UX-001 residual dual wording closed (pad detail + phone/watch badges). Considered for new items: empty-state dual copy (phone “Can't reach iCloud” vs pad “Not syncing…”) → already **UX-002**; Confirm vs Approve verb drift → **UX-003**; pad sort vs Mac rank → **UX-004**. **No new UX-0xx** this fire.

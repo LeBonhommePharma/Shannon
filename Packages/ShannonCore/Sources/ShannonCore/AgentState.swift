@@ -137,25 +137,52 @@ public struct AgentState: CloudSyncable, Codable, Identifiable, Hashable {
     }
 }
 
-public extension Array where Element == AgentState {
-    /// Ordering used by every device: alerting first, then running, then by
-    /// recency. The watch shows `prefix(3)` of this and must not disagree with
-    /// the phone about which agents those are.
-    ///
-    /// Fully stable: equal activity + equal `updatedAt` falls back to `id`
-    /// ascending so phone, watch and complication never re-shuffle a tie.
-    func rankedForDisplay() -> [AgentState] {
-        func rank(_ a: AgentState) -> Int {
-            switch a.activity {
-            case .errored:  return 0
-            case .blocked:  return 1
-            case .running:  return 2
-            case .finished: return 3
-            case .idle:     return 4
-            }
+// MARK: - Attention rank (Mac roster parity — UX-004)
+
+/// Pure attention priority for companion agent lists.
+///
+/// Matches Mac `AgentLiveSurfaceLogic` / session roster:
+/// **needs you → (errored) → working → finished → idle**.
+///
+/// Companions have no live gate surface; `blocked` activity **or** a pending
+/// confirmation agent id elevates to needs-you so iPad/phone never bury an ask.
+public enum AgentAttentionRank: Sendable {
+    /// Lower = higher on the board.
+    public static func priority(
+        activity: AgentActivity,
+        hasPendingConfirmation: Bool = false
+    ) -> Int {
+        if hasPendingConfirmation || activity == .blocked { return 0 } // needs you
+        switch activity {
+        case .errored: return 1
+        case .running: return 2 // working
+        case .finished: return 3
+        case .idle: return 4
+        case .blocked: return 0
         }
-        return sorted {
-            let r0 = rank($0), r1 = rank($1)
+    }
+}
+
+public extension Array where Element == AgentState {
+    /// Ordering used by every device: needs-you first (Mac roster parity), then
+    /// errored, working, finished, idle — then recency, then stable id.
+    ///
+    /// - Parameter pendingAgentIDs: Agent ids with an open (non-expired)
+    ///   confirmation. Elevates those rows to needs-you even when activity is
+    ///   still `.running` / `.idle` (CloudKit mirrors asks separately).
+    ///
+    /// Fully stable: equal priority + equal `updatedAt` falls back to `id`
+    /// ascending so phone, watch and complication never re-shuffle a tie.
+    func rankedForDisplay(pendingAgentIDs: Set<String> = []) -> [AgentState] {
+        sorted {
+            let r0 = AgentAttentionRank.priority(
+                activity: $0.activity,
+                hasPendingConfirmation: pendingAgentIDs.contains($0.id)
+            )
+            let r1 = AgentAttentionRank.priority(
+                activity: $1.activity,
+                hasPendingConfirmation: pendingAgentIDs.contains($1.id)
+            )
             if r0 != r1 { return r0 < r1 }
             if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
             return $0.id < $1.id
@@ -163,4 +190,17 @@ public extension Array where Element == AgentState {
     }
 
     var runningCount: Int { filter { $0.activity == .running }.count }
+}
+
+public extension ShannonSnapshot {
+    /// Agents ordered for every companion surface, elevating open confirmations.
+    func agentsRankedForDisplay(now: Date = Date()) -> [AgentState] {
+        let pendingIDs = Set(
+            confirmations
+                .filter { !$0.isExpired(now: now) }
+                .compactMap(\.agentID)
+                .filter { !$0.isEmpty }
+        )
+        return agents.rankedForDisplay(pendingAgentIDs: pendingIDs)
+    }
 }

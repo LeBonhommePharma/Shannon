@@ -187,7 +187,7 @@ struct AgentListView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: ShannonSpacing.sm) {
-                ForEach(model.snapshot.agents.rankedForDisplay()) { agent in
+                ForEach(model.snapshot.agentsRankedForDisplay()) { agent in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
                             Text("\(agent.activity.glyph) \(agent.name)")

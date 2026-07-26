@@ -22,7 +22,7 @@ struct ShannonFaceView: View {
     private var docking: DockingProgress? {
         snapshot.docking.first(where: { $0.isRunning }) ?? snapshot.docking.first
     }
-    private var agent: AgentState? { snapshot.agents.rankedForDisplay().first }
+    private var agent: AgentState? { snapshot.agentsRankedForDisplay().first }
 
     private var accent: Color {
         // Always-On dims to 15% for burn-in; an elevated heart rate (only when

@@ -144,12 +144,13 @@ jobs:
     name: Publish to PyPI
     needs: [build-sdist, build-pure-wheel]
     runs-on: ubuntu-latest
+    # No GitHub Environment gate: OIDC subject is
+    # repo:LeBonhommePharma/Shannon:ref:refs/heads/main (or tag ref on release).
+    # Pair with a PyPI trusted publisher for this workflow path, or set
+    # repo secret PYPI_API_TOKEN.
     if: >-
       (github.event_name == 'release' && github.event.action == 'published') ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'pypi')
-    environment:
-      name: pypi
-      url: https://pypi.org/project/shannon-entropy
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4

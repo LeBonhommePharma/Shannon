@@ -108,9 +108,10 @@ public struct SessionContentCard: Sendable, Equatable, Identifiable {
         return nil
     }
 
-    /// Whether to show a tertiary "Gate · approve" hint on roster rows.
-    /// True only when the gate has a matching ask (`canAnswerInline`) — never
-    /// invent Approve affordances when the hub is offline / ask is missing.
+    /// Whether to show a tertiary gate-approve hint on roster rows
+    /// (`GateAskActionCopy.rosterApproveHint`). True only when the gate has a
+    /// matching ask (`canAnswerInline`) — never invent Approve affordances when
+    /// the hub is offline / ask is missing.
     public var showsApproveHint: Bool { canAnswerInline }
 }
 

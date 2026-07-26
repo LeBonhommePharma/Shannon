@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import PillCore
+import ShannonCore
 
 /// Menu-bar presence for Shannon.
 ///
@@ -629,7 +630,11 @@ final class MenuBarController: NSObject {
 
     private static func symbolImage(_ name: String, template: Bool) -> NSImage? {
         let cfg = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
-        let img = NSImage(systemSymbolName: name, accessibilityDescription: "Shannon")?
+        // UX-027: status-item symbol a11y shares Core quietShort (brand chrome).
+        let img = NSImage(
+            systemSymbolName: name,
+            accessibilityDescription: CompanionFocusCopy.quietShort
+        )?
             .withSymbolConfiguration(cfg)
         img?.isTemplate = template
         return img

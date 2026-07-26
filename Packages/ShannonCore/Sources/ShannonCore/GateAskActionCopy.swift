@@ -43,6 +43,13 @@ public enum GateAskActionCopy: Sendable {
     /// Phone unreachable; system will deliver later (watch delivery chrome).
     public static let queuedForPhone = "Queued — delivers when iPhone is back"
 
+    /// Compact menu-bar roster tertiary hint when an ask is answerable (UX-027).
+    /// Distinct from full-width Approve buttons — density-preserving, same verb root.
+    public static let rosterApproveHint = "Gate · approve"
+
+    /// Accessibility when `rosterApproveHint` is shown.
+    public static let rosterApproveAccessibility = "Gate approve available"
+
     // MARK: Affordance resolution
 
     /// Resolved UI policy for one ask surface.

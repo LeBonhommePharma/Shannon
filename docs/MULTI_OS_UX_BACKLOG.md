@@ -264,10 +264,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** Compact + sidebar `navigationTitle(quietShort)`; GateCard/Notification/a11y/activity fallbacks; CompanionFocusCopyTests pad hub wiring.
 - **Priority:** P2
 
+### - [x] UX-027: Mac menu-bar roster gate hint + status a11y use Core tokens
+
+- **Why:** After gate/card Approve parity, menu-bar roster still hard-coded `"Gate · approve"` / `"Gate approve available"` and status-item symbol a11y hard-coded `"Shannon"`.
+- **Platforms:** macOS (iOS/iPadOS/watch gate verb reference)
+- **Area:** `MenuBarAgentRoster`, `MenuBarController`, `GateAskActionCopy`, `CompanionFocusCopy`
+- **First slice:** Core `rosterApproveHint` / `rosterApproveAccessibility`; wire roster + quietShort a11y; pure wiring test.
+- **Done:** GateAskActionCopy roster tokens; MenuBarAgentRoster + MenuBarController wired; GateAskActionCopyTests.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 22):** `--quick` all PASS. Backlog empty after UX-026. Residual Mac menu-bar `"Gate · approve"` dual + status-item a11y `"Shannon"`. Claimed **UX-027**. Considered: widget docking `"Idle"` (not brand/gate); `configurationDisplayName` catalog (leave); theme preview product chrome OK; phone head-gesture “Nod to confirm” (gesture copy, not primary Approve verb). **No additional UX-0xx**.
 - **2026-07-26 (loop 21):** `--quick` all PASS. Backlog empty after UX-025. Residual pad hub brand `"Shannon"` nav titles + unknown-agent fallbacks. Claimed **UX-026**. Considered: widget docking `"Idle"` (not brand); widget/complication `configurationDisplayName` (system catalog — leave); theme preview product chrome OK; Mac menu-bar symbol a11y `"Shannon"` (status item, not nav brand). **No additional UX-0xx**.
 - **2026-07-26 (loop 20):** `--quick` all PASS. Backlog empty; residual brand `"Shannon"` on widget/complication/menu/phone. Claimed **UX-025**. Considered: widget docking `"Idle"` (not brand token — leave); theme preview + Settings titles OK product chrome. **No additional UX-0xx**.
 - **2026-07-26 (loop 19):** `--quick` all PASS. Backlog empty; Mac/watch dual quiet `"Shannon"`. Claimed **UX-024**. Considered: widget `"Idle"` docking-empty (different context — not quiet brand token); pad feed empty prose OK. **No additional UX-0xx**.

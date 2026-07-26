@@ -27,6 +27,16 @@ final class GateAskActionCopyTests: XCTestCase {
         XCTAssertEqual(GateAskActionCopy.sent, "Sent ✓")
         XCTAssertFalse(GateAskActionCopy.queuedForPhone.isEmpty)
         XCTAssertTrue(GateAskActionCopy.queuedForPhone.localizedCaseInsensitiveContains("iphone"))
+        // UX-027: menu-bar roster tertiary hint shares approve verb root.
+        XCTAssertEqual(GateAskActionCopy.rosterApproveHint, "Gate · approve")
+        XCTAssertTrue(
+            GateAskActionCopy.rosterApproveHint.localizedCaseInsensitiveContains("approve")
+        )
+        XCTAssertFalse(GateAskActionCopy.rosterApproveAccessibility.isEmpty)
+        XCTAssertTrue(
+            GateAskActionCopy.rosterApproveAccessibility
+                .localizedCaseInsensitiveContains("approve")
+        )
     }
 
     func testCompanionAnswerableWhenSyncOK() {
@@ -389,6 +399,54 @@ final class GateAskActionCopyTests: XCTestCase {
         XCTAssertTrue(
             hub.contains("lastError: hub.store.lastError"),
             "AgentHubView must pass store.lastError into NotificationPanelView"
+        )
+    }
+
+    /// UX-027: Mac menu-bar roster gate hint + status-item brand a11y use Core tokens.
+    func testMacMenuBarRosterWiresRosterApproveHint() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let roster = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Pill/Sources/ShannonPill/MenuBarAgentRoster.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            roster.contains("GateAskActionCopy.rosterApproveHint"),
+            "menu-bar roster must use GateAskActionCopy.rosterApproveHint"
+        )
+        XCTAssertTrue(
+            roster.contains("GateAskActionCopy.rosterApproveAccessibility"),
+            "menu-bar roster a11y must use rosterApproveAccessibility"
+        )
+        XCTAssertFalse(
+            roster.contains("Text(\"Gate · approve\")"),
+            "menu-bar roster must not hard-code dual Gate · approve string"
+        )
+        XCTAssertFalse(
+            roster.contains("\"Gate approve available\""),
+            "menu-bar roster must not hard-code dual Gate approve a11y string"
+        )
+
+        let menuBar = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Pill/Sources/ShannonPill/MenuBarController.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            menuBar.contains("CompanionFocusCopy.quietShort"),
+            "menu-bar status symbol a11y must use CompanionFocusCopy.quietShort"
+        )
+        XCTAssertFalse(
+            menuBar.contains("accessibilityDescription: \"Shannon\""),
+            "menu-bar must not hard-code dual Shannon a11y description"
         )
     }
 }

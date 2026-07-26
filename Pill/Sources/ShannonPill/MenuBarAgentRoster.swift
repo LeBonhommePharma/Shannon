@@ -135,8 +135,9 @@ struct MenuBarAgentRoster: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             // Text-only hint — GateInlineCard owns real Approve/Deny actions.
+            // UX-027: share GateAskActionCopy.rosterApproveHint (not dual literal).
             if card.showsApproveHint {
-                Text("Gate · approve")
+                Text(GateAskActionCopy.rosterApproveHint)
                     .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonTertiary)
                     .lineLimit(1)
@@ -166,7 +167,7 @@ struct MenuBarAgentRoster: View {
             parts.append(card.activityLine)
         }
         if card.showsApproveHint {
-            parts.append("Gate approve available")
+            parts.append(GateAskActionCopy.rosterApproveAccessibility)
         }
         parts.append(reading.explain(at: Date()))
         if let age = card.relativeAge {

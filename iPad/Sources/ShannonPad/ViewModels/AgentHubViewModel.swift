@@ -257,7 +257,17 @@ final class AgentHubViewModel: ObservableObject {
         approved: Bool,
         source: ConfirmationSource = .tap
     ) {
-        store.answer(confirmation, approved ? .confirmed : .denied, source: source)
+        // Honor OS-agnostic refuse (expired / empty question) — no success haptic
+        // or gate-activity trail when the store rejected the answer.
+        let accepted = store.answer(
+            confirmation,
+            approved ? .confirmed : .denied,
+            source: source
+        )
+        guard accepted else {
+            post("That approval is no longer open.")
+            return
+        }
         didAnswer(confirmation, approved: approved)
     }
 

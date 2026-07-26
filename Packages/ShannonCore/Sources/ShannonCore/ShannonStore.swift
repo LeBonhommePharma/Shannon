@@ -227,13 +227,18 @@ public final class ShannonStore {
 
     /// Convenience for the gesture, voice and Double Tap paths, which all
     /// answer whichever question is currently on screen.
+    ///
+    /// Returns the pending item only when `answer` actually accepted it.
+    /// Fail-closed: expired / empty-question refuse → `nil` (callers must not
+    /// treat that as a successful confirm/deny).
     @discardableResult
     public func answerPending(
         _ answer: ConfirmationAnswer,
-        source: ConfirmationSource
+        source: ConfirmationSource,
+        now: Date = Date()
     ) -> PendingConfirmation? {
-        guard let pending = snapshot.oldestPendingConfirmation() else { return nil }
-        self.answer(pending, answer, source: source)
+        guard let pending = snapshot.oldestPendingConfirmation(now: now) else { return nil }
+        guard self.answer(pending, answer, source: source, now: now) else { return nil }
         return pending
     }
 

@@ -114,7 +114,7 @@ final class DesktopCompanionWindowTests: XCTestCase {
         let bridge = ShannonBridge()
         let model = DesktopCompanionModel(activity: activity, bridge: bridge)
         XCTAssertEqual(
-            model.scheduledPollIntervalForTesting,
+            model.scheduledPollIntervalForTesting ?? -1,
             DesktopCompanionRefreshCadence.quietPollInterval,
             accuracy: 1e-9
         )

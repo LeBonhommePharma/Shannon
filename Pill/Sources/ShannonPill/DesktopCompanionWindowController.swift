@@ -59,7 +59,6 @@ final class DesktopCompanionModel: ObservableObject {
 
     private let activity: AgentActivityMonitor
     private let bridge: ShannonBridge
-    private var initialPackagePetId: String?
     private var cancellables = Set<AnyCancellable>()
     private var pollCancellable: AnyCancellable?
     private var currentPollInterval: TimeInterval?
@@ -109,7 +108,11 @@ final class DesktopCompanionModel: ObservableObject {
     }
 
     func setPackagePetId(_ id: String?) {
-        packagePetId = id
+        if let id {
+            packagePetId = ShannonPreferences.normalizeDesktopPetId(id)
+        } else {
+            packagePetId = nil
+        }
         refresh()
     }
 
@@ -216,7 +219,8 @@ final class DesktopCompanionWindowController {
 
     private let activity: AgentActivityMonitor
     private let bridge: ShannonBridge
-
+    /// Package id from Settings until the model is created (E1).
+    private var initialPackagePetId: String?
     /// E4: click bubble/pet → expand notch + optional agent focus id.
     var onActivate: ((String?) -> Void)?
 
@@ -260,9 +264,19 @@ final class DesktopCompanionWindowController {
         return snap
     }
 
+    func setPackagePetId(_ id: String?) {
+        initialPackagePetId = id
+        model?.setPackagePetId(id)
+    }
+
     func show() {
         shouldBeVisible = true
-        let model = self.model ?? DesktopCompanionModel(activity: activity, bridge: bridge, packagePetId: initialPackagePetId)
+        let model = self.model ?? DesktopCompanionModel(
+            activity: activity,
+            bridge: bridge,
+            packagePetId: initialPackagePetId
+        )
+        model.setPackagePetId(initialPackagePetId)
         self.model = model
 
         let size = Self.defaultSize

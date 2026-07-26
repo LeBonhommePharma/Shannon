@@ -1,13 +1,10 @@
 class Shannon < Formula
   desc "Physics-grounded LLM safety: Shannon entropy collapse detection (shannon-agent)"
   homepage "https://github.com/LeBonhommePharma/Shannon"
-  license "Apache-2.0"
-
   url "https://github.com/LeBonhommePharma/Shannon/archive/refs/tags/v2.1.0.tar.gz"
-  sha256 "ecabf9a019f0316debe2319006dcf3623386c74568807e0252d33e4a99581411"
   version "2.1.0"
-
-
+  sha256 "ecabf9a019f0316debe2319006dcf3623386c74568807e0252d33e4a99581411"
+  license "Apache-2.0"
 
   head "https://github.com/LeBonhommePharma/Shannon.git", branch: "main"
 

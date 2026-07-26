@@ -82,6 +82,42 @@ final class SyncBehaviourTests: XCTestCase {
                        "both commands must be cleared from the queue")
     }
 
+    /// Failed deletes must not return a command for execution (no double nextTrack).
+    func testConsumeCommandsSkipsWhenDeleteFails() async throws {
+        let backend = DeleteFailingBackend()
+        let publisher = ShannonPublisher(backend: backend)
+        let now = fixedDate
+        try await backend.save(RemoteCommand(id: "fresh", command: .nextTrack,
+                                             origin: "phone", issuedAt: now))
+
+        let first = try await publisher.consumeCommands(now: now)
+        XCTAssertTrue(first.isEmpty, "delete failed → do not execute")
+        XCTAssertEqual(backend.recordCount(RemoteCommand.recordType), 1,
+                       "command remains on queue for retry")
+
+        backend.failDeletes = false
+        let second = try await publisher.consumeCommands(now: now)
+        XCTAssertEqual(second.map(\.id), ["fresh"])
+        XCTAssertEqual(backend.recordCount(RemoteCommand.recordType), 0)
+    }
+
+    /// ConfirmationResponse stable recordName → last write wins (MULTI_DEVICE.md).
+    func testConfirmationResponseOverwriteSameId() async throws {
+        let backend = InMemorySyncBackend()
+        try await backend.save(ConfirmationResponse(
+            id: "c1", answer: .denied, source: .tap, origin: "iPhone",
+            answeredAt: fixedDate
+        ))
+        try await backend.save(ConfirmationResponse(
+            id: "c1", answer: .confirmed, source: .tap, origin: "iPad",
+            answeredAt: fixedDate.addingTimeInterval(1)
+        ))
+        let all = try await backend.fetch(ConfirmationResponse.self)
+        XCTAssertEqual(all.count, 1, "stable response-<id> overwrites in place")
+        XCTAssertEqual(all.first?.answer, .confirmed)
+        XCTAssertEqual(all.first?.origin, "iPad")
+    }
+
     func testOversizedArtworkIsDroppedBeforePublish() async throws {
         let backend = InMemorySyncBackend()
         let publisher = ShannonPublisher(backend: backend)
@@ -284,5 +320,34 @@ final class SyncBehaviourTests: XCTestCase {
     func testWatchMessageRejectsMalformedPayload() {
         XCTAssertThrowsError(try WatchMessageCodec.decode(["wrongKey": Data()]))
         XCTAssertThrowsError(try WatchMessageCodec.decode([:]))
+    }
+}
+
+// MARK: - Test doubles
+
+/// Backend that can refuse deletes so consumeCommands cannot double-execute.
+private final class DeleteFailingBackend: ShannonSyncBackend, @unchecked Sendable {
+    private let inner = InMemorySyncBackend()
+    var failDeletes = true
+
+    func save(recordType: String, recordName: String, fields: CloudFields) async throws {
+        try await inner.save(recordType: recordType, recordName: recordName, fields: fields)
+    }
+
+    func delete(recordType: String, recordName: String) async throws {
+        if failDeletes {
+            throw SyncError.notAvailable("forced delete failure for test")
+        }
+        try await inner.delete(recordType: recordType, recordName: recordName)
+    }
+
+    func fetchAll(
+        recordType: String
+    ) async throws -> [(recordName: String, fields: CloudFields)] {
+        try await inner.fetchAll(recordType: recordType)
+    }
+
+    func recordCount(_ recordType: String) -> Int {
+        inner.recordCount(recordType)
     }
 }

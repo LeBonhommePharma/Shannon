@@ -39,14 +39,27 @@ final class SecurityTests: XCTestCase {
     /// The container is fixed and private. A test rather than a comment,
     /// because switching to `publicCloudDatabase` would be a one-word change
     /// that leaks every agent task title.
-    func testSyncTargetsPrivateContainerOnly() {
+    ///
+    /// Reads the **shipped** `ShannonSync.swift` so this fails if the backend
+    /// body changes (a hard-coded prose string in the test cannot).
+    func testSyncTargetsPrivateContainerOnly() throws {
         XCTAssertEqual(ShannonSyncConfig.containerID, "iCloud.com.lebonhommepharma.shannon")
         XCTAssertEqual(ShannonSyncConfig.zoneName, "ShannonState")
 
-        let source = """
-        CloudKitSyncBackend uses container.privateCloudDatabase exclusively.
-        """
-        XCTAssertFalse(source.contains("publicCloudDatabase"))
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // ShannonCoreTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // ShannonCore
+            .appendingPathComponent("Sources/ShannonCore/ShannonSync.swift")
+        let source = try String(contentsOf: root, encoding: .utf8)
+        XCTAssertTrue(
+            source.contains("privateCloudDatabase"),
+            "CloudKitSyncBackend must use privateCloudDatabase"
+        )
+        XCTAssertFalse(
+            source.contains("publicCloudDatabase"),
+            "CloudKitSyncBackend must not use publicCloudDatabase"
+        )
     }
 
     func testAllRecordTypesAreRegisteredForSchemaDeploy() {

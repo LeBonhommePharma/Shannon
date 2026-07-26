@@ -283,12 +283,25 @@ public actor ShannonPublisher {
 
     /// Drains commands the phone or watch issued. Stale ones are deleted
     /// without executing — a tap queued offline should not skip a track later.
+    ///
+    /// Fresh commands are returned **only after a successful delete** so a
+    /// failed CloudKit delete cannot re-deliver the same nextTrack/toggle on
+    /// the next Mac poll (double-execute). Delete failure leaves the command
+    /// on the queue for a later retry.
     public func consumeCommands(now: Date = Date()) async throws -> [RemoteCommand] {
         let all = try await backend.fetch(RemoteCommand.self)
         var fresh: [RemoteCommand] = []
         for command in all.sorted(by: { $0.issuedAt < $1.issuedAt }) {
-            if !command.isStale(now: now) { fresh.append(command) }
-            try? await backend.delete(command)
+            if command.isStale(now: now) {
+                try? await backend.delete(command)
+                continue
+            }
+            do {
+                try await backend.delete(command)
+                fresh.append(command)
+            } catch {
+                // Leave on queue; do not execute while still present.
+            }
         }
         return fresh
     }

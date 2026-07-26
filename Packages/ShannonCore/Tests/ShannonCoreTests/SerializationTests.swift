@@ -77,6 +77,26 @@ final class SerializationTests: XCTestCase {
         XCTAssertEqual(try device.reencoded(), device)
     }
 
+    /// Capacity gauges are published for multi-device load preference — round-trip
+    /// must preserve them (fail-closed when absent on older peers).
+    func testMacDeviceStateCapacityRoundTrips() throws {
+        let device = MacDeviceState(
+            deviceName: "LP-MacBook-Pro",
+            batteryPercent: 70,
+            isCharging: false,
+            minutesRemaining: 90,
+            capacity: HostCapacitySnapshot(
+                cpuPercent: 88, ramPercent: 62, diskPercent: 40, sampledAt: fixedDate
+            ),
+            updatedAt: fixedDate
+        )
+        let round = try device.reencoded()
+        XCTAssertEqual(round.capacity?.cpuPercent, 88)
+        XCTAssertEqual(round.capacity?.ramPercent, 62)
+        XCTAssertEqual(round.capacity?.diskPercent, 40)
+        XCTAssertEqual(round, device)
+    }
+
     func testNotificationMirrorRoundTrips() throws {
         let note = NotificationMirror(
             id: "n1",

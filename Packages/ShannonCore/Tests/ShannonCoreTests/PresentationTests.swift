@@ -305,5 +305,8 @@ final class PresentationTests: XCTestCase {
         let command = RemoteCommand(command: .nextTrack, origin: "watch", issuedAt: fixedDate)
         XCTAssertFalse(command.isStale(now: fixedDate.addingTimeInterval(10)))
         XCTAssertTrue(command.isStale(now: fixedDate.addingTimeInterval(120)))
+        // Contract is age > 60s (MULTI_DEVICE.md); exact 60s is still fresh.
+        XCTAssertFalse(command.isStale(now: fixedDate.addingTimeInterval(RemoteCommand.staleAfter)))
+        XCTAssertTrue(command.isStale(now: fixedDate.addingTimeInterval(RemoteCommand.staleAfter + 0.001)))
     }
 }

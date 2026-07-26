@@ -183,8 +183,35 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ---
 
+### - [ ] UX-018: iPad GateCard disables Approve/Deny when hub/sync offline
+
+- **Why:** Phone uses `companionAffordance` / disables when `lastError`; pad `GateCardView` keeps Approve/Deny live on error — multi-OS honesty drift.
+- **Platforms:** iPadOS (iOS reference)
+- **Area:** `iPad/.../GateCardView.swift`, `AgentHubViewModel.lastError`, `GateAskActionCopy`
+- **First slice:** Disable buttons + status line when lastError / hub offline; pure wiring or ViewModel policy test.
+- **Priority:** P1
+
+### - [ ] UX-019: Pad + watch badges elevate open pending confirmation
+
+- **Why:** Open confirmation can still badge as “working” if activity is mid-task; Mac attention elevates needs-you.
+- **Platforms:** iPadOS, watchOS (macOS reference)
+- **Area:** pad `AgentActivity.label`, watch `badgeLabel(for:)`
+- **First slice:** Pass `hasPendingConfirmation` into badge; pure test with pending id set.
+- **Priority:** P1
+
+### - [ ] UX-020: Watch empty list uses offline empty copy when phone unreachable
+
+- **Why:** Watch empty list always `CompanionEmptyStateCopy.idleTitle`; never hub-offline when WC/phone unreachable.
+- **Platforms:** watchOS
+- **Area:** `WatchRootView`, `WatchModel` connectivity
+- **First slice:** Map unreachable → `hubOfflineTitle` (or equivalent); idle only when connected + no agents.
+- **Priority:** P2
+
+---
+
 ## Investigation notes
 
+- **2026-07-26 (swarm multi-device):** Exploration swarm + host audit. Filed **UX-018…020** (pad/watch honesty). Dual primary-verb strings clean. Builds green unsigned.
 - **2026-07-26 (loop 12):** `--quick` all PASS. Backlog empty after UX-016. Residual dual quiet idle: Mac collapsedStatusLine hard-codes `"Shannon · idle"`. Claimed **UX-017**. Considered: widget `"Idle"` docking-empty (different context); PillView fallback `"Shannon"` quietShort family (optional follow-up); dual Approve/empty/status legend closed. **No additional UX-0xx**.
 - **2026-07-26 (multi-OS optimize):** UX-001…015 closed. Residual skeptic gap: macOS 14+ CompanionBoard density dead vs listedSurfaces/agentRow. Claimed **UX-016**. Dual-copy primary verbs clean after UX-014/015. **No additional UX-0xx** this fire pending multi-platform re-check.
 - **2026-07-26 (loop 11):** `--quick` all PASS. Backlog empty; residual dual empty idle title on Mac pill + menu-bar. Claimed **UX-015**. Considered: SessionContentPresenter hard-coded `"Shannon · idle"` vs `CompanionFocusCopy.quietFace` (follow-up, not this fire); widget `"Idle"` docking-empty (different context); watch delivery prose (OK). **No additional UX-0xx**.

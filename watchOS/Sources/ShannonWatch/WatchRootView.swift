@@ -178,11 +178,12 @@ struct GateApprovalView: View {
                 .font(.shannonCaption)
                 .foregroundStyle(Color.shannonSecondary)
         case .sent:
-            Text("Sent ✓")
+            // UX-023: shared with face DeliveryRow.
+            Text(GateAskActionCopy.sent)
                 .font(.shannonCaption)
                 .foregroundStyle(Color.shannonAccent)
         case .queued:
-            Text("Queued — delivers when iPhone is back")
+            Text(GateAskActionCopy.queuedForPhone)
                 .font(.shannonCaption)
                 .foregroundStyle(Color.shannonSecondary)
         }

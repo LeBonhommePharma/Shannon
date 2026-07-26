@@ -22,6 +22,11 @@ final class GateAskActionCopyTests: XCTestCase {
         XCTAssertEqual(GateAskActionCopy.approve, "Approve")
         XCTAssertEqual(GateAskActionCopy.deny, "Deny")
         XCTAssertEqual(GateAskActionCopy.needsApproval, "needs approval")
+        // UX-023: delivery chrome tokens (watch face + gate status).
+        XCTAssertEqual(GateAskActionCopy.sending, "Sending…")
+        XCTAssertEqual(GateAskActionCopy.sent, "Sent ✓")
+        XCTAssertFalse(GateAskActionCopy.queuedForPhone.isEmpty)
+        XCTAssertTrue(GateAskActionCopy.queuedForPhone.localizedCaseInsensitiveContains("iphone"))
     }
 
     func testCompanionAnswerableWhenSyncOK() {
@@ -169,6 +174,45 @@ final class GateAskActionCopyTests: XCTestCase {
         XCTAssertFalse(
             watch.contains("Text(\"No agents\")"),
             "watch must not hard-code dual-OS No agents empty string"
+        )
+        // UX-023: gate status sent/queued share Core tokens with face.
+        XCTAssertTrue(watch.contains("GateAskActionCopy.sent"))
+        XCTAssertTrue(watch.contains("GateAskActionCopy.queuedForPhone"))
+        XCTAssertFalse(
+            watch.contains("Text(\"Sent ✓\")"),
+            "gate status must not hard-code dual sent string"
+        )
+    }
+
+    /// UX-023: face DeliveryRow must not dual-fork sending/sent/queued vs gate.
+    func testWatchFaceDeliveryWiresSharedCopy() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let face = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "watchOS/Sources/ShannonWatch/ShannonFaceView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(face.contains("GateAskActionCopy.sending"))
+        XCTAssertTrue(face.contains("GateAskActionCopy.sent"))
+        XCTAssertTrue(face.contains("GateAskActionCopy.queuedForPhone"))
+        XCTAssertFalse(
+            face.contains("\"Sending answer"),
+            "face must not hard-code dual Sending answer prose"
+        )
+        XCTAssertFalse(
+            face.contains("\"Answer sent\""),
+            "face must not hard-code dual Answer sent string"
+        )
+        XCTAssertFalse(
+            face.contains("\"Answer queued"),
+            "face must not hard-code dual Answer queued string"
         )
     }
 

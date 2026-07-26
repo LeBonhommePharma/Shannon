@@ -120,13 +120,14 @@ struct DeliveryRow: View {
                 EmptyView()
             case .sending:
                 ProgressView().controlSize(.mini)
-                Text("Sending answer…")
+                // UX-023: same sending/sent/queued tokens as gate statusLine.
+                Text(GateAskActionCopy.sending)
             case .sent:
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(accent)
-                Text("Answer sent")
+                Text(GateAskActionCopy.sent)
             case .queued:
                 Image(systemName: "tray.and.arrow.up")
-                Text("Answer queued for iPhone")
+                Text(GateAskActionCopy.queuedForPhone)
             }
         }
         .font(.shannonCaption)

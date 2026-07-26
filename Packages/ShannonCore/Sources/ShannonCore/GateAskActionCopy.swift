@@ -34,7 +34,14 @@ public enum GateAskActionCopy: Sendable {
     public static let promptUnanswerable =
         "This prompt is no longer answerable"
 
+    /// In-flight answer (Mac gate cards + watch gate status).
     public static let sending = "Sending…"
+
+    /// Phone/Mac acknowledged the answer (watch face + gate status — UX-023).
+    public static let sent = "Sent ✓"
+
+    /// Phone unreachable; system will deliver later (watch delivery chrome).
+    public static let queuedForPhone = "Queued — delivers when iPhone is back"
 
     // MARK: Affordance resolution
 

@@ -103,7 +103,7 @@ private struct ConfirmationRow: View {
 
             HStack(spacing: ShannonSpacing.sm) {
                 Button(action: onConfirm) {
-                    // UX-012: Approve (not dual-OS "Confirm") — Mac/phone parity.
+                    // UX-012: Approve token — Mac/phone parity (no dual-OS Confirm).
                     Label(GateAskActionCopy.approve, systemImage: "checkmark")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }

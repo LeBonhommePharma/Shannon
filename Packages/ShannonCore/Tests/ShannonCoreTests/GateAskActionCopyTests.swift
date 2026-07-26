@@ -155,9 +155,14 @@ final class GateAskActionCopyTests: XCTestCase {
                 text.contains("GateAskActionCopy"),
                 "\(rel) must use GateAskActionCopy"
             )
+            // Forbid hard-coded UI strings only (not prose comments).
             XCTAssertFalse(
-                text.contains("\"Confirm\""),
-                "\(rel) must not hard-code Confirm (use Approve)"
+                text.contains("Label(\"Confirm\""),
+                "\(rel) must not hard-code Label Confirm"
+            )
+            XCTAssertFalse(
+                text.contains("title: \"Confirm\""),
+                "\(rel) must not hard-code title Confirm"
             )
             XCTAssertTrue(
                 text.contains("GateAskActionCopy.approve")

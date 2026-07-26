@@ -228,7 +228,7 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 
 | Suite | Last green note |
 |---|---|
-| `cd Pill && swift build && swift test` | 2026-07-26 ENH-007 residual: PillView listedAgentSurfaces; ShannonPill wiring green |
+| `cd Pill && swift build && swift test` | 2026-07-26 swarm: PillCore 924 pass (1 skip); ShannonPill 48; multi-platform 4/4 |
 | `pytest hub/tests/ -v` | 2026-07-26 ENH-017: 685 passed, 8 skipped (tool_kind migration + classify) |
 | `pytest tests/python/ -q` | 2026-07-26 ENH-009: 180 passed, 51 skipped (pythonpath wired; bare pytest works) |
 | Session presenters | `SessionContentPresenterTests` + `AgentLiveSurfaceTests` + `SessionUIWiringTests` |

@@ -1,5 +1,6 @@
 import SwiftUI
 import PillCore
+import ShannonCore
 
 // `ShannonStatus.isSynthetic` / `.syntheticBackends` and the provenance rules
 // built on them now live in PillCore (`EntropyProvenance.swift`), so the
@@ -1032,13 +1033,19 @@ struct PillView: View {
             // that same instant, labelling "simulated" — and connectivity alone
             // does not establish provenance: `--demo` opens a real socket.
             if #available(macOS 14, *) {
+                // Same density as listedAgentSurfaces / agentRow (meta + usage).
+                // Without this, the live macOS 14+ board would stay pet-status-only
+                // while the #else agentRow path showed project/branch/model/tokens.
                 CompanionBoardView(
                     summary: summary,
                     entropyDeltas: agentCompanionDeltas,
                     pendingAsks: activity.pendingAsks,
                     activity: activity.recentActivity,
                     maxRows: busy.isEmpty ? 3 : 4,
-                    focusedAgentId: focusedAgentId
+                    focusedAgentId: focusedAgentId,
+                    densityByAgent: SessionContentPresenter.companionBoardDensity(
+                        from: listedAgentSurfaces
+                    )
                 )
             } else {
                 // The companions are Canvas-drawn and need macOS 14; the package
@@ -1153,7 +1160,8 @@ struct PillView: View {
 
     private var emptyBoard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("No agents running")
+            // UX-015: same idle empty token as phone/pad/watch (not dual hard-code).
+            Text(CompanionEmptyStateCopy.idleTitle)
                 .font(.shannonMenuTitle)
                 .foregroundStyle(Color.shannonPrimary)
             Text(PillChromePolicy.emptyRosterCopy)

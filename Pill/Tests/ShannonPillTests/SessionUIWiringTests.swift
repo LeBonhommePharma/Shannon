@@ -23,6 +23,7 @@ final class SessionUIWiringTests: XCTestCase {
                 "card.badgeLabel",
                 "rosterDetailLine",
                 "showsApproveHint",
+                "CompanionEmptyStateCopy.idleTitle",
             ]),
             ("PanelSectionRegistry.swift", [
                 "SessionContentPresenter.cards",
@@ -33,11 +34,14 @@ final class SessionUIWiringTests: XCTestCase {
                 "SessionContentPresenter.listedSurfaces",
                 "SessionContentPresenter.collapsedActiveCount",
                 "SessionContentPresenter.collapsedUsageChip",
+                "SessionContentPresenter.companionBoardDensity",
+                "densityByAgent",
                 "usageByAgent",
                 "sessionsByAgent",
                 "parity.sessionsByAgent",
                 "AgentLiveChrome.badgeLabel",
                 "metaLine",
+                "CompanionEmptyStateCopy.idleTitle",
             ]),
             ("MenuBarPopoverView.swift", [
                 "AgentLiveSurfaceLogic.primaryFocus",

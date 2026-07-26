@@ -95,4 +95,44 @@ final class CompanionEmptyStateCopyTests: XCTestCase {
             "pad must not hard-code dual-OS offline title"
         )
     }
+
+    /// UX-015: Mac notch empty board + menu-bar roster share Core idle title.
+    func testMacEmptyRosterWiresIdleTitle() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let pill = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Pill/Sources/ShannonPill/PillView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            pill.contains("CompanionEmptyStateCopy.idleTitle"),
+            "Mac emptyBoard must use CompanionEmptyStateCopy.idleTitle"
+        )
+        XCTAssertFalse(
+            pill.contains("Text(\"No agents running\")"),
+            "Mac emptyBoard must not hard-code dual idle title"
+        )
+
+        let roster = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Pill/Sources/ShannonPill/MenuBarAgentRoster.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            roster.contains("CompanionEmptyStateCopy.idleTitle"),
+            "menu-bar empty roster must use CompanionEmptyStateCopy.idleTitle"
+        )
+        XCTAssertFalse(
+            roster.contains("\"No agents."),
+            "menu-bar must not hard-code dual short 'No agents.' empty string"
+        )
+    }
 }

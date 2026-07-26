@@ -154,10 +154,30 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** Gate `approve`/`deny`/`sending` + empty list `CompanionEmptyStateCopy.idleTitle`; wiring test forbids hard-coded Approve/Deny/No agents.
 - **Priority:** P2
 
+### - [x] UX-015: Mac empty roster title uses CompanionEmptyStateCopy.idleTitle
+
+- **Why:** Watch/phone/pad empty idle titles call Core; Mac notch `emptyBoard` still hard-codes `"No agents running"` and menu-bar roster uses dual `"No agents."` — token drift risk.
+- **Platforms:** macOS (iOS/iPadOS/watchOS reference)
+- **Area:** `Pill/Sources/ShannonPill/PillView.swift`, `MenuBarAgentRoster.swift`
+- **First slice:** Wire both empty titles to `CompanionEmptyStateCopy.idleTitle`; pure wiring test forbids hard-coded dual strings.
+- **Done:** `emptyBoard` + menu-bar empty roster use `CompanionEmptyStateCopy.idleTitle`; Core + SessionUIWiring tests forbid dual hard-codes.
+- **Priority:** P2
+
+### - [x] UX-016: Mac macOS 14+ CompanionBoardView shows session meta + usage
+
+- **Why:** Expanded board on modern Mac uses `CompanionBoardView` only; meta/usage lived on `#else agentRow` — dead density path for host OS 14+ (AgentPeek-class session density).
+- **Platforms:** macOS (primary expanded HUD)
+- **Area:** `PetPillView.swift` (`CompanionRow`/`CompanionBoardView`), `SessionContentPresenter.companionBoardDensity*`, `PillView.agentBoard`
+- **First slice:** Pure density map from sessions/listedSurfaces; pass into board; render fail-closed; tests prove UI consumes density.
+- **Done:** `CompanionBoardDensity` + `companionBoardDensity(from:)` / `companionBoardDensityByAgent`; row shows meta + usage; PillView passes `densityByAgent` from `listedAgentSurfaces`; pure + structural tests.
+- **Priority:** P0
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (multi-OS optimize):** UX-001…015 closed. Residual skeptic gap: macOS 14+ CompanionBoard density dead vs listedSurfaces/agentRow. Claimed **UX-016**. Dual-copy primary verbs clean after UX-014/015. **No additional UX-0xx** this fire pending multi-platform re-check.
+- **2026-07-26 (loop 11):** `--quick` all PASS. Backlog empty; residual dual empty idle title on Mac pill + menu-bar. Claimed **UX-015**. Considered: SessionContentPresenter hard-coded `"Shannon · idle"` vs `CompanionFocusCopy.quietFace` (follow-up, not this fire); widget `"Idle"` docking-empty (different context); watch delivery prose (OK). **No additional UX-0xx**.
 - **2026-07-26 (loop 10):** `--quick` all PASS. Backlog empty; watch gate/empty dual wording. Claimed **UX-014**. Considered: face “Sending answer…” delivery prose (OK as status narrative, not primary verb); Mac “No agents running” already matches Core idleTitle. **No additional UX-0xx**.
 - **2026-07-26 (loop 9):** `--quick` all PASS. Backlog empty; residual dual wording on Mac `GateInlineCard`. Claimed **UX-013**. Considered: no other grounded dual-string forks in shipped surfaces. **No additional UX-0xx**.
 - **2026-07-26 (loop 8):** `--quick` ios/ipad/watch PASS; macOS FAIL (pet prefs WIP). Claimed **UX-012** (pad Confirm→Approve). Considered: GateInlineCard hard-coded needs approval → optional follow-up; no new P0. **No new UX-0xx**.

@@ -1,5 +1,6 @@
 import SwiftUI
 import PillCore
+import ShannonCore
 
 // MARK: - Menu-bar popover agent roster (extracted)
 
@@ -43,7 +44,10 @@ struct MenuBarAgentRoster: View {
                 .tracking(0.8)
                 .accessibilityAddTraits(.isHeader)
             if summary.agents.isEmpty {
-                Text("No agents. ⌘D attaches the front app · DatasetRunner fills FlexAIDdS progress.")
+                // UX-015: idle title matches Core / companions; Mac-only attach hint stays local.
+                Text(
+                    "\(CompanionEmptyStateCopy.idleTitle). ⌘D attaches the front app · DatasetRunner fills FlexAIDdS progress."
+                )
                     .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonTertiary)
                     .lineLimit(2)

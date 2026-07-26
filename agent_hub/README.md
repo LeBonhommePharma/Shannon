@@ -1,8 +1,10 @@
 # Agent Hub
 
-> ## ⚠️ STALE — DO NOT USE FOR PRODUCTION
+> ## ⚠️ STALE ARCHIVE — DO NOT USE FOR PRODUCTION
 >
 > **Canonical hub is `hub/`** at the repo root (not this tree).
+> **Canonical macOS HUD is ShannonPill** (`Pill/`, `./scripts/shannon`) — not
+> the Swift snapshot under `agent_hub/swift/` or `hub/AgentHubApp.swift`.
 >
 > | Item | Live path |
 > |------|-----------|
@@ -10,10 +12,12 @@
 > | Socket | `/tmp/shannon.sock` |
 > | Tests | `hub/tests/` |
 > | Identities | `hub/agent_identity.py` |
+> | Menu-bar / notch | `Pill/` → ShannonPill |
 >
-> This `agent_hub/` directory is a historical snapshot. Entropy integrity,
-> approval-always-surfaces, process-attach, and Keychain service names all
-> live only under **`hub/`**. Scripts and docs must point there.
+> This `agent_hub/` directory is kept only as a historical snapshot. It is
+> **not** referenced by `scripts/shannon`, CI, or Swift packages. Entropy
+> integrity, approval-always-surfaces, process-attach, and Keychain service
+> names all live only under **`hub/`**. Do not add new script/CI refs here.
 
 A macOS multi-agent coordination layer, added alongside the Shannon entropy
 library but functionally and architecturally independent from it — it does

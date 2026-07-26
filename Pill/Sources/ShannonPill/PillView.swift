@@ -1337,23 +1337,19 @@ struct PillView: View {
     // MARK: Live agent surface (clean-room AgentNotch-class)
 
     private func liveSurface(for a: AgentActivitySnapshot) -> AgentLiveSurface {
-        AgentLiveSurfaceLogic.resolve(
+        AgentLiveChrome.surface(
             agent: a,
             pendingAsks: activity.pendingAsks,
             activity: activity.recentActivity
         )
     }
 
-    /// Capsule badge: needs you / working / done / live.
+    /// Capsule badge: needs you / working / done / live (shared with menu bar).
     private func liveBadge(for a: AgentActivitySnapshot) -> String {
-        let s = liveSurface(for: a)
-        switch s.attention {
-        case .needsYou: return "needs you"
-        case .working: return s.toolKind == .none ? "working" : s.toolKind.rawValue
-        case .finished: return "done"
-        case .idle: return "live"
-        case .unknown: return a.statusLine
-        }
+        AgentLiveChrome.badgeLabel(
+            surface: liveSurface(for: a),
+            fallbackStatusLine: a.statusLine
+        )
     }
 
     private func liveDetailLine(for a: AgentActivitySnapshot) -> String {
@@ -1366,12 +1362,10 @@ struct PillView: View {
     }
 
     private func liveAttentionColor(for a: AgentActivitySnapshot) -> Color {
-        switch liveSurface(for: a).attention {
-        case .needsYou: return .shannonWarning
-        case .working: return style(for: a).palette.ink
-        case .finished: return .shannonSuccess
-        case .idle, .unknown: return ink(for: a)
-        }
+        AgentLiveChrome.attentionColor(
+            surface: liveSurface(for: a),
+            styleInk: ink(for: a)
+        )
     }
 
     /// Brand tint for non-text marks — dots, icons, arcs — modulated by status.

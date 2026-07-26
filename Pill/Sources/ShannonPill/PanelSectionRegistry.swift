@@ -55,25 +55,64 @@ final class ParityPanelModel: ObservableObject {
     }
 
     /// Register gate agents + artifact readers, then refresh independent surfaces.
+    ///
+    /// Disk / process discovery (Claude/Codex artifacts, dev servers, home
+    /// routes) runs off the MainActor so opening the popover never hitch the
+    /// menu bar — same discipline as `AgentActivityMonitor` hub scans.
     func refresh(gateAgents: [AgentActivitySnapshot], force: Bool = false) {
         let now = Date()
         if !force, now.timeIntervalSince(lastRefresh) < 2.0 { return }
         lastRefresh = now
-
-        registry.register(GateSessionProvider(agents: gateAgents))
-        registry.register(ClaudeCodeSessionReader(maxSessions: 12))
-        registry.register(CodexSessionReader(maxSessions: 12))
-        sessions = registry.allSessions(now: now)
-            .filter { $0.sourceKind == .artifact }
-            .prefix(8)
-            .map { $0 }
-
-        servers = Array(DevServerDiscovery.discoverLive().prefix(8))
-
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        Task.detached(priority: .utility) { [weak self] in
+            let payload = ParityPanelModel.collectParityPayload(
+                gateAgents: gateAgents,
+                now: now,
+                home: home
+            )
+            await MainActor.run {
+                guard let self else { return }
+                self.sessions = payload.sessions
+                self.servers = payload.servers
+                self.routes = payload.routes
+            }
+        }
+    }
+
+    /// One snapshot of parity panel data (sessions / servers / routes).
+    struct ParityPayload: Sendable {
+        var sessions: [AgentSession]
+        var servers: [DevServer]
+        var routes: [QuickRoute]
+    }
+
+    /// Heavy I/O for the parity panel — safe to call off MainActor.
+    ///
+    /// Uses a fresh local `SessionRegistry` so callers never share mutable
+    /// MainActor state with a detached task. `includeArtifactReaders` is true
+    /// in production; tests may set false to avoid scanning `~/.claude`.
+    nonisolated static func collectParityPayload(
+        gateAgents: [AgentActivitySnapshot],
+        now: Date = Date(),
+        home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+        includeArtifactReaders: Bool = true,
+        discoverServers: () -> [DevServer] = { Array(DevServerDiscovery.discoverLive().prefix(8)) }
+    ) -> ParityPayload {
+        let reg = SessionRegistry()
+        reg.register(GateSessionProvider(agents: gateAgents))
+        if includeArtifactReaders {
+            reg.register(ClaudeCodeSessionReader(maxSessions: 12))
+            reg.register(CodexSessionReader(maxSessions: 12))
+        }
+        let sess = Array(
+            reg.allSessions(now: now)
+                .filter { $0.sourceKind == .artifact }
+                .prefix(8)
+        )
+        let servers = discoverServers()
         // Keep missing catalog paths so QuickRoutesSection can dim/disable them.
-        // Never filter(\.exists) — that would hide AC3 "disabled when absent".
-        routes = QuickRouteCatalog.panelRoutes(home: home, limit: 24)
+        let routes = QuickRouteCatalog.panelRoutes(home: home, limit: 24)
+        return ParityPayload(sessions: sess, servers: servers, routes: routes)
     }
 
     func runAction(_ action: FastAction) {

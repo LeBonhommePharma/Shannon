@@ -96,6 +96,47 @@ final class CompanionEmptyStateCopyTests: XCTestCase {
         )
     }
 
+    /// UX-020: watch WC phone reachability maps to idle vs hub-offline.
+    func testWatchPhoneReachabilityMapsEmptyCopy() {
+        let idle = CompanionEmptyStateCopy.content(isPhoneReachable: true)
+        XCTAssertFalse(idle.isOffline)
+        XCTAssertEqual(idle.title, CompanionEmptyStateCopy.idleTitle)
+
+        let offline = CompanionEmptyStateCopy.content(isPhoneReachable: false)
+        XCTAssertTrue(offline.isOffline)
+        XCTAssertEqual(offline.title, CompanionEmptyStateCopy.offlineTitle)
+        XCTAssertNotEqual(offline.title, CompanionEmptyStateCopy.idleTitle)
+    }
+
+    /// UX-020: watch empty agent list must resolve via phone reachability.
+    func testWatchEmptyListWiresPhoneReachability() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let watch = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "watchOS/Sources/ShannonWatch/WatchRootView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            watch.contains("CompanionEmptyStateCopy.content"),
+            "watch empty list must use CompanionEmptyStateCopy.content"
+        )
+        XCTAssertTrue(
+            watch.contains("isPhoneReachable"),
+            "watch empty list must pass phone reachability"
+        )
+        XCTAssertFalse(
+            watch.contains("Text(CompanionEmptyStateCopy.idleTitle)"),
+            "watch must not always show idle empty when phone may be away"
+        )
+    }
+
     /// UX-015: Mac notch empty board + menu-bar roster share Core idle title.
     func testMacEmptyRosterWiresIdleTitle() {
         let root = URL(fileURLWithPath: #filePath)

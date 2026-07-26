@@ -201,18 +201,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** Pad `label/tint/dotState(hasPendingConfirmation:)` + card/sidebar/palette; watch list `badgeLabel(..., hasPendingConfirmation:)`; pure + wiring tests.
 - **Priority:** P1
 
-### - [ ] UX-020: Watch empty list uses offline empty copy when phone unreachable
+### - [x] UX-020: Watch empty list uses offline empty copy when phone unreachable
 
 - **Why:** Watch empty list always `CompanionEmptyStateCopy.idleTitle`; never hub-offline when WC/phone unreachable.
 - **Platforms:** watchOS
 - **Area:** `WatchRootView`, `WatchModel` connectivity
 - **First slice:** Map unreachable → `hubOfflineTitle` (or equivalent); idle only when connected + no agents.
+- **Done:** `CompanionEmptyStateCopy.content(isPhoneReachable:)`; AgentList empty uses offline title/chip when `!isPhoneReachable`; pure + wiring tests.
 - **Priority:** P2
 
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 15):** `--quick` all PASS. Claimed P2 **UX-020** (watch offline empty). Considered: multi-OS dual primary verbs clean; backlog empty after this claim. **No new UX-0xx**.
 - **2026-07-26 (loop 14):** `--quick` all PASS. Claimed P1 **UX-019** (pad/watch pending badge elevate). Considered: UX-020 watch offline empty; residual dual primary verbs clean. **No new UX-0xx**.
 - **2026-07-26 (loop 13):** `--quick` all PASS. Open P1 **UX-018** claimed (pad GateCard offline). Considered: UX-019 pending badge elevate; UX-020 watch offline empty; residual detail/notification buttons inherit VM guard. **No new UX-0xx**.
 - **2026-07-26 (swarm multi-device):** Exploration swarm + host audit. Filed **UX-018…020** (pad/watch honesty). Dual primary-verb strings clean. Builds green unsigned.

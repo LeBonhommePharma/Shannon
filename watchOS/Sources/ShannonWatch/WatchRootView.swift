@@ -243,10 +243,25 @@ struct AgentListView: View {
                 }
 
                 if model.snapshot.agents.isEmpty {
-                    // UX-014: same idle empty token as phone/pad (not dual "No agents").
-                    Text(CompanionEmptyStateCopy.idleTitle)
-                        .font(.shannonCaption)
-                        .foregroundStyle(Color.shannonTertiary)
+                    // UX-014 / UX-020: Core empty copy — offline when phone unreachable.
+                    let empty = CompanionEmptyStateCopy.content(
+                        isPhoneReachable: model.isPhoneReachable
+                    )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(empty.title)
+                            .font(.shannonCaption)
+                            .foregroundStyle(
+                                empty.isOffline
+                                    ? Color.shannonWarning
+                                    : Color.shannonTertiary
+                            )
+                        if empty.isOffline {
+                            Text(CompanionEmptyStateCopy.offlineChip)
+                                .font(.shannonCaption)
+                                .foregroundStyle(Color.shannonTertiary)
+                                .accessibilityLabel(CompanionEmptyStateCopy.offlineAccessibility)
+                        }
+                    }
                 }
             }
         }

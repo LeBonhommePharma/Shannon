@@ -81,6 +81,14 @@ public enum CompanionEmptyStateCopy: Sendable {
         )
     }
 
+    /// Watch empty roster (UX-020): WC phone is the companion hub link.
+    ///
+    /// Unreachable phone must **not** read as quiet healthy idle when the
+    /// agent list is empty — same offline title family as phone/pad CloudKit.
+    public static func content(isPhoneReachable: Bool) -> Content {
+        content(lastError: isPhoneReachable ? nil : "phone unreachable")
+    }
+
     /// Non-empty technical line for secondary display (pad shows raw store error).
     /// Never used as the primary title — keeps dual-OS title tokens stable.
     public static func technicalDetail(lastError: String?) -> String? {

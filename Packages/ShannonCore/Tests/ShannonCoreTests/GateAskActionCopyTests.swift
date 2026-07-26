@@ -157,9 +157,14 @@ final class GateAskActionCopyTests: XCTestCase {
             watch.contains("gateButton(\"Deny\""),
             "watch must not hard-code Deny string"
         )
+        // UX-020: empty list uses content(isPhoneReachable:) — not always idle.
         XCTAssertTrue(
-            watch.contains("CompanionEmptyStateCopy.idleTitle"),
-            "watch empty agent list must use shared idle empty title"
+            watch.contains("CompanionEmptyStateCopy"),
+            "watch empty agent list must use shared empty copy"
+        )
+        XCTAssertTrue(
+            watch.contains("isPhoneReachable"),
+            "watch empty list must consider phone reachability"
         )
         XCTAssertFalse(
             watch.contains("Text(\"No agents\")"),

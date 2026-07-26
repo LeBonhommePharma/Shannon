@@ -33,8 +33,17 @@ struct GateCardView: View {
         }
     }
 
+    /// UX-018: same CloudKit write-back honesty as phone ConfirmationBanner.
+    private func affordance(for question: PendingConfirmation) -> GateAskActionCopy.Affordance {
+        GateAskActionCopy.companionAffordance(
+            pending: question,
+            lastError: hub.store.lastError
+        )
+    }
+
     private func card(for question: PendingConfirmation) -> some View {
-        VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
+        let a = affordance(for: question)
+        return VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
             HStack(spacing: ShannonSpacing.sm) {
                 ShannonStatusDot(state: .warning, diameter: 8)
                 Text(hub.agentName(for: question) ?? "Shannon")
@@ -60,6 +69,13 @@ struct GateCardView: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // Fail-closed: hub offline / expired — honest status, not live taps.
+            if let status = a.statusMessage {
+                Text(status)
+                    .shannonText(.shannonCaption, color: .shannonWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack(spacing: ShannonSpacing.sm) {
                 Button {
                     hub.answer(question, approved: true)
@@ -69,6 +85,7 @@ struct GateCardView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.shannonSuccess)
+                .disabled(!a.canInteract)
                 .help("\(GateAskActionCopy.approve) — ⌘A")
 
                 Button {
@@ -79,9 +96,11 @@ struct GateCardView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(.shannonError)
+                .disabled(!a.canInteract)
                 .help("\(GateAskActionCopy.deny) — ⌘D")
             }
             .font(.shannonCallout)
+            .opacity(a.canInteract ? 1 : 0.45)
         }
         .padding(ShannonSpacing.md)
         .frame(maxWidth: 520)
@@ -106,22 +125,28 @@ struct GateCardView: View {
             if !question.detail.isEmpty {
                 Section("Detail") { Text(question.detail) }
             }
-            Divider()
-            Button {
-                hub.answer(question, approved: true)
-            } label: {
-                Label(GateAskActionCopy.approve, systemImage: "checkmark")
-            }
-            Button(role: .destructive) {
-                hub.answer(question, approved: false)
-            } label: {
-                Label(GateAskActionCopy.deny, systemImage: "xmark")
+            if a.canInteract {
+                Divider()
+                Button {
+                    hub.answer(question, approved: true)
+                } label: {
+                    Label(GateAskActionCopy.approve, systemImage: "checkmark")
+                }
+                Button(role: .destructive) {
+                    hub.answer(question, approved: false)
+                } label: {
+                    Label(GateAskActionCopy.deny, systemImage: "xmark")
+                }
             }
         }
         .padding(.horizontal, ShannonSpacing.md)
         .padding(.top, ShannonSpacing.sm)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Gate request from \(hub.agentName(for: question) ?? "Shannon")")
+        .accessibilityLabel(
+            a.canInteract
+                ? "Gate request from \(hub.agentName(for: question) ?? "Shannon")"
+                : "Gate request from \(hub.agentName(for: question) ?? "Shannon"). \(a.statusMessage ?? "")"
+        )
     }
 }
 

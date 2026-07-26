@@ -241,8 +241,21 @@ final class AgentHubViewModel: ObservableObject {
     }
 
     /// Answer the oldest pending confirmation — the ⌘↵ / ⌘. shortcuts, the
-    /// palette's Confirm / Deny, and the spoken commands all land here.
+    /// palette's Approve / Deny, and the spoken commands all land here.
     func answerPendingConfirmation(approved: Bool, source: ConfirmationSource = .tap) {
+        guard let pending = store.snapshot.oldestPendingConfirmation() else {
+            post("Nothing is waiting on an answer.")
+            return
+        }
+        // UX-018: keyboard/palette paths share companionAffordance with GateCard.
+        let affordance = GateAskActionCopy.companionAffordance(
+            pending: pending,
+            lastError: store.lastError
+        )
+        guard affordance.canInteract else {
+            post(affordance.statusMessage ?? "Nothing is waiting on an answer.")
+            return
+        }
         guard let answered = store.answerPending(
             approved ? .confirmed : .denied, source: source
         ) else {
@@ -258,6 +271,15 @@ final class AgentHubViewModel: ObservableObject {
         approved: Bool,
         source: ConfirmationSource = .tap
     ) {
+        // UX-018: hub offline / unanswerable — same fail-closed as phone (no fake success).
+        let affordance = GateAskActionCopy.companionAffordance(
+            pending: confirmation,
+            lastError: store.lastError
+        )
+        guard affordance.canInteract else {
+            post(affordance.statusMessage ?? "That approval is no longer open.")
+            return
+        }
         // Honor OS-agnostic refuse (expired / empty question) — no success haptic
         // or gate-activity trail when the store rejected the answer.
         let accepted = store.answer(

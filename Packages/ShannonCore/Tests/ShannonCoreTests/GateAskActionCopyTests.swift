@@ -239,4 +239,48 @@ final class GateAskActionCopyTests: XCTestCase {
             )
         }
     }
+
+    /// UX-018: iPad GateCard + hub answers use companionAffordance (phone parity).
+    func testPadGateCardWiresCompanionAffordanceOffline() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let card = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/GateCardView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            card.contains("companionAffordance"),
+            "GateCardView must use companionAffordance"
+        )
+        XCTAssertTrue(
+            card.contains("lastError") || card.contains("hub.store.lastError"),
+            "GateCardView must pass hub lastError into affordance"
+        )
+        XCTAssertTrue(
+            card.contains(".disabled(!a.canInteract)") || card.contains("disabled(!a.canInteract)"),
+            "GateCardView must disable Approve/Deny when cannot interact"
+        )
+        XCTAssertTrue(
+            card.contains("statusMessage"),
+            "GateCardView must surface offline/expired status"
+        )
+
+        let vm = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/ViewModels/AgentHubViewModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            vm.contains("companionAffordance"),
+            "AgentHubViewModel.answer must guard with companionAffordance"
+        )
+    }
 }

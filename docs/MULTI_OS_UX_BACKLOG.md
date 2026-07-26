@@ -183,12 +183,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ---
 
-### - [ ] UX-018: iPad GateCard disables Approve/Deny when hub/sync offline
+### - [x] UX-018: iPad GateCard disables Approve/Deny when hub/sync offline
 
 - **Why:** Phone uses `companionAffordance` / disables when `lastError`; pad `GateCardView` keeps Approve/Deny live on error — multi-OS honesty drift.
 - **Platforms:** iPadOS (iOS reference)
 - **Area:** `iPad/.../GateCardView.swift`, `AgentHubViewModel.lastError`, `GateAskActionCopy`
 - **First slice:** Disable buttons + status line when lastError / hub offline; pure wiring or ViewModel policy test.
+- **Done:** GateCardView `companionAffordance` + disabled buttons/status; hub `answer` / `answerPendingConfirmation` fail-closed; Core wiring test.
 - **Priority:** P1
 
 ### - [ ] UX-019: Pad + watch badges elevate open pending confirmation
@@ -211,6 +212,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (loop 13):** `--quick` all PASS. Open P1 **UX-018** claimed (pad GateCard offline). Considered: UX-019 pending badge elevate; UX-020 watch offline empty; residual detail/notification buttons inherit VM guard. **No new UX-0xx**.
 - **2026-07-26 (swarm multi-device):** Exploration swarm + host audit. Filed **UX-018…020** (pad/watch honesty). Dual primary-verb strings clean. Builds green unsigned.
 - **2026-07-26 (loop 12):** `--quick` all PASS. Backlog empty after UX-016. Residual dual quiet idle: Mac collapsedStatusLine hard-codes `"Shannon · idle"`. Claimed **UX-017**. Considered: widget `"Idle"` docking-empty (different context); PillView fallback `"Shannon"` quietShort family (optional follow-up); dual Approve/empty/status legend closed. **No additional UX-0xx**.
 - **2026-07-26 (multi-OS optimize):** UX-001…015 closed. Residual skeptic gap: macOS 14+ CompanionBoard density dead vs listedSurfaces/agentRow. Claimed **UX-016**. Dual-copy primary verbs clean after UX-014/015. **No additional UX-0xx** this fire pending multi-platform re-check.

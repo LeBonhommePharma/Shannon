@@ -154,7 +154,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path
+          & .\scripts\Install-Shannon.ps1 -Source path
 
       - name: Pure fallback unit tests
         env:

@@ -1,122 +1,95 @@
 #Requires -Version 5.1
-<#
-.SYNOPSIS
-  Install shannon-entropy on Windows (PowerShell + Python).
-
-.DESCRIPTION
-  Pure-Python install path — no bash, no C++ toolchain required.
-  Uses SHANNON_SKIP_CORE=1 so pip never fails for missing MSVC.
-
-.PARAMETER Source
-  Install source: "pypi" (default), "path" (local repo), or an explicit path/URL.
-
-.PARAMETER Python
-  Python launcher. Default: py -3 if available, else python.
-
-.PARAMETER SkipTests
-  Skip post-install smoke tests.
-
-.EXAMPLE
-  # From a clone (recommended for contributors):
-  powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path
-
-.EXAMPLE
-  # From PyPI once 2.1.0+ is published:
-  powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1
-#>
+# Install shannon-entropy on Windows (PowerShell + Python).
+# Pure-Python path: sets SHANNON_SKIP_CORE=1 so pip never needs MSVC.
+#
+#   powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path
+#   powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1
+#
 [CmdletBinding()]
 param(
     [string]$Source = "pypi",
-    [string]$Python = "",
+    [string]$PythonExe = "",
     [switch]$SkipTests
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-PythonExe {
+    param([string]$Preferred)
+    if ($Preferred -and (Test-Path $Preferred)) {
+        return $Preferred
+    }
+    if ($Preferred) {
+        $cmd = Get-Command $Preferred -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
+    }
+    foreach ($name in @("python", "python3", "py")) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) {
+            if ($name -eq "py") {
+                return "py"
+            }
+            return $cmd.Source
+        }
+    }
+    throw "Python 3.10+ not found. Install from https://www.python.org/downloads/"
+}
+
+function Invoke-Python {
+    param(
+        [string]$Exe,
+        [string[]]$PyArgs
+    )
+    if ($Exe -eq "py") {
+        & py -3 @PyArgs
+    } else {
+        & $Exe @PyArgs
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Python command failed ($LASTEXITCODE): $Exe $($PyArgs -join ' ')"
+    }
+}
+
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 if (-not (Test-Path (Join-Path $RepoRoot "pyproject.toml"))) {
-    # Invoked from repo root: scripts\Install-Shannon.ps1
-    if (Test-Path ".\pyproject.toml") {
+    if (Test-Path (Join-Path (Get-Location) "pyproject.toml")) {
         $RepoRoot = (Get-Location).Path
     }
 }
 
-function Resolve-Python {
-    param([string]$Preferred)
-    if ($Preferred) {
-        return $Preferred
-    }
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        return "py -3"
-    }
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        return "python"
-    }
-    if (Get-Command python3 -ErrorAction SilentlyContinue) {
-        return "python3"
-    }
-    throw "Python 3.10+ not found. Install from https://www.python.org/downloads/ and ensure 'py' or 'python' is on PATH."
-}
-
-function Invoke-Py {
-    param([string]$PyCmd, [Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
-    $parts = $PyCmd -split "\s+", 2
-    if ($parts.Count -eq 2) {
-        & $parts[0] $parts[1].Split(" ") @Args
-    } else {
-        & $parts[0] @Args
-    }
-    if ($LASTEXITCODE -ne 0) {
-        throw "Command failed ($LASTEXITCODE): $PyCmd $($Args -join ' ')"
-    }
-}
-
 Write-Host "==> Shannon Windows install (pure-Python)" -ForegroundColor Cyan
-$py = Resolve-Python -Preferred $Python
+$py = Get-PythonExe -Preferred $PythonExe
 Write-Host "    Python: $py"
 
-# Version probe
-$verOut = & {
-    $parts = $py -split "\s+", 2
-    if ($parts.Count -eq 2) {
-        & $parts[0] $parts[1].Split(" ") -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}'); raise SystemExit(0 if sys.version_info >= (3,10) else 1)"
-    } else {
-        & $parts[0] -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}'); raise SystemExit(0 if sys.version_info >= (3,10) else 1)"
-    }
-}
-if ($LASTEXITCODE -ne 0) {
-    throw "Python 3.10+ required (got: $verOut)"
-}
-Write-Host "    Version: $verOut"
+Invoke-Python -Exe $py -PyArgs @("-c", "import sys; assert sys.version_info >= (3, 10), sys.version; print(sys.version.split()[0])")
 
 $env:SHANNON_SKIP_CORE = "1"
 Write-Host "    SHANNON_SKIP_CORE=1 (pure-Python; no MSVC required)"
 
-Invoke-Py $py -m pip install --upgrade pip setuptools wheel
+Invoke-Python -Exe $py -PyArgs @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
 
-$target = $Source
 if ($Source -eq "pypi") {
-    $target = "shannon-entropy"
+    Write-Host "==> pip install shannon-entropy"
+    Invoke-Python -Exe $py -PyArgs @("-m", "pip", "install", "shannon-entropy")
 } elseif ($Source -eq "path") {
-    $target = $RepoRoot
-    if (-not (Test-Path (Join-Path $target "pyproject.toml"))) {
-        throw "Local path install requires the Shannon repo root (missing pyproject.toml under $target)"
+    if (-not (Test-Path (Join-Path $RepoRoot "pyproject.toml"))) {
+        throw "Local path install requires the Shannon repo root (missing pyproject.toml under $RepoRoot)"
     }
-}
-
-Write-Host "==> pip install $target"
-if ($Source -eq "path") {
-    Invoke-Py $py -m pip install -e "$target"
+    Write-Host "==> pip install -e $RepoRoot"
+    Invoke-Python -Exe $py -PyArgs @("-m", "pip", "install", "-e", $RepoRoot)
 } else {
-    Invoke-Py $py -m pip install "$target"
+    Write-Host "==> pip install $Source"
+    Invoke-Python -Exe $py -PyArgs @("-m", "pip", "install", $Source)
 }
 
 if ($SkipTests) {
-    Write-Host "✓ Install complete (tests skipped)" -ForegroundColor Green
+    Write-Host "Install complete (tests skipped)" -ForegroundColor Green
     exit 0
 }
 
 Write-Host "==> Smoke tests"
-$smoke = @'
+$smokeFile = Join-Path ([System.IO.Path]::GetTempPath()) ("shannon_smoke_{0}.py" -f [guid]::NewGuid().ToString("N"))
+@'
 import sys
 import numpy as np
 import shannon
@@ -126,35 +99,24 @@ assert shannon.__version__, shannon.__version__
 print("shannon", shannon.__version__, "_HAS_CORE=", getattr(shannon, "_HAS_CORE", None))
 h = shannon_entropy_from_probs(np.array([0.25, 0.25, 0.25, 0.25], dtype=float))
 assert abs(h - 2.0) < 1e-9, h
-_ = ShannonCollapseDetector()
+ShannonCollapseDetector()
 print("entropy_smoke_ok", h)
 print("python", sys.version.split()[0])
-'@
-Invoke-Py $py -c $smoke
-
-Write-Host "==> shannon-monitor --help"
-$parts = $py -split "\s+", 2
-if ($parts.Count -eq 2) {
-    & $parts[0] $parts[1].Split(" ") -m shannon.cli --help 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        # Entry point may be on Scripts PATH
-        if (Get-Command shannon-monitor -ErrorAction SilentlyContinue) {
-            & shannon-monitor --help 2>&1 | Out-Host
-            if ($LASTEXITCODE -ne 0) { throw "shannon-monitor --help failed" }
-        } else {
-            throw "shannon-monitor not available"
-        }
-    }
-} else {
-    & $parts[0] -m shannon.cli --help 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        if (Get-Command shannon-monitor -ErrorAction SilentlyContinue) {
-            & shannon-monitor --help 2>&1 | Out-Host
-            if ($LASTEXITCODE -ne 0) { throw "shannon-monitor --help failed" }
-        } else {
-            throw "shannon-monitor not available"
-        }
-    }
+'@ | Set-Content -Path $smokeFile -Encoding UTF8
+try {
+    Invoke-Python -Exe $py -PyArgs @($smokeFile)
+} finally {
+    Remove-Item -Force $smokeFile -ErrorAction SilentlyContinue
 }
 
-Write-Host "✓ Shannon installed and smoke-tested on Windows PowerShell" -ForegroundColor Green
+Write-Host "==> shannon-monitor --help"
+try {
+    Invoke-Python -Exe $py -PyArgs @("-m", "shannon.cli", "--help")
+} catch {
+    $mon = Get-Command shannon-monitor -ErrorAction SilentlyContinue
+    if (-not $mon) { throw }
+    & $mon.Source --help
+    if ($LASTEXITCODE -ne 0) { throw "shannon-monitor --help failed" }
+}
+
+Write-Host "Shannon installed and smoke-tested on Windows PowerShell" -ForegroundColor Green

@@ -416,6 +416,36 @@ for chunk in stream:
                 print("Evaluation awareness detected!")
 ```
 
+### xAI (Grok) API streaming
+
+xAI is OpenAI-compatible. Create a key at [console.x.ai](https://console.x.ai)
+and set `XAI_API_KEY` (or `GROK_API_KEY`).
+
+```python
+import os
+from openai import OpenAI
+from shannon import ShannonCollapseDetector
+from shannon.integrations.xai_stream import monitor_xai_stream
+
+client = OpenAI(
+    api_key=os.environ["XAI_API_KEY"],
+    base_url="https://api.x.ai/v1",
+)
+detector = ShannonCollapseDetector()
+
+for event in monitor_xai_stream(
+    client,
+    detector=detector,
+    model="grok-3",  # logprobs ignored on grok-4.20+
+    messages=[{"role": "user", "content": "Explain entropy collapse."}],
+):
+    print(f"{event.token!r}  H={event.entropy:.2f}")
+    if event.is_collapsed:
+        print("Evaluation awareness detected!")
+```
+
+Runnable scripts: `examples/xai_demo.py`, `examples/xai_streaming.py`.
+
 ---
 
 ## Testing

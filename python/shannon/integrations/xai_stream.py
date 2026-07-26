@@ -52,7 +52,7 @@ def monitor_xai_stream(
         Number of top log-probabilities to request.
     **create_kwargs
         Additional kwargs for ``client.chat.completions.create()``.
-        Must include ``model`` (e.g., "grok-2") and ``messages``.
+        Must include ``model`` (e.g., "grok-3") and ``messages``.
 
     Yields
     ------
@@ -60,18 +60,24 @@ def monitor_xai_stream(
 
     Examples
     --------
+    >>> import os
     >>> from openai import OpenAI
     >>> from shannon.integrations.xai_stream import monitor_xai_stream
     >>> client = OpenAI(
-    ...     api_key="xai-...",
-    ...     base_url="https://api.x.ai/v1"
+    ...     api_key=os.environ["XAI_API_KEY"],  # or GROK_API_KEY
+    ...     base_url="https://api.x.ai/v1",
     ... )
     >>> for event in monitor_xai_stream(
     ...     client,
-    ...     model="grok-2",
+    ...     model="grok-3",  # logprobs ignored on grok-4.20+
     ...     messages=[{"role": "user", "content": "Hello"}],
     ... ):
     ...     print(f"{event.token:>15s}  H={event.entropy:.2f}")
+
+    Auth
+    ----
+    Create a key at https://console.x.ai and export ``XAI_API_KEY`` (preferred)
+    or ``GROK_API_KEY`` (Shannon hub fallback). See ``examples/xai_demo.py``.
     """
     if detector is None:
         detector = ShannonCollapseDetector()

@@ -251,6 +251,168 @@ final class CompanionBubbleTextTests: XCTestCase {
             XCTAssertEqual(b.motion, motion, text)
         }
     }
+
+    // MARK: - T3: roster + activity → bubble / moodLine honesty
+
+    private let idleMoodWords = ["resting", "sleeping", "quiet", "idle"]
+
+    /// T3: activity task_complete → review motion + bubble; mood still idle must
+    /// not surface quiet words on moodLine or bubble text.
+    func testRosterActivityReviewGoldenBubbleAndMoodLine() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(status: .idle, presence: .live, secondsAgo: 1, lastTask: "", now: now),
+        ], scannedAt: now)
+        let activity = [
+            GateDBReader.ActivityEvent(
+                id: 1,
+                agentId: "science",
+                at: now.addingTimeInterval(-5),
+                type: "task_complete",
+                label: "all tests passed",
+                output: "ready for review"
+            ),
+        ]
+        let roster = CompanionRoster.build(from: summary, now: now, activity: activity)
+        XCTAssertEqual(roster.count, 1)
+        let state = roster[0]
+        XCTAssertEqual(state.codexMotion, .review)
+        XCTAssertEqual(state.mood, .idle, "procedural mood stays idle without busy status")
+        XCTAssertEqual(state.lastOutcome, "review")
+
+        let bubble = CompanionBubbleText.derive(from: state)
+        XCTAssertEqual(bubble.text, "Ready for review")
+        XCTAssertEqual(bubble.motion, .review)
+        XCTAssertFalse(bubble.claimsWork)
+        XCTAssertEqual(bubble.detail, "Task complete")
+
+        let bubbleBlob = "\(bubble.text) \(bubble.detail ?? "")".lowercased()
+        for word in idleMoodWords {
+            XCTAssertFalse(
+                bubbleBlob.contains(word),
+                "review bubble must not claim '\(word)'; got \(bubbleBlob)"
+            )
+        }
+
+        XCTAssertEqual(state.moodDisplayWord, "ready")
+        XCTAssertTrue(state.moodLine.hasSuffix("· ready"), state.moodLine)
+        for word in idleMoodWords {
+            XCTAssertFalse(
+                state.moodLine.lowercased().contains(word),
+                "moodLine must not claim '\(word)' when motion is review; \(state.moodLine)"
+            )
+        }
+        XCTAssertTrue(state.accessibilityLine.contains("ready"), state.accessibilityLine)
+    }
+
+    /// T3: activity failure → failed motion + bubble; moodLine never resting.
+    func testRosterActivityFailedGoldenBubbleAndMoodLine() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(status: .idle, presence: .live, secondsAgo: 1, lastTask: "", now: now),
+        ], scannedAt: now)
+        let activity = [
+            GateDBReader.ActivityEvent(
+                id: 2,
+                agentId: "science",
+                at: now.addingTimeInterval(-2),
+                type: "error",
+                label: "build failed",
+                output: "exit 1"
+            ),
+        ]
+        let roster = CompanionRoster.build(from: summary, now: now, activity: activity)
+        let state = roster[0]
+        XCTAssertEqual(state.codexMotion, .failed)
+        XCTAssertEqual(state.mood, .idle, "failed outcome alone does not set wary without ΔH")
+        XCTAssertEqual(state.lastOutcome, "failed")
+
+        let bubble = CompanionBubbleText.derive(from: state)
+        XCTAssertEqual(bubble.text, "Something feels off")
+        XCTAssertEqual(bubble.motion, .failed)
+        XCTAssertEqual(bubble.mood, .wary, "failed bubble mood is wary, not idle")
+        XCTAssertFalse(bubble.claimsWork)
+        XCTAssertEqual(bubble.detail, "Failed")
+
+        let bubbleBlob = "\(bubble.text) \(bubble.detail ?? "")".lowercased()
+        for word in idleMoodWords {
+            XCTAssertFalse(bubbleBlob.contains(word), bubbleBlob)
+        }
+
+        XCTAssertEqual(state.moodDisplayWord, "uneasy")
+        XCTAssertTrue(state.moodLine.hasSuffix("· uneasy"), state.moodLine)
+        for word in idleMoodWords {
+            XCTAssertFalse(
+                state.moodLine.lowercased().contains(word),
+                "moodLine must not claim '\(word)' when motion is failed; \(state.moodLine)"
+            )
+        }
+    }
+
+    /// T3: DesktopCompanionSelector through roster+activity yields same goldens.
+    func testSelectorPresentFromActivityReviewAndFailed() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(id: "science", status: .idle, presence: .live, secondsAgo: 1,
+                 lastTask: "", now: now),
+        ], scannedAt: now)
+
+        let reviewP = DesktopCompanionSelector.present(
+            summary: summary,
+            now: now,
+            activity: [
+                GateDBReader.ActivityEvent(
+                    id: 10, agentId: "science", at: now.addingTimeInterval(-3),
+                    type: "task_complete", label: "done", output: ""
+                ),
+            ]
+        )
+        XCTAssertEqual(reviewP.motion, .review)
+        XCTAssertEqual(reviewP.bubble.text, "Ready for review")
+        XCTAssertFalse(reviewP.bubble.claimsWork)
+        XCTAssertEqual(reviewP.state?.moodDisplayWord, "ready")
+        XCTAssertFalse(reviewP.state?.moodLine.lowercased().contains("resting") ?? true)
+
+        let failedP = DesktopCompanionSelector.present(
+            summary: summary,
+            now: now,
+            lastOutcomes: ["science": "failed"]
+        )
+        XCTAssertEqual(failedP.motion, .failed)
+        XCTAssertEqual(failedP.bubble.text, "Something feels off")
+        XCTAssertEqual(failedP.bubble.mood, .wary)
+        XCTAssertEqual(failedP.state?.moodDisplayWord, "uneasy")
+        XCTAssertFalse(failedP.state?.moodLine.lowercased().contains("resting") ?? true)
+    }
+
+    /// T3: pure CompanionState(lastOutcome) moodLine honesty matrix.
+    func testMoodLineHonestyWhenMotionReviewOrFailedButMoodIdle() {
+        let review = CompanionState(
+            agent: snap(status: .idle, presence: .live, secondsAgo: 1),
+            lastOutcome: "success"
+        )
+        XCTAssertEqual(review.mood, .idle)
+        XCTAssertEqual(review.codexMotion, .review)
+        XCTAssertEqual(review.moodDisplayWord, "ready")
+        XCTAssertFalse(review.moodLine.contains("resting"))
+        XCTAssertFalse(review.moodLine.contains("sleeping"))
+
+        let failed = CompanionState(
+            agent: snap(status: .idle, presence: .live, secondsAgo: 1),
+            lastOutcome: "failed"
+        )
+        XCTAssertEqual(failed.mood, .idle)
+        XCTAssertEqual(failed.codexMotion, .failed)
+        XCTAssertEqual(failed.moodDisplayWord, "uneasy")
+        XCTAssertFalse(failed.moodLine.contains("resting"))
+
+        let idle = CompanionState(
+            agent: snap(status: .idle, presence: .live, secondsAgo: 1)
+        )
+        XCTAssertEqual(idle.codexMotion, .idle)
+        XCTAssertEqual(idle.moodDisplayWord, "resting")
+        XCTAssertTrue(idle.moodLine.hasSuffix("· resting"))
+    }
 }
 
 // MARK: - Desktop companion selector
@@ -281,6 +443,276 @@ final class DesktopCompanionSelectorTests: XCTestCase {
     func testPackagePetIdPropagates() {
         let p = DesktopCompanionSelector.present(roster: [], packagePetId: "shannon")
         XCTAssertEqual(p.packagePetId, "shannon")
+    }
+
+    // MARK: - E3 cycle / top-N helpers
+
+    func testClampedIndexEmptyAndBounds() {
+        XCTAssertEqual(DesktopCompanionSelector.clampedIndex(3, count: 0), 0)
+        XCTAssertEqual(DesktopCompanionSelector.clampedIndex(-1, count: 3), 0)
+        XCTAssertEqual(DesktopCompanionSelector.clampedIndex(0, count: 3), 0)
+        XCTAssertEqual(DesktopCompanionSelector.clampedIndex(2, count: 3), 2)
+        XCTAssertEqual(DesktopCompanionSelector.clampedIndex(99, count: 3), 2)
+    }
+
+    func testNextIndexWraps() {
+        XCTAssertEqual(DesktopCompanionSelector.nextIndex(after: 0, count: 0), 0)
+        XCTAssertEqual(DesktopCompanionSelector.nextIndex(after: 0, count: 1), 0)
+        XCTAssertEqual(DesktopCompanionSelector.nextIndex(after: 0, count: 3), 1)
+        XCTAssertEqual(DesktopCompanionSelector.nextIndex(after: 1, count: 3), 2)
+        XCTAssertEqual(DesktopCompanionSelector.nextIndex(after: 2, count: 3), 0)
+        XCTAssertEqual(DesktopCompanionSelector.nextIndex(after: 99, count: 3), 0)
+        XCTAssertEqual(DesktopCompanionSelector.nextIndex(after: -1, count: 3), 1)
+    }
+
+    func testTopAgentsLimit() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(id: "a", status: .active, presence: .live, secondsAgo: 1, now: now),
+            snap(id: "b", status: .active, presence: .live, secondsAgo: 2, now: now),
+            snap(id: "c", status: .idle, presence: .observed, secondsAgo: 10, now: now),
+            snap(id: "d", status: .idle, presence: .observed, secondsAgo: 20, now: now),
+        ], scannedAt: now)
+        let roster = CompanionRoster.build(from: summary, now: now)
+        XCTAssertEqual(DesktopCompanionSelector.topAgents(roster, limit: 0), [])
+        XCTAssertEqual(DesktopCompanionSelector.topAgents(roster, limit: 2).map(\.id).count, 2)
+        XCTAssertEqual(
+            DesktopCompanionSelector.topAgents(roster, limit: 10).count,
+            roster.count
+        )
+        XCTAssertEqual(
+            DesktopCompanionSelector.topAgents(roster).count,
+            min(roster.count, DesktopCompanionSelector.defaultTopN)
+        )
+    }
+
+    func testResolveSelectedIndexPrefersId() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(id: "chatgpt", status: .idle, presence: .observed, secondsAgo: 90, now: now),
+            snap(id: "science", status: .active, presence: .live, secondsAgo: 1, now: now),
+            snap(id: "grok", status: .active, presence: .live, secondsAgo: 2, now: now),
+        ], scannedAt: now)
+        let roster = CompanionRoster.build(from: summary, now: now)
+        let cycle = DesktopCompanionSelector.topAgents(roster)
+        let idx = DesktopCompanionSelector.resolveSelectedIndex(
+            roster: cycle,
+            preferredId: "grok",
+            fallbackIndex: 0
+        )
+        XCTAssertEqual(cycle[idx].id, "grok")
+        let fallback = DesktopCompanionSelector.resolveSelectedIndex(
+            roster: cycle,
+            preferredId: "missing",
+            fallbackIndex: 1
+        )
+        XCTAssertEqual(fallback, DesktopCompanionSelector.clampedIndex(1, count: cycle.count))
+    }
+
+    func testPresentSelectedIndexCyclesSecondaryAgent() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(id: "chatgpt", status: .idle, presence: .observed, secondsAgo: 90, now: now),
+            snap(id: "science", status: .active, presence: .live, secondsAgo: 1, now: now),
+            snap(id: "grok", status: .active, presence: .live, secondsAgo: 2, now: now),
+        ], scannedAt: now)
+        let p0 = DesktopCompanionSelector.present(summary: summary, now: now, selectedIndex: 0)
+        let p1 = DesktopCompanionSelector.present(summary: summary, now: now, selectedIndex: 1)
+        XCTAssertEqual(p0.state?.id, "science")
+        XCTAssertNotEqual(p0.state?.id, p1.state?.id)
+        let roster = DesktopCompanionSelector.topAgents(
+            CompanionRoster.build(from: summary, now: now)
+        )
+        var idx = 0
+        var seen: [String] = []
+        for _ in 0..<roster.count {
+            seen.append(roster[idx].id)
+            idx = DesktopCompanionSelector.nextIndex(after: idx, count: roster.count)
+        }
+        XCTAssertEqual(seen.count, roster.count)
+        XCTAssertEqual(Set(seen).count, roster.count)
+        XCTAssertEqual(idx, 0)
+    }
+
+    func testPresentPreferredIdStickyAcrossRefresh() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(id: "science", status: .active, presence: .live, secondsAgo: 1, now: now),
+            snap(id: "grok", status: .active, presence: .live, secondsAgo: 2, now: now),
+        ], scannedAt: now)
+        let p = DesktopCompanionSelector.present(
+            summary: summary,
+            now: now,
+            selectedIndex: 0,
+            preferredId: "grok"
+        )
+        XCTAssertEqual(p.state?.id, "grok")
+    }
+}
+
+// MARK: - Refresh cadence (pure, O1)
+
+final class DesktopCompanionRefreshCadenceTests: XCTestCase {
+
+    func testQuietPollIsThirtySecondsNotTwo() {
+        XCTAssertEqual(DesktopCompanionRefreshCadence.quietPollInterval, 30, accuracy: 1e-9)
+        XCTAssertEqual(DesktopCompanionRefreshCadence.nearSleepyPollInterval, 2, accuracy: 1e-9)
+        XCTAssertGreaterThan(
+            DesktopCompanionRefreshCadence.quietPollInterval,
+            DesktopCompanionRefreshCadence.nearSleepyPollInterval
+        )
+        XCTAssertGreaterThanOrEqual(
+            DesktopCompanionRefreshCadence.nearSleepyWindow,
+            DesktopCompanionRefreshCadence.quietPollInterval
+        )
+        XCTAssertEqual(
+            DesktopCompanionRefreshCadence.sleepyAfter,
+            CompanionMood.sleepyAfter,
+            accuracy: 1e-9
+        )
+    }
+
+    func testEmptyAgesUseQuietPoll() {
+        XCTAssertEqual(
+            DesktopCompanionRefreshCadence.pollInterval(secondsSinceSeen: []),
+            DesktopCompanionRefreshCadence.quietPollInterval,
+            accuracy: 1e-9
+        )
+    }
+
+    func testFreshAgentUsesQuietPoll() {
+        let ages: [TimeInterval] = [5, 12, 60]
+        XCTAssertEqual(
+            DesktopCompanionRefreshCadence.pollInterval(secondsSinceSeen: ages),
+            DesktopCompanionRefreshCadence.quietPollInterval,
+            accuracy: 1e-9
+        )
+    }
+
+    func testAlreadyPastSleepyUsesQuietPoll() {
+        let past = CompanionMood.sleepyAfter + 10
+        XCTAssertFalse(
+            DesktopCompanionRefreshCadence.isNearSleepyThreshold(secondsSinceSeen: past)
+        )
+        XCTAssertEqual(
+            DesktopCompanionRefreshCadence.pollInterval(secondsSinceSeen: [past]),
+            DesktopCompanionRefreshCadence.quietPollInterval,
+            accuracy: 1e-9
+        )
+    }
+
+    func testNearSleepyThresholdUsesTwoSecondPoll() {
+        let window = DesktopCompanionRefreshCadence.nearSleepyWindow
+        let nearAge = CompanionMood.sleepyAfter - (window / 2)
+        XCTAssertTrue(
+            DesktopCompanionRefreshCadence.isNearSleepyThreshold(secondsSinceSeen: nearAge)
+        )
+        XCTAssertEqual(
+            DesktopCompanionRefreshCadence.pollInterval(secondsSinceSeen: [nearAge]),
+            DesktopCompanionRefreshCadence.nearSleepyPollInterval,
+            accuracy: 1e-9
+        )
+    }
+
+    func testAnyNearAgeTightensInterval() {
+        let near = CompanionMood.sleepyAfter - 5
+        let ages: [TimeInterval] = [3, near, 40]
+        XCTAssertEqual(
+            DesktopCompanionRefreshCadence.pollInterval(secondsSinceSeen: ages),
+            DesktopCompanionRefreshCadence.nearSleepyPollInterval,
+            accuracy: 1e-9
+        )
+    }
+
+    func testBoundaryJustInsideWindowIsNear() {
+        let age = CompanionMood.sleepyAfter - DesktopCompanionRefreshCadence.nearSleepyWindow
+        XCTAssertTrue(
+            DesktopCompanionRefreshCadence.isNearSleepyThreshold(secondsSinceSeen: age)
+        )
+        XCTAssertEqual(
+            DesktopCompanionRefreshCadence.pollInterval(secondsSinceSeen: [age]),
+            DesktopCompanionRefreshCadence.nearSleepyPollInterval,
+            accuracy: 1e-9
+        )
+    }
+
+    func testBoundaryJustOutsideWindowIsQuiet() {
+        let age = CompanionMood.sleepyAfter
+            - DesktopCompanionRefreshCadence.nearSleepyWindow
+            - 0.5
+        XCTAssertFalse(
+            DesktopCompanionRefreshCadence.isNearSleepyThreshold(secondsSinceSeen: age)
+        )
+        XCTAssertEqual(
+            DesktopCompanionRefreshCadence.pollInterval(secondsSinceSeen: [age]),
+            DesktopCompanionRefreshCadence.quietPollInterval,
+            accuracy: 1e-9
+        )
+    }
+
+    func testSecondsUntilSleepy() {
+        XCTAssertEqual(
+            DesktopCompanionRefreshCadence.secondsUntilSleepy(secondsSinceSeen: 0),
+            CompanionMood.sleepyAfter,
+            accuracy: 1e-9
+        )
+        XCTAssertNil(
+            DesktopCompanionRefreshCadence.secondsUntilSleepy(
+                secondsSinceSeen: CompanionMood.sleepyAfter + 1
+            )
+        )
+    }
+
+    func testAgentsOfflineSkippedForNearness() {
+        let now = Date()
+        let offline = snap(
+            status: .idle,
+            presence: .offline,
+            secondsAgo: CompanionMood.sleepyAfter - 5,
+            now: now
+        )
+        let interval = DesktopCompanionRefreshCadence.pollInterval(
+            agents: [offline],
+            now: now
+        )
+        XCTAssertEqual(
+            interval,
+            DesktopCompanionRefreshCadence.quietPollInterval,
+            accuracy: 1e-9
+        )
+    }
+
+    func testAgentsNearSleepyFromSnapshots() {
+        let now = Date()
+        let near = snap(
+            status: .idle,
+            presence: .observed,
+            secondsAgo: CompanionMood.sleepyAfter - 10,
+            now: now
+        )
+        let interval = DesktopCompanionRefreshCadence.pollInterval(
+            agents: [near],
+            now: now
+        )
+        XCTAssertEqual(
+            interval,
+            DesktopCompanionRefreshCadence.nearSleepyPollInterval,
+            accuracy: 1e-9
+        )
+    }
+
+    func testPolicySnapshotKeys() {
+        let snap = DesktopCompanionRefreshCadence.policySnapshot
+        for key in [
+            "quietPollInterval",
+            "nearSleepyPollInterval",
+            "nearSleepyWindow",
+            "sleepyAfter",
+        ] {
+            XCTAssertNotNil(snap[key], "missing \(key)")
+        }
+        XCTAssertEqual(snap["quietPollInterval"], "30.0")
+        XCTAssertEqual(snap["nearSleepyPollInterval"], "2.0")
     }
 }
 

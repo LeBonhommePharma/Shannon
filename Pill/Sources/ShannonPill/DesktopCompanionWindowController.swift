@@ -56,15 +56,24 @@ final class DesktopCompanionModel: ObservableObject {
     private let activity: AgentActivityMonitor
     private let bridge: ShannonBridge
     private var cancellables = Set<AnyCancellable>()
+    /// Adaptive sleepy poll (O1) — not the fixed 2 s historical tick.
+    private var pollCancellable: AnyCancellable?
+    private var currentPollInterval: TimeInterval?
+
+    /// Last scheduled wall-timer interval (tests / diagnostics).
+    var scheduledPollIntervalForTesting: TimeInterval? { currentPollInterval }
 
     init(activity: AgentActivityMonitor, bridge: ShannonBridge) {
         self.activity = activity
         self.bridge = bridge
         self.presentation = Self.makePresentation(activity: activity, bridge: bridge)
         bind()
+        ensurePollTimer()
     }
 
     private func bind() {
+        // Activity + bridge ticks rebuild immediately; wall timer only covers
+        // idle→sleepy age flips when gate traffic is quiet (see O1 cadence).
         activity.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -79,15 +88,25 @@ final class DesktopCompanionModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Steady tick so sleepy thresholds advance even without gate traffic.
-        Timer.publish(every: 2.0, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in self?.refresh() }
-            .store(in: &cancellables)
     }
 
     func refresh() {
         presentation = Self.makePresentation(activity: activity, bridge: bridge)
+            ensurePollTimer()
+    }
+
+
+    /// Schedule / reschedule the sleepy poll from pure cadence policy.
+    private func ensurePollTimer() {
+        let interval = DesktopCompanionRefreshCadence.pollInterval(
+            agents: activity.summary.agents
+        )
+        if currentPollInterval == interval, pollCancellable != nil { return }
+        currentPollInterval = interval
+        pollCancellable?.cancel()
+        pollCancellable = Timer.publish(every: interval, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in self?.refresh() }
     }
 
     static func makePresentation(

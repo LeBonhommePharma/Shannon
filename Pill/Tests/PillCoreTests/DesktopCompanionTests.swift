@@ -128,6 +128,74 @@ final class CompanionBubbleTextTests: XCTestCase {
         XCTAssertEqual(bubble.detail, "tests green")
     }
 
+    /// B2: Signals(state:) must carry lastOutcome (was hard-coded nil).
+    func testSignalsFromStateCarriesLastOutcome() {
+        let state = CompanionState(
+            agent: snap(status: .idle, presence: .live, secondsAgo: 1, lastTask: ""),
+            lastOutcome: "success"
+        )
+        XCTAssertEqual(state.lastOutcome, "success")
+        XCTAssertEqual(state.codexMotion, .review)
+        let signals = CompanionBubbleText.Signals(state: state)
+        XCTAssertEqual(signals.lastOutcome, "success")
+        XCTAssertEqual(signals.motion, .review)
+    }
+
+    /// B2: derive(from:) with roster outcome → review bubble + task-complete detail.
+    func testStateWithSuccessOutcomeShowsReviewBubbleEvidence() {
+        let state = CompanionState(
+            agent: snap(status: .idle, presence: .live, secondsAgo: 1, lastTask: ""),
+            lastOutcome: "success"
+        )
+        let bubble = CompanionBubbleText.derive(from: state)
+        XCTAssertEqual(bubble.text, "Ready for review")
+        XCTAssertEqual(bubble.motion, .review)
+        XCTAssertFalse(bubble.claimsWork)
+        XCTAssertEqual(bubble.detail, "Task complete")
+    }
+
+    /// B2: failed lastOutcome → failed bubble with "Failed" detail when no task.
+    func testStateWithFailedOutcomeShowsFailedBubbleEvidence() {
+        let state = CompanionState(
+            agent: snap(status: .idle, presence: .live, secondsAgo: 1, lastTask: ""),
+            lastOutcome: "failed"
+        )
+        let bubble = CompanionBubbleText.derive(from: state)
+        XCTAssertEqual(bubble.text, "Something feels off")
+        XCTAssertEqual(bubble.motion, .failed)
+        XCTAssertFalse(bubble.claimsWork)
+        XCTAssertEqual(bubble.detail, "Failed")
+    }
+
+    /// B2: roster lastOutcomes plumb through CompanionState into bubble.
+    func testRosterLastOutcomeReachesBubble() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(status: .idle, presence: .live, secondsAgo: 1, lastTask: "", now: now),
+        ], scannedAt: now)
+        let roster = CompanionRoster.build(
+            from: summary, now: now, lastOutcomes: ["science": "review"]
+        )
+        XCTAssertEqual(roster.first?.lastOutcome, "review")
+        let bubble = CompanionBubbleText.derive(from: roster[0])
+        XCTAssertEqual(bubble.text, "Ready for review")
+        XCTAssertEqual(bubble.detail, "Task complete")
+        XCTAssertFalse(bubble.claimsWork)
+    }
+
+    /// Task snippet still outranks outcome evidence when both present.
+    func testTaskDetailPrefersOverOutcomeEvidence() {
+        let state = CompanionState(
+            agent: snap(
+                status: .idle, presence: .live, secondsAgo: 1, lastTask: "docking done"
+            ),
+            lastOutcome: "success"
+        )
+        let bubble = CompanionBubbleText.derive(from: state)
+        XCTAssertEqual(bubble.text, "Ready for review")
+        XCTAssertEqual(bubble.detail, "docking done")
+    }
+
     func testApprovalBubble() {
         let bubble = CompanionBubbleText.derive(.init(
             presence: .live,

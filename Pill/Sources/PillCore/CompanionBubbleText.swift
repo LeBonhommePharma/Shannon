@@ -84,7 +84,8 @@ public enum CompanionBubbleText {
             self.statusLine = state.agent.statusLine
             self.lastTask = state.agent.lastTask
             self.hasPendingAsk = state.codexMotion == .waiting
-            self.lastOutcome = nil
+            // B2: keep roster/activity outcomes so review/failed detail can restate them.
+            self.lastOutcome = state.lastOutcome
         }
     }
 
@@ -104,7 +105,12 @@ public enum CompanionBubbleText {
         if motion == .failed || mood == .wary {
             return CompanionBubbleContent(
                 text: "Something feels off",
-                detail: nonWorkDetail(who: who, statusLine: signals.statusLine, task: task),
+                detail: nonWorkDetail(
+                    who: who,
+                    statusLine: signals.statusLine,
+                    task: task,
+                    lastOutcome: signals.lastOutcome
+                ),
                 claimsWork: false,
                 motion: .failed,
                 mood: mood == .wary ? .wary : mood
@@ -146,11 +152,11 @@ public enum CompanionBubbleText {
             )
         }
 
-        // 5. Review — finished, not busy.
+        // 5. Review — finished, not busy. Prefer task, else outcome evidence.
         if motion == .review {
             return CompanionBubbleContent(
                 text: "Ready for review",
-                detail: task ?? who,
+                detail: task ?? outcomeEvidence(signals.lastOutcome) ?? who,
                 claimsWork: false,
                 motion: .review,
                 mood: mood
@@ -220,12 +226,36 @@ public enum CompanionBubbleText {
         return t.isEmpty ? nil : t
     }
 
-    private static func nonWorkDetail(who: String, statusLine: String, task: String?) -> String? {
+    /// Honest secondary line for failed/wary: task → outcome evidence → status → who.
+    private static func nonWorkDetail(
+        who: String,
+        statusLine: String,
+        task: String?,
+        lastOutcome: String? = nil
+    ) -> String? {
         if let task { return task }
+        if let evidence = outcomeEvidence(lastOutcome) { return evidence }
         let s = statusLine.trimmingCharacters(in: .whitespacesAndNewlines)
         if !s.isEmpty { return s }
         return who
     }
+
+    /// Restate known outcome classes only (same sets as PetCodexMotion). Unknown → nil.
+    private static func outcomeEvidence(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let o = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !o.isEmpty else { return nil }
+        if Self.failedOutcomeLabels.contains(o) { return "Failed" }
+        if Self.reviewOutcomeLabels.contains(o) { return "Task complete" }
+        return nil
+    }
+
+    private static let failedOutcomeLabels: Set<String> = [
+        "failed", "fail", "error", "errored", "failure", "crash", "crashed",
+    ]
+    private static let reviewOutcomeLabels: Set<String> = [
+        "review", "done", "success", "succeeded", "completed", "complete", "passed",
+    ]
 }
 
 // MARK: - Desktop companion selection (pure)

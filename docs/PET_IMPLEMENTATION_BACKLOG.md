@@ -29,12 +29,17 @@ Test baseline (must stay green while implementing):
   **Done:** `inferredSpriteVersion` / `infer_sprite_version` — missing version +
   sheet → v2 (note recorded); explicit 1 stays 1; hub+Pill tests + live oc-an.
 
-- [ ] **B2 — `CompanionBubbleText.Signals(state:)` drops `lastOutcome`**  
+- [x] **B2 — `CompanionBubbleText.Signals(state:)` drops `lastOutcome`**  
   Observation: `init(state:)` hard-codes `lastOutcome = nil`, so bubble copy
   cannot restate review/failed from roster outcomes even when
   `state.codexMotion` already mapped them.  
   Work: plumb outcome through `CompanionState` (or re-derive from motion) so
-  bubble detail can show task-complete / failed evidence honestly.
+  bubble detail can show task-complete / failed evidence honestly.  
+  **Done:** `CompanionState.lastOutcome` stored; `Signals(state:)` carries it;
+  failed/review detail prefers task → outcome evidence (`Failed` /
+  `Task complete`) → status/who; unit tests via state + roster lastOutcomes.
+
+
 
 - [ ] **B3 — Board companions always atlas-bind package id `"shannon"`**  
   Observation: `CompanionGlyph` passes `packagePetId: PetPackageResolver.defaultPetId`
@@ -141,5 +146,6 @@ Test baseline (must stay green while implementing):
 | Suite | Result |
 |-------|--------|
 | Pill pet filter | 122 PillCore + 5 ShannonPill DesktopCompanion window tests, 0 failures |
-| Hub `test_pet_*.py` | 111 passed |
+| Hub `test_pet_*.py` | 111 passed (later loop: 114) |
 | Live `~/.codex/pets` | shannon/bonhomme/bonhomme-cat/collapse-cat/firebear/grok → v2 OK; oc-an/stitch → v1 only (B1) |
+| B2 (2026-07-26) | CompanionBubbleText + CompanionState lastOutcome plumb; see DesktopCompanionTests |

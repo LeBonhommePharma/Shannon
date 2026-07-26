@@ -438,6 +438,9 @@ public struct CompanionState: Sendable, Equatable, Identifiable {
     public let bond: CompanionBond
     /// Seconds since the approval driving `happy`, or nil.
     public let happyElapsed: Double?
+    /// Last task outcome label (`success` / `failed` / `review` / …) when known.
+    /// Fed into motion **and** bubble detail; never invented when absent.
+    public let lastOutcome: String?
 
     public init(agent: AgentActivitySnapshot,
                 now: Date = Date(),
@@ -463,6 +466,7 @@ public struct CompanionState: Sendable, Equatable, Identifiable {
         )
         self.bond           = CompanionBond.from(historyCount: agent.historyCount)
         self.happyElapsed   = approvedAt.map { max(0, now.timeIntervalSince($0)) }
+        self.lastOutcome    = lastOutcome
     }
 
     /// The companion's line on the board. It *restates* the agent's status more

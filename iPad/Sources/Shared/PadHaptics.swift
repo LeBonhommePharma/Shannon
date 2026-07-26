@@ -21,6 +21,8 @@ enum PadHaptics {
         case .agentErrored:                notify(.error)
         case .agentFinished:               notify(.success)
         case .notification:                tap()
+        // Gate / human decision — stronger than a light tap so LP feels it.
+        case .confirmationRequested:       notify(.warning)
         @unknown default:                  tap()
         }
     }

@@ -103,7 +103,10 @@ public final class PhoneModel {
 
     public func answer(_ answer: ConfirmationAnswer, source: ConfirmationSource) {
         guard let pending = store.snapshot.oldestPendingConfirmation() else { return }
-        store.answer(pending, answer, source: source)
+        // OS-agnostic contract: expired prompts refuse the answer (no haptic success).
+        guard GlobalNotifyResponse.canAnswer(pending) else { return }
+        let accepted = store.answer(pending, answer, source: source)
+        guard accepted else { return }
         lastAnswer = (answer, Date())
         Haptics.confirmation(answer)
         airPods.announce(answer == .confirmed ? "Confirmed" : "Denied")

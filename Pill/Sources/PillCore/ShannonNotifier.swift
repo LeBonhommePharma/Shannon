@@ -75,17 +75,27 @@ public enum ShannonNotifier {
     }
 
     /// Post when a new gate ask appears.
+    ///
+    /// Wording matches `GlobalNotifyResponse.content` family so Mac local
+    /// notifications read the same as phone/watch “needs you” focus lines.
     public static func notifyAsk(prompt: String, agentId: String = "") {
         let agent = agentId.trimmingCharacters(in: .whitespacesAndNewlines)
-        let body: String
+        let q = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title: String
         if agent.isEmpty {
-            body = prompt.isEmpty ? "An agent is waiting for your answer" : prompt
-        } else if prompt.isEmpty {
-            body = "\(agent) needs approval"
+            title = "Approval needed"
         } else {
-            body = "\(agent): \(prompt)"
+            title = "\(agent) needs you"
         }
-        let content = notificationContent(kind: .ask, body: body)
+        let body: String
+        if q.isEmpty {
+            body = "An agent is waiting for your answer"
+        } else if agent.isEmpty {
+            body = q
+        } else {
+            body = "\(agent): \(q)"
+        }
+        let content = notificationContent(kind: .ask, title: title, body: body)
         post(identifier: "shannon.ask.\(UUID().uuidString)", content: content)
     }
 

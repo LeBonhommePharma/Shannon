@@ -199,6 +199,11 @@ public final class WatchModel: NSObject {
 
     public func answer(_ answer: ConfirmationAnswer, source: ConfirmationSource) {
         guard let pending = pendingConfirmation else { return }
+        // OS-agnostic contract: refuse expired prompts (no haptic success).
+        guard GlobalNotifyResponse.canAnswer(pending) else { return }
+        guard GlobalNotifyResponse.makeResponse(
+            for: pending, answer: answer, source: source, origin: "Apple Watch"
+        ) != nil else { return }
         // Optimistic: drop it from the local snapshot now, tell the phone
         // after. The card must never linger while a radio round-trip happens.
         // `answeredIDs` is what keeps the phone's next (still-stale) snapshot

@@ -194,25 +194,35 @@ public final class ShannonStore {
 
     /// Answer a pending question. The card disappears immediately; the write
     /// reconciles in the background.
+    ///
+    /// Fail-closed: expired prompts are refused (no optimistic clear, no write).
+    /// Uses `GlobalNotifyResponse.makeResponse` so Mac/phone/pad/watch share
+    /// the same OS-agnostic answer contract.
+    @discardableResult
     public func answer(
         _ confirmation: PendingConfirmation,
         _ answer: ConfirmationAnswer,
         source: ConfirmationSource,
-        origin: String? = nil
-    ) {
-        guard !answeredConfirmations.contains(confirmation.id) else { return }
+        origin: String? = nil,
+        now: Date = Date()
+    ) -> Bool {
+        guard !answeredConfirmations.contains(confirmation.id) else { return false }
+        guard let response = GlobalNotifyResponse.makeResponse(
+            for: confirmation,
+            answer: answer,
+            source: source,
+            origin: origin ?? deviceName,
+            now: now
+        ) else {
+            return false
+        }
         answeredConfirmations.insert(confirmation.id)
         snapshot.confirmations.removeAll { $0.id == confirmation.id }
 
-        let response = ConfirmationResponse(
-            confirmation: confirmation,
-            answer: answer,
-            source: source,
-            origin: origin ?? deviceName
-        )
         Task { [backend] in
             try? await backend.save(response)
         }
+        return true
     }
 
     /// Convenience for the gesture, voice and Double Tap paths, which all

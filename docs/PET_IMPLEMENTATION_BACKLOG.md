@@ -14,14 +14,16 @@ Test baseline (must stay green while implementing):
 
 ## Bugs / correctness
 
-- [ ] **B1 — Packages missing `spriteVersionNumber` never draw on the atlas path**  
+- [x] **B1 — Packages missing `spriteVersionNumber` never draw on the atlas path**  
   Observation: live `~/.codex/pets/oc-an` and `stitch` have valid `spritesheet.webp`
   + `pet.json` but omit `spriteVersionNumber`. With `requireV2: true` (what
   `CompanionDrawMode` / desktop companion use) resolve falls to procedural.
   Without requireV2 they resolve as version=1.  
   Work: either treat “sheet present + complete atlas geometry” as drawable, or
   default missing version to 2 when sheet dimensions match v2 grid; add
-  migrate/note for hatch-pet to always write version.
+  migrate/note for hatch-pet to always write version.  
+  **Done:** `inferredSpriteVersion` / `infer_sprite_version` — missing version +
+  sheet → v2 (note recorded); explicit 1 stays 1; hub+Pill tests + live oc-an.
 
 - [ ] **B2 — `CompanionBubbleText.Signals(state:)` drops `lastOutcome`**  
   Observation: `init(state:)` hard-codes `lastOutcome = nil`, so bubble copy

@@ -74,9 +74,21 @@ class TestResolveMissing:
 
 
 class TestMissingSpriteVersion:
-    """Live packages like oc-an/stitch ship sheets without spriteVersionNumber."""
+    """Live packages like oc-an/stitch ship sheets without spriteVersionNumber.
 
-    def test_missing_version_is_usable_without_require_v2(self, tmp_path: Path):
+    B1: infer version 2 when sheet is present so require_v2 atlas path works.
+    """
+
+    def test_infer_sprite_version_pure(self):
+        ver, note = pkg.infer_sprite_version(None, sheet_present=True)
+        assert ver == 2
+        assert note and "inferred 2" in note
+        ver1, note1 = pkg.infer_sprite_version(1, sheet_present=True)
+        assert ver1 == 1
+        assert note1 is not None
+        assert pkg.infer_sprite_version(2, sheet_present=True) == (2, None)
+
+    def test_missing_version_is_usable_with_require_v2(self, tmp_path: Path):
         d = tmp_path / "no-ver"
         d.mkdir()
         (d / "pet.json").write_text(
@@ -92,11 +104,14 @@ class TestMissingSpriteVersion:
         (d / "spritesheet.webp").write_bytes(b"RIFF....WEBP")
         loose = pkg.resolve_pet_package("no-ver", roots=[tmp_path], require_v2=False)
         assert loose.use_procedural is False
-        assert loose.is_v2 is False
-        assert loose.sprite_version == 1
+        assert loose.is_v2 is True
+        assert loose.sprite_version == 2
+        assert any("inferred 2" in n for n in loose.notes)
 
         strict = pkg.resolve_pet_package("no-ver", roots=[tmp_path], require_v2=True)
-        assert strict.use_procedural is True
+        assert strict.use_procedural is False
+        assert strict.is_v2 is True
+        assert strict.sprite_version == 2
 
     def test_live_oc_an_or_stitch_if_present(self):
         codex = Path.home() / ".codex" / "pets"
@@ -111,7 +126,9 @@ class TestMissingSpriteVersion:
             loose = pkg.resolve_pet_package(pid, require_v2=False)
             strict = pkg.resolve_pet_package(pid, require_v2=True)
             assert loose.use_procedural is False, pid
-            assert strict.use_procedural is True, pid
+            # B1: require_v2 must accept missing version when sheet exists.
+            assert strict.use_procedural is False, pid
+            assert strict.is_v2 is True, pid
             return
         # No matching live package — still OK; fixture test above covers the code path.
 

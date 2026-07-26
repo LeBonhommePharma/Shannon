@@ -769,6 +769,46 @@ final class PetPackageResolverTests: XCTestCase {
         XCTAssertEqual(again.spritesheetURL, result.spritesheetURL)
     }
 
+    /// B1: pet.json without spriteVersionNumber but with a sheet is still v2 / atlas-eligible.
+    func testMissingSpriteVersionInferredAsV2WhenSheetPresent() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-pet-pkg-\(UUID().uuidString)")
+        let pkgDir = root.appendingPathComponent("oc-an-like")
+        try FileManager.default.createDirectory(at: pkgDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meta: [String: Any] = [
+            "id": "oc-an-like",
+            "displayName": "OC An",
+            // no spriteVersionNumber — live oc-an / stitch packages
+            "spritesheetPath": "spritesheet.webp",
+        ]
+        try JSONSerialization.data(withJSONObject: meta)
+            .write(to: pkgDir.appendingPathComponent("pet.json"))
+        try Data("RIFF....WEBP".utf8)
+            .write(to: pkgDir.appendingPathComponent("spritesheet.webp"))
+
+        let pure = PetPackageResolver.inferredSpriteVersion(declared: nil, sheetPresent: true)
+        XCTAssertEqual(pure.version, 2)
+        XCTAssertNotNil(pure.note)
+
+        let result = PetPackageResolver.resolve(
+            petId: "oc-an-like", roots: [root], requireV2: true
+        )
+        XCTAssertFalse(result.useProcedural, "must not fall to procedural when sheet exists")
+        XCTAssertTrue(result.isV2)
+        XCTAssertEqual(result.spriteVersion, 2)
+        XCTAssertTrue(
+            result.notes.contains(where: { $0.contains("inferred 2") }),
+            "notes should record inference: \(result.notes)"
+        )
+
+        // Explicit v1 still fails requireV2.
+        let v1 = PetPackageResolver.inferredSpriteVersion(declared: 1, sheetPresent: true)
+        XCTAssertEqual(v1.version, 1)
+        XCTAssertFalse(v1.version >= 2)
+    }
+
     func testMemoryRootIsNotASpritesheetStore() {
         let mem = PetPackageResolver.agentMemoryRoot()
         XCTAssertTrue(mem.path.contains("pets"))

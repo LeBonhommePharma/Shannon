@@ -339,11 +339,9 @@ final class DesktopCompanionPackageResolveTests: XCTestCase {
         }
     }
 
-    /// Live packages with a sheet but no `spriteVersionNumber` (oc-an, stitch
-    /// on this machine) resolve as usable v1 without requireV2, but
-    /// `requireV2: true` (CompanionDrawMode / desktop atlas path) falls through
-    /// to procedural — documents the interop gap, not a blank-UI failure.
-    func testMissingSpriteVersionNumberIsV1WithoutRequireV2() throws {
+    /// B1: sheet + pet.json without `spriteVersionNumber` infers v2 so
+    /// CompanionDrawMode / desktop atlas (`requireV2: true`) can draw.
+    func testMissingSpriteVersionNumberInferredAsV2ForAtlas() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("shannon-pet-nov-\(UUID().uuidString)")
         let pkgDir = root.appendingPathComponent("no-version-pet")
@@ -365,16 +363,17 @@ final class DesktopCompanionPackageResolveTests: XCTestCase {
             petId: "no-version-pet", roots: [root], requireV2: false
         )
         XCTAssertFalse(loose.useProcedural, "sheet+json must resolve without requireV2")
-        XCTAssertFalse(loose.isV2, "missing version must not claim v2")
-        XCTAssertEqual(loose.spriteVersion, 1)
+        XCTAssertTrue(loose.isV2, "missing version + sheet infers v2")
+        XCTAssertEqual(loose.spriteVersion, 2)
 
         let strict = PetPackageResolver.resolve(
             petId: "no-version-pet", roots: [root], requireV2: true
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             strict.useProcedural,
-            "requireV2 must skip packages without spriteVersionNumber>=2"
+            "requireV2 must accept inferred v2 when sheet is present"
         )
+        XCTAssertEqual(strict.spriteVersion, 2)
     }
 
     /// Desktop / board atlas path always requires v2 — same as CompanionDrawMode.

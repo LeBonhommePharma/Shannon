@@ -112,9 +112,8 @@ public enum PetPackageResolver {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
 
-        let version = (json["spriteVersionNumber"] as? Int)
+        let declaredVersion = (json["spriteVersionNumber"] as? Int)
             ?? (json["sprite_version"] as? Int)
-            ?? 0
         let sheetRel = (json["spritesheetPath"] as? String)
             ?? (json["spritesheet_path"] as? String)
             ?? "spritesheet.webp"
@@ -139,9 +138,11 @@ public enum PetPackageResolver {
             ?? petId
         let desc = (json["description"] as? String) ?? ""
         let id = (json["id"] as? String) ?? petId
+        // B1: missing version + sheet present → infer v2 so requireV2 atlas draws.
+        let inferred = inferredSpriteVersion(declared: declaredVersion, sheetPresent: true)
         var notes: [String] = []
-        if version > 0 && version < 2 {
-            notes.append("spriteVersionNumber=\(version) (<2); atlas rows may be incomplete")
+        if let note = inferred.note {
+            notes.append(note)
         }
 
         return PetPackage(
@@ -149,11 +150,33 @@ public enum PetPackageResolver {
             root: directory,
             petJSONURL: metaURL,
             spritesheetURL: sheet,
-            spriteVersion: version > 0 ? version : 1,
+            spriteVersion: inferred.version,
             displayName: display,
             description: desc,
             useProcedural: false,
             notes: notes
         )
+    }
+
+    /// Resolve sprite version for a package with a found sheet (B1).
+    ///
+    /// - Explicit `spriteVersionNumber` / `sprite_version` wins when > 0
+    /// - Missing / zero with a sheet → **2** so `requireV2` atlas path works
+    ///   (oc-an / stitch-style packages that ship sheet + pet.json without version)
+    /// - Explicit 1 stays 1 (incomplete atlas is intentional)
+    public static func inferredSpriteVersion(
+        declared: Int?,
+        sheetPresent: Bool
+    ) -> (version: Int, note: String?) {
+        if let d = declared, d > 0 {
+            if d < 2 {
+                return (d, "spriteVersionNumber=\(d) (<2); atlas rows may be incomplete")
+            }
+            return (d, nil)
+        }
+        if sheetPresent {
+            return (2, "spriteVersionNumber missing; inferred 2 from spritesheet presence")
+        }
+        return (0, nil)
     }
 }

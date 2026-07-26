@@ -79,6 +79,25 @@ def _read_pet_json(path: Path) -> Optional[dict]:
     return data
 
 
+def infer_sprite_version(
+    declared: Optional[int],
+    *,
+    sheet_present: bool,
+) -> tuple[int, Optional[str]]:
+    """Resolve sprite version when pet.json omits or zeros the field (B1).
+
+    Explicit positive versions win. Missing/zero with a sheet → 2 so atlas /
+    requireV2 consumers accept oc-an/stitch-style packages.
+    """
+    if declared is not None and declared > 0:
+        if declared < 2:
+            return declared, f"spriteVersionNumber={declared} (<2); atlas rows may be incomplete"
+        return declared, None
+    if sheet_present:
+        return 2, "spriteVersionNumber missing; inferred 2 from spritesheet presence"
+    return 0, None
+
+
 def _package_from_dir(directory: Path, pet_id: str) -> Optional[PetPackage]:
     """Build a PetPackage if directory has valid pet.json + spritesheet."""
     if not directory.is_dir():
@@ -90,7 +109,13 @@ def _package_from_dir(directory: Path, pet_id: str) -> Optional[PetPackage]:
     if meta is None:
         return None
 
-    version = int(meta.get("spriteVersionNumber") or meta.get("sprite_version") or 0)
+    raw_ver = meta.get("spriteVersionNumber")
+    if raw_ver is None:
+        raw_ver = meta.get("sprite_version")
+    try:
+        declared = int(raw_ver) if raw_ver is not None else None
+    except (TypeError, ValueError):
+        declared = None
     sheet_rel = (
         meta.get("spritesheetPath")
         or meta.get("spritesheet_path")
@@ -112,15 +137,17 @@ def _package_from_dir(directory: Path, pet_id: str) -> Optional[PetPackage]:
     display = str(meta.get("displayName") or meta.get("display_name") or pet_id)
     desc = str(meta.get("description") or "")
     pid = str(meta.get("id") or pet_id)
+    # B1: missing version + sheet → infer 2 so atlas/requireV2 path accepts package.
+    version, note = infer_sprite_version(declared, sheet_present=True)
     notes: list[str] = []
-    if version < 2:
-        notes.append(f"spriteVersionNumber={version} (<2); atlas rows may be incomplete")
+    if note:
+        notes.append(note)
     return PetPackage(
         pet_id=pid,
         root=directory.resolve(),
         pet_json_path=meta_path.resolve(),
         spritesheet_path=sheet,
-        sprite_version=version if version > 0 else 1,
+        sprite_version=version,
         display_name=display,
         description=desc,
         use_procedural=False,

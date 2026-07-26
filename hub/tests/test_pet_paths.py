@@ -92,3 +92,52 @@ def test_snapshot_keys(tmp_path: Path):
     assert "packages" in snap
     assert "agents" in snap
     assert "shannonHome" in snap
+
+
+def test_repo_mirrors_default_from_module_location():
+    """Python defaults on: hub/ (this package) then <repo>/pets."""
+    roots = paths.package_roots(home=Path("/tmp/no-home"), env={}, include_repo_mirrors=True)
+    hub = Path(paths.__file__).resolve().parent
+    pets = hub.parent / paths.PETS_MIRROR_SUBDIR
+    assert roots[-2].resolve() == hub
+    assert roots[-1].expanduser() == pets
+
+
+def test_repo_mirrors_from_shannon_pets_repo_env(tmp_path: Path):
+    """`$SHANNON_PETS_REPO` selects monorepo mirrors (Swift PetPaths parity)."""
+    repo = tmp_path / "ShannonCheckout"
+    env = {paths.ENV_REPO_ROOT: str(repo)}
+    roots = paths.package_roots(home=tmp_path, env=env, include_repo_mirrors=True)
+    assert roots[-2] == repo / paths.HUB_MIRROR_SUBDIR
+    assert roots[-1] == repo / paths.PETS_MIRROR_SUBDIR
+    # Production root still before mirrors.
+    assert any(p == tmp_path / ".codex" / "pets" for p in roots[:-2])
+
+
+def test_repo_mirrors_path_list_order_parity(tmp_path: Path):
+    """Canonical order matches Swift PetPathsTests.testRepoMirrorsPathListParityWithFlag."""
+    repo = tmp_path / "mono"
+    custom = tmp_path / "custom-codex"
+    codex_home = tmp_path / "codex-home"
+    home = tmp_path / "home"
+    env = {
+        paths.ENV_PACKAGES: str(custom),
+        paths.ENV_CODEX_HOME: str(codex_home),
+        paths.ENV_REPO_ROOT: str(repo),
+    }
+    roots = paths.package_roots(home=home, env=env, include_repo_mirrors=True)
+    expected = [
+        custom,
+        codex_home / "pets",
+        home / ".codex" / "pets",
+        repo / paths.HUB_MIRROR_SUBDIR,
+        repo / paths.PETS_MIRROR_SUBDIR,
+    ]
+    assert [p.expanduser() for p in roots] == expected
+
+
+def test_repo_mirrors_can_be_disabled(tmp_path: Path):
+    env = {paths.ENV_REPO_ROOT: str(tmp_path / "mono")}
+    roots = paths.package_roots(home=tmp_path, env=env, include_repo_mirrors=False)
+    assert not any(p.name == paths.HUB_MIRROR_SUBDIR for p in roots)
+    assert roots[-1] == tmp_path / ".codex" / "pets"

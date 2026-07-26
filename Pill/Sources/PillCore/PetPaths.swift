@@ -24,6 +24,12 @@
 //   SHANNON_LOG_DIR     — Shannon home (agents → $SHANNON_LOG_DIR/pets when
 //                         no SHANNON_PETS / SHANNON_PETS_AGENTS)
 //
+// Optional monorepo package mirrors (Python `include_repo_mirrors` parity):
+//   export SHANNON_PETS_REPO=/path/to/Shannon
+//     packages also search → $SHANNON_PETS_REPO/hub then …/pets
+//   Or pass includeRepoMirrors + repoRoot to packageRoots (tests / tools).
+//   Off by default in production so installed Pill never walks a checkout.
+//
 // Agent-memory roots are never searched as spritesheet stores.
 
 import Foundation
@@ -42,11 +48,17 @@ public enum PetPaths: Sendable {
     public static let envCodexHome = "CODEX_HOME"
     public static let envShannonHome = "SHANNON_LOG_DIR"
     public static let envFlexaidHome = "FLEXAIDDS_LOG_DIR"
+    /// Monorepo root for optional `hub/` + `pets/` package mirrors (dev parity).
+    public static let envRepoRoot = "SHANNON_PETS_REPO"
 
     /// Subdirectory name under `SHANNON_PETS` for agent memory.
     public static let agentsSubdir = "agents"
     /// Optional subdirectory under `SHANNON_PETS` for packages only.
     public static let packagesSubdir = "packages"
+    /// Repo-relative hub mirror (Python `Path(__file__).parent`).
+    public static let hubMirrorSubdir = "hub"
+    /// Repo-relative pets mirror (Python `repo/pets`).
+    public static let petsMirrorSubdir = "pets"
 
     // MARK: - Shannon home (logs / registry host)
 
@@ -82,10 +94,17 @@ public enum PetPaths: Sendable {
     /// 3. `$SHANNON_PETS` (flat Codex layout — e.g. `~/.codex/pets`)
     /// 4. `$CODEX_HOME/pets`
     /// 5. `~/.codex/pets`
+    /// 6–7. Optional repo mirrors (when enabled): `<repo>/hub`, `<repo>/pets`
+    ///
+    /// Mirrors match Python `package_roots(..., include_repo_mirrors=True)`.
+    /// Enabled when `includeRepoMirrors` is true **or** `$SHANNON_PETS_REPO`
+    /// / `repoRoot` supplies a monorepo root. Production defaults leave mirrors off.
     public static func packageRoots(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         env: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        includeRepoMirrors: Bool = false,
+        repoRoot: URL? = nil
     ) -> [URL] {
         var roots: [URL] = []
         var seen = Set<String>()
@@ -118,7 +137,25 @@ public enum PetPaths: Sendable {
         }
 
         append(home.appendingPathComponent(".codex/pets", isDirectory: true))
+
+        // Dev mirrors: hub/<pet-id> and pets/<pet-id> under the monorepo root.
+        let effectiveRepo = resolvedRepoRoot(repoRoot: repoRoot, env: env)
+        if includeRepoMirrors || effectiveRepo != nil, let root = effectiveRepo {
+            append(root.appendingPathComponent(hubMirrorSubdir, isDirectory: true))
+            append(root.appendingPathComponent(petsMirrorSubdir, isDirectory: true))
+        }
+
         return roots
+    }
+
+    /// Monorepo root for optional package mirrors (`repoRoot` param or env).
+    public static func resolvedRepoRoot(
+        repoRoot: URL? = nil,
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        if let repoRoot { return repoRoot }
+        guard let raw = nonEmpty(env[envRepoRoot]) else { return nil }
+        return URL(fileURLWithPath: expand(raw), isDirectory: true)
     }
 
     // MARK: - Agents (Shannon memory)
@@ -156,27 +193,44 @@ public enum PetPaths: Sendable {
     public static func packageRootsExcludingMemory(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         env: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        includeRepoMirrors: Bool = false,
+        repoRoot: URL? = nil
     ) -> [URL] {
         let memory = agentMemoryRoot(home: home, env: env).standardizedFileURL
-        return packageRoots(home: home, env: env, fileManager: fileManager)
-            .filter { $0.standardizedFileURL != memory }
+        return packageRoots(
+            home: home,
+            env: env,
+            fileManager: fileManager,
+            includeRepoMirrors: includeRepoMirrors,
+            repoRoot: repoRoot
+        )
+        .filter { $0.standardizedFileURL != memory }
     }
 
     /// Diagnostic snapshot for boot logs / tests.
     public static func snapshot(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         env: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        includeRepoMirrors: Bool = false,
+        repoRoot: URL? = nil
     ) -> [String: String] {
-        let packages = packageRoots(home: home, env: env, fileManager: fileManager)
-            .map(\.path)
-            .joined(separator: ":")
+        let packages = packageRoots(
+            home: home,
+            env: env,
+            fileManager: fileManager,
+            includeRepoMirrors: includeRepoMirrors,
+            repoRoot: repoRoot
+        )
+        .map(\.path)
+        .joined(separator: ":")
         return [
             "unified": unifiedHome(env: env)?.path ?? "",
             "packages": packages,
             "agents": agentMemoryRoot(home: home, env: env).path,
             "shannonHome": shannonHome(home: home, env: env).path,
+            "repoRoot": resolvedRepoRoot(repoRoot: repoRoot, env: env)?.path ?? "",
         ]
     }
 

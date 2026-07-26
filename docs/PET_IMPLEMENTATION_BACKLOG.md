@@ -106,12 +106,16 @@ Test baseline (must stay green while implementing):
   Work: process-wide cache keyed by (petId, roots mtime) with invalidation on
   path env change.
 
-- [ ] **O3 — Align Swift package roots with Python repo mirrors intentionally**  
+- [x] **O3 — Align Swift package roots with Python repo mirrors intentionally**  
   Observation: Python `package_roots` appends `hub/` and `repo/pets` mirrors;
   Swift `PetPaths.packageRoots` does not. Tests pass but list/resolve can differ
   by environment.  
   Work: either add optional mirror roots on Swift for parity, or document
-  “Python-only dev mirrors” and exclude from production resolve docs.
+  “Python-only dev mirrors” and exclude from production resolve docs.  
+  **Done:** Swift opt-in via `includeRepoMirrors` / `repoRoot` /
+  `$SHANNON_PETS_REPO` (appends `<repo>/hub` then `<repo>/pets`); production
+  default remains mirrors-off. Python accepts same env (else `__file__` hub).
+  Path-list parity tests on both sides.
 
 ---
 

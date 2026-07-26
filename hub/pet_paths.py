@@ -36,6 +36,13 @@ Narrow overrides:
   SHANNON_LOG_DIR / FLEXAIDDS_LOG_DIR — Shannon home (agents → …/pets
                         when no SHANNON_PETS / SHANNON_PETS_AGENTS)
 
+Repo package mirrors (dev fixtures)::
+
+  When ``include_repo_mirrors=True`` (default), appends ``hub/`` then
+  ``<repo>/pets``. Prefer ``export SHANNON_PETS_REPO=/path/to/Shannon``
+  (Swift ``PetPaths`` parity); else uses this module's checkout location.
+  Swift is opt-in (flag / env); Python defaults on for hub CLI tools.
+
 Agent-memory roots are never used as spritesheet stores. Migrating agent
 memory onto ``$SHANNON_PETS/agents`` is a manual copy/symlink (not automated).
 """
@@ -52,9 +59,13 @@ ENV_AGENTS = "SHANNON_PETS_AGENTS"
 ENV_CODEX_HOME = "CODEX_HOME"
 ENV_SHANNON_HOME = "SHANNON_LOG_DIR"
 ENV_FLEXAID_HOME = "FLEXAIDDS_LOG_DIR"
+# Swift-side monorepo root for optional hub/ + pets/ mirrors (documented parity).
+ENV_REPO_ROOT = "SHANNON_PETS_REPO"
 
 AGENTS_SUBDIR = "agents"
 PACKAGES_SUBDIR = "packages"
+HUB_MIRROR_SUBDIR = "hub"
+PETS_MIRROR_SUBDIR = "pets"
 
 
 def _env(mapping: Optional[Mapping[str, str]] = None) -> Mapping[str, str]:
@@ -126,9 +137,16 @@ def package_roots(
     append(base / ".codex" / "pets")
 
     if include_repo_mirrors:
-        here = Path(__file__).resolve().parent
-        append(here)  # hub/<id> mirrors
-        append(here.parent / "pets")
+        # Prefer explicit monorepo root (Swift `$SHANNON_PETS_REPO` parity);
+        # else this checkout's hub/ next to pet_paths.py.
+        if raw := _nonempty(e.get(ENV_REPO_ROOT)):
+            repo = Path(raw).expanduser()
+            append(repo / HUB_MIRROR_SUBDIR)
+            append(repo / PETS_MIRROR_SUBDIR)
+        else:
+            here = Path(__file__).resolve().parent
+            append(here)  # hub/<id> mirrors
+            append(here.parent / PETS_MIRROR_SUBDIR)
 
     return roots
 

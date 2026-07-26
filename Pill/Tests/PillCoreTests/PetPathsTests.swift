@@ -120,6 +120,7 @@ final class PetPathsTests: XCTestCase {
         XCTAssertNotNil(snap["agents"])
         XCTAssertNotNil(snap["shannonHome"])
         XCTAssertEqual(snap["unified"], "")
+        XCTAssertEqual(snap["repoRoot"], "")
     }
 
     /// Real machine: ~/.codex/pets is the default package root and is searchable.
@@ -131,5 +132,104 @@ final class PetPathsTests: XCTestCase {
             roots.contains(where: { $0.standardizedFileURL == codex.standardizedFileURL }),
             "default package roots must include ~/.codex/pets"
         )
+    }
+
+    /// Production default: no monorepo hub/pets mirrors unless env/flag set.
+    func testRepoMirrorsOffByDefault() {
+        let env: [String: String] = [:]
+        let roots = PetPaths.packageRoots(home: home, env: env)
+        XCTAssertFalse(roots.contains(where: { $0.lastPathComponent == PetPaths.hubMirrorSubdir }))
+        // Default ends at ~/.codex/pets (under injected home).
+        XCTAssertEqual(
+            roots.last?.standardizedFileURL,
+            home.appendingPathComponent(".codex/pets", isDirectory: true).standardizedFileURL
+        )
+    }
+
+    /// `$SHANNON_PETS_REPO` enables hub + pets mirrors after production roots.
+    func testRepoMirrorsWhenEnvSet() {
+        let repo = tmp.appendingPathComponent("ShannonCheckout", isDirectory: true)
+        let env = [PetPaths.envRepoRoot: repo.path]
+        let roots = PetPaths.packageRoots(home: home, env: env)
+
+        let hub = repo.appendingPathComponent(PetPaths.hubMirrorSubdir, isDirectory: true)
+        let pets = repo.appendingPathComponent(PetPaths.petsMirrorSubdir, isDirectory: true)
+        XCTAssertEqual(roots.suffix(2).map(\.standardizedFileURL), [
+            hub.standardizedFileURL,
+            pets.standardizedFileURL,
+        ])
+        // Production root still present before mirrors.
+        XCTAssertTrue(roots.dropLast(2).contains(where: {
+            $0.standardizedFileURL == home.appendingPathComponent(".codex/pets", isDirectory: true)
+                .standardizedFileURL
+        }))
+    }
+
+    /// Explicit flag + repoRoot matches env path list (Python include_repo_mirrors).
+    func testRepoMirrorsPathListParityWithFlag() {
+        let repo = tmp.appendingPathComponent("mono", isDirectory: true)
+        let custom = tmp.appendingPathComponent("custom-codex", isDirectory: true)
+        let codexHome = tmp.appendingPathComponent("codex-home", isDirectory: true)
+        let env: [String: String] = [
+            PetPaths.envPackages: custom.path,
+            PetPaths.envCodexHome: codexHome.path,
+        ]
+        let withFlag = PetPaths.packageRoots(
+            home: home,
+            env: env,
+            includeRepoMirrors: true,
+            repoRoot: repo
+        )
+        var envWithRepo = env
+        envWithRepo[PetPaths.envRepoRoot] = repo.path
+        let withEnv = PetPaths.packageRoots(home: home, env: envWithRepo)
+
+        XCTAssertEqual(
+            withFlag.map(\.standardizedFileURL),
+            withEnv.map(\.standardizedFileURL)
+        )
+
+        // Canonical order: SHANNON_CODEX_PETS, CODEX_HOME/pets, ~/.codex/pets, hub, pets
+        let expected: [URL] = [
+            custom,
+            codexHome.appendingPathComponent("pets", isDirectory: true),
+            home.appendingPathComponent(".codex/pets", isDirectory: true),
+            repo.appendingPathComponent(PetPaths.hubMirrorSubdir, isDirectory: true),
+            repo.appendingPathComponent(PetPaths.petsMirrorSubdir, isDirectory: true),
+        ]
+        XCTAssertEqual(
+            withFlag.map(\.standardizedFileURL),
+            expected.map(\.standardizedFileURL)
+        )
+    }
+
+    func testSnapshotIncludesRepoRootKey() {
+        let repo = tmp.appendingPathComponent("r", isDirectory: true)
+        let snap = PetPaths.snapshot(
+            home: home,
+            env: [PetPaths.envRepoRoot: repo.path]
+        )
+        XCTAssertEqual(snap["repoRoot"], repo.path)
+        XCTAssertTrue(snap["packages"]?.contains(PetPaths.hubMirrorSubdir) == true)
+    }
+
+    func testExcludingMemoryStillKeepsRepoMirrors() {
+        let repo = tmp.appendingPathComponent("mono", isDirectory: true)
+        let filtered = PetPaths.packageRootsExcludingMemory(
+            home: home,
+            env: [:],
+            includeRepoMirrors: true,
+            repoRoot: repo
+        )
+        XCTAssertTrue(filtered.contains(where: {
+            $0.standardizedFileURL
+                == repo.appendingPathComponent(PetPaths.hubMirrorSubdir, isDirectory: true)
+                .standardizedFileURL
+        }))
+        XCTAssertTrue(filtered.contains(where: {
+            $0.standardizedFileURL
+                == repo.appendingPathComponent(PetPaths.petsMirrorSubdir, isDirectory: true)
+                .standardizedFileURL
+        }))
     }
 }

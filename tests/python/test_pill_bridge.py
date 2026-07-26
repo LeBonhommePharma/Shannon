@@ -9,6 +9,15 @@ import stat
 import uuid
 
 import pytest
+
+import sys
+
+# Unix-domain sockets are not available on classic Windows Python builds.
+pytestmark = pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX"),
+    reason="AF_UNIX not available on this platform (Windows)",
+)
+
 from shannon.pill_bridge import (
     PillBridgeServer,
     default_socket_path,

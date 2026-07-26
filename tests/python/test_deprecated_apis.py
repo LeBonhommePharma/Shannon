@@ -62,6 +62,6 @@ def test_gate_argparse_description_is_shannon_not_flexaid():
     from pathlib import Path
 
     text = Path(__file__).resolve().parents[2] / "hub" / "shannon_gate.py"
-    src = text.read_text()
+    src = text.read_text(encoding="utf-8")
     assert 'description="FlexAIDdS Shannon Gate' not in src
     assert "Shannon Gate — multi-agent entropy guardian" in src

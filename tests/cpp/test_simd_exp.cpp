@@ -123,17 +123,21 @@ double max_rel_error(Fn f) {
 
 #if defined(__AVX512F__)
 TEST(SimdExpAvx512, MaxRelativeErrorUnder1e12) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX512F";
     EXPECT_LT(max_rel_error(eval_avx512), 1e-12);
 }
 TEST(SimdExpAvx512, ExactAtZero) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX512F";
     EXPECT_EQ(eval_avx512(0.0), 1.0);
 }
 TEST(SimdExpAvx512, FlushToZeroBelowUnderflow) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX512F";
     EXPECT_EQ(eval_avx512(-745.5), 0.0);   // below smallest subnormal
     EXPECT_EQ(eval_avx512(-800.0), 0.0);
     EXPECT_EQ(eval_avx512(-1000.0), 0.0);
 }
 TEST(SimdExpAvx512, DeepNegativeSaturatesToZero) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX512F";
     // Regression: before the kExpFlush saturation, the 2^n exponent-bit trick
     // wrapped for x < ~-1418 and returned Inf / huge garbage (observed at
     // x=-1420 and x=-2000 on AVX2). A masked-vocab logit spread can produce
@@ -144,6 +148,7 @@ TEST(SimdExpAvx512, DeepNegativeSaturatesToZero) {
     }
 }
 TEST(SimdExpAvx512, NoNaNAnywhereOnNegativeDomain) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX512F";
     for (double x = 0.0; x >= -1000.0; x -= 0.7) {
         const double v = eval_avx512(x);
         EXPECT_FALSE(std::isnan(v)) << "NaN at x=" << x;
@@ -151,6 +156,7 @@ TEST(SimdExpAvx512, NoNaNAnywhereOnNegativeDomain) {
     }
 }
 TEST(SimdExpAvx512, SubnormalRangeFiniteAndSmall) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX512F";
     // exp(-745..-709) is subnormal; must stay finite, non-negative, tiny.
     for (double x = -709.0; x >= -745.0; x -= 0.5) {
         const double v = eval_avx512(x);
@@ -164,13 +170,16 @@ TEST(SimdExpAvx512, SubnormalRangeFiniteAndSmall) {
 #if defined(__AVX2__)
 TEST(SimdExpAvx2, MaxRelativeErrorUnder1e12) {
     if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_LT(max_rel_error(eval_avx2), 1e-12);
 }
 TEST(SimdExpAvx2, ExactAtZero) {
     if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_EQ(eval_avx2(0.0), 1.0);
 }
 TEST(SimdExpAvx2, FlushToZeroBelowUnderflow) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_EQ(eval_avx2(-745.5), 0.0);
     EXPECT_EQ(eval_avx2(-800.0), 0.0);
@@ -178,12 +187,14 @@ TEST(SimdExpAvx2, FlushToZeroBelowUnderflow) {
 }
 TEST(SimdExpAvx2, DeepNegativeSaturatesToZero) {
     if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     for (double x : {-709.0, -1418.0, -1420.0, -2000.0, -1e6, -1e300}) {
         EXPECT_EQ(eval_avx2(x), 0.0) << "x=" << x;
         EXPECT_FALSE(std::signbit(eval_avx2(x))) << "must be +0, x=" << x;
     }
 }
 TEST(SimdExpAvx2, NoNaNAnywhereOnNegativeDomain) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     for (double x = 0.0; x >= -1000.0; x -= 0.7) {
         const double v = eval_avx2(x);
@@ -196,12 +207,15 @@ TEST(SimdExpAvx2, NoNaNAnywhereOnNegativeDomain) {
 // ─── log2 accuracy ─────────────────────────────────────────────────────────────
 #if defined(__AVX512F__)
 TEST(SimdLog2Avx512, MaxRelativeErrorUnder1e12) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX512F";
     EXPECT_LT(max_rel_error_log2(eval_log2_avx512), 1e-12);
 }
 TEST(SimdLog2Avx512, ExactAtOne) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX512F";
     EXPECT_EQ(eval_log2_avx512(1.0), 0.0);  // log2(1) == 0 exactly
 }
 TEST(SimdLog2Avx512, ExactAtPowersOfTwo) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX512F";
     EXPECT_NEAR(eval_log2_avx512(0.5), -1.0, 1e-14);
     EXPECT_NEAR(eval_log2_avx512(0.25), -2.0, 1e-14);
     EXPECT_NEAR(eval_log2_avx512(1e-300), std::log2(1e-300), 1e-12 * 997.0);
@@ -211,13 +225,16 @@ TEST(SimdLog2Avx512, ExactAtPowersOfTwo) {
 #if defined(__AVX2__)
 TEST(SimdLog2Avx2, MaxRelativeErrorUnder1e12) {
     if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_LT(max_rel_error_log2(eval_log2_avx2), 1e-12);
 }
 TEST(SimdLog2Avx2, ExactAtOne) {
     if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_EQ(eval_log2_avx2(1.0), 0.0);
 }
 TEST(SimdLog2Avx2, ExactAtPowersOfTwo) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
     EXPECT_NEAR(eval_log2_avx2(0.5), -1.0, 1e-14);
     EXPECT_NEAR(eval_log2_avx2(0.25), -2.0, 1e-14);

@@ -33,10 +33,40 @@ The canonical build is SwiftPM:
 
 On launch you should see:
 1. A **menu-bar** glyph: `○ ready` or an active agent name
-2. A **notch pill** driven by real agent pets (`~/.shannon/pets/`) — task + status
+2. A **notch pill** driven by real agent pets (default memory root `~/.shannon/pets/`; see [Pet paths](#pet-paths-operators) for `SHANNON_PETS`) — task + status
 3. **⌘D** captures the frontmost app (Terminal / Claude / ChatGPT / Codex / browser)
 
 Quit from the menu-bar item → **Quit Shannon**.
+
+### Pet paths (operators)
+
+Two on-disk roles share one resolution policy (`PillCore/PetPaths.swift`, hub `pet_paths.py`):
+
+| Role | What lives there | Default (no env) |
+|------|------------------|------------------|
+| **packages** | Codex-compatible art: `<root>/<pet-id>/{pet.json,spritesheet.webp}` | `~/.codex/pets` |
+| **agents** | Per-agent memory: `<root>/<agent_id>/{state.json,memory.md,…}` | `~/.shannon/pets` |
+
+**Unified home (optional).** Point both roles at one tree with `SHANNON_PETS`:
+
+```bash
+# Flat Codex layout at the root (packages); agent memory under agents/
+export SHANNON_PETS="$HOME/.codex/pets"
+# packages → $SHANNON_PETS  (and $SHANNON_PETS/packages if that directory exists)
+# agents   → $SHANNON_PETS/agents
+```
+
+Example after `export SHANNON_PETS=/Users/you/.codex/pets`:
+
+- Packages: `/Users/you/.codex/pets/shannon/pet.json` (and siblings under that root)
+- Agents: `/Users/you/.codex/pets/agents/codex/state.json`
+
+Narrow overrides (still supported): `SHANNON_CODEX_PETS` (packages only),
+`CODEX_HOME` → `$CODEX_HOME/pets`, `SHANNON_PETS_AGENTS` (agents only),
+`SHANNON_LOG_DIR` / `FLEXAIDDS_LOG_DIR` (Shannon home; agents → `…/pets` when
+no unified/agents override). Agent-memory roots are never searched as
+spritesheet stores. Migrating existing agent memory onto `$SHANNON_PETS/agents`
+is a manual copy/symlink — not automated.
 
 For Xcode (signing, Instruments, debugging the UI):
 

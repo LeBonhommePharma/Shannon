@@ -2,7 +2,8 @@
 """
 pet_paths.py — single path policy for both pet systems (Python side).
 
-Mirrors PillCore ``PetPaths`` (Swift):
+Mirrors PillCore ``PetPaths`` (Swift). Operators: see also Pill/README.md
+"Pet paths (operators)".
 
   packages  Codex-compatible v2 art
             <root>/<pet-id>/{pet.json,spritesheet.webp}
@@ -10,23 +11,33 @@ Mirrors PillCore ``PetPaths`` (Swift):
   agents    Shannon per-agent memory
             <root>/<agent_id>/{state.json,memory.md,history.jsonl,config.json}
 
-Defaults (back-compat):
+Defaults (back-compat, no env required)::
+
   packages → ~/.codex/pets
   agents   → ~/.shannon/pets
 
-Unified home (optional)::
+Unified home (optional) — one tree for both roles::
 
-  export SHANNON_PETS=/path/to/pets
-    packages → $SHANNON_PETS  (and $SHANNON_PETS/packages if present)
+  export SHANNON_PETS="$HOME/.codex/pets"
+  # or absolute: export SHANNON_PETS=/Users/you/.codex/pets
+
+    packages → $SHANNON_PETS  (and $SHANNON_PETS/packages if that directory exists)
     agents   → $SHANNON_PETS/agents
+
+  Example after ``export SHANNON_PETS=/Users/you/.codex/pets``::
+
+    /Users/you/.codex/pets/shannon/pet.json       # package
+    /Users/you/.codex/pets/agents/codex/state.json  # agent memory
 
 Narrow overrides:
   SHANNON_CODEX_PETS  — packages only
   CODEX_HOME          — packages under $CODEX_HOME/pets
   SHANNON_PETS_AGENTS — agents only
-  SHANNON_LOG_DIR / FLEXAIDDS_LOG_DIR — Shannon home (agents → …/pets)
+  SHANNON_LOG_DIR / FLEXAIDDS_LOG_DIR — Shannon home (agents → …/pets
+                        when no SHANNON_PETS / SHANNON_PETS_AGENTS)
 
-Agent-memory roots are never used as spritesheet stores.
+Agent-memory roots are never used as spritesheet stores. Migrating agent
+memory onto ``$SHANNON_PETS/agents`` is a manual copy/symlink (not automated).
 """
 
 from __future__ import annotations

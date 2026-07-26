@@ -3,10 +3,36 @@
 pet_manager.py — Shannon Hub Pet System (Python side)
 ======================================================
 Manages per-agent persistent identity under the unified agent-memory root
-(see pet_paths.py / SHANNON_PETS).
+(see ``pet_paths.py`` / ``SHANNON_PETS``; mirrors PillCore ``PetPaths``).
 
-Default: ~/.shannon/pets/{agent_id}/
-With SHANNON_PETS: $SHANNON_PETS/agents/{agent_id}/
+Path policy (operators)
+-----------------------
+Two roles, one API:
+
+  packages  Codex art under package roots (default ``~/.codex/pets``)
+  agents    This module — per-agent memory (default ``~/.shannon/pets``)
+
+Defaults (no env)::
+
+  ~/.shannon/pets/{agent_id}/state.json
+  ~/.codex/pets/{pet-id}/pet.json          # packages, via pet_package
+
+Unified home — put both under one tree::
+
+  export SHANNON_PETS="$HOME/.codex/pets"
+  # or: export SHANNON_PETS=/Users/you/.codex/pets
+
+  packages → $SHANNON_PETS  (and $SHANNON_PETS/packages if that dir exists)
+  agents   → $SHANNON_PETS/agents/{agent_id}/
+
+  Example layout after export SHANNON_PETS=/Users/you/.codex/pets::
+
+    /Users/you/.codex/pets/shannon/pet.json
+    /Users/you/.codex/pets/agents/codex/state.json
+
+Narrow overrides: ``SHANNON_PETS_AGENTS`` (agents only), ``SHANNON_CODEX_PETS``
+(packages only). Migrating old ``~/.shannon/pets`` trees onto
+``$SHANNON_PETS/agents`` is a manual copy/symlink.
 
 Directory layout per agent
 --------------------------

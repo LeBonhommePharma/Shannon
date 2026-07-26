@@ -76,12 +76,14 @@ Test baseline (must stay green while implementing):
   Work: click bubble or pet → `PillWindowController.expand()` + scroll/highlight
   matching agent if any.
 
-- [ ] **E5 — Document `SHANNON_PETS` unified home for operators**  
+- [x] **E5 — Document `SHANNON_PETS` unified home for operators**  
   Observation: `PetPaths` / `pet_paths` support `SHANNON_PETS` (packages at root,
   agents under `agents/`), but README / CLAUDE.md still describe only dual
   defaults.  
   Work: short operator section in Pill README + hub pet_manager docstring
-  examples with `/Users/…/.codex/pets`.
+  examples with `/Users/…/.codex/pets`.  
+  **Done:** Pill README “Pet paths (operators)” + `hub/pet_manager.py` /
+  `hub/pet_paths.py` docstrings with `SHANNON_PETS=$HOME/.codex/pets` layout.
 
 ---
 

@@ -1,11 +1,15 @@
-// PetAnimationState.swift — the four moods a companion pet can be in.
+// PetAnimationState.swift — companion pet moods for the hub HUD.
 //
-// Each state maps to a real signal on the agent card, never to decoration:
-//
+// Procedural Canvas moods (original four):
 //   idle    → agents.status == idle, seen recently
 //   alert   → the agent is active/waiting, or streaming gate messages right now
 //   happy   → a human just approved one of this agent's asks (0.4 s, one-shot)
 //   sleepy  → agents.last_seen_ns is older than `sleepyAfter`
+//
+// Codex-aligned motion (for optional spritesheet atlas) is derived via
+// `codexMotion(...)` — vocabulary: idle / running / waiting / failed / review
+// (+ waving for happy). Pure mapping mirrors hub/pet_codex_motion.py and
+// PillCore.PetCodexMotion.
 //
 // The mapping itself lives in `PetAnimationState.forAgent(...)` so the hub card
 // and the previews agree on it.
@@ -32,6 +36,16 @@ enum PetAnimationState: String, CaseIterable, Hashable {
         }
     }
 
+    /// Codex atlas motion label for this procedural mood (default bridge).
+    var codexMotionLabel: String {
+        switch self {
+        case .idle:   return "idle"
+        case .alert:  return "running"
+        case .happy:  return "waving"
+        case .sleepy: return "idle"
+        }
+    }
+
     /// Derives the mood from the signals an agent card already has.
     ///
     /// - Parameters:
@@ -47,5 +61,34 @@ enum PetAnimationState: String, CaseIterable, Hashable {
         if isActive || isStreaming { return .alert }
         if let age = secondsSinceLastSeen, age > sleepyAfter { return .sleepy }
         return .idle
+    }
+
+    /// Codex-aligned motion from richer hub signals. Deterministic.
+    ///
+    /// Precedence: collapse → failed; approval → waving; waiting/ask → waiting;
+    /// failed outcome → failed; busy → running; review outcome → review; else idle.
+    static func codexMotion(
+        isActive: Bool,
+        isStreaming: Bool,
+        isWaiting: Bool = false,
+        justApproved: Bool = false,
+        entropyCollapse: Bool = false,
+        lastOutcome: String? = nil,
+        isLivePresence: Bool = true
+    ) -> String {
+        let live = isLivePresence
+        let outcome = (lastOutcome ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let failed: Set<String> = ["failed", "fail", "error", "errored", "failure"]
+        let review: Set<String> = ["review", "done", "success", "succeeded", "completed", "complete", "passed"]
+
+        if live && entropyCollapse { return "failed" }
+        if justApproved { return "waving" }
+        if live {
+            if isWaiting { return "waiting" }
+            if failed.contains(outcome) { return "failed" }
+            if isActive || isStreaming { return "running" }
+            if review.contains(outcome) { return "review" }
+        }
+        return "idle"
     }
 }

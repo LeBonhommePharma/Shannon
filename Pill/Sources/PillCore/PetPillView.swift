@@ -39,17 +39,30 @@ public struct CompanionView: View {
     public let size: CGFloat
     /// Instant the approval landed, for the one-shot `happy` bounce.
     public let happyStart: Date?
+    /// Codex-aligned motion (atlas row). Defaults from mood when omitted.
+    public let codexMotion: PetCodexMotion
+    /// Optional Codex package pet id (e.g. "shannon"). When a v2 package is
+    /// found, atlas frames are preferred; otherwise procedural Canvas art.
+    public let packagePetId: String?
+
+    /// Resolved once per `packagePetId` — never on every TimelineView tick.
+    @State private var cachedPackage: PetPackage?
+    @State private var packageLookupDone = false
 
     public init(kind: CompanionKind,
                 mood: CompanionMood,
                 agentColor: Color,
                 size: CGFloat = 26,
-                happyStart: Date? = nil) {
+                happyStart: Date? = nil,
+                codexMotion: PetCodexMotion? = nil,
+                packagePetId: String? = PetPackageResolver.defaultPetId) {
         self.kind = kind
         self.mood = mood
         self.agentColor = agentColor
         self.size = size
         self.happyStart = happyStart
+        self.codexMotion = codexMotion ?? PetCodexMotion.from(mood: mood)
+        self.packagePetId = packagePetId
     }
 
     public var body: some View {
@@ -59,16 +72,55 @@ public struct CompanionView: View {
             // case, and the pill has no business burning a display link on a
             // breathing owl.
             if mood == .idle || mood == .sleepy {
-                TimelineView(.periodic(from: .now, by: 0.5)) { tl in canvas(at: tl.date) }
+                TimelineView(.periodic(from: .now, by: 0.5)) { tl in content(at: tl.date) }
             } else {
-                TimelineView(.animation) { tl in canvas(at: tl.date) }
+                TimelineView(.animation) { tl in content(at: tl.date) }
             }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)   // the owning row carries the label
+        .onAppear { resolvePackageOnce() }
+        .onChange(of: packagePetId) { _ in
+            packageLookupDone = false
+            cachedPackage = nil
+            resolvePackageOnce()
+        }
     }
 
-    private func canvas(at date: Date) -> some View {
+    /// Disk / pet.json resolve — only from appear / packagePetId change.
+    private func resolvePackageOnce() {
+        guard !packageLookupDone else { return }
+        packageLookupDone = true
+        guard let pid = packagePetId, !pid.isEmpty else {
+            cachedPackage = nil
+            return
+        }
+        let mode = CompanionDrawMode.resolve(petId: pid, motion: codexMotion)
+        if case .atlas(let package, _) = mode {
+            cachedPackage = package
+        } else {
+            cachedPackage = nil
+        }
+    }
+
+    @ViewBuilder
+    private func content(at date: Date) -> some View {
+        let t = date.timeIntervalSinceReferenceDate
+        // Prefer atlas only when crop succeeds this frame; otherwise procedural
+        // so a corrupt/missing sheet never blanks the companion.
+        if let package = cachedPackage,
+           let cg = PetAtlasRenderer.frameImage(
+               package: package, motion: codexMotion, tSeconds: t
+           ) {
+            Canvas { ctx, sz in
+                ctx.draw(Image(decorative: cg, scale: 1), in: CGRect(origin: .zero, size: sz))
+            }
+        } else {
+            proceduralCanvas(at: date)
+        }
+    }
+
+    private func proceduralCanvas(at date: Date) -> some View {
         Canvas { ctx, sz in
             let frame = CompanionMotion.frame(
                 kind: kind,
@@ -112,7 +164,9 @@ public struct CompanionGlyph: View {
                           mood: state.mood,
                           agentColor: style.color,
                           size: size,
-                          happyStart: happyStart)
+                          happyStart: happyStart,
+                          codexMotion: state.codexMotion,
+                          packagePetId: PetPackageResolver.defaultPetId)
         } else {
             Image(systemName: state.symbolFallback)
                 .font(.system(size: size * 0.62, weight: .medium))
@@ -235,12 +289,18 @@ public struct CompanionBoardView: View {
                 approvals: [String: Date] = [:],
                 entropyDeltas: [String: Double] = [:],
                 entropyDelta: Double? = nil,
+                pendingAsks: [GateDBReader.PendingAsk] = [],
+                lastOutcomes: [String: String] = [:],
+                activity: [GateDBReader.ActivityEvent] = [],
                 maxRows: Int = 6) {
         self.states = CompanionRoster.build(from: summary,
                                             now: now,
                                             approvals: approvals,
                                             entropyDeltas: entropyDeltas,
-                                            entropyDelta: entropyDelta)
+                                            entropyDelta: entropyDelta,
+                                            pendingAsks: pendingAsks,
+                                            lastOutcomes: lastOutcomes,
+                                            activity: activity)
         self.maxRows = maxRows
     }
 

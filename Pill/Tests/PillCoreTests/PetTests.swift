@@ -547,3 +547,342 @@ final class CompanionRosterTests: XCTestCase {
         XCTAssertTrue(roster.allSatisfy { !$0.mood.claimsWork })
     }
 }
+
+// MARK: - Codex motion vocabulary (atlas responsiveness)
+
+final class PetCodexMotionTests: XCTestCase {
+
+    func testCoreVocabularyPresent() {
+        let labels = Set(PetCodexMotion.core.map(\.rawValue))
+        for name in ["idle", "running", "waiting", "failed", "review"] {
+            XCTAssertTrue(labels.contains(name), "missing \(name)")
+        }
+    }
+
+    func testLiveBusyIsRunning() {
+        let m = PetCodexMotion.map(.init(presence: .live, status: .active))
+        XCTAssertEqual(m, .running)
+        XCTAssertTrue(m.claimsWork)
+    }
+
+    func testLiveBlockedIsWaiting() {
+        XCTAssertEqual(
+            PetCodexMotion.map(.init(presence: .live, status: .blocked)),
+            .waiting
+        )
+    }
+
+    func testPendingAskIsWaiting() {
+        XCTAssertEqual(
+            PetCodexMotion.map(.init(presence: .live, status: .active, hasPendingAsk: true)),
+            .waiting
+        )
+    }
+
+    func testFailedOutcome() {
+        XCTAssertEqual(
+            PetCodexMotion.map(.init(presence: .live, status: .idle, lastOutcome: "failed")),
+            .failed
+        )
+    }
+
+    func testReviewAfterSuccess() {
+        XCTAssertEqual(
+            PetCodexMotion.map(.init(presence: .live, status: .idle, lastOutcome: "success")),
+            .review
+        )
+    }
+
+    func testApprovalIsWaving() {
+        XCTAssertEqual(
+            PetCodexMotion.map(.init(presence: .live, justApproved: true)),
+            .waving
+        )
+    }
+
+    func testCollapseIsFailedAndOutranksApproval() {
+        let m = PetCodexMotion.map(.init(
+            presence: .live, status: .active,
+            justApproved: true, entropyCollapse: true
+        ))
+        XCTAssertEqual(m, .failed)
+    }
+
+    func testObservedBusyNeverClaimsWork() {
+        let m = PetCodexMotion.map(.init(presence: .observed, status: .active))
+        XCTAssertEqual(m, .idle)
+        XCTAssertFalse(m.claimsWork)
+    }
+
+    /// Flip one input → motion label changes (responsiveness).
+    func testFlipStatusChangesMotion() {
+        let busy = PetCodexMotion.map(.init(presence: .live, status: .active))
+        let wait = PetCodexMotion.map(.init(presence: .live, status: .blocked))
+        XCTAssertEqual(busy, .running)
+        XCTAssertEqual(wait, .waiting)
+        XCTAssertNotEqual(busy, wait)
+    }
+
+    func testCompanionStateCarriesCodexMotion() {
+        let state = CompanionState(
+            agent: snapshot(status: .active, presence: .live, secondsAgo: 1)
+        )
+        XCTAssertEqual(state.codexMotion, .running)
+        let idle = CompanionState(
+            agent: snapshot(status: .idle, presence: .observed, secondsAgo: 2)
+        )
+        XCTAssertEqual(idle.codexMotion, .idle)
+    }
+
+    func testMoodBridgeAlertToRunning() {
+        XCTAssertEqual(PetCodexMotion.from(mood: .alert), .running)
+        XCTAssertEqual(PetCodexMotion.from(mood: .wary), .failed)
+        XCTAssertEqual(PetCodexMotion.from(mood: .happy), .waving)
+    }
+}
+
+// MARK: - Atlas frame selection
+
+final class PetAtlasFrameTests: XCTestCase {
+
+    func testGridMatchesCodexV2() {
+        XCTAssertEqual(PetAtlasGrid.columns, 8)
+        XCTAssertEqual(PetAtlasGrid.extendedRows, 11)
+        XCTAssertEqual(PetAtlasGrid.cellWidth, 192)
+        XCTAssertEqual(PetAtlasGrid.cellHeight, 208)
+        XCTAssertEqual(PetAtlasGrid.atlasWidth, 1536)
+        XCTAssertEqual(PetAtlasGrid.extendedHeight, 2288)
+    }
+
+    func testCoreMotionsLandInCorrectRows() {
+        let expected: [String: Int] = [
+            "idle": 0, "running": 7, "waiting": 6, "failed": 5, "review": 8,
+        ]
+        for (motion, row) in expected {
+            let fr = PetAtlasFrame.select(motion: motion, tSeconds: 0)
+            XCTAssertEqual(fr.row, row, motion)
+            XCTAssertGreaterThan(fr.framesInRow, 0)
+            XCTAssertTrue((0 ..< fr.framesInRow).contains(fr.col))
+            XCTAssertEqual(fr.width, 192)
+            XCTAssertEqual(fr.height, 208)
+            XCTAssertEqual(fr.x, fr.col * 192)
+            XCTAssertEqual(fr.y, row * 208)
+        }
+    }
+
+    func testMultiFrameAdvancesWithTime() {
+        let f0 = PetAtlasFrame.select(motion: "idle", tSeconds: 0, fps: 8)
+        let f1 = PetAtlasFrame.select(motion: "idle", tSeconds: 0.2, fps: 8)
+        XCTAssertEqual(f0.frameIndex, 0)
+        XCTAssertEqual(f1.frameIndex, 1)
+        XCTAssertTrue(PetAtlasFrame.advances(motion: "running", from: 0, to: 1, fps: 8))
+        XCTAssertTrue(PetAtlasFrame.advances(motion: "waiting", from: 0, to: 1, fps: 8))
+    }
+
+    func testUnknownFallsBackToIdle() {
+        let fr = PetAtlasFrame.select(motion: "not-a-motion", tSeconds: 0)
+        XCTAssertEqual(fr.motion, "idle")
+        XCTAssertEqual(fr.row, 0)
+    }
+}
+
+// MARK: - Package resolve + procedural fallback
+
+final class PetPackageResolverTests: XCTestCase {
+
+    func testMissingPackageUsesProcedural() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-pet-pkg-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let a = PetPackageResolver.resolve(petId: "does-not-exist", roots: [root])
+        let b = PetPackageResolver.resolve(petId: "does-not-exist", roots: [root])
+        XCTAssertTrue(a.useProcedural)
+        XCTAssertTrue(b.useProcedural)
+        XCTAssertFalse(a.isV2)
+        XCTAssertEqual(a.spriteVersion, 0)
+    }
+
+    func testResolvesV2FixturePackage() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-pet-pkg-\(UUID().uuidString)")
+        let pkgDir = root.appendingPathComponent("fixture-pet")
+        try FileManager.default.createDirectory(at: pkgDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meta: [String: Any] = [
+            "id": "fixture-pet",
+            "displayName": "Fixture Pet",
+            "description": "test",
+            "spriteVersionNumber": 2,
+            "spritesheetPath": "spritesheet.webp",
+        ]
+        let metaData = try JSONSerialization.data(withJSONObject: meta)
+        try metaData.write(to: pkgDir.appendingPathComponent("pet.json"))
+        try Data("RIFF....WEBP".utf8).write(to: pkgDir.appendingPathComponent("spritesheet.webp"))
+
+        let result = PetPackageResolver.resolve(petId: "fixture-pet", roots: [root], requireV2: true)
+        XCTAssertFalse(result.useProcedural)
+        XCTAssertTrue(result.isV2)
+        XCTAssertEqual(result.spriteVersion, 2)
+        XCTAssertEqual(result.displayName, "Fixture Pet")
+        XCTAssertNotNil(result.spritesheetURL)
+
+        let again = PetPackageResolver.resolve(petId: "fixture-pet", roots: [root], requireV2: true)
+        XCTAssertEqual(again.spritesheetURL, result.spritesheetURL)
+    }
+
+    func testMemoryRootIsNotASpritesheetStore() {
+        let mem = PetPackageResolver.agentMemoryRoot()
+        XCTAssertTrue(mem.path.contains("pets"))
+        // Default roots must not equal the memory root path.
+        let roots = PetPackageResolver.defaultRoots()
+        XCTAssertFalse(roots.contains(where: { $0.standardizedFileURL == mem.standardizedFileURL }))
+    }
+
+    func testDrawModeProceduralWithoutPackage() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-pet-empty-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let mode = CompanionDrawMode.resolve(petId: "none", motion: .running, roots: [root])
+        XCTAssertEqual(mode, .procedural)
+        XCTAssertFalse(mode.usesPackage)
+    }
+
+    /// Placeholder / unloadable sheet must not claim atlas mode (no blank UI).
+    func testUnloadableSheetFallsBackToProcedural() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-pet-bad-\(UUID().uuidString)")
+        let pkgDir = root.appendingPathComponent("bad-pet")
+        try FileManager.default.createDirectory(at: pkgDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let meta: [String: Any] = [
+            "id": "bad-pet",
+            "displayName": "Bad",
+            "spriteVersionNumber": 2,
+            "spritesheetPath": "spritesheet.webp",
+        ]
+        try JSONSerialization.data(withJSONObject: meta)
+            .write(to: pkgDir.appendingPathComponent("pet.json"))
+        // Not a real image — NSImage load fails.
+        try Data("not-a-real-image".utf8)
+            .write(to: pkgDir.appendingPathComponent("spritesheet.webp"))
+
+        let mode = CompanionDrawMode.resolve(petId: "bad-pet", motion: .idle, roots: [root])
+        XCTAssertEqual(mode, .procedural, "unloadable sheet must not use atlas mode")
+
+        let pkg = PetPackageResolver.resolve(petId: "bad-pet", roots: [root], requireV2: true)
+        // Metadata may resolve, but renderer must refuse to draw.
+        if !pkg.useProcedural {
+            XCTAssertFalse(PetAtlasRenderer.isDrawable(package: pkg))
+            XCTAssertNil(PetAtlasRenderer.frameImage(package: pkg, motion: .idle, tSeconds: 0))
+        }
+    }
+}
+
+// MARK: - Roster pending ask / outcome → Codex motion
+
+final class CompanionRosterCodexMotionTests: XCTestCase {
+
+    func testPendingAskDrivesWaitingMotion() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snapshot(id: "science", status: .active, presence: .live, secondsAgo: 1, now: now),
+            snapshot(id: "codex", status: .idle, presence: .live, secondsAgo: 2, now: now),
+        ], scannedAt: now)
+        let asks = [
+            GateDBReader.PendingAsk(
+                interactionId: "ask-1",
+                agentId: "science",
+                prompt: "Approve Softβ?",
+                createdAt: now
+            ),
+        ]
+        let roster = CompanionRoster.build(
+            from: summary, now: now, pendingAsks: asks
+        )
+        let byID = Dictionary(uniqueKeysWithValues: roster.map { ($0.id, $0) })
+        XCTAssertEqual(byID["science"]?.codexMotion, .waiting,
+                       "open ask must map to waiting")
+        XCTAssertEqual(byID["codex"]?.codexMotion, .idle)
+    }
+
+    func testActivityCompletionDrivesReviewMotion() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snapshot(id: "science", status: .idle, presence: .live, secondsAgo: 1, now: now),
+        ], scannedAt: now)
+        let activity = [
+            GateDBReader.ActivityEvent(
+                id: 1,
+                agentId: "science",
+                at: now.addingTimeInterval(-5),
+                type: "task_complete",
+                label: "all tests passed",
+                output: "ready for review"
+            ),
+        ]
+        let roster = CompanionRoster.build(
+            from: summary, now: now, activity: activity
+        )
+        XCTAssertEqual(roster.first?.codexMotion, .review)
+    }
+
+    func testActivityFailureDrivesFailedMotion() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snapshot(id: "science", status: .idle, presence: .live, secondsAgo: 1, now: now),
+        ], scannedAt: now)
+        let activity = [
+            GateDBReader.ActivityEvent(
+                id: 2,
+                agentId: "science",
+                at: now.addingTimeInterval(-2),
+                type: "error",
+                label: "build failed",
+                output: "exit 1"
+            ),
+        ]
+        let roster = CompanionRoster.build(
+            from: summary, now: now, activity: activity
+        )
+        XCTAssertEqual(roster.first?.codexMotion, .failed)
+    }
+
+    func testExplicitOutcomeWinsOverActivity() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snapshot(id: "science", status: .idle, presence: .live, secondsAgo: 1, now: now),
+        ], scannedAt: now)
+        let activity = [
+            GateDBReader.ActivityEvent(
+                id: 3, agentId: "science", at: now,
+                type: "task_complete", label: "done", output: ""
+            ),
+        ]
+        let roster = CompanionRoster.build(
+            from: summary, now: now,
+            lastOutcomes: ["science": "failed"],
+            activity: activity
+        )
+        XCTAssertEqual(roster.first?.codexMotion, .failed)
+    }
+
+    func testOutcomeHintMergeIsPure() {
+        let now = Date()
+        let ev = GateDBReader.ActivityEvent(
+            id: 9, agentId: "codex", at: now,
+            type: "task_complete", label: "done", output: ""
+        )
+        let merged = CompanionRoster.mergeOutcomes(
+            explicit: ["science": "failed"],
+            activity: [ev],
+            now: now
+        )
+        XCTAssertEqual(merged["science"], "failed")
+        XCTAssertEqual(merged["codex"], "review")
+    }
+}

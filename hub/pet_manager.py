@@ -22,6 +22,8 @@ Standalone CLI
 --------------
   python pet_manager.py status [agent_id]
   python pet_manager.py mood <agent_id>
+  python pet_manager.py motion <agent_id> [--presence live] [--status active] …
+  python pet_manager.py package [pet_id]   # resolve Codex v2 atlas package
   python pet_manager.py set-task <agent_id> "<task summary>"
   python pet_manager.py mark-idle <agent_id>
   python pet_manager.py log-history <agent_id> '<json line>'
@@ -556,6 +558,36 @@ def _cli_main() -> None:
     md = sub.add_parser("mood", help="Print the pet's coarse mood label")
     md.add_argument("agent_id", choices=ALL_AGENTS)
 
+    mo = sub.add_parser(
+        "motion",
+        help="Codex-aligned motion label from signals (or derived from pet state)",
+    )
+    mo.add_argument("agent_id", choices=ALL_AGENTS)
+    mo.add_argument("--presence", default=None, help="live|offline|observed")
+    mo.add_argument("--status", default=None, help="active|mid_task|idle|blocked|…")
+    mo.add_argument("--pending-ask", action="store_true")
+    mo.add_argument("--outcome", default=None, help="success|failed|review|…")
+    mo.add_argument("--approved", action="store_true")
+    mo.add_argument("--collapse", action="store_true")
+    mo.add_argument("--json", action="store_true")
+
+    pk = sub.add_parser(
+        "package",
+        help="Resolve a Codex v2 pet package (spritesheet) or procedural fallback",
+    )
+    pk.add_argument("pet_id", nargs="?", default="shannon")
+    pk.add_argument("--json", action="store_true")
+    pk.add_argument("--list", action="store_true", help="List discoverable packages")
+
+    fr = sub.add_parser(
+        "frame",
+        help="Select atlas cell for a Codex motion at time t (pure math)",
+    )
+    fr.add_argument("motion", help="idle|running|waiting|failed|review|…")
+    fr.add_argument("--t", type=float, default=0.0, help="seconds into the animation")
+    fr.add_argument("--fps", type=float, default=8.0)
+    fr.add_argument("--json", action="store_true")
+
     st = sub.add_parser("set-task", help="Mark agent as active with a task")
     st.add_argument("agent_id", choices=ALL_AGENTS)
     st.add_argument("task")
@@ -586,6 +618,81 @@ def _cli_main() -> None:
 
     elif args.cmd == "mood":
         print(pm.mood(args.agent_id))
+
+    elif args.cmd == "motion":
+        from pet_codex_motion import PetMotionSignals, map_pet_motion
+
+        state = pm.read_state(args.agent_id)
+        presence = args.presence or (
+            "live" if state.status in ("active", "mid_task") and not (
+                getattr(state, "source", "") in OBSERVED_MARKERS
+                or state.status in OBSERVED_MARKERS
+            ) else "observed"
+        )
+        status = args.status or state.status
+        sig = PetMotionSignals(
+            presence=presence,
+            status=status,
+            has_pending_ask=bool(args.pending_ask),
+            last_outcome=args.outcome,
+            just_approved=bool(args.approved),
+            entropy_collapse=bool(args.collapse),
+        )
+        motion = map_pet_motion(sig)
+        if args.json:
+            print(json.dumps({
+                "agent_id": args.agent_id,
+                "motion": motion,
+                "presence": presence,
+                "status": status,
+                "mood": pm.mood(args.agent_id),
+            }))
+        else:
+            print(motion)
+
+    elif args.cmd == "package":
+        from pet_package import list_pet_packages, resolve_pet_package
+
+        if args.list:
+            found = list_pet_packages()
+            if args.json:
+                print(json.dumps([p.to_dict() for p in found], indent=2))
+            else:
+                for p in found:
+                    print(f"  {p.pet_id:20} v{p.sprite_version}  {p.spritesheet_path}")
+                if not found:
+                    print("(no packages found)")
+        else:
+            result = resolve_pet_package(args.pet_id)
+            if args.json:
+                print(json.dumps(result.to_dict(), indent=2))
+            else:
+                if result.use_procedural:
+                    print(f"procedural  pet_id={result.pet_id}  ({'; '.join(result.notes)})")
+                else:
+                    print(
+                        f"package  id={result.pet_id}  v{result.sprite_version}  "
+                        f"sheet={result.spritesheet_path}"
+                    )
+
+    elif args.cmd == "frame":
+        from pet_atlas import select_frame
+
+        fr_sel = select_frame(args.motion, args.t, fps=args.fps)
+        if args.json:
+            print(json.dumps({
+                "motion": fr_sel.motion,
+                "row": fr_sel.row,
+                "col": fr_sel.col,
+                "frame_index": fr_sel.frame_index,
+                "frames_in_row": fr_sel.frames_in_row,
+                "rect": list(fr_sel.rect),
+            }))
+        else:
+            print(
+                f"{fr_sel.motion}  row={fr_sel.row} col={fr_sel.col}  "
+                f"rect={fr_sel.rect}  frames={fr_sel.frames_in_row}"
+            )
 
     elif args.cmd == "status":
         s = pm.read_state(args.agent_id)

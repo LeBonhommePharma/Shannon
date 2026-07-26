@@ -941,6 +941,8 @@ struct PillView: View {
                 CompanionBoardView(
                     summary: summary,
                     entropyDeltas: agentCompanionDeltas,
+                    pendingAsks: activity.pendingAsks,
+                    activity: activity.recentActivity,
                     maxRows: busy.isEmpty ? 3 : 4
                 )
             } else {

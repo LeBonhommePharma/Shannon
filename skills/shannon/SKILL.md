@@ -2,15 +2,16 @@
 name: shannon
 description: >
   Shannon hub agent manager handrail — Shannon owns FlexAIDdS benchmark
-  campaign orchestration and delegates collaborative agents (Codex, Claude Code,
-  Claude Science, Claude Cowork, Dispatch, Design, Grok Build, OpenCode,
+  campaign orchestration and Claude Code ↔ Codex pair work (half-and-half
+  implement + cross-review), and delegates collaborative agents (Codex, Claude
+  Code, Claude Science, Claude Cowork, Dispatch, Design, Grok Build, OpenCode,
   DatasetRunner) through the Shannon Gate regardless of which upstream model API
-  they use. Use for multi-agent FlexAIDdS benchmarking ownership, campaign
+  they use. Use for multi-agent FlexAIDdS ownership, pair/cross-review
   plan/delegate, hub attach, gate status, approval asks, and when any agent must
   report lifecycle/status/results to the Shannon pill.
   Triggers: /shannon, "shannon hub", "attach agent", "spawn agent",
-  "monitor agents", "kill agent", "campaign", "delegate", concurrent agentic
-  benchmarking.
+  "monitor agents", "kill agent", "campaign", "delegate", "pair",
+  "cross-review", concurrent agentic benchmarking.
 ---
 
 # Shannon — Hub Agent Handrail
@@ -18,16 +19,18 @@ description: >
 **Shannon owns multi-agent workstreams — especially FlexAIDdS benchmarking.**
 Upstream models (Claude, Codex, Grok, OpenCode, …) may use any API endpoint.
 They must still be **delegated through this skill** (spawn / control / monitor /
-ask / result / kill / campaign / delegate) so concurrent work stays observable,
-gated, and killable from one place (pill + gate + this skill).
+ask / result / kill / campaign / delegate / **pair**) so concurrent work stays
+observable, gated, and killable from one place (pill + gate + this skill).
 
 Agents must **not** invent a parallel orchestration workflow. If Shannon has not
-planned the campaign and delegated your role, do not dual-launch a heavy docking
-arm.
+planned the campaign or pair and delegated your role, do not freestyle dual
+owners or dual reviewers.
 
 ## When to use
 
 - **Owning** a FlexAIDdS / Astex / red-pair benchmark campaign (Shannon plans it)
+- **Pair work:** Claude Code ↔ Codex half-and-half implement, or cross-review
+  (Codex reviews Claude’s slice and vice-versa)
 - Delegating science / code / dispatch agents into campaign roles
 - Starting or joining a multi-agent session through the hub
 - Reporting progress, results, or approval needs to the human via the pill
@@ -37,13 +40,14 @@ arm.
 ## Hard rules
 
 1. **Shannon owns the campaign plan.** Use `campaign` (dry-run OK) before multi-agent docking work.
-2. **Register before heavy work.** `spawn` (or attach) your agent id + **campaign task id**.
-3. **Status heartbeats** on long runs (`control` every meaningful phase: A → B0 → B).
-4. **Results go through the gate** (`result`) — entropy-scored, audited; never invent CF/RMSD/H.
-5. **Human approvals** via `ask` — never silent force-push of gated actions.
-6. **Detach on exit** (`kill`) so the pill does not show ghost agents.
-7. **No dual heavy docking owner.** `dataset_runner` is the sole docking owner role; `monitor` first. The CLI **refuses** a second heavy owner when monitor/connected state already shows one.
-8. Shannon does **not** replace host process kill (⌘C / TUI cancel). `kill` is hub detach; pair with host-native cancel when stopping compute.
+2. **Shannon owns Claude Code ↔ Codex pair plans.** Use `pair --pair-mode …` (not freestyle dual implementers/reviewers). Flag is **`--pair-mode`** — common `--mode` is only `socket|http`.
+3. **Register before heavy work.** `spawn` (or attach) your agent id + **campaign/pair task id**.
+4. **Status heartbeats** on long runs (`control` every meaningful phase: A → B0 → B, or implement/review slices).
+5. **Results go through the gate** (`result`) — entropy-scored, audited; never invent CF/RMSD/H or review findings.
+6. **Human approvals** via `ask` — never silent force-push of gated actions.
+7. **Detach on exit** (`kill`) so the pill does not show ghost agents.
+8. **No dual heavy docking owner.** `dataset_runner` is the sole docking owner role; `monitor` first. The CLI **refuses** a second heavy owner when monitor/connected state already shows one.
+9. Shannon does **not** replace host process kill (⌘C / TUI cancel). `kill` is hub detach; use host-native cancel when stopping compute.
 
 ## Canonical agent ids
 
@@ -92,6 +96,23 @@ python3 -m agent_manager campaign --connected dataset_runner --dry-run --json
 # Single role under Shannon ownership
 python3 -m agent_manager delegate science --task flexaidds_redpair_YYYYMMDD --dry-run --json
 
+# ── Claude Code ↔ Codex pair (Shannon-owned; no gate for dry-run) ──
+# Half-and-half implement (slice_a / slice_b)
+python3 -m agent_manager pair --pair-mode implement_pair \
+  --task pair_auth_YYYYMMDD --summary "Auth middleware + tests" --dry-run --json
+
+# Mutual cross-review (each implements one slice and reviews the other)
+python3 -m agent_manager pair --pair-mode cross_review \
+  --task pair_xr_YYYYMMDD --summary "Feature X" --dry-run --json
+
+# Claude implements full; Codex reviews
+python3 -m agent_manager pair --pair-mode claude_implements \
+  --task pair_ci_YYYYMMDD --summary "Implement feature" --dry-run --json
+
+# Codex implements full; Claude reviews
+python3 -m agent_manager pair --pair-mode codex_implements \
+  --task pair_xi_YYYYMMDD --summary "Implement feature" --dry-run --json
+
 # Lifecycle (dry-run / offline)
 python3 -m agent_manager spawn science --dry-run --json
 python3 -m agent_manager control science "docking 1ACJ" --task TASK --dry-run
@@ -115,6 +136,7 @@ which bootstraps the macOS app):
 ```bash
 ./scripts/shannon agent roster
 ./scripts/shannon agent campaign --dry-run --json
+./scripts/shannon agent pair --pair-mode implement_pair --task pair_t1 --dry-run --json
 ./scripts/shannon agent spawn science --dry-run
 ./scripts/shannon agent monitor
 ./scripts/shannon agent control science "phase A" --task TASK --dry-run
@@ -139,6 +161,8 @@ Installs into (when present):
 
 ## Session protocol (copy into agent system notes)
 
+**Campaign (FlexAIDdS / multi-agent docking):**
+
 ```
 1. SHANNON_ROOT = path to Shannon checkout
 2. PYTHONPATH=$SHANNON_ROOT/hub
@@ -148,6 +172,28 @@ Installs into (when present):
 6. loop: control … / result … / ask … as needed (phases A → B0 → B)
 7. kill <your_agent_id> --task $task_id on exit (success or fail)
 ```
+
+**Pair (Claude Code ↔ Codex):**
+
+```
+1. SHANNON_ROOT + PYTHONPATH as above
+2. Shannon plans pair: agent_manager pair --pair-mode <mode> --task $task_id --dry-run --json
+3. Read assignments (role=implement|review, slice=slice_a|slice_b|full)
+4. spawn claude_code --task $task_id  AND  spawn codex --task $task_id
+5. loop: control (implement/review phases) / result (real findings only) / ask (risky merges)
+6. kill both agents on the same task_id when done
+```
+
+## Claude Code ↔ Codex pair work
+
+Canonical detail: **`references/pair_work.md`** (part of this **SKILL**). Summary:
+
+- **Shannon owns** the pair plan: `pair --pair-mode … --dry-run --json`.
+- Modes: `implement_pair` (half-and-half), `cross_review` (vice-versa review),
+  `claude_implements`, `codex_implements`, `implement_only`.
+- Shared `task_id`; roles are `implement` / `review` with slice labels — not
+  automatic file splits; host TUIs do the real work after `spawn`.
+- Plan JSON never invents review text or code (`fabricated_*` always null).
 
 ## FlexAIDdS concurrent benchmarking
 
@@ -165,6 +211,7 @@ See `references/flexaidds.md`. Summary:
 | `gate offline` | `./scripts/shannon gate` or start hub; pill may auto-ensure |
 | `Unknown agent_id` | Use roster ids; add identity in `hub/agent_identity.py` if new host |
 | Campaign refused (exit 3) | Heavy owner already online — monitor / kill existing, then re-plan |
+| `pair` argparse conflict | Use **`--pair-mode`**, not `--mode` (`--mode` is socket\|http only) |
 | Ghost agent on pill | `kill` with same task_id; or wait for heartbeat expiry |
 | Approval stuck | Human answers in pill; agent must not invent approval |
 
@@ -174,7 +221,9 @@ See `references/flexaidds.md`. Summary:
 |-------|------|
 | Gate daemon | `hub/shannon_gate.py` |
 | Client | `hub/agent_protocol.py` |
-| Lifecycle + **campaign ownership** | `hub/agent_manager.py` |
+| Lifecycle + **campaign + pair ownership** | `hub/agent_manager.py` |
 | Identities | `hub/agent_identity.py` |
 | macOS pill | `Pill/` |
-| This skill | `skills/shannon/` |
+| This **SKILL** | `skills/shannon/SKILL.md` |
+| Pair reference | `skills/shannon/references/pair_work.md` |
+| FlexAIDdS campaign reference | `skills/shannon/references/flexaidds.md` |

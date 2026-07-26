@@ -577,6 +577,337 @@ def plan_benchmark_campaign(
     )
 
 
+# ── Claude Code ↔ Codex pair work (half-and-half + cross-review) ─────────────
+
+# Default coding pair for Shannon-owned dual-agent tasks.
+PAIR_AGENT_A = "claude_code"
+PAIR_AGENT_B = "codex"
+
+# Modes for plan_pair_work (skill-aligned).
+PAIR_MODES: frozenset[str] = frozenset(
+    {
+        "implement_pair",  # both implement half-and-half
+        "cross_review",  # mutual: each reviews the other's implement slice
+        "claude_implements",  # Claude implements; Codex reviews
+        "codex_implements",  # Codex implements; Claude reviews
+        "implement_only",  # single agent implements (not a pair requirement)
+    }
+)
+
+
+@dataclass(frozen=True)
+class PairWorkPlan:
+    """Shannon-owned dual-agent coding plan (Claude Code ↔ Codex). Pure."""
+
+    action: str  # always "pair"
+    mode: str
+    task_id: str
+    summary: str
+    assignments: tuple[dict[str, Any], ...]
+    refused: bool = False
+    refuse_reason: str = ""
+    notes: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "action": self.action,
+            "mode": self.mode,
+            "task_id": self.task_id,
+            "summary": self.summary,
+            "assignments": [dict(a) for a in self.assignments],
+            "refused": self.refused,
+            "refuse_reason": self.refuse_reason or None,
+            "notes": list(self.notes),
+            "ok": not self.refused,
+            # Role/slice assignment only — never invent review text or code.
+            "fabricated_review": None,
+            "fabricated_code": None,
+            "agents": sorted(
+                {
+                    str(a.get("agent_id"))
+                    for a in self.assignments
+                    if a.get("agent_id")
+                }
+            ),
+        }
+
+
+def _pair_assignment(
+    agent_id: str,
+    role: str,
+    slice_label: str,
+    task_id: str,
+    *,
+    mode: str = "socket",
+    reason: str = "pair_work",
+    reviews_agent: Optional[str] = None,
+    implements_with: Optional[str] = None,
+) -> dict[str, Any]:
+    """One inspectable assignment + lifecycle spawn plan under shared task id."""
+    aid = normalize_agent_id(agent_id)
+    spawn = plan_spawn(
+        aid,
+        task_id,
+        mode=mode,
+        reason=reason,
+        details={
+            "pair_role": role,
+            "slice": slice_label,
+            "shannon_owned": True,
+            "pair_work": True,
+            **({"reviews_agent": reviews_agent} if reviews_agent else {}),
+            **({"implements_with": implements_with} if implements_with else {}),
+        },
+    )
+    return {
+        "agent_id": aid,
+        "role": role,  # implement | review
+        "slice": slice_label,
+        "reviews_agent": reviews_agent,
+        "implements_with": implements_with,
+        "plan": spawn.as_dict(),
+    }
+
+
+def plan_pair_work(
+    mode: str = "implement_pair",
+    task_id: Optional[str] = None,
+    *,
+    summary: str = "",
+    agent_a: str = PAIR_AGENT_A,
+    agent_b: str = PAIR_AGENT_B,
+    socket_mode: str = "socket",
+) -> PairWorkPlan:
+    """
+    Shannon-owned Claude Code ↔ Codex pair plan.
+
+    Modes
+    -----
+    implement_pair
+        Both implement half-and-half (slice_a / slice_b). Shared task id.
+    cross_review
+        Mutual: A implements slice_a and reviews B's slice_b; B implements
+        slice_b and reviews A's slice_a (vice-versa review).
+    claude_implements
+        Claude Code implements full task; Codex reviews.
+    codex_implements
+        Codex implements full task; Claude Code reviews.
+    implement_only
+        Single agent (agent_a) implements — not a pair requirement.
+
+    Pure: no gate, no host TUI launch, no invented review text or code.
+    """
+    m = (mode or "implement_pair").strip().lower().replace("-", "_").replace(" ", "_")
+    # Aliases
+    aliases = {
+        "pair": "implement_pair",
+        "half": "implement_pair",
+        "half_and_half": "implement_pair",
+        "mutual_review": "cross_review",
+        "cross": "cross_review",
+        "claude_impl": "claude_implements",
+        "codex_impl": "codex_implements",
+        "solo": "implement_only",
+        "single": "implement_only",
+    }
+    m = aliases.get(m, m)
+
+    notes = (
+        "Shannon owns this pair plan — agents only act via skill/CLI lifecycle.",
+        "Half-and-half is a role/slice assignment, not automatic file partitioning.",
+        "No fabricated review comments or code in the plan — agents produce those live.",
+    )
+    tid = task_id or default_task_id("pair")
+    a = normalize_agent_id(agent_a)
+    b = normalize_agent_id(agent_b)
+    title = (summary or "").strip() or "pair work"
+
+    if m not in PAIR_MODES:
+        return PairWorkPlan(
+            action="pair",
+            mode=m,
+            task_id=tid,
+            summary=title,
+            assignments=(),
+            refused=True,
+            refuse_reason=(
+                f"Unknown pair mode {m!r}; use one of: "
+                + ", ".join(sorted(PAIR_MODES))
+            ),
+            notes=notes,
+        )
+
+    if m != "implement_only" and a == b:
+        return PairWorkPlan(
+            action="pair",
+            mode=m,
+            task_id=tid,
+            summary=title,
+            assignments=(),
+            refused=True,
+            refuse_reason=(
+                "Pair mode requires two distinct agents "
+                f"(got {a!r} twice). Use implement_only for a single agent."
+            ),
+            notes=notes,
+        )
+
+    assignments: list[dict[str, Any]] = []
+
+    if m == "implement_pair":
+        assignments.append(
+            _pair_assignment(
+                a,
+                "implement",
+                "slice_a",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:implement:{title[:40]}",
+                implements_with=b,
+            )
+        )
+        assignments.append(
+            _pair_assignment(
+                b,
+                "implement",
+                "slice_b",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:implement:{title[:40]}",
+                implements_with=a,
+            )
+        )
+    elif m == "cross_review":
+        # Each implements one slice and reviews the other.
+        assignments.append(
+            _pair_assignment(
+                a,
+                "implement",
+                "slice_a",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:impl_cross:{title[:40]}",
+                implements_with=b,
+            )
+        )
+        assignments.append(
+            _pair_assignment(
+                b,
+                "implement",
+                "slice_b",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:impl_cross:{title[:40]}",
+                implements_with=a,
+            )
+        )
+        assignments.append(
+            _pair_assignment(
+                a,
+                "review",
+                "slice_b",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:review_cross:{title[:40]}",
+                reviews_agent=b,
+            )
+        )
+        assignments.append(
+            _pair_assignment(
+                b,
+                "review",
+                "slice_a",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:review_cross:{title[:40]}",
+                reviews_agent=a,
+            )
+        )
+    elif m == "claude_implements":
+        # Force Claude as implementer, Codex as reviewer regardless of agent_a/b
+        # order when defaults used; still respect explicit agent_a/agent_b if set
+        # to claude_code/codex.
+        impl, rev = a, b
+        if a == PAIR_AGENT_B and b == PAIR_AGENT_A:
+            impl, rev = PAIR_AGENT_A, PAIR_AGENT_B
+        elif "claude" in a or a == PAIR_AGENT_A:
+            impl, rev = a, b
+        elif "codex" in a or a == PAIR_AGENT_B:
+            impl, rev = b, a
+        else:
+            impl, rev = PAIR_AGENT_A, PAIR_AGENT_B
+        assignments.append(
+            _pair_assignment(
+                impl,
+                "implement",
+                "full",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:claude_impl:{title[:40]}",
+            )
+        )
+        assignments.append(
+            _pair_assignment(
+                rev,
+                "review",
+                "full",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:codex_review:{title[:40]}",
+                reviews_agent=impl,
+            )
+        )
+    elif m == "codex_implements":
+        impl, rev = PAIR_AGENT_B, PAIR_AGENT_A
+        if a == PAIR_AGENT_B or "codex" in a:
+            impl, rev = a, b
+        elif b == PAIR_AGENT_B or "codex" in b:
+            impl, rev = b, a
+        assignments.append(
+            _pair_assignment(
+                impl,
+                "implement",
+                "full",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:codex_impl:{title[:40]}",
+            )
+        )
+        assignments.append(
+            _pair_assignment(
+                rev,
+                "review",
+                "full",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:claude_review:{title[:40]}",
+                reviews_agent=impl,
+            )
+        )
+    else:  # implement_only
+        assignments.append(
+            _pair_assignment(
+                a,
+                "implement",
+                "full",
+                tid,
+                mode=socket_mode,
+                reason=f"pair:solo:{title[:40]}",
+            )
+        )
+
+    return PairWorkPlan(
+        action="pair",
+        mode=m,
+        task_id=tid,
+        summary=title,
+        assignments=tuple(assignments),
+        refused=False,
+        refuse_reason="",
+        notes=notes,
+    )
+
+
 def format_monitor_report(
     connected: list[str],
     recent: list[dict[str, Any]],
@@ -881,6 +1212,44 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     dlg.add_argument("--dry-run", action="store_true")
 
+    # Claude Code ↔ Codex pair work (half-and-half implement + cross-review).
+    pr = sub.add_parser(
+        "pair",
+        parents=[common],
+        help="Plan Shannon-owned Claude Code ↔ Codex pair work (implement/review)",
+    )
+    pr.add_argument(
+        "--pair-mode",
+        default="implement_pair",
+        dest="pair_mode",
+        help=(
+            "implement_pair | cross_review | claude_implements | "
+            "codex_implements | implement_only "
+            "(not --mode: that is socket|http on common flags)"
+        ),
+    )
+    pr.add_argument("--task", default=None, help="Shared task id (auto if omitted)")
+    pr.add_argument(
+        "--summary",
+        default="",
+        help="Short description of the work (no code/review body inventing)",
+    )
+    pr.add_argument(
+        "--agent-a",
+        default=PAIR_AGENT_A,
+        help=f"First agent id (default {PAIR_AGENT_A})",
+    )
+    pr.add_argument(
+        "--agent-b",
+        default=PAIR_AGENT_B,
+        help=f"Second agent id (default {PAIR_AGENT_B})",
+    )
+    pr.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print pure plan only (always safe; no gate)",
+    )
+
     args = p.parse_args(argv)
     mgr = AgentManager(mode=args.mode, http_url=args.http_url, socket_path=args.socket)
 
@@ -1010,6 +1379,18 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
             out(result)
             return 0 if result.get("ok") else 3
+
+        if args.cmd == "pair":
+            plan = plan_pair_work(
+                getattr(args, "pair_mode", "implement_pair"),
+                args.task,
+                summary=getattr(args, "summary", "") or "",
+                agent_a=getattr(args, "agent_a", PAIR_AGENT_A),
+                agent_b=getattr(args, "agent_b", PAIR_AGENT_B),
+                socket_mode=args.mode,
+            )
+            out(plan.as_dict())
+            return 0 if not plan.refused else 3
     except ConnectionError as exc:
         out({"ok": False, "error": f"gate offline: {exc}"})
         return 1

@@ -433,6 +433,8 @@ public struct CompanionState: Sendable, Equatable, Identifiable {
     /// The pet name as branded in `AgentStyle` / `hub/agent_identity.py`.
     public let petName: String
     public let mood: CompanionMood
+    /// Codex-aligned motion for atlas frames / richer responsiveness.
+    public let codexMotion: PetCodexMotion
     public let bond: CompanionBond
     /// Seconds since the approval driving `happy`, or nil.
     public let happyElapsed: Double?
@@ -440,7 +442,9 @@ public struct CompanionState: Sendable, Equatable, Identifiable {
     public init(agent: AgentActivitySnapshot,
                 now: Date = Date(),
                 approvedAt: Date? = nil,
-                entropyDelta: Double? = nil) {
+                entropyDelta: Double? = nil,
+                hasPendingAsk: Bool = false,
+                lastOutcome: String? = nil) {
         let style = AgentStyleCatalog.style(for: agent.id)
         self.agent          = agent
         self.kind           = CompanionKind(petName: style.pet)
@@ -449,6 +453,14 @@ public struct CompanionState: Sendable, Equatable, Identifiable {
         self.mood           = CompanionMood.resolve(for: agent, now: now,
                                                     approvedAt: approvedAt,
                                                     entropyDelta: entropyDelta)
+        self.codexMotion    = PetCodexMotion.resolve(
+            for: agent,
+            now: now,
+            approvedAt: approvedAt,
+            hasPendingAsk: hasPendingAsk,
+            lastOutcome: lastOutcome,
+            entropyDelta: entropyDelta
+        )
         self.bond           = CompanionBond.from(historyCount: agent.historyCount)
         self.happyElapsed   = approvedAt.map { max(0, now.timeIntervalSince($0)) }
     }
@@ -485,12 +497,26 @@ public enum CompanionRoster {
     /// - Parameter entropyDelta: legacy single delta applied to every live
     ///   agent when that agent has no entry in `entropyDeltas`. Pass nil when
     ///   nothing measured is available.
+    /// - Parameter pendingAsks: open gate approvals. Agents with a live ask
+    ///   get `hasPendingAsk` so `PetCodexMotion` maps to **waiting**.
+    /// - Parameter lastOutcomes: optional per-agent outcome (`success` /
+    ///   `failed` / `review` / …). When empty, outcomes are inferred from
+    ///   recent `activity` events when provided.
+    /// - Parameter activity: recent gate activity; used to infer review/failed
+    ///   outcomes for Codex motion when `lastOutcomes` has no entry.
     public static func build(from summary: AgentActivitySummary,
                              now: Date = Date(),
                              approvals: [String: Date] = [:],
                              entropyDeltas: [String: Double] = [:],
-                             entropyDelta: Double? = nil) -> [CompanionState] {
-        summary.agents
+                             entropyDelta: Double? = nil,
+                             pendingAsks: [GateDBReader.PendingAsk] = [],
+                             lastOutcomes: [String: String] = [:],
+                             activity: [GateDBReader.ActivityEvent] = []) -> [CompanionState] {
+        let askAgents = Set(pendingAsks.map(\.agentId))
+        let inferred = activity.isEmpty
+            ? lastOutcomes
+            : mergeOutcomes(explicit: lastOutcomes, activity: activity, now: now)
+        return summary.agents
             .map { agent in
                 let perAgent = entropyDeltas[agent.id]
                 let shared = entropyDelta
@@ -499,18 +525,74 @@ public enum CompanionRoster {
                     if let perAgent { return perAgent }
                     return shared
                 }()
-                return CompanionState(agent: agent,
-                                      now: now,
-                                      approvedAt: approvals[agent.id],
-                                      entropyDelta: delta)
+                return CompanionState(
+                    agent: agent,
+                    now: now,
+                    approvedAt: approvals[agent.id],
+                    entropyDelta: delta,
+                    hasPendingAsk: askAgents.contains(agent.id),
+                    lastOutcome: inferred[agent.id]
+                )
             }
             .sorted { l, r in
+                // Waiting for human (pending ask) ranks with work for board order.
+                let lw = l.codexMotion == .waiting || l.mood.claimsWork
+                let rw = r.codexMotion == .waiting || r.mood.claimsWork
+                if lw != rw { return lw }
                 let lb = l.mood.claimsWork, rb = r.mood.claimsWork
                 if lb != rb { return lb }
                 let ll = l.agent.presence == .live, rl = r.agent.presence == .live
                 if ll != rl { return ll }
                 return l.agent.updatedAt > r.agent.updatedAt
             }
+    }
+
+    /// Infer per-agent last outcome from the newest activity event.
+    /// Explicit `lastOutcomes` always wins.
+    public static func mergeOutcomes(
+        explicit: [String: String],
+        activity: [GateDBReader.ActivityEvent],
+        now: Date = Date()
+    ) -> [String: String] {
+        var out = explicit
+        // Newest event per agent.
+        var newest: [String: GateDBReader.ActivityEvent] = [:]
+        for ev in activity {
+            if let prev = newest[ev.agentId] {
+                if ev.at > prev.at { newest[ev.agentId] = ev }
+            } else {
+                newest[ev.agentId] = ev
+            }
+        }
+        for (agentId, ev) in newest {
+            if out[agentId] != nil { continue }
+            if let hint = outcomeHint(from: ev, now: now) {
+                out[agentId] = hint
+            }
+        }
+        return out
+    }
+
+    /// Map a gate activity row onto a Codex outcome label, or nil.
+    public static func outcomeHint(
+        from event: GateDBReader.ActivityEvent,
+        now: Date = Date()
+    ) -> String? {
+        // Reuse finished window from live surface so review fades honestly.
+        let age = now.timeIntervalSince(event.at)
+        guard age >= 0, age <= AgentLiveSurfaceLogic.finishedFreshSeconds else { return nil }
+        let t = event.type.lowercased()
+        let blob = "\(event.type) \(event.label) \(event.output)".lowercased()
+        if t.contains("fail") || t.contains("error")
+            || blob.contains("failed") || blob.contains("error") {
+            return "failed"
+        }
+        if AgentLiveSurfaceLogic.isCompletion(event: event, now: now)
+            || t == "task_complete" || t == "completed" || t == "done" || t == "finish"
+            || t == "result" {
+            return "review"
+        }
+        return nil
     }
 }
 

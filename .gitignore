@@ -50,3 +50,6 @@ Pill/DerivedData/
 # fastlane run output
 fastlane/report.xml
 fastlane/README.md
+
+# Local planning notes (not shipped)
+SHANNON_PARITY_ROADMAP.md

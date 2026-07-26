@@ -2832,8 +2832,9 @@ class ShannonGate:
 
         # ── 6c. Behavioural entropy (SHANNON_BEHAVIOR) — PRIMARY by default ──
         # Feeds action-type stream into BehavioralMonitor (per-agent baseline).
-        # Danger: high anomaly score OR collapsed action efficiency (low H).
-        # Observe annotates; enforce escalates pass→flagged. Never silent-drop.
+        # Enforce escalates only on high anomaly score (baseline_ready &&
+        # score ≥ FLAG). Absolute low efficiency is observe-annotate only.
+        # Never silent-drop reasons.
         if BEHAVIOR_MODE != "off" and self._behavior is not None:
             try:
                 ts = int(msg.timestamp_ns) if msg.timestamp_ns else time.time_ns()

@@ -217,6 +217,65 @@ class TestBehavioralWireSmoke:
         )
         assert sg.registry_entropy_score(d) == pytest.approx(3.5)
 
+    def test_registry_monotype_with_positive_score_still_falls_through(self):
+        """Burstiness alone (score>0, eff=0, H=0) must not publish HUD zero.
+
+        Skeptic: alternating inter-arrival gaps make score>0 while K=1 keeps
+        action H at 0. Preferring H=0 reintroduces monotype false-collapse.
+        """
+        d = sg.GateDecision(
+            decision="flagged",
+            reasons=["behavior_observe:score=0.42"],
+            computed_H=3.1,
+            computed_D=0.0,
+            behavior_entropy_bits=0.0,
+            behavior_n_events=8,
+            behavior_efficiency=0.0,
+            behavior_score=0.42,  # e.g. burstiness > 0
+        )
+        assert sg.registry_entropy_score(d) == pytest.approx(3.1)
+
+    def test_registry_jittered_monotype_stream_keeps_computed_h(
+        self, tmp_path, monkeypatch
+    ):
+        """Live monotype with alternating 1s / 50ms gaps (burstiness > 0)."""
+        monkeypatch.setattr(sg, "BEHAVIOR_MODE", "enforce")
+        monkeypatch.setattr(sg, "TEXT_PROXY_MODE", "off")
+        monkeypatch.setattr(sg, "ATTEST_MODE", "off")
+        monkeypatch.setattr(sg, "VOLUME_MODE", "off")
+        monkeypatch.setattr(sg, "UNSCORED_MODE", "off")
+        gate = sg.ShannonGate(sg.AuditDB(tmp_path / "jitter.db"))
+        if gate._behavior is None:
+            pytest.skip("BehavioralMonitor unavailable")
+
+        text = "alpha beta gamma delta epsilon"
+        # Alternating long/short gaps → burstiness > 0 while action type fixed.
+        gaps_ns = [1_000_000_000, 50_000_000]  # 1s, 50ms
+        t = 0
+        last = None
+        for i in range(10):
+            t += gaps_ns[i % 2]
+            last = gate.evaluate(
+                _msg(
+                    message_type="status",
+                    text=text,
+                    timestamp_ns=t,
+                )
+            )
+            reg = sg.registry_entropy_score(last)
+            assert reg == pytest.approx(last.computed_H), (
+                f"n={last.behavior_n_events} score={last.behavior_score} "
+                f"eff={last.behavior_efficiency} behH={last.behavior_entropy_bits} "
+                f"reg={reg} computed={last.computed_H}"
+            )
+            assert reg > 1.0
+        assert last is not None
+        assert last.behavior_n_events >= 4
+        # Burstiness should push score > 0 on at least some later readings.
+        # Even then registry must keep computed_H (eff stays 0 for monotype).
+        assert (last.behavior_efficiency or 0.0) == pytest.approx(0.0)
+        assert last.behavior_entropy_bits == pytest.approx(0.0)
+
     def test_registry_prefers_core_collapse_h(self):
         d = sg.GateDecision(
             decision="flagged",

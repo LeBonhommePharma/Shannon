@@ -13,7 +13,7 @@ import ShannonTheme
 struct ShannonWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "ShannonWidget", provider: SnapshotProvider()) { entry in
-            ShannonWidgetView(snapshot: entry.snapshot)
+            ShannonWidgetView(snapshot: entry.snapshot, now: entry.date)
                 .containerBackground(Color.shannonBackground, for: .widget)
         }
         .configurationDisplayName("Shannon")
@@ -70,6 +70,13 @@ struct SnapshotProvider: TimelineProvider {
 struct ShannonWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let snapshot: ShannonSnapshot
+    /// Entry date from the timeline — glance age uses Mac 15 s buckets (UX-008).
+    var now: Date = Date()
+
+    /// Bucketed relative age for the freshest agent/docking/capture timestamp.
+    private var glanceAge: String {
+        SharedRelativeAge.glanceBucketed(in: snapshot, now: now)
+    }
 
     private var docking: DockingProgress? {
         snapshot.docking.first(where: { $0.isRunning }) ?? snapshot.docking.first
@@ -93,7 +100,13 @@ struct ShannonWidgetView: View {
 
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 1) {
-                Text("Shannon").font(.caption2.weight(.semibold))
+                HStack(spacing: 4) {
+                    Text("Shannon").font(.caption2.weight(.semibold))
+                    Spacer(minLength: 0)
+                    Text(glanceAge)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(Color.shannonTertiary)
+                }
                 ForEach(Array(snapshot.watchCards(limit: 2).enumerated()), id: \.offset) { _, line in
                     Text(line).font(.caption2.monospacedDigit()).lineLimit(1)
                 }
@@ -105,6 +118,9 @@ struct ShannonWidgetView: View {
                     Image(systemName: "cpu")
                     Text("\(snapshot.agents.runningCount)")
                     Spacer()
+                    Text(glanceAge)
+                        .font(.shannonCaption.monospacedDigit())
+                        .foregroundStyle(Color.shannonTertiary)
                 }
                 .font(.shannonCaption)
                 .foregroundStyle(Color.shannonSecondary)

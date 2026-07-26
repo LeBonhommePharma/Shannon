@@ -91,12 +91,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## P2 — polish & tooling
 
-### - [ ] UX-008: Widget glance uses same relative-age buckets as Mac (no 1s thrash)
+### - [x] UX-008: Widget glance uses same relative-age buckets as Mac (no 1s thrash)
 
 - **Why:** Mac uses signature age buckets to avoid layout thrash; widget may refresh too eagerly or show stale “now”.
 - **Platforms:** iOS widget, macOS (reference)
 - **Area:** `iOS/Sources/ShannonWidget/`, age helpers in Core
 - **First slice:** Share bucketed age formatter; widget snapshot test or pure test.
+- **Done:** `SharedRelativeAge` in ShannonCore (15 s `bucketed` = Mac `signatureAge`; `fine` for live UI); widget small/rect glance age via `glanceBucketed`; pure + wiring tests.
 - **Priority:** P2
 
 ### - [x] UX-009: iPad compact (Slide Over) mode keeps needs-you agent reachable in one scroll

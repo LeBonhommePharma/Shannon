@@ -46,7 +46,7 @@ struct GateCardView: View {
         return VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
             HStack(spacing: ShannonSpacing.sm) {
                 ShannonStatusDot(state: .warning, diameter: 8)
-                Text(hub.agentName(for: question) ?? "Shannon")
+                Text(hub.agentName(for: question) ?? CompanionFocusCopy.quietShort)
                     .shannonText(.shannonHeadline)
                     .lineLimit(1)
 
@@ -144,8 +144,8 @@ struct GateCardView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             a.canInteract
-                ? "Gate request from \(hub.agentName(for: question) ?? "Shannon")"
-                : "Gate request from \(hub.agentName(for: question) ?? "Shannon"). \(a.statusMessage ?? "")"
+                ? "Gate request from \(hub.agentName(for: question) ?? CompanionFocusCopy.quietShort)"
+                : "Gate request from \(hub.agentName(for: question) ?? CompanionFocusCopy.quietShort). \(a.statusMessage ?? "")"
         )
     }
 }
@@ -168,7 +168,7 @@ struct GateActivitySection: View {
                             Text(event.question)
                                 .shannonText(.shannonCaption)
                                 .lineLimit(1)
-                            Text("\(event.agentName ?? "Shannon") · \(event.approved ? "approved" : "denied")")
+                            Text("\(event.agentName ?? CompanionFocusCopy.quietShort) · \(event.approved ? "approved" : "denied")")
                                 .shannonNumeric(color: .shannonTertiary)
                                 .lineLimit(1)
                         }

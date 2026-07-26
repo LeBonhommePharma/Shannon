@@ -211,4 +211,59 @@ final class CompanionFocusCopyTests: XCTestCase {
             )
         }
     }
+
+    /// UX-026: iPad hub brand chrome uses quietShort (phone Home parity).
+    func testPadHubBrandChromeWireQuietShort() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let hub = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/AgentHubView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            hub.contains("CompanionFocusCopy.quietShort"),
+            "pad hub brand titles must use CompanionFocusCopy.quietShort"
+        )
+        XCTAssertFalse(
+            hub.contains("navigationTitle(\"Shannon\")"),
+            "pad hub must not hard-code navigationTitle Shannon"
+        )
+
+        let gate = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/GateCardView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            gate.contains("CompanionFocusCopy.quietShort"),
+            "pad GateCard unknown-agent fallback must use quietShort"
+        )
+        XCTAssertFalse(
+            gate.contains("?? \"Shannon\""),
+            "pad GateCard must not hard-code dual Shannon agent fallback"
+        )
+
+        let notify = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/NotificationPanelView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            notify.contains("CompanionFocusCopy.quietShort"),
+            "pad notification unknown-agent fallback must use quietShort"
+        )
+        XCTAssertFalse(
+            notify.contains("?? \"Shannon\""),
+            "pad notification must not hard-code dual Shannon agent fallback"
+        )
+    }
 }

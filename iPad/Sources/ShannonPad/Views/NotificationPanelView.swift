@@ -94,7 +94,7 @@ private struct ConfirmationRow: View {
         return VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
             HStack(spacing: ShannonSpacing.sm) {
                 ShannonStatusDot(state: .warning, diameter: 8)
-                Text(agentName ?? "Shannon")
+                Text(agentName ?? CompanionFocusCopy.quietShort)
                     .shannonText(.shannonHeadline)
                     .lineLimit(1)
                 Spacer()

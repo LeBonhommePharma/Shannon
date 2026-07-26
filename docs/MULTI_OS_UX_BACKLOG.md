@@ -255,10 +255,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** All four surfaces + a11y menu label; CompanionFocusCopyTests glance/menu wiring.
 - **Priority:** P2
 
+### - [x] UX-026: iPad hub brand chrome uses CompanionFocusCopy.quietShort
+
+- **Why:** UX-025 closed phone/widget/menu brand chrome; pad compact nav title, sidebar title, and unknown-agent fallbacks still hard-coded `"Shannon"`.
+- **Platforms:** iPadOS (iOS phone reference)
+- **Area:** `AgentHubView`, `GateCardView`, `NotificationPanelView`, `CompanionFocusCopy`
+- **First slice:** Wire nav titles + agent-name fallbacks to `quietShort`; pure pad wiring test.
+- **Done:** Compact + sidebar `navigationTitle(quietShort)`; GateCard/Notification/a11y/activity fallbacks; CompanionFocusCopyTests pad hub wiring.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 21):** `--quick` all PASS. Backlog empty after UX-025. Residual pad hub brand `"Shannon"` nav titles + unknown-agent fallbacks. Claimed **UX-026**. Considered: widget docking `"Idle"` (not brand); widget/complication `configurationDisplayName` (system catalog — leave); theme preview product chrome OK; Mac menu-bar symbol a11y `"Shannon"` (status item, not nav brand). **No additional UX-0xx**.
 - **2026-07-26 (loop 20):** `--quick` all PASS. Backlog empty; residual brand `"Shannon"` on widget/complication/menu/phone. Claimed **UX-025**. Considered: widget docking `"Idle"` (not brand token — leave); theme preview + Settings titles OK product chrome. **No additional UX-0xx**.
 - **2026-07-26 (loop 19):** `--quick` all PASS. Backlog empty; Mac/watch dual quiet `"Shannon"`. Claimed **UX-024**. Considered: widget `"Idle"` docking-empty (different context — not quiet brand token); pad feed empty prose OK. **No additional UX-0xx**.
 - **2026-07-26 (loop 18):** `--quick` all PASS. Backlog empty; watch face vs gate delivery dual strings. Claimed **UX-023**. Considered: widget `"Idle"` docking-empty (different context); PillView header `"Shannon"` quietShort (optional); pad notification empty prose OK. **No additional UX-0xx**.

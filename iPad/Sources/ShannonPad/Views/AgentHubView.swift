@@ -51,7 +51,8 @@ struct AgentHubView: View {
         case .compact:
             NavigationStack {
                 dashboard(showsSidePanelCards: true)
-                    .navigationTitle("Shannon")
+                    // UX-026: brand title shares Core quietShort (phone/widget parity).
+                    .navigationTitle(CompanionFocusCopy.quietShort)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { toolbarItems }
             }
@@ -340,7 +341,8 @@ struct AgentSidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle("Shannon")
+        // UX-026: brand title shares Core quietShort (phone/widget parity).
+        .navigationTitle(CompanionFocusCopy.quietShort)
     }
 
     /// `List` selection is optional; the hub always has one, and a tap on empty

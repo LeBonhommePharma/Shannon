@@ -3,11 +3,17 @@ import ShannonCore
 
 // MARK: - Mac hub fleet status (native Shannon path)
 
-/// Pure Mac-facing Bonhomme Fleet query used by Pill status / tests.
+/// Pure Mac-facing Bonhomme Fleet + NATURaL SCI query used by Pill status / tests.
 ///
 /// Builds membership from local Mac device + peers and returns a schedule
-/// snapshot (FlexAIDdS split + NATURaL presence-ready). No CloudKit I/O.
+/// snapshot (FlexAIDdS split + NATURaL presence-ready). Exposes SCI demo line.
+/// No CloudKit I/O / HealthKit.
 public enum BonhommeFleetMacStatus: Sendable {
+
+    /// NATURaL SCI demo (concentrated vs spread RR) for operator status.
+    public static func naturalSCIStatusLine() -> String {
+        NaturalSCIHub.demoStatusLine()
+    }
 
     /// Schedule a representative fleet job across local + peers.
     public static func snapshot(

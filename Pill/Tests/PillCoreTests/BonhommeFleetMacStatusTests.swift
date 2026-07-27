@@ -59,4 +59,10 @@ final class BonhommeFleetMacStatusTests: XCTestCase {
         XCTAssertEqual(snap.chunks[0].params.units, 300)
         XCTAssertFalse(snap.chunks.contains { $0.claimedBy == "device-hot" })
     }
+
+    func testNaturalSCIStatusLineFromMacSurface() {
+        let line = BonhommeFleetMacStatus.naturalSCIStatusLine()
+        XCTAssertTrue(line.contains("SCI"), line)
+        XCTAssertFalse(line.isEmpty)
+    }
 }

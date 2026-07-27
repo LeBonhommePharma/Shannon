@@ -378,6 +378,7 @@ Also:
   ./scripts/shannon pets            create default pet directories
   ./scripts/shannon science         pure-Python library from this clone (update-safe)
   ./scripts/shannon fleet           Bonhomme Fleet schedule snapshot (Mac hub)
+  ./scripts/shannon natural         NATURaL SCI/HRV entropy unit path
   ./scripts/shannon gate            start agent gate daemon only
   ./scripts/shannon agent-demo      live socket demo agent (needs gate)
   ./scripts/shannon agent …         hub agent manager (spawn|control|monitor|kill|roster)
@@ -427,16 +428,26 @@ case "${CMD}" in
     (
       cd "${REPO}/Packages/ShannonCore" && swift test --filter BonhommeFleetTests 2>&1 | tail -20
     ) || true
-    # Drive shipped pure API via a one-shot Swift snippet in PillCore tests binary path is heavy;
-    # print demo status by reusing unit-tested fixture constants in python for CLI UX.
     python3 - <<'PY'
-# Operator-facing summary (logic is proven in BonhommeFleetMacStatusTests / BonhommeFleetTests).
 print("Fleet: demo Mac+iPhone+iPad schedule — run:")
 print("  cd Packages/ShannonCore && swift test --filter BonhommeFleetTests")
 print("  cd Pill && swift test --filter BonhommeFleetMacStatusTests")
 print("Shipped types: ShannonCore.BonhommeFleetHub / PillCore.BonhommeFleetMacStatus")
 PY
     ok "Fleet tests are the source of truth for membership + work split"
+    ;;
+  natural|sci|hrv)
+    # NATURaL SCI / HRV fixed-domain entropy (300–1500 ms RR).
+    info "NATURaL SCI (native ShannonCore path)"
+    (
+      cd "${REPO}/Packages/ShannonCore" && swift test --filter NaturalSCITests 2>&1 | tail -25
+    ) || true
+    python3 - <<'PY'
+print("NATURaL SCI: fixed RR domain 300–1500 ms → H bits → SCI score")
+print("  cd Packages/ShannonCore && swift test --filter NaturalSCITests")
+print("Shipped types: ShannonCore.NaturalSCI / NaturalEntropyCalculator")
+PY
+    ok "SCI unit tests are the source of truth for HRV entropy"
     ;;
   start|open)
     start_app

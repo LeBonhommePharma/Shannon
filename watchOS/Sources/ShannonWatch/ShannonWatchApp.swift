@@ -29,7 +29,7 @@ final class WatchAppDelegate: NSObject, WKApplicationDelegate {
     @MainActor var model: WatchModel?
 
     func applicationDidFinishLaunching() {
-        scheduleRefresh(after: 15 * 60)
+        scheduleRefresh(after: MultiDeviceCadence.watchBackgroundRefreshInterval)
     }
 
     func handle(_ backgroundTasks: Set<WKRefreshBackgroundTask>) {
@@ -43,7 +43,7 @@ final class WatchAppDelegate: NSObject, WKApplicationDelegate {
                         self.model?.applyCached(cached)
                     }
                 }
-                scheduleRefresh(after: 15 * 60)
+                scheduleRefresh(after: MultiDeviceCadence.watchBackgroundRefreshInterval)
                 refresh.setTaskCompletedWithSnapshot(true)
 
             case let snapshotTask as WKSnapshotRefreshBackgroundTask:

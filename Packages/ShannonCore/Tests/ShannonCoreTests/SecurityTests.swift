@@ -77,6 +77,16 @@ final class SecurityTests: XCTestCase {
         }
     }
 
+    /// Pet state is local-only (ENH-021). Accidental registration would mirror
+    /// pet XP/name into the private CloudKit zone across Mac/phone without a
+    /// hub publish path — keep it out of the schema deploy list.
+    func testPetCloudRecordIsNotMirroredInSyncSchema() {
+        XCTAssertFalse(
+            ShannonSyncConfig.allRecordTypes.contains(PetCloudRecord.recordType),
+            "PetCloudRecord must stay local-only (not Mac-hub mirrored)"
+        )
+    }
+
     // MARK: Snapshot cache
 
     func testCacheRoundTripsThroughDisk() throws {

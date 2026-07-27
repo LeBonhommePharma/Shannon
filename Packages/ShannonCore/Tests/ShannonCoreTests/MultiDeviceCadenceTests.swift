@@ -16,6 +16,39 @@ final class MultiDeviceCadenceTests: XCTestCase {
         XCTAssertEqual(MultiDeviceCadence.worstCaseMissedPushLag, 20)
     }
 
+    /// Watch does not poll CloudKit; background wake budget is separate and
+    /// must stay centralized (not a magic `15 * 60` in the app delegate).
+    func testWatchBackgroundRefreshIntervalIsFifteenMinutes() {
+        XCTAssertEqual(MultiDeviceCadence.watchBackgroundRefreshInterval, 15 * 60)
+        XCTAssertGreaterThan(
+            MultiDeviceCadence.watchBackgroundRefreshInterval,
+            MultiDeviceCadence.worstCaseMissedPushLag
+        )
+    }
+
+    func testWatchAppWiresCadenceConstant() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let watch = try String(
+            contentsOf: root.appendingPathComponent(
+                "watchOS/Sources/ShannonWatch/ShannonWatchApp.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            watch.contains("MultiDeviceCadence.watchBackgroundRefreshInterval"),
+            "WatchAppDelegate must use MultiDeviceCadence (not hard-coded 15*60)"
+        )
+        XCTAssertFalse(
+            watch.contains("15 * 60"),
+            "Watch must not hard-code 15-minute interval"
+        )
+    }
+
     func testShannonStoreDefaultIntervalMatchesCadence() {
         // Default init uses MultiDeviceCadence.companionRefreshInterval (10),
         // not the old 30 s floor that lagged Mac publish by 20 s.

@@ -16,6 +16,13 @@ From repo root (macOS + Xcode):
 
 # Multi-platform build/test health
 ./scripts/test_apple_platforms.sh
+
+# Coordinated swarm (packages + Pill + Python + iCloud focus + installer + mobile)
+./scripts/platform_swarm.sh
+./scripts/platform_swarm.sh --quick          # faster Pill (build only)
+./scripts/platform_swarm.sh --sync-only      # ShannonCore CloudKit codecs / security
+./scripts/platform_swarm.sh --installer      # pure-Python install/update re-verify
+# Optional: SHANNON_SWARM_LOG_DIR=/path/to/logs ./scripts/platform_swarm.sh --quick
 ```
 
 | Flag / args | Meaning |

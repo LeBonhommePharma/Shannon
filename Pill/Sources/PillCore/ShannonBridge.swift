@@ -287,10 +287,11 @@ public final class UnixSocketClient {
 /// rather than an error banner.
 ///
 /// **Transport:**
-/// - Heartbeat poll (default cadence) remains as fallback.
-/// - Push path: `subscribe` keeps a second socket open; the producer emits
-///   NDJSON status frames on significant ΔH / collapse. UI applies them via
-///   ``applyPush(_:)`` without waiting for the next poll tick.
+/// - Heartbeat poll (default cadence) remains as fallback on ``pollQueue``.
+/// - Push path: `subscribe` keeps a second socket open on **dedicated**
+///   ``pushQueue`` so a blocking `readLine` can never starve poll/stop.
+/// - Producer emits NDJSON status frames on significant ΔH / collapse. UI applies
+///   them via ``applyPush(_:)`` without waiting for the next poll tick.
 ///
 /// Connection is reused across polls when the peer stays up (connect once, request
 /// repeatedly). On MainActor, `status` / `connected` are only reassigned when the
@@ -307,19 +308,30 @@ public final class ShannonBridge: ObservableObject {
     @Published public private(set) var lastUpdateWasPush = false
     /// Monotonic generation for significant push events (UI can react without 1 Hz lag).
     @Published public private(set) var pushGeneration: UInt64 = 0
+    /// Counts successful poll heartbeats (tests: push must not starve poll).
+    @Published public private(set) var pollGeneration: UInt64 = 0
 
     public let socketPath: String
     private let interval: TimeInterval
     private var timer: Timer?
-    private let queue = DispatchQueue(label: "com.lebonhomme.shannon.pill.bridge")
-    /// Persistent client, owned exclusively by `queue`. Reused while the socket
-    /// is up so each poll is a request, not a connect/close round-trip.
-    /// `@unchecked Sendable` box: only ever touched on `queue`.
+
+    /// Poll / status request I/O only. Never runs the blocking push read loop.
+    private let pollQueue = DispatchQueue(label: "com.lebonhomme.shannon.pill.bridge.poll")
+    /// Subscribe / push I/O only. Isolated so `readLine` cannot block poll or stop.
+    private let pushQueue = DispatchQueue(label: "com.lebonhomme.shannon.pill.bridge.push")
+
+    /// Shared clients. Poll client is touched only on `pollQueue`; push client
+    /// primary I/O is on `pushQueue`. `close()` is safe from `stop()` on any
+    /// thread to unblock a blocked `recv` (standard Unix pattern).
     private final class ClientBox: @unchecked Sendable {
         var client = UnixSocketClient()
-        /// Long-lived subscribe socket (push). Separate from poll client.
         var pushClient = UnixSocketClient()
-        var pushRunning = false
+        private let lock = NSLock()
+        private var _pushRunning = false
+        var pushRunning: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return _pushRunning }
+            set { lock.lock(); _pushRunning = newValue; lock.unlock() }
+        }
     }
     private let clientBox = ClientBox()
 
@@ -355,9 +367,16 @@ public final class ShannonBridge: ObservableObject {
         timer?.invalidate()
         timer = nil
         let box = clientBox
-        queue.async {
-            box.pushRunning = false
+        // Flag first, then close fds immediately so a blocked `recv` on the
+        // push queue unblocks without waiting for that queue to drain.
+        box.pushRunning = false
+        box.pushClient.close()
+        box.client.close()
+        // Drain residual work so the next start() does not race a half-dead loop.
+        pollQueue.async {
             box.client.close()
+        }
+        pushQueue.async {
             box.pushClient.close()
         }
     }
@@ -365,7 +384,7 @@ public final class ShannonBridge: ObservableObject {
     public func poll() {
         let path = socketPath
         let box = clientBox
-        queue.async { [weak self] in
+        pollQueue.async { [weak self] in
             let result: ShannonStatus? = {
                 do {
                     if !box.client.isConnected {
@@ -389,10 +408,35 @@ public final class ShannonBridge: ObservableObject {
     ///
     /// Pure-side effects are limited to published properties; never blocks the
     /// producer socket (caller already decoded off-main).
+    ///
+    /// - When `result == nil` and `fromPush == false` (poll failure): clear
+    ///   connected — heartbeat is the authority for liveness.
+    /// - When `result == nil` and `fromPush == true`: push path lost the
+    ///   producer; clear connected only if status is already gone or we force
+    ///   a disconnect publish so a dead producer cannot leave a stale live flag
+    ///   if poll is also quiet. Prefer poll for truth; still publish nil so a
+    ///   push-only death is visible before the next poll tick.
     public func applyStatus(_ result: ShannonStatus?, fromPush: Bool) {
-        let up = (result != nil)
-        if connected != up { connected = up }
         let previous = status
+        if result == nil {
+            // Disconnect: fail closed. Poll nil always clears; push nil clears
+            // when we were showing a live status so producer death is not sticky.
+            if !fromPush || previous != nil {
+                if connected { connected = false }
+                if BridgePushLogic.shouldPublishStatus(previous: previous, next: nil) {
+                    status = nil
+                }
+            }
+            if !fromPush {
+                lastUpdateWasPush = false
+            }
+            return
+        }
+        let up = true
+        if connected != up { connected = up }
+        if !fromPush {
+            pollGeneration &+= 1
+        }
         if BridgePushLogic.shouldPublishStatus(previous: previous, next: result) {
             status = result
         }
@@ -415,11 +459,11 @@ public final class ShannonBridge: ObservableObject {
 
     // MARK: - Push listener
 
-    /// Open a long-lived `subscribe` connection; read NDJSON events as they land.
+    /// Open a long-lived `subscribe` connection on ``pushQueue`` only.
     private func startPushListener() {
         let path = socketPath
         let box = clientBox
-        queue.async { [weak self] in
+        pushQueue.async { [weak self] in
             guard let self else { return }
             if box.pushRunning { return }
             box.pushRunning = true
@@ -434,7 +478,8 @@ public final class ShannonBridge: ObservableObject {
                     try box.pushClient.connect(to: path, timeout: 2.0)
                     try box.pushClient.send(try BridgeCodec.encode(BridgeRequest(command: "subscribe")))
                 }
-                // Read unsolicited frames until disconnect.
+                // Read unsolicited frames until disconnect. Blocking is OK:
+                // this loop owns pushQueue exclusively; poll uses pollQueue.
                 let line = try box.pushClient.readLine()
                 let decoded = try BridgeCodec.decodeStatus(line)
                 Task { @MainActor [weak self] in
@@ -442,6 +487,11 @@ public final class ShannonBridge: ObservableObject {
                 }
             } catch {
                 box.pushClient.close()
+                // Producer / subscribe path died — publish disconnect so a
+                // stale "connected" does not linger until the next poll.
+                Task { @MainActor [weak self] in
+                    self?.applyStatus(nil, fromPush: true)
+                }
                 // Back off briefly; poll heartbeat covers the gap.
                 if box.pushRunning {
                     Thread.sleep(forTimeInterval: 0.4)

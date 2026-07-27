@@ -508,18 +508,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** answerPendingConfirmation posts outcomeLabel; GateAskActionCopyTests forbid Confirmed/Denied duals on pad hub.
 - **Priority:** P2
 
-### - [ ] UX-054: Pad unanswerable posts share promptUnanswerable family
+### - [x] UX-054: Pad unanswerable posts share promptUnanswerable family
 
 - **Why:** Offline/fail paths already surface `affordance.statusMessage` (Core), but store-reject / missing-pending still hard-code `"That approval is no longer open."` / `"Nothing is waiting…"` next to Core `promptUnanswerable` — optional status-toast family polish.
 - **Platforms:** iPadOS
 - **Area:** `AgentHubViewModel.answer` / `answerPendingConfirmation`, `GateAskActionCopy`
 - **First slice:** Prefer Core tokens where meaning matches; keep surface-specific empty-pending prose if no token fits; wiring test.
+- **Done:** `nothingWaitingForAnswer` + `promptUnanswerable` wired on pad hub; dual literals removed; GateAskActionCopyTests.
 - **Priority:** P3
 
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (clean slate):** Closed **UX-054**; committed XcodeGen hygiene (`validate_xcodeprojs.sh`, clean generate in test/setup, docs). Primary UX/ENH/PET queues empty; working tree clean on main.
 - **2026-07-26 (loop 32):** `--quick` all PASS. Multi-OS backlog empty after parallel wave closed UX-042…052. Residual pad answer toast dual Confirmed/Denied vs outcomeLabel → **UX-053** (claim). Also filed **UX-054** (pad unanswerable post family, P3). Considered: HubScanLine FlexAIDdS offline (domain-specific leave); pad palette “No matches” (surface leave); widget Idle residual (rg clean).
 - **2026-07-26 (P2/P3 parallel wave):** Five agents closed **UX-042…052**, **ENH-024/025**, PET **E6/E7**. ShannonCore 275 green; apple --quick on commit path.
 - **2026-07-26 (loop 31):** `--quick` all PASS (ran=4). No open P0/P1 (swarm closed UX-035…041). Claimed **UX-042** (P2): post-tap socketUnavailable → `macGateOffline`. Considered already-queued: UX-043 roster gateAvailable; UX-044 AirPods Confirmed/Denied; UX-050 watch “No notifications”; pad “No matches” surface-specific (leave). **No additional UX-0xx**.

@@ -46,6 +46,11 @@ public enum GateAskActionCopy: Sendable {
     public static let promptUnanswerable =
         "This prompt is no longer answerable"
 
+    /// Companion toast when no pending ask exists (palette / keyboard / race).
+    /// Distinct from `promptUnanswerable` (ask present but refuse).
+    public static let nothingWaitingForAnswer =
+        "Nothing is waiting on an answer."
+
     /// In-flight answer (Mac gate cards + watch gate status).
     public static let sending = "Sending…"
 

@@ -260,7 +260,8 @@ final class AgentHubViewModel: ObservableObject {
     /// palette's Approve / Deny, and the spoken commands all land here.
     func answerPendingConfirmation(approved: Bool, source: ConfirmationSource = .tap) {
         guard let pending = store.snapshot.oldestPendingConfirmation() else {
-            post("Nothing is waiting on an answer.")
+            // UX-054: empty-pending toast shares Core nothingWaitingForAnswer.
+            post(GateAskActionCopy.nothingWaitingForAnswer)
             return
         }
         // UX-018: keyboard/palette paths share companionAffordance with GateCard.
@@ -269,13 +270,13 @@ final class AgentHubViewModel: ObservableObject {
             lastError: store.lastError
         )
         guard affordance.canInteract else {
-            post(affordance.statusMessage ?? "Nothing is waiting on an answer.")
+            post(affordance.statusMessage ?? GateAskActionCopy.nothingWaitingForAnswer)
             return
         }
         guard let answered = store.answerPending(
             approved ? .confirmed : .denied, source: source
         ) else {
-            post("Nothing is waiting on an answer.")
+            post(GateAskActionCopy.nothingWaitingForAnswer)
             return
         }
         didAnswer(answered, approved: approved)
@@ -295,7 +296,8 @@ final class AgentHubViewModel: ObservableObject {
             lastError: store.lastError
         )
         guard affordance.canInteract else {
-            post(affordance.statusMessage ?? "That approval is no longer open.")
+            // UX-054: refuse toast prefers affordance status, else promptUnanswerable.
+            post(affordance.statusMessage ?? GateAskActionCopy.promptUnanswerable)
             return
         }
         // Honor OS-agnostic refuse (expired / empty question) — no success haptic
@@ -306,7 +308,7 @@ final class AgentHubViewModel: ObservableObject {
             source: source
         )
         guard accepted else {
-            post("That approval is no longer open.")
+            post(GateAskActionCopy.promptUnanswerable)
             return
         }
         didAnswer(confirmation, approved: approved)

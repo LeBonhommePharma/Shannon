@@ -68,6 +68,16 @@ final class GateAskActionCopyTests: XCTestCase {
             GateAskActionCopy.gateGlanceHeader(pendingCount: 5),
             "Shannon asks (5)"
         )
+        // UX-054: pad empty-pending / refuse toast family (distinct strings).
+        XCTAssertFalse(GateAskActionCopy.promptUnanswerable.isEmpty)
+        XCTAssertEqual(
+            GateAskActionCopy.nothingWaitingForAnswer,
+            "Nothing is waiting on an answer."
+        )
+        XCTAssertNotEqual(
+            GateAskActionCopy.nothingWaitingForAnswer,
+            GateAskActionCopy.promptUnanswerable
+        )
         // Count only when >1; never invent H or docking metrics.
         XCTAssertFalse(GateAskActionCopy.gateGlanceHeader(pendingCount: 3).contains("H "))
         XCTAssertFalse(GateAskActionCopy.gateGlanceHeader(pendingCount: 3).contains("Å"))
@@ -623,6 +633,40 @@ final class GateAskActionCopyTests: XCTestCase {
         XCTAssertFalse(
             hub.contains("\"Denied\""),
             "pad must not hard-code Denied status toast"
+        )
+    }
+
+    /// UX-054: pad unanswerable / empty-pending toasts share Core tokens.
+    func testPadUnanswerablePostsWirePromptUnanswerableFamily() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let hub = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/ViewModels/AgentHubViewModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(hub.isEmpty)
+        XCTAssertTrue(
+            hub.contains("GateAskActionCopy.promptUnanswerable"),
+            "store-reject path must use promptUnanswerable (UX-054)"
+        )
+        XCTAssertTrue(
+            hub.contains("GateAskActionCopy.nothingWaitingForAnswer"),
+            "empty-pending path must use nothingWaitingForAnswer (UX-054)"
+        )
+        XCTAssertFalse(
+            hub.contains("\"That approval is no longer open.\""),
+            "pad must not hard-code store-reject toast"
+        )
+        XCTAssertFalse(
+            hub.contains("\"Nothing is waiting on an answer.\""),
+            "pad must not hard-code empty-pending toast literal"
         )
     }
 

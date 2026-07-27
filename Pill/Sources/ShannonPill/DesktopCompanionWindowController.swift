@@ -8,6 +8,7 @@ import AppKit
 import Combine
 import SwiftUI
 import PillCore
+import ShannonCore
 
 // MARK: - Panel
 
@@ -401,8 +402,13 @@ struct DesktopCompanionHost: View {
             model.cycleToNext()
             onActivate()
         }
-        .accessibilityHint("Click to expand Shannon and focus this agent")
-        .accessibilityAction(named: Text("Open in Shannon")) { onActivate() }
+        // UX-031: brand chrome shares Core quietShort (menu-bar/status a11y parity).
+        .accessibilityHint(
+            "Click to expand \(CompanionFocusCopy.quietShort) and focus this agent"
+        )
+        .accessibilityAction(
+            named: Text("Open in \(CompanionFocusCopy.quietShort)")
+        ) { onActivate() }
     }
 }
 

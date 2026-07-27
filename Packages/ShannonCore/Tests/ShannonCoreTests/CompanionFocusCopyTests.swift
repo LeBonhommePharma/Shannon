@@ -266,4 +266,33 @@ final class CompanionFocusCopyTests: XCTestCase {
             "pad notification must not hard-code dual Shannon agent fallback"
         )
     }
+
+    /// UX-031: desktop companion a11y brand uses quietShort (menu-bar parity).
+    func testDesktopCompanionA11yWireQuietShort() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let desktop = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Pill/Sources/ShannonPill/DesktopCompanionWindowController.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            desktop.contains("CompanionFocusCopy.quietShort"),
+            "desktop companion a11y must use CompanionFocusCopy.quietShort"
+        )
+        XCTAssertFalse(
+            desktop.contains("\"Open in Shannon\""),
+            "desktop must not hard-code dual Open in Shannon a11y action"
+        )
+        XCTAssertFalse(
+            desktop.contains("\"Click to expand Shannon"),
+            "desktop must not hard-code dual expand Shannon a11y hint"
+        )
+    }
 }

@@ -27,8 +27,8 @@ final class MenuBarController: NSObject {
     private let resources: SystemResourceMonitor
     private let keepAwake: KeepAwakeMonitor
     private let focusMode: FocusModeMonitor
-    /// Honest multi-device backend label from CloudPublisher.
-    private let multiDeviceStatus: String
+    /// Honest multi-device backend label from CloudPublisher (re-read each open).
+    private let multiDeviceStatusProvider: () -> String
     /// AgentPeek-parity surfaces (pulled sessions, dev servers, routes).
     private let parity = ParityPanelModel()
     private var timer: Timer?
@@ -62,7 +62,8 @@ final class MenuBarController: NSObject {
         resources: SystemResourceMonitor,
         keepAwake: KeepAwakeMonitor,
         focusMode: FocusModeMonitor,
-        multiDeviceStatus: String = "in-memory"
+        multiDeviceStatus: String = "in-memory",
+        multiDeviceStatusProvider: (() -> String)? = nil
     ) {
         self.bridge = bridge
         self.battery = battery
@@ -71,7 +72,8 @@ final class MenuBarController: NSObject {
         self.resources = resources
         self.keepAwake = keepAwake
         self.focusMode = focusMode
-        self.multiDeviceStatus = multiDeviceStatus
+        // Prefer live provider so iCloud sign-out updates the footer without relaunch.
+        self.multiDeviceStatusProvider = multiDeviceStatusProvider ?? { multiDeviceStatus }
     }
 
     func start() {
@@ -483,7 +485,7 @@ final class MenuBarController: NSObject {
                 resources: resources,
                 keepAwake: keepAwake,
                 focusMode: focusMode,
-                multiDeviceStatus: multiDeviceStatus,
+                multiDeviceStatus: multiDeviceStatusProvider(),
                 parity: parity,
                 onShowAllGates: { [weak self] in
                     self?.popover?.performClose(nil)

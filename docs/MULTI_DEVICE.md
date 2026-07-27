@@ -247,6 +247,31 @@ provisioned on the Mac be read by the iPhone without a second sign-in. Note the 
 (MediaRemote and IOKit power sources are unreachable from a sandboxed process),
 which does not conflict with CloudKit.
 
+### 3b. iCloud authentication (system Apple ID — no custom login)
+
+Shannon **never** collects Apple ID username/password. Sign-in is **System
+Settings → Apple ID / iCloud** on the Mac (and the same iCloud account on
+iPhone / iPad / Watch).
+
+| Gate | Required for live CloudKit |
+|------|----------------------------|
+| `SHANNON_ICLOUD=1` | Operator opt-in (default stays in-memory) |
+| Embedded provisioning profile | Unsigned Homebrew / `swift run` never constructs `CKContainer` (macOS would hard-crash) |
+| `CKAccountStatus.available` for container `iCloud.com.lebonhommepharma.shannon` | Fail-closed: no account / restricted / undetermined / temporary → **in-memory**, honest menu footer |
+
+Account transitions are observed via `CKAccountChanged`. Sign-out mid-session
+stops treating CloudKit as healthy and swaps the Mac hub back to in-memory
+(no invented “on (iCloud)” status). Secrets stay in Keychain (`SecureStore`);
+nothing credential-shaped is written to CloudKit fields.
+
+**Windows / Linux:** multi-device iCloud is **Apple-only**. Those hosts get the
+science library + installer path and report `ICloudAccountStatus.unsupported` —
+there is no fake CloudKit login.
+
+Pure policy lives in `Packages/ShannonCore` (`ICloudAccountStatus`,
+`ICloudAccountPolicy`); Mac wiring is `CloudPublisher` +
+`MultiDeviceBackendPolicy`.
+
 ### 4. Deploy the CloudKit schema
 
 On first run in the **Development** environment, CloudKit creates record types

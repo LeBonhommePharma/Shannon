@@ -163,7 +163,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             resources: sysRes,
             keepAwake: keep,
             focusMode: focus,
-            multiDeviceStatus: cloudPub.multiDeviceStatus
+            multiDeviceStatus: cloudPub.multiDeviceStatus,
+            multiDeviceStatusProvider: { [weak cloudPub] in
+                // Prefer full operator line when it is more specific than the short token.
+                cloudPub?.multiDeviceStatus ?? "in-memory"
+            }
         )
         menu.onShowPill = { [weak ctl] in ctl?.reassertVisibility(); ctl?.expand() }
         menu.isDesktopCompanionVisible = { [weak prefs] in

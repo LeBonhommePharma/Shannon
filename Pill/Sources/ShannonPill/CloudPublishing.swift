@@ -1,5 +1,6 @@
 import Foundation
 import PillCore
+import ShannonCore
 
 /// Mac → iCloud publishing. Reads the same models the pill renders and mirrors
 /// them into CloudKit for the iPhone and Apple Watch.
@@ -7,9 +8,14 @@ import PillCore
 /// Publishing is best-effort by design: an unsigned `swift run` build has no
 /// iCloud entitlement, and the pill must keep working regardless. Failures are
 /// counted and exposed for the status line rather than surfaced as alerts.
+///
+/// **iCloud auth:** system Apple ID only (System Settings). CloudKit is
+/// fail-closed unless ``ICloudAccountStatus/available`` — never publishes while
+/// signed out / restricted / undetermined.
 @MainActor
 final class CloudPublisher {
-    private let publisher: ShannonPublisher
+    private var publisher: ShannonPublisher
+    private var backend: ShannonSyncBackend
     private let deviceName: String
     private var timer: Timer?
     private let interval: TimeInterval
@@ -17,10 +23,18 @@ final class CloudPublisher {
     private(set) var lastPublishedAt: Date?
     private(set) var failureCount = 0
 
-    /// Honest multi-device status for the popover footer (P2.7).
-    /// - `off` / `in-memory`: unsigned or SHANNON_ICLOUD≠1
-    /// - `on`: CloudKit backend active
+    /// Honest multi-device status for the popover footer (P2.7 / iCloud auth).
+    /// Short tokens: `on`, `off`, `in-memory`, `no-account`, `restricted`, …
     private(set) var multiDeviceStatus: String = "in-memory"
+
+    /// Full operator line (menu footer prefers this when available).
+    private(set) var multiDeviceStatusLine: String = "Multi-device: in-memory"
+
+    /// Latest system iCloud account status for the Shannon container.
+    private(set) var accountStatus: ICloudAccountStatus = .couldNotDetermine
+
+    /// Whether the active backend is the live CloudKit private-DB path.
+    private(set) var usesCloudKit: Bool = false
 
     /// Sources are read at publish time rather than observed, so this stays a
     /// leaf: nothing in the pill has to know it exists.
@@ -45,6 +59,12 @@ final class CloudPublisher {
     /// See `ConfirmationCreatedAtResolver` for why both halves are needed.
     private var confirmationCreatedAt = ConfirmationCreatedAtResolver()
 
+    /// System account monitor (only started when opt-in + profile allow CK queries).
+    private var accountMonitor: ICloudAccountMonitor?
+
+    /// Injected account status for tests (bypasses live CK query).
+    private let injectedAccountStatus: ICloudAccountStatus?
+
     init(
         nowPlaying: NowPlayingModel?,
         battery: BatteryMonitor?,
@@ -53,7 +73,8 @@ final class CloudPublisher {
         resources: SystemResourceMonitor? = nil,
         backend: ShannonSyncBackend? = nil,
         interval: TimeInterval = MultiDeviceCadence.macPublishInterval,
-        deviceName: String = Host.current().localizedName ?? "Mac"
+        deviceName: String = Host.current().localizedName ?? "Mac",
+        accountStatus: ICloudAccountStatus? = nil
     ) {
         self.nowPlaying = nowPlaying
         self.battery = battery
@@ -62,39 +83,58 @@ final class CloudPublisher {
         self.resources = resources
         self.interval = interval
         self.deviceName = deviceName
-        let resolved = backend ?? CloudPublisher.defaultBackend()
+        self.injectedAccountStatus = accountStatus
+
+        // Initial resolve: fail-closed until we know account is available.
+        // Injected status (tests) skips live CloudKit queries.
+        let initialAccount = accountStatus ?? .couldNotDetermine
+        self.accountStatus = initialAccount
+        let resolved = backend ?? CloudPublisher.defaultBackend(accountStatus: initialAccount)
+        self.backend = resolved
         self.publisher = ShannonPublisher(backend: resolved)
-        self.multiDeviceStatus = CloudPublisher.statusLabel(for: resolved)
+        self.usesCloudKit = CloudPublisher.backendIsCloudKit(resolved)
+        self.refreshStatusLabels()
     }
 
-    /// Operator-facing label for the multi-device path.
-    static func statusLabel(for backend: ShannonSyncBackend) -> String {
-        let name = String(describing: type(of: backend))
-        let cloudKit = name.contains("CloudKit")
+    /// Operator-facing short token for the multi-device path.
+    static func statusLabel(
+        for backend: ShannonSyncBackend,
+        accountStatus: ICloudAccountStatus = .couldNotDetermine
+    ) -> String {
+        let cloudKit = backendIsCloudKit(backend)
         let optIn = MultiDeviceBackendPolicy.optInFromEnvironment()
         let profile = MultiDeviceBackendPolicy.hasEmbeddedProvisioningProfile()
         return MultiDeviceBackendPolicy.status(
             optIn: optIn,
             hasProvisioningProfile: profile,
-            cloudKitConstructed: cloudKit
+            cloudKitConstructed: cloudKit,
+            accountStatus: accountStatus
         ).rawValue
     }
 
+    static func backendIsCloudKit(_ backend: ShannonSyncBackend) -> Bool {
+        String(describing: type(of: backend)).contains("CloudKit")
+    }
+
     /// Default backend is **always** in-memory unless the user opts into iCloud
-    /// with `SHANNON_ICLOUD=1` *and* the process has a real iCloud entitlement.
+    /// with `SHANNON_ICLOUD=1`, the process has a real iCloud entitlement, **and**
+    /// the system Apple ID is available for the Shannon container.
     ///
     /// macOS 27 (and earlier): `CKContainer(identifier:)` raises `EXC_BREAKPOINT`
     /// when the container id is not in the app's entitlements. That is a hard
     /// process kill, not a catchable Swift error — so we must never construct
     /// `CloudKitSyncBackend` from an ad-hoc / Homebrew / `swift run` build.
-    /// Policy is pure in `MultiDeviceBackendPolicy` (unit-tested).
-    private static func defaultBackend() -> ShannonSyncBackend {
+    /// Policy is pure in `MultiDeviceBackendPolicy` / `ICloudAccountPolicy`.
+    static func defaultBackend(
+        accountStatus: ICloudAccountStatus
+    ) -> ShannonSyncBackend {
         #if canImport(CloudKit)
         let optIn = MultiDeviceBackendPolicy.optInFromEnvironment()
         let profile = MultiDeviceBackendPolicy.hasEmbeddedProvisioningProfile()
         if MultiDeviceBackendPolicy.shouldUseCloudKit(
             optIn: optIn,
-            hasProvisioningProfile: profile
+            hasProvisioningProfile: profile,
+            accountStatus: accountStatus
         ) {
             return CloudKitSyncBackend()
         }
@@ -102,7 +142,56 @@ final class CloudPublisher {
         return InMemorySyncBackend()
     }
 
+    private func refreshStatusLabels() {
+        let optIn = MultiDeviceBackendPolicy.optInFromEnvironment()
+        let profile = MultiDeviceBackendPolicy.hasEmbeddedProvisioningProfile()
+        multiDeviceStatus = MultiDeviceBackendPolicy.status(
+            optIn: optIn,
+            hasProvisioningProfile: profile,
+            cloudKitConstructed: usesCloudKit,
+            accountStatus: accountStatus
+        ).rawValue
+        multiDeviceStatusLine = MultiDeviceBackendPolicy.operatorStatusLine(
+            optIn: optIn,
+            hasProvisioningProfile: profile,
+            cloudKitConstructed: usesCloudKit,
+            accountStatus: accountStatus
+        )
+    }
+
+    /// Re-evaluate account + backend after system iCloud transitions.
+    /// Fail-closed: if account is no longer available, swap to in-memory and
+    /// stop treating CloudKit as healthy.
+    func applyAccountStatus(_ next: ICloudAccountStatus) {
+        accountStatus = next
+        let optIn = MultiDeviceBackendPolicy.optInFromEnvironment()
+        let profile = MultiDeviceBackendPolicy.hasEmbeddedProvisioningProfile()
+        let wantCloud = MultiDeviceBackendPolicy.shouldUseCloudKit(
+            optIn: optIn,
+            hasProvisioningProfile: profile,
+            accountStatus: next
+        )
+        if wantCloud && !usesCloudKit {
+            #if canImport(CloudKit)
+            let ck = CloudKitSyncBackend()
+            backend = ck
+            publisher = ShannonPublisher(backend: ck)
+            usesCloudKit = true
+            #endif
+        } else if !wantCloud && usesCloudKit {
+            let mem = InMemorySyncBackend()
+            backend = mem
+            publisher = ShannonPublisher(backend: mem)
+            usesCloudKit = false
+            // Clear bookkeeping so we do not invent retracts against the wrong store.
+            publishedConfirmationIDs.removeAll()
+            publishedAgentIDs.removeAll()
+        }
+        refreshStatusLabels()
+    }
+
     func start() {
+        startAccountMonitoringIfNeeded()
         publish()
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.publish() }
@@ -114,6 +203,39 @@ final class CloudPublisher {
     func stop() {
         timer?.invalidate()
         timer = nil
+        accountMonitor = nil
+    }
+
+    /// Only query `CKContainer` when opt-in + profile make it safe (unsigned
+    /// builds must never construct the container — EXC_BREAKPOINT).
+    private func startAccountMonitoringIfNeeded() {
+        if injectedAccountStatus != nil { return }
+        let optIn = MultiDeviceBackendPolicy.optInFromEnvironment()
+        let profile = MultiDeviceBackendPolicy.hasEmbeddedProvisioningProfile()
+        guard optIn, profile else {
+            // No live query — stay on injected/default undetermined or in-memory path.
+            accountStatus = optIn ? .couldNotDetermine : accountStatus
+            if !optIn { accountStatus = .couldNotDetermine }
+            refreshStatusLabels()
+            return
+        }
+        #if canImport(CloudKit)
+        let monitor = ICloudAccountMonitor(
+            initial: accountStatus,
+            reader: CloudKitAccountStatusReader(),
+            observeSystemChanges: true
+        )
+        monitor.onChange = { [weak self] status in
+            self?.applyAccountStatus(status)
+        }
+        accountMonitor = monitor
+        Task { @MainActor in
+            await monitor.refresh()
+            self.applyAccountStatus(monitor.status)
+        }
+        #else
+        applyAccountStatus(.unsupported)
+        #endif
     }
 
     /// One publish pass. `ShannonPublisher` suppresses unchanged records, so

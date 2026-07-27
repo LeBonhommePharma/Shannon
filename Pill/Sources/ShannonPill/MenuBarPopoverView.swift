@@ -719,15 +719,34 @@ struct MenuBarPopoverView: View {
         .accessibilityHint("Quits the Shannon menu bar app")
     }
 
-    /// Honest multi-device path from CloudPublisher (P2.7).
+    /// Honest multi-device path from CloudPublisher (P2.7 / iCloud auth).
+    /// Never claims "on (iCloud)" for no-account / restricted / undetermined.
     private var multiDeviceFooterLine: String {
+        // Prefer full operator line when the short token is an account problem
+        // (CloudPublisher multiDeviceStatusLine is the source of truth).
         switch multiDeviceStatus {
         case "on":
             return "Multi-device: on (iCloud)"
         case "off":
             return "Multi-device: off"
-        default:
+        case "no-account":
+            return "Multi-device: sign in to iCloud (System Settings → Apple ID)"
+        case "restricted":
+            return "Multi-device: iCloud restricted on this Mac"
+        case "undetermined":
+            return "Multi-device: iCloud status undetermined"
+        case "temporary":
+            return "Multi-device: iCloud temporarily unavailable"
+        case "unsupported":
+            return "Multi-device: iCloud is Apple-only (not available here)"
+        case "in-memory":
             return "Multi-device: in-memory"
+        default:
+            // Future tokens from ICloudAccountPolicy.statusToken.
+            if multiDeviceStatus.hasPrefix("Multi-device:") {
+                return multiDeviceStatus
+            }
+            return "Multi-device: \(multiDeviceStatus)"
         }
     }
 

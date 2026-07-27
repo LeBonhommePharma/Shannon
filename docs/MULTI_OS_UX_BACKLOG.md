@@ -535,12 +535,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `EntropyEmptyTraceCopy.short` / `.detail`; chart + detail wired; PresentationTests pure + pad wiring.
 - **Priority:** P3
 
-### - [ ] UX-057: Status board columns (needs-you / working / done) (parity G4)
+### - [x] UX-057: Status board columns (needs-you / working / done) (parity G4)
 
 - **Why:** AgentPeek kanban board groups sessions by status; Shannon ranks for list density but has no column board for needs-you vs working vs done on Mac/pad.
 - **Platforms:** macOS (primary), iPadOS optional
 - **Area:** `AgentAttentionRank` buckets, CompanionBoard / pad hub layout
 - **First slice:** Pure bucket helper from ranked agents + pending IDs; wire one surface with three sections; no pixel clone of Peek.
+- **Done:** `StatusBoardColumns` + `StatusBoardBuckets` in ShannonCore (column from `AgentAttentionCopy.Kind` / activity + pending; ranked `bucket`; generic `partition`); titles/a11y share attention vocabulary; Mac `CompanionBoardView` three sections (needs-you / working / done) then quiet rows; `CompanionState.statusBoardColumn` + `AgentLiveAttention.statusBoardColumn`; pure + structural tests.
 - **Priority:** P3
 - **Parity:** AgentPeek board (candidate G4)
 

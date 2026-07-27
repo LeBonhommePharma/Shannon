@@ -24,6 +24,7 @@
 // `CompanionMoodTests` pins this over the full presence × status matrix.
 
 import Foundation
+import ShannonCore
 #if canImport(SwiftUI)
 import SwiftUI
 import ShannonTheme
@@ -499,6 +500,33 @@ public struct CompanionState: Sendable, Equatable, Identifiable {
     /// Full accessibility sentence, mood *and* the underlying evidence.
     public var accessibilityLine: String {
         "\(agent.displayName), \(petName), \(moodDisplayWord). \(agent.statusLine)."
+    }
+
+    /// UX-057 status-board column for kanban sections. Fail-closed: idle /
+    /// unknown / unmapped stay `nil` (rendered after the three columns).
+    public var statusBoardColumn: StatusBoardColumn? {
+        // Waiting / blocked → needs you (pending ask or session wait).
+        if agent.status == .blocked || codexMotion == .waiting {
+            return .needsYou
+        }
+        // Failed outcome needs operator attention, not a green "Done".
+        if codexMotion == .failed {
+            return .needsYou
+        }
+        // Working: Codex claims work, or live busy telemetry (not blocked).
+        if codexMotion.claimsWork {
+            return .working
+        }
+        if agent.presence.canBeBusy, agent.status.isBusy {
+            return .working
+        }
+        // Done: review / completion celebration motions only (never invent).
+        switch codexMotion {
+        case .review, .jumping:
+            return .done
+        default:
+            return nil
+        }
     }
 }
 

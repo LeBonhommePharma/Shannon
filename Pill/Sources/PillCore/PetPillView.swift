@@ -22,6 +22,7 @@
 
 #if canImport(SwiftUI)
 import SwiftUI
+import ShannonCore
 import ShannonTheme
 
 // MARK: - CompanionView
@@ -407,16 +408,34 @@ public struct CompanionBoardView: View {
         if states.isEmpty {
             EmptyView()
         } else {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(states.prefix(maxRows)) { state in
-                    CompanionRow(
-                        state: state,
-                        isFocused: DesktopCompanionHandoff.isFocusedRow(
-                            rowAgentId: state.id,
-                            focusedAgentId: focusedAgentId
-                        ),
-                        density: densityByAgent[state.id] ?? CompanionBoardDensity()
-                    )
+            // UX-057: three status sections (needs-you / working / done), then
+            // quiet rows. Cap total visible rows at maxRows across the board.
+            let visible = Array(states.prefix(maxRows))
+            let buckets = StatusBoardColumns.partition(visible) { $0.statusBoardColumn }
+            VStack(alignment: .leading, spacing: 6) {
+                if buckets.hasColumnContent {
+                    ForEach(StatusBoardColumns.displayOrder, id: \.self) { column in
+                        let columnStates = buckets.agents(in: column)
+                        if !columnStates.isEmpty {
+                            statusBoardSection(column: column, states: columnStates)
+                        }
+                    }
+                }
+                if !buckets.other.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(buckets.other) { state in
+                            companionBoardRow(state)
+                        }
+                    }
+                }
+                // Flat fallback when every row is "other" and we hid sections:
+                // still show them (handled above). When nothing was column-mapped
+                // and other is also empty, we already returned EmptyView.
+                if !buckets.hasColumnContent, buckets.other.isEmpty {
+                    // Defensive: partition always places each item somewhere.
+                    ForEach(visible) { state in
+                        companionBoardRow(state)
+                    }
                 }
                 if states.count > maxRows {
                     Text("+\(states.count - maxRows) more")
@@ -426,6 +445,35 @@ public struct CompanionBoardView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func statusBoardSection(
+        column: StatusBoardColumn,
+        states: [CompanionState]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(StatusBoardColumns.title(for: column))
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier(StatusBoardColumns.accessibilityIdentifier(for: column))
+            ForEach(states) { state in
+                companionBoardRow(state)
+            }
+        }
+    }
+
+    private func companionBoardRow(_ state: CompanionState) -> some View {
+        CompanionRow(
+            state: state,
+            isFocused: DesktopCompanionHandoff.isFocusedRow(
+                rowAgentId: state.id,
+                focusedAgentId: focusedAgentId
+            ),
+            density: densityByAgent[state.id] ?? CompanionBoardDensity()
+        )
     }
 }
 

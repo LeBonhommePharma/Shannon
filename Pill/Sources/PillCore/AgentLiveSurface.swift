@@ -24,6 +24,16 @@ public enum AgentLiveAttention: String, Sendable, Equatable, CaseIterable {
     case idle
     /// No trustworthy signal.
     case unknown
+
+    /// UX-057 status-board column (nil for idle/unknown — not on the three-column board).
+    public var statusBoardColumn: StatusBoardColumn? {
+        switch self {
+        case .needsYou: return .needsYou
+        case .working: return .working
+        case .finished: return .done
+        case .idle, .unknown: return nil
+        }
+    }
 }
 
 /// Coarse tool category for the live line (read / edit / shell / …).

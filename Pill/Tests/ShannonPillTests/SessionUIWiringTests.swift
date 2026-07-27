@@ -48,13 +48,18 @@ final class SessionUIWiringTests: XCTestCase {
                 "PulledSessionsSection",
                 "liveAgentIds",
                 "GateInlineCard",
+                "gateAvailable: activity.gateAvailable",
             ]),
             ("GateAskCard.swift", [
                 "GateAskActionCopy",
+                "macGateAffordance",
+                "gateAvailable",
             ]),
             ("GateInlineCard.swift", [
-                "GateAskActionCopy.approve",
-                "GateAskActionCopy.deny",
+                "GateAskActionCopy",
+                "macGateAffordance",
+                "gateAvailable",
+                "a.canInteract",
             ]),
         ]
 

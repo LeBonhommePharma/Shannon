@@ -46,6 +46,8 @@ struct ComplicationEntry: TimelineEntry {
 
 @available(watchOS 10.0, *)
 struct ComplicationProvider: TimelineProvider {
+    /// Gallery / widget-picker sample only — never a live cache-miss fallback (UX-041).
+    /// getSnapshot / getTimeline use `load() ?? ShannonSnapshot()` (empty), not this.
     static let placeholder = ShannonSnapshot(
         agents: [AgentState(id: "a", name: "FlexAID∆S", activity: .running, entropyBits: 0.61)],
         docking: [DockingProgress(id: "astex", benchmarkName: "Astex Diverse",
@@ -57,8 +59,9 @@ struct ComplicationProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (ComplicationEntry) -> Void) {
+        // UX-041: cache miss → empty snapshot (same as timeline). Do not invent H/metrics.
         completion(ComplicationEntry(date: Date(),
-                                     snapshot: SnapshotCache.watch.load() ?? Self.placeholder))
+                                     snapshot: SnapshotCache.watch.load() ?? ShannonSnapshot()))
     }
 
     func getTimeline(in context: Context,

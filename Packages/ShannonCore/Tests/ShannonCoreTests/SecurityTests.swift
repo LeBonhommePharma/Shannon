@@ -94,6 +94,49 @@ final class SecurityTests: XCTestCase {
         let loaded = cache.load()
         XCTAssertEqual(loaded?.agents.map(\.id), ["a"])
         XCTAssertEqual(loaded?.confirmations.map(\.id), ["c"])
+        let record = cache.loadRecord()
+        XCTAssertEqual(record?.snapshot.agents.map(\.id), ["a"])
+        XCTAssertNil(record?.lastError)
+        XCTAssertFalse(record?.isOffline == true)
+    }
+
+    /// UX-038: offline/lastError persists with the snapshot envelope.
+    func testCachePersistsOfflineLastError() throws {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("shannon-cache-offline-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let cache = SnapshotCache(fileURL: url)
+        let snapshot = ShannonSnapshot(
+            agents: [AgentState(id: "a", name: "Agent", activity: .running)]
+        )
+        XCTAssertTrue(cache.save(snapshot, lastError: "CKError network unavailable"))
+
+        let record = cache.loadRecord()
+        XCTAssertEqual(record?.snapshot.agents.map(\.id), ["a"])
+        XCTAssertEqual(record?.lastError, "CKError network unavailable")
+        XCTAssertTrue(record?.isOffline == true)
+        // load() still returns the snapshot for watch/complication callers.
+        XCTAssertEqual(cache.load()?.agents.map(\.id), ["a"])
+    }
+
+    /// UX-038: bare pre-envelope ShannonSnapshot files still load (online).
+    func testCacheLoadsLegacyBareSnapshotAsOnline() throws {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("shannon-cache-legacy-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let snapshot = ShannonSnapshot(
+            agents: [AgentState(id: "legacy", name: "L", activity: .idle)]
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(snapshot).write(to: url)
+
+        let record = SnapshotCache(fileURL: url).loadRecord()
+        XCTAssertEqual(record?.snapshot.agents.map(\.id), ["legacy"])
+        XCTAssertNil(record?.lastError)
+        XCTAssertFalse(record?.isOffline == true)
     }
 
     #if os(iOS) || os(watchOS)

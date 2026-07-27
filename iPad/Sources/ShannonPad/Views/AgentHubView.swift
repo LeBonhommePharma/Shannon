@@ -30,6 +30,29 @@ struct AgentHubView: View {
                 }
             )
             .onPreferenceChange(HubWidthKey.self) { width = $0 }
+            // UX-039: phone shows DisconnectedPill when content + lastError; pad
+            // only fail-closed the empty roster. Surface the shared offline chip
+            // under non-empty content so a stale board never looks healthy.
+            .safeAreaInset(edge: .bottom) {
+                if hub.store.lastError != nil && !hub.snapshot.isEmpty {
+                    Label(
+                        CompanionEmptyStateCopy.offlineChip,
+                        systemImage: "bolt.horizontal.circle"
+                    )
+                    .font(.shannonCaption)
+                    .foregroundStyle(Color.shannonSecondary)
+                    .padding(.horizontal, ShannonSpacing.sm)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(
+                        Capsule().strokeBorder(Color.shannonSeparator, lineWidth: ShannonStroke.hairline)
+                    )
+                    .accessibilityLabel(CompanionEmptyStateCopy.offlineAccessibility)
+                    .padding(.bottom, ShannonSpacing.xs)
+                    .transition(.opacity)
+                }
+            }
+            .animation(.shannonEase, value: hub.store.lastError)
             .overlay(alignment: .bottom) { voiceChip }
             .overlay(alignment: .top) { topOverlays }
             .overlay { paletteOverlay }
@@ -185,9 +208,12 @@ struct AgentHubView: View {
             }
             .accessibilityLabel(voice.isListening ? "Stop dictation" : "Start dictation")
 
+            // UX-039: fail-closed under lastError — do not show healthy relative age
+            // after a prior success while the hub is offline.
             SyncIndicator(
                 syncedAt: hub.store.lastSyncedAt,
-                isRefreshing: hub.store.isRefreshing
+                isRefreshing: hub.store.isRefreshing,
+                lastError: hub.store.lastError
             )
         }
     }
@@ -379,14 +405,30 @@ struct AgentSidebar: View {
 
 /// Last sync time, and a spinner while a fetch is in flight. Mirrors the
 /// phone's indicator so both companions age the same way.
+///
+/// UX-039: when `lastError` is set, prefer offline glyph + chip over a healthy
+/// relative `lastSyncedAt` from a prior success (fail-closed chrome).
 struct SyncIndicator: View {
     var syncedAt: Date?
     var isRefreshing: Bool
+    /// `ShannonStore.lastError` — when set, do not show relative age as healthy.
+    var lastError: String? = nil
+
+    private var isOffline: Bool {
+        CompanionEmptyStateCopy.hasSyncError(lastError)
+    }
 
     var body: some View {
         Group {
             if isRefreshing {
                 ProgressView().controlSize(.small)
+            } else if isOffline {
+                Label(
+                    CompanionEmptyStateCopy.offlineChip,
+                    systemImage: "bolt.horizontal.circle"
+                )
+                .font(.shannonCaption)
+                .foregroundStyle(Color.shannonSecondary)
             } else if let syncedAt {
                 Text(syncedAt, style: .relative)
                     .shannonNumeric(color: .shannonTertiary)
@@ -395,6 +437,10 @@ struct SyncIndicator: View {
                     .foregroundStyle(Color.shannonTertiary)
             }
         }
-        .accessibilityLabel("Sync status")
+        .accessibilityLabel(
+            isOffline
+                ? CompanionEmptyStateCopy.offlineAccessibility
+                : "Sync status"
+        )
     }
 }

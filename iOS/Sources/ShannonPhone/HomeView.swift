@@ -110,7 +110,9 @@ struct HomeView: View {
                 if let pending = snapshot.oldestPendingConfirmation() {
                     ConfirmationBanner(
                         confirmation: pending,
-                        gesturesAvailable: model.isAwaitingConfirmation,
+                        // UX-037: coaching follows actual motion arming, not mere pending.
+                        gesturesArmed: model.headGesturesArmed,
+                        gestureStatus: model.headGestureStatus,
                         lastError: model.store.lastError
                     ) { answer in
                         model.answer(answer, source: .tap)
@@ -175,7 +177,10 @@ struct ShannonPressStyle: ButtonStyle {
 @available(iOS 17.0, *)
 struct ConfirmationBanner: View {
     let confirmation: PendingConfirmation
-    let gesturesAvailable: Bool
+    /// True only when `HeadGestureListener` is actually armed (UX-037).
+    let gesturesArmed: Bool
+    /// Device-reported status for `HeadGestureCopy.unavailableLine`.
+    var gestureStatus: String = "not available"
     /// `ShannonStore.lastError` — when set, answers cannot write back.
     var lastError: String? = nil
     var onAnswer: (ConfirmationAnswer) -> Void
@@ -240,11 +245,16 @@ struct ConfirmationBanner: View {
                 }
             }
 
-            // UX-028: head-gesture coaching shares HeadGestureCopy with Mac pill.
-            if gesturesAvailable && a.canInteract {
-                Label(HeadGestureCopy.availableHint, systemImage: "airpodspro")
-                    .font(.shannonCaption)
-                    .foregroundStyle(Color.shannonTertiary)
+            // UX-028 / UX-037: HeadGestureCopy with Mac pill — available only when armed.
+            if a.canInteract {
+                Label(
+                    gesturesArmed
+                        ? HeadGestureCopy.availableHint
+                        : HeadGestureCopy.unavailableLine(status: gestureStatus),
+                    systemImage: gesturesArmed ? "airpodspro" : "airpodspro.chargingcase.wireless"
+                )
+                .font(.shannonCaption)
+                .foregroundStyle(Color.shannonTertiary)
             }
         }
         .padding(ShannonSpacing.md)

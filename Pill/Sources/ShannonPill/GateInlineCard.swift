@@ -10,17 +10,30 @@ import ShannonCore
 ///
 /// **UX-013:** Approve/Deny + “needs approval” via `GateAskActionCopy` so the
 /// menu-bar popover cannot drift from Mac `GateAskCard` / phone / pad.
+///
+/// **UX-036:** When the hub gate socket is down, buttons disable and the shared
+/// `macGateAffordance` status line is shown — same honesty bar as `GateAskCard`.
 struct GateInlineCard: View {
     let ask: GateDBReader.PendingAsk
     let isResolving: Bool
     let error: String?
+    /// Whether the gate socket is present. When false, Approve/Deny would fail.
+    var gateAvailable: Bool = true
     let extraPending: Int
     let onAnswer: (Bool) -> Void
     let onShowAll: () -> Void
 
     private var style: AgentStyle { AgentStyleCatalog.style(for: ask.agentId) }
 
+    private var affordance: GateAskActionCopy.Affordance {
+        GateAskActionCopy.macGateAffordance(
+            gateAvailable: gateAvailable,
+            errorText: error
+        )
+    }
+
     var body: some View {
+        let a = affordance
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Text(style.emoji).font(.shannonMenuBody)
@@ -42,12 +55,17 @@ struct GateInlineCard: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let error {
-                Text(error)
+            if let status = a.statusMessage {
+                Text(status)
                     .font(.shannonMenuFootnote)
-                    .foregroundStyle(Color.shannonError)
+                    .foregroundStyle(
+                        error != nil ? Color.shannonError : Color.shannonWarning
+                    )
                     .lineLimit(2)
-                    .accessibilityLabel("Approval error: \(error)")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(
+                        error != nil ? "Approval error: \(status)" : status
+                    )
             }
 
             HStack(spacing: 8) {
@@ -58,16 +76,18 @@ struct GateInlineCard: View {
                         .foregroundStyle(Color.shannonSecondary)
                 } else {
                     answerButton(
-                        GateAskActionCopy.approve,
+                        a.approveLabel,
                         systemImage: "checkmark",
-                        tint: .shannonSuccess
+                        tint: .shannonSuccess,
+                        enabled: a.canInteract
                     ) {
                         onAnswer(true)
                     }
                     answerButton(
-                        GateAskActionCopy.deny,
+                        a.denyLabel,
                         systemImage: "xmark",
-                        tint: .shannonError
+                        tint: .shannonError,
+                        enabled: a.canInteract
                     ) {
                         onAnswer(false)
                     }
@@ -102,7 +122,11 @@ struct GateInlineCard: View {
     }
 
     private func answerButton(
-        _ title: String, systemImage: String, tint: Color, action: @escaping () -> Void
+        _ title: String,
+        systemImage: String,
+        tint: Color,
+        enabled: Bool,
+        action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
@@ -113,10 +137,11 @@ struct GateInlineCard: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
-            .background(Capsule(style: .continuous).fill(tint))
+            .background(Capsule(style: .continuous).fill(enabled ? tint : tint.opacity(0.4)))
             .foregroundStyle(.white)
         }
         .buttonStyle(ShannonQuietButtonStyle())
+        .disabled(!enabled)
         .help("\(title) this request")
         .accessibilityLabel("\(title) \(style.displayName)'s request")
     }

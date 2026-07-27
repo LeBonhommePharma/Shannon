@@ -199,8 +199,12 @@ final class CloudPublisher {
         }
     }
 
-    /// Forward a phone/watch/iPad answer to the gate socket, then drop the local
-    /// ask so the pill stops pulsing without waiting for the next DB poll.
+    /// Forward a phone/watch/iPad answer to the gate socket.
+    ///
+    /// Terminal states match the on-desk path (`AgentActivityMonitor.resolve`):
+    /// clear the local ask only after a successful socket write; on any failure
+    /// keep the ask and surface `lastResolveError` so the pill stays actionable
+    /// instead of silently dropping the card when the hub is offline.
     private func applyRemoteAnswer(
         _ response: ConfirmationResponse,
         _ confirmation: PendingConfirmation?
@@ -211,13 +215,32 @@ final class CloudPublisher {
         let interactionID = response.id
         let approved = response.answer == .confirmed
         publishedConfirmationIDs.remove(interactionID)
-        Task { [weak self] in
+
+        // Prefer the live pending ask so resolve owns clearAsk + lastResolveError
+        // with the same terminal states as local approve/deny. Fall back to a
+        // minimal ask from the mirrored confirmation when the monitor has not
+        // yet polled this id.
+        if let activity {
+            let ask = activity.pendingAsks.first(where: { $0.interactionId == interactionID })
+                ?? GateDBReader.PendingAsk(
+                    interactionId: interactionID,
+                    agentId: agentID,
+                    prompt: confirmation?.question ?? ""
+                )
+            Task {
+                await activity.resolve(ask, approved: approved)
+            }
+            return
+        }
+
+        // No activity monitor: still forward so the waiting agent unblocks.
+        // There is no local ask UI to clear or surface an error on.
+        Task {
             _ = try? await GateApprovalClient.resolveAsync(
                 interactionId: interactionID,
                 agentId: agentID,
                 approved: approved
             )
-            await MainActor.run { self?.activity?.clearAsk(interactionID) }
         }
     }
 

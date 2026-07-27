@@ -118,5 +118,15 @@ final class MultiDeviceCadenceTests: XCTestCase {
             phone.contains("if SnapshotCache.phone.save"),
             "reload must gate on successful SnapshotCache.phone.save"
         )
+        // UX-038: offline signal rides with the cache write; failure path rewrites too.
+        XCTAssertTrue(
+            phone.contains("lastError: store.lastError")
+                || phone.contains("lastError: self.store.lastError"),
+            "PhoneModel must persist lastError with SnapshotCache"
+        )
+        XCTAssertTrue(
+            phone.contains("onSyncFailure"),
+            "PhoneModel must rewrite cache on store sync failure (UX-038)"
+        )
     }
 }

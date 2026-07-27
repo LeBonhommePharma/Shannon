@@ -273,8 +273,16 @@ final class GateAskActionCopyTests: XCTestCase {
             "GateInlineCard must use GateAskActionCopy"
         )
         XCTAssertTrue(inline.contains("GateAskActionCopy.needsApproval"))
-        XCTAssertTrue(inline.contains("GateAskActionCopy.approve"))
-        XCTAssertTrue(inline.contains("GateAskActionCopy.deny"))
+        XCTAssertTrue(inline.contains("GateAskActionCopy.approve") || inline.contains("a.approveLabel"))
+        XCTAssertTrue(inline.contains("GateAskActionCopy.deny") || inline.contains("a.denyLabel"))
+        XCTAssertTrue(
+            inline.contains("macGateAffordance"),
+            "GateInlineCard must use macGateAffordance when hub socket is down (UX-036)"
+        )
+        XCTAssertTrue(
+            inline.contains("gateAvailable"),
+            "GateInlineCard must take gateAvailable (UX-036)"
+        )
         XCTAssertFalse(
             inline.contains("Text(\"needs approval\")"),
             "GateInlineCard must not hard-code needs-approval capsule"

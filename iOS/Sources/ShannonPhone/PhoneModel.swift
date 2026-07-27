@@ -65,14 +65,15 @@ public final class PhoneModel {
         store.onSnapshot = { [weak self] snapshot in
             guard let self else { return }
             self.relay.send(snapshot)
-            // The widget process cannot share app memory — mirror into the
-            // App Group container (encrypted at rest), then ask WidgetKit to
-            // re-read so lock-screen glance stays within MultiDeviceCadence
-            // rather than the 15-minute timeline fallback (UX-035).
-            if SnapshotCache.phone.save(snapshot) {
-                WidgetCenter.shared.reloadTimelines(ofKind: "ShannonWidget")
-            }
+            // App Group + WidgetKit reload (UX-035); offline flag from lastError (UX-038).
+            self.persistWidgetCache(snapshot: snapshot)
             self.updateGestureArming(for: snapshot)
+        }
+        // UX-038: refresh errors must rewrite the cache so the glance fail-closes.
+        store.onSyncFailure = { [weak self] in
+            guard let self else { return }
+            self.persistWidgetCache(snapshot: self.store.snapshot)
+            self.updateGestureArming(for: self.store.snapshot)
         }
 
         relay.activate()
@@ -91,11 +92,27 @@ public final class PhoneModel {
         store.start()
     }
 
-    /// Arms head-gesture listening only while a question is on screen, and
-    /// tears the motion session down the moment it is answered — CoreMotion
-    /// updates are a real battery cost to leave running.
+    /// True only while `HeadGestureListener` is actually tracking (UX-037).
+    /// Distinct from `isAwaitingConfirmation` (stem/voice may still answer).
+    public var headGesturesArmed: Bool { gestures.isArmed }
+
+    /// Status string for unavailable gesture coaching line.
+    public var headGestureStatus: String { gestures.statusDescription }
+
+    /// Mirror into App Group (encrypted at rest), then reload WidgetKit so
+    /// lock-screen glance stays within MultiDeviceCadence rather than the
+    /// 15-minute timeline fallback (UX-035). Persists offline signal (UX-038).
+    private func persistWidgetCache(snapshot: ShannonSnapshot) {
+        if SnapshotCache.phone.save(snapshot, lastError: store.lastError) {
+            WidgetCenter.shared.reloadTimelines(ofKind: "ShannonWidget")
+        }
+    }
+
+    /// Arms head-gesture listening only while a question is on screen **and**
+    /// motion is available — CoreMotion updates cost battery, and coaching must
+    /// not claim "Nod to confirm" when arming no-ops (UX-037).
     private func updateGestureArming(for snapshot: ShannonSnapshot) {
-        // Arm only when a pending ask is answerable (not expired / not hub offline).
+        // Answerable pending ask (not expired / not hub offline) — stem/voice gate.
         var awaiting = snapshot.isAwaitingConfirmation
         if awaiting, let pending = snapshot.oldestPendingConfirmation() {
             let a = GateAskActionCopy.companionAffordance(
@@ -104,12 +121,15 @@ public final class PhoneModel {
             )
             awaiting = a.canInteract
         }
-        guard awaiting != isAwaitingConfirmation else { return }
         isAwaitingConfirmation = awaiting
 
-        if awaiting {
-            gestures.arm { [weak self] gesture in
-                self?.answer(gesture.answer, source: gesture == .nod ? .headNod : .headShake)
+        // UX-037: arm only when gestures are available; always re-evaluate so a
+        // late AirPods connect can arm without waiting for another snapshot flip.
+        if awaiting, gestures.isAvailable {
+            if !gestures.isArmed {
+                gestures.arm { [weak self] gesture in
+                    self?.answer(gesture.answer, source: gesture == .nod ? .headNod : .headShake)
+                }
             }
         } else {
             gestures.disarm()

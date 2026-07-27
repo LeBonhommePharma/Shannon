@@ -129,6 +129,7 @@ struct MenuBarPopoverView: View {
                             ask: ask,
                             isResolving: activity.resolving.contains(ask.interactionId),
                             error: activity.lastResolveError,
+                            gateAvailable: activity.gateAvailable,
                             extraPending: max(0, activity.pendingAsks.count - 1),
                             onAnswer: { approved in
                                 Task { await activity.resolve(ask, approved: approved) }

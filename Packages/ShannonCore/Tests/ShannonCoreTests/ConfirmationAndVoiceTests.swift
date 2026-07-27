@@ -238,9 +238,51 @@ final class ConfirmationAndVoiceTests: XCTestCase {
             phone.contains("HeadGestureCopy.availableHint"),
             "phone confirmation must use HeadGestureCopy.availableHint"
         )
+        XCTAssertTrue(
+            phone.contains("HeadGestureCopy.unavailableLine"),
+            "phone confirmation must use HeadGestureCopy.unavailableLine when unarmed (UX-037)"
+        )
+        XCTAssertTrue(
+            phone.contains("gesturesArmed"),
+            "phone banner must take gesturesArmed (not isAwaitingConfirmation alone)"
+        )
+        XCTAssertFalse(
+            phone.contains("gesturesAvailable: model.isAwaitingConfirmation"),
+            "banner must not treat isAwaitingConfirmation as gesture availability (UX-037)"
+        )
         XCTAssertFalse(
             phone.contains("\"Nod to confirm · shake to deny\""),
             "phone must not hard-code dual gesture hint string"
+        )
+
+        let model = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/PhoneModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            model.contains("gestures.isAvailable"),
+            "PhoneModel must arm only when HeadGestureListener is available"
+        )
+        XCTAssertTrue(
+            model.contains("headGesturesArmed"),
+            "PhoneModel must expose headGesturesArmed from listener.isArmed"
+        )
+
+        let listener = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/HeadGestureListener.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            listener.contains("statusDescription"),
+            "HeadGestureListener must expose statusDescription for unavailableLine"
+        )
+        XCTAssertTrue(
+            listener.contains("guard isAvailable"),
+            "HeadGestureListener.arm must no-op when motion unavailable"
         )
     }
 

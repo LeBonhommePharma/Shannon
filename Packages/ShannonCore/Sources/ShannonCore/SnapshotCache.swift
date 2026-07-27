@@ -1,5 +1,29 @@
 import Foundation
 
+/// On-disk snapshot + optional hub/sync error for App Group readers (widgets).
+///
+/// **UX-038:** companions persist fail-closed offline alongside the last good
+/// agent list. `lastError == nil` means last write considered sync healthy;
+/// non-nil drives `CompanionEmptyStateCopy` offline chrome in the widget.
+///
+/// Encoding is a thin envelope. Legacy files that were bare `ShannonSnapshot`
+/// JSON still load (offline = false).
+public struct SnapshotCacheRecord: Codable, Equatable, Sendable {
+    public var snapshot: ShannonSnapshot
+    /// `ShannonStore.lastError` at write time, or nil when last refresh succeeded.
+    public var lastError: String?
+
+    public init(snapshot: ShannonSnapshot, lastError: String? = nil) {
+        self.snapshot = snapshot
+        self.lastError = lastError
+    }
+
+    /// Fail-closed offline flag for widget / complication empty chrome.
+    public var isOffline: Bool {
+        CompanionEmptyStateCopy.hasSyncError(lastError)
+    }
+}
+
 /// On-disk snapshot cache, written with file protection so the cached agent
 /// task titles and notification previews are encrypted at rest.
 ///
@@ -58,10 +82,16 @@ public struct SnapshotCache: Sendable {
         return decoder
     }
 
+    /// Persist snapshot plus optional offline/lastError signal (UX-038).
     @discardableResult
-    public func save(_ snapshot: ShannonSnapshot) -> Bool {
+    public func save(_ snapshot: ShannonSnapshot, lastError: String? = nil) -> Bool {
+        save(SnapshotCacheRecord(snapshot: snapshot, lastError: lastError))
+    }
+
+    @discardableResult
+    public func save(_ record: SnapshotCacheRecord) -> Bool {
         guard let fileURL else { return false }
-        guard let data = try? Self.encoder.encode(snapshot) else { return false }
+        guard let data = try? Self.encoder.encode(record) else { return false }
 
         var options: Data.WritingOptions = [.atomic]
         #if os(iOS) || os(watchOS)
@@ -80,9 +110,21 @@ public struct SnapshotCache: Sendable {
         }
     }
 
-    public func load() -> ShannonSnapshot? {
+    /// Full envelope (snapshot + offline). Prefer for widget fail-closed UI.
+    public func loadRecord() -> SnapshotCacheRecord? {
         guard let fileURL, let data = try? Data(contentsOf: fileURL) else { return nil }
-        return try? Self.decoder.decode(ShannonSnapshot.self, from: data)
+        if let record = try? Self.decoder.decode(SnapshotCacheRecord.self, from: data) {
+            return record
+        }
+        // Backward compatible: pre-UX-038 bare ShannonSnapshot files.
+        if let snapshot = try? Self.decoder.decode(ShannonSnapshot.self, from: data) {
+            return SnapshotCacheRecord(snapshot: snapshot, lastError: nil)
+        }
+        return nil
+    }
+
+    public func load() -> ShannonSnapshot? {
+        loadRecord()?.snapshot
     }
 
     /// Removes the cache — called on sign-out, so a previous account's agent

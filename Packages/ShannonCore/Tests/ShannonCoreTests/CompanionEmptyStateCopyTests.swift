@@ -137,6 +137,103 @@ final class CompanionEmptyStateCopyTests: XCTestCase {
         )
     }
 
+    /// UX-039: pad non-empty hub must surface offlineChip under lastError
+    /// (phone DisconnectedPill parity); SyncIndicator must not stay healthy.
+    func testPadNonEmptyHubWiresOfflineChipAndFailClosedSyncIndicator() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let phone = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/HomeView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            phone.contains("CompanionEmptyStateCopy.offlineChip"),
+            "phone DisconnectedPill must use CompanionEmptyStateCopy.offlineChip"
+        )
+        XCTAssertTrue(
+            phone.contains("lastError != nil") && phone.contains("!snapshot.isEmpty"),
+            "phone must gate offline chip on lastError + non-empty snapshot"
+        )
+
+        let pad = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/AgentHubView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(pad.isEmpty, "AgentHubView.swift must be readable from Core tests")
+        // Non-empty content + lastError → shared offline chip (not empty-only).
+        XCTAssertTrue(
+            pad.contains("CompanionEmptyStateCopy.offlineChip"),
+            "pad must wire CompanionEmptyStateCopy.offlineChip under content (UX-039)"
+        )
+        XCTAssertTrue(
+            pad.contains("lastError != nil") && pad.contains("!hub.snapshot.isEmpty"),
+            "pad must gate offline chip on lastError + non-empty snapshot (phone parity)"
+        )
+        XCTAssertTrue(
+            pad.contains("CompanionEmptyStateCopy.offlineAccessibility"),
+            "pad offline chrome must use shared offline a11y"
+        )
+        // SyncIndicator: prefer offline under lastError, not healthy relative age.
+        XCTAssertTrue(
+            pad.contains("lastError: hub.store.lastError"),
+            "AgentHubView must pass store.lastError into SyncIndicator"
+        )
+        XCTAssertTrue(
+            pad.contains("hasSyncError(lastError)") || pad.contains("hasSyncError"),
+            "SyncIndicator must fail-close via hasSyncError / lastError"
+        )
+        XCTAssertTrue(
+            pad.contains("struct SyncIndicator"),
+            "SyncIndicator lives in AgentHubView for pad toolbar chrome"
+        )
+    }
+
+    /// UX-038: widget empty/offline branch uses CompanionEmptyStateCopy offline family.
+    func testWidgetWiresOfflineEmptyStateCopy() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let widget = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonWidget/ShannonWidget.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            widget.contains("SnapshotCache.phone.loadRecord"),
+            "widget must load SnapshotCacheRecord for offline flag"
+        )
+        XCTAssertTrue(
+            widget.contains("CompanionEmptyStateCopy"),
+            "widget must use CompanionEmptyStateCopy for offline chrome"
+        )
+        XCTAssertTrue(
+            widget.contains("offline.isOffline") || widget.contains("isOffline"),
+            "widget must branch on offline flag"
+        )
+        XCTAssertTrue(
+            widget.contains("lastError"),
+            "widget entry must carry lastError from cache"
+        )
+        XCTAssertFalse(
+            widget.contains("\"Hub offline\""),
+            "widget must not hard-code dual offline title string"
+        )
+    }
+
     /// UX-015: Mac notch empty board + menu-bar roster share Core idle title.
     func testMacEmptyRosterWiresIdleTitle() {
         let root = URL(fileURLWithPath: #filePath)

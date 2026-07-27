@@ -13,7 +13,11 @@ import ShannonTheme
 struct ShannonWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "ShannonWidget", provider: SnapshotProvider()) { entry in
-            ShannonWidgetView(snapshot: entry.snapshot, now: entry.date)
+            ShannonWidgetView(
+                snapshot: entry.snapshot,
+                lastError: entry.lastError,
+                now: entry.date
+            )
                 .containerBackground(Color.shannonBackground, for: .widget)
         }
         .configurationDisplayName("Shannon")
@@ -38,6 +42,14 @@ struct ShannonWidgetBundle: WidgetBundle {
 struct SnapshotEntry: TimelineEntry {
     let date: Date
     let snapshot: ShannonSnapshot
+    /// Hub/sync error mirrored from phone `SnapshotCache` (UX-038).
+    let lastError: String?
+
+    init(date: Date, snapshot: ShannonSnapshot, lastError: String? = nil) {
+        self.date = date
+        self.snapshot = snapshot
+        self.lastError = lastError
+    }
 }
 
 struct SnapshotProvider: TimelineProvider {
@@ -53,25 +65,41 @@ struct SnapshotProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (SnapshotEntry) -> Void) {
-        completion(SnapshotEntry(date: Date(),
-                                 snapshot: SnapshotCache.phone.load() ?? Self.placeholder))
+        completion(loadEntry(fallback: Self.placeholder))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<SnapshotEntry>) -> Void) {
-        let entry = SnapshotEntry(date: Date(),
-                                  snapshot: SnapshotCache.phone.load() ?? ShannonSnapshot())
+        let entry = loadEntry(fallback: ShannonSnapshot())
         // PhoneModel reloads timelines after each successful App Group cache
-        // write (UX-035). This 15-minute policy is only the fallback when the
-        // host app has not run recently.
+        // write (UX-035), including offline fail-closed rewrites (UX-038).
+        // This 15-minute policy is only the fallback when the host app has
+        // not run recently.
         completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(900))))
+    }
+
+    private func loadEntry(fallback: ShannonSnapshot) -> SnapshotEntry {
+        if let record = SnapshotCache.phone.loadRecord() {
+            return SnapshotEntry(
+                date: Date(),
+                snapshot: record.snapshot,
+                lastError: record.lastError
+            )
+        }
+        return SnapshotEntry(date: Date(), snapshot: fallback)
     }
 }
 
 struct ShannonWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let snapshot: ShannonSnapshot
+    /// Non-nil when phone last wrote a sync failure (UX-038 fail-closed).
+    var lastError: String? = nil
     /// Entry date from the timeline — glance age uses Mac 15 s buckets (UX-008).
     var now: Date = Date()
+
+    private var offline: CompanionEmptyStateCopy.Content {
+        CompanionEmptyStateCopy.content(lastError: lastError)
+    }
 
     /// Bucketed relative age for the freshest agent/docking/capture timestamp.
     private var glanceAge: String {
@@ -83,6 +111,61 @@ struct ShannonWidgetView: View {
     }
 
     var body: some View {
+        // UX-038: offline flag fails closed — never paint healthy agent counts
+        // from a stale cache while hub/sync is down.
+        if offline.isOffline {
+            offlineBody
+        } else {
+            onlineBody
+        }
+    }
+
+    @ViewBuilder
+    private var offlineBody: some View {
+        switch family {
+        case .accessoryCircular:
+            Image(systemName: offline.systemImage)
+                .font(.title2)
+                .foregroundStyle(Color.shannonWarning)
+
+        case .accessoryInline:
+            Text(CompanionEmptyStateCopy.offlineChip)
+
+        case .accessoryRectangular:
+            VStack(alignment: .leading, spacing: 1) {
+                Text(CompanionEmptyStateCopy.offlineTitle)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.shannonWarning)
+                Text(CompanionEmptyStateCopy.offlineChip)
+                    .font(.caption2)
+                    .foregroundStyle(Color.shannonTertiary)
+            }
+
+        default:
+            VStack(alignment: .leading, spacing: ShannonSpacing.sm) {
+                HStack(spacing: ShannonSpacing.xs) {
+                    Image(systemName: offline.systemImage)
+                    Text(offline.title)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .font(.shannonCaption)
+                .foregroundStyle(Color.shannonWarning)
+
+                Text(offline.detail)
+                    .font(.shannonCaption)
+                    .foregroundStyle(Color.shannonTertiary)
+                    .lineLimit(3)
+                Spacer(minLength: 0)
+            }
+            .accessibilityLabel(
+                "\(CompanionEmptyStateCopy.offlineTitle). \(CompanionEmptyStateCopy.offlineAccessibility)"
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var onlineBody: some View {
         switch family {
         case .accessoryCircular:
             if let docking {

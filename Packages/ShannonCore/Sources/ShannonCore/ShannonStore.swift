@@ -99,6 +99,9 @@ public final class ShannonStore {
     /// Called after every snapshot change, for the watch relay and the widget
     /// cache. Also unobserved.
     @ObservationIgnored public var onSnapshot: ((ShannonSnapshot) -> Void)?
+    /// Fired when a refresh fails after `lastError` is set so hosts can rewrite
+    /// the App Group cache with an offline signal (UX-038) without inventing agents.
+    @ObservationIgnored public var onSyncFailure: (() -> Void)?
 
     @ObservationIgnored private let backend: ShannonSyncBackend
     @ObservationIgnored private var assembler = SnapshotAssembler()
@@ -163,11 +166,14 @@ public final class ShannonStore {
                 confirmations: try await confirmations,
                 capturedAt: Date()
             )
-            apply(fresh)
+            // Clear offline before onSnapshot so widget cache writes as healthy.
             lastError = nil
             lastSyncedAt = Date()
+            apply(fresh)
         } catch {
             lastError = String(describing: error)
+            // UX-038: do not leave App Group glance on stale "healthy" agents.
+            onSyncFailure?()
         }
     }
 

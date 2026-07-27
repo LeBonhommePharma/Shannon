@@ -295,4 +295,60 @@ final class CompanionFocusCopyTests: XCTestCase {
             "desktop must not hard-code dual expand Shannon a11y hint"
         )
     }
+
+    // MARK: UX-041 — complication live snapshot must not invent metrics
+
+    /// Pure contract: empty cache-miss fallback invents no agents / docking / H.
+    func testEmptySnapshotFallbackDoesNotInventMetrics() {
+        let empty = ShannonSnapshot()
+        XCTAssertTrue(empty.isEmpty)
+        XCTAssertTrue(empty.agents.isEmpty)
+        XCTAssertTrue(empty.docking.isEmpty)
+        XCTAssertTrue(empty.confirmations.isEmpty)
+        XCTAssertNil(empty.agents.first?.entropyBits)
+        XCTAssertEqual(empty.complicationLine(now: now), CompanionFocusCopy.quietShort)
+        XCTAssertNil(empty.primaryFocusLine(now: now))
+    }
+
+    /// getSnapshot cache miss must use empty ShannonSnapshot, not busy gallery placeholder.
+    func testWatchComplicationGetSnapshotDoesNotUsePlaceholderOnCacheMiss() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let source = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "watchOS/Sources/ShannonWatchComplication/ShannonComplication.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(source.isEmpty, "ShannonComplication.swift must be readable")
+
+        // placeholder(in:) may still reference Self.placeholder for gallery sample.
+        XCTAssertTrue(
+            source.contains("func placeholder(in context: Context)"),
+            "gallery placeholder path must remain"
+        )
+        XCTAssertTrue(
+            source.contains("snapshot: Self.placeholder"),
+            "placeholder(in:) keeps gallery sample only"
+        )
+
+        // Live paths: getSnapshot + getTimeline use empty, never invent busy metrics.
+        XCTAssertTrue(
+            source.contains("SnapshotCache.watch.load() ?? ShannonSnapshot()"),
+            "live paths must fall back to empty ShannonSnapshot()"
+        )
+        XCTAssertFalse(
+            source.contains("load() ?? Self.placeholder"),
+            "getSnapshot/getTimeline must not use placeholder as cache-miss fallback"
+        )
+        XCTAssertFalse(
+            source.contains("?? Self.placeholder"),
+            "only placeholder(in:) may use Self.placeholder; live paths use empty snapshot"
+        )
+    }
 }

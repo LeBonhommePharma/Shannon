@@ -80,7 +80,10 @@ struct GateApprovalView: View {
     let model: WatchModel
     let pending: PendingConfirmation
 
-    private var pendingCount: Int { model.snapshot.confirmations.count }
+    /// Active (non-expired) only — matches face / complication / Core (UX-040).
+    private var pendingCount: Int {
+        GlobalNotifyResponse.activePending(in: model.snapshot).count
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: ShannonSpacing.sm) {

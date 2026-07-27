@@ -23,6 +23,9 @@ public final class HeadGestureListener {
 
     public var isAvailable: Bool {
         #if canImport(CoreMotion)
+        // Match Mac HeadphoneMotionProvider: denied/restricted are not available.
+        let status = CMHeadphoneMotionManager.authorizationStatus()
+        guard status != .denied, status != .restricted else { return false }
         return manager.isDeviceMotionAvailable
         #else
         return false
@@ -39,9 +42,27 @@ public final class HeadGestureListener {
         #endif
     }
 
+    /// Device-reported detail for `HeadGestureCopy.unavailableLine` (UX-037).
+    public var statusDescription: String {
+        #if canImport(CoreMotion)
+        switch CMHeadphoneMotionManager.authorizationStatus() {
+        case .notDetermined: return "motion access not yet requested"
+        case .restricted:    return "motion access restricted by policy"
+        case .denied:        return "motion access denied"
+        case .authorized:    return manager.isDeviceMotionAvailable
+                                    ? "authorized"
+                                    : "no head-tracking headphones connected"
+        @unknown default:    return "unknown authorization state"
+        }
+        #else
+        return "CoreMotion unavailable"
+        #endif
+    }
+
     public private(set) var isArmed = false
 
     public func arm(_ handler: @escaping (HeadGesture) -> Void) {
+        // UX-037: never claim armed when motion cannot actually track.
         guard isAvailable, !isArmed else { return }
         onGesture = handler
         detector = HeadGestureDetector()

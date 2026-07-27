@@ -16,6 +16,7 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 
 ## Investigation notes
 
+- **2026-07-26 (P0/P1 parallel agents):** Closed **ENH-023** remote clearAsk fail-open via activity.resolve parity.
 - 2026-07-26 15:40 — health sample: Pill SessionContent|AgentLiveSurface|Pet|Companion 180 passed; hub `test_pet_*.py` 114 passed. ENH-001–017 closed. No new ENH items (no dual-HUD gaps / Sendable warnings / fail-closed regressions observed this pass).
 
 ---
@@ -217,11 +218,12 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Priority:** P2
 - **Done:** Fleet `bridgeAggregate` uses `EntropyProvenance.resolve` (bridge → gate → absent) with `activity.agentEntropy`; multi-agent rows keep `resolveForAgent` + gate map. Demo collapse never published; gate-measured H publishes when resolve falls through. Tests in `CloudPublisherProvenanceTests` (demo+gate, multi-agent resolveForAgent).
 
-### - [ ] ENH-023: Remote companion answer must not clearAsk when gate resolve fails
+### - [x] ENH-023: Remote companion answer must not clearAsk when gate resolve fails
 
 - **Why:** `CloudPublishing.applyRemoteAnswer` always `clearAsk` after `try? resolveAsync`, swallowing errors — local `AgentActivity.resolve` only clears on success. Phone/watch can retract CloudKit while Mac pill stops pulsing though agent remains blocked at dead socket.
 - **Area:** `Pill/Sources/ShannonPill/CloudPublishing.swift` `applyRemoteAnswer`, `GateApprovalClient`, optional `lastResolveError` surface
 - **First slice:** `clearAsk` only after successful resolve; on failure keep ask + visible error; unit/integration test with failing socket path.
+- **Done:** `applyRemoteAnswer` → `activity.resolve` (same terminal as local); clearAsk only on success; `CloudPublisherRemoteAnswerTests`.
 - **Priority:** P0
 
 ### - [ ] ENH-024: AirPods tertiary stem dismiss notifications is real or removed

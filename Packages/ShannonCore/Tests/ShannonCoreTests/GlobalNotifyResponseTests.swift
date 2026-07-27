@@ -90,6 +90,58 @@ final class GlobalNotifyResponseTests: XCTestCase {
         XCTAssertTrue(edge.edges(from: snap, now: now).isEmpty)
     }
 
+    // MARK: Active pending count (UX-040)
+
+    /// Gate chrome “Gate 1 of N” must count answerable items only — not expired backlog.
+    func testActivePendingCountExcludesExpired() {
+        let snap = ShannonSnapshot(confirmations: [
+            pending(id: "fresh"),
+            pending(id: "stale", created: -2000, lifetime: 60),
+            pending(id: "also-fresh", question: "Other?", created: 1),
+        ])
+        XCTAssertEqual(snap.confirmations.count, 3, "raw queue still holds expired")
+        let active = GlobalNotifyResponse.activePending(in: snap, now: now)
+        XCTAssertEqual(active.map { $0.id }, ["fresh", "also-fresh"])
+        XCTAssertEqual(active.count, 2)
+        XCTAssertNotEqual(
+            active.count,
+            snap.confirmations.count,
+            "expired must not inflate Gate 1 of N"
+        )
+    }
+
+    /// UX-040: watch gate header must not use bare confirmations.count.
+    func testWatchGateChromeWiresActivePendingCount() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let watch = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "watchOS/Sources/ShannonWatch/WatchRootView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(watch.isEmpty, "WatchRootView.swift must be readable from test root")
+        XCTAssertTrue(
+            watch.contains("GlobalNotifyResponse.activePending")
+                || watch.contains("!isExpired")
+                || watch.contains("!$0.isExpired"),
+            "GateApprovalView pendingCount must filter active/non-expired only"
+        )
+        XCTAssertFalse(
+            watch.contains("model.snapshot.confirmations.count"),
+            "gate chrome must not use bare .confirmations.count"
+        )
+        XCTAssertFalse(
+            watch.contains("snapshot.confirmations.count"),
+            "gate chrome must not use bare confirmations.count"
+        )
+    }
+
     // MARK: Multi-surface identity
 
     func testConsumersAgreeOnSameSnapshotPending() {

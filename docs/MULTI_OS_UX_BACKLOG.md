@@ -345,7 +345,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** PhoneModel gates reload on save success; ShannonWidget timeline comment fixed; MultiDeviceCadenceTests structural.
 - **Priority:** P0
 
-### - [ ] UX-036: Menu-bar GateInlineCard uses macGateAffordance when hub socket down
+### - [x] UX-036: Menu-bar GateInlineCard uses macGateAffordance when hub socket down
+- **Done:** GateInlineCard macGateAffordance + gateAvailable from popover; SessionUIWiringTests + GateAskActionCopyTests.
 
 - **Why:** Notch `GateAskCard` disables Approve/Deny via `GateAskActionCopy.macGateAffordance`; menu-bar `GateInlineCard` always enables buttons when not resolving — fail-open vs UX-003 honesty bar.
 - **Platforms:** macOS
@@ -353,7 +354,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Pass `gateAvailable`; disable + `statusMessage` from `macGateAffordance`; SessionUIWiringTests require affordance on GateInlineCard.
 - **Priority:** P1
 
-### - [ ] UX-037: Phone head-gesture coaching only when motion actually armed
+### - [x] UX-037: Phone head-gesture coaching only when motion actually armed
+- **Done:** Arm only when isAvailable; banner availableHint vs unavailableLine; ConfirmationAndVoiceTests wiring.
 
 - **Why:** Banner shows `HeadGestureCopy.availableHint` from `isAwaitingConfirmation` alone; `HeadGestureListener.arm` no-ops when unavailable/denied without UI — fail-open “Nod to confirm” while motion off.
 - **Platforms:** iOS
@@ -361,7 +363,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Arm only when available; show `availableHint` only when armed else `unavailableLine`; pure/wiring tests.
 - **Priority:** P1
 
-### - [ ] UX-038: Widget glance fail-closed when hub/sync offline
+### - [x] UX-038: Widget glance fail-closed when hub/sync offline
+- **Done:** SnapshotCacheRecord envelope lastError; onSyncFailure rewrite; widget offline Core copy; SecurityTests + CompanionEmptyStateCopyTests.
 
 - **Why:** Store refresh errors set `lastError` without rewriting cache; widget has no offline branch / Core offline chip — glance can stay “agents running / Idle docking” after hub down (pairs with UX-035 reload).
 - **Platforms:** iOS widget (+ phone cache writer)
@@ -369,7 +372,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Persist offline signal with cache; widget empty/offline uses Core offline family; presence test.
 - **Priority:** P1
 
-### - [ ] UX-039: Pad non-empty hub shows offline chip; SyncIndicator not healthy under lastError
+### - [x] UX-039: Pad non-empty hub shows offline chip; SyncIndicator not healthy under lastError
+- **Done:** AgentHubView offline chip + SyncIndicator lastError path; CompanionEmptyStateCopyTests pad wiring; ipad build green.
 
 - **Why:** Phone shows `DisconnectedPill` when content + `lastError`; pad only fail-closes empty roster. Toolbar `SyncIndicator` still shows relative age after prior success while offline — opposite of fail-closed chrome.
 - **Platforms:** iPadOS (iOS DisconnectedPill reference)
@@ -377,7 +381,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Offline chip when `lastError != nil` and snapshot non-empty; SyncIndicator prefers offline glyph under lastError; wiring test.
 - **Priority:** P1
 
-### - [ ] UX-040: Watch gate “Gate 1 of N” counts active (non-expired) confirmations only
+### - [x] UX-040: Watch gate “Gate 1 of N” counts active (non-expired) confirmations only
+- **Done:** GateApprovalView pendingCount → GlobalNotifyResponse.activePending; GlobalNotifyResponseTests.
 
 - **Why:** `GateApprovalView.pendingCount` uses all `confirmations.count` while face/complication/Core filter expired — overstates backlog vs answerable asks.
 - **Platforms:** watchOS
@@ -385,7 +390,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Active-only count for header; wiring test forbids bare `.confirmations.count` for gate chrome.
 - **Priority:** P1
 
-### - [ ] UX-041: Watch complication getSnapshot must not invent busy placeholder metrics
+### - [x] UX-041: Watch complication getSnapshot must not invent busy placeholder metrics
+- **Done:** getSnapshot cache miss → ShannonSnapshot(); placeholder gallery-only; CompanionFocusCopyTests wiring.
 
 - **Why:** Timeline falls back to empty snapshot; `getSnapshot` falls back to busy FlexAID∆S + docking 78/85 + H 0.61 — invents metrics when cache nil (gallery/cold stack).
 - **Platforms:** watchOS complication
@@ -485,6 +491,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (P0/P1 parallel agents):** Implemented **UX-035…041** + **ENH-023** via five background agents (phone WidgetKit/gesture/offline, Mac clearAsk, GateInlineCard, pad offline chip, watch gate count + complication). ShannonCore 261 + Pill CloudPublisher/SessionUIWiring green; apple --quick re-run on commit path.
 - **2026-07-26 (loop 30):** `--quick` all PASS. Open P0 **UX-035** (phone WidgetKit reload after SnapshotCache) claimed. Closed with PhoneModel + structural test. Next open: **UX-036** GateInlineCard macGateAffordance (P1). Considered: UX-037 gesture arm honesty; UX-038 widget offline; watch No notifications (P2+). **No additional UX-0xx**.
 - **2026-07-26 (Grok 4.5 OS swarm):** Four background audits (`swarm_{macos,ios,ipados,watchos}.md`) + `./scripts/test_apple_platforms.sh --quick` **PASS** (ran=4 failed=0). Enqueued **UX-035…052** (18 open), plus ENH-023…025 and PET **E6/E7** on sibling queues. Per-OS enqueue: macOS 3 UX + 1 ENH; iOS 6 UX + 2 ENH + 1 PET; iPadOS 6 UX + 1 PET (F1+F2 merged; comment-only 20s dropped); watchOS 4 UX. Dropped: companion bubble character empty, status-item spoken brand prose, palette/No matches surface-specific, watch face quiet-offline P3 polish, configurationDisplayName catalog.
 - **2026-07-26 (loop 29):** `--quick` all PASS. Backlog empty after UX-033. Residual pad Gate Activity dual approved/denied past tense. Claimed **UX-034**. Considered: watch `"No notifications"` empty (surface-specific); watch crown coaching prose (gesture narrative); pad `"No matches"`; `configurationDisplayName` catalog (leave). **No additional UX-0xx**.

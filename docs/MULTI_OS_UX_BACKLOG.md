@@ -399,12 +399,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** `load() ?? ShannonSnapshot()` for snapshot path; keep `placeholder(in:)` sample-only; test/comment contract.
 - **Priority:** P1
 
-### - [ ] UX-042: Unify Mac hub-offline resolve error with GateAskActionCopy.macGateOffline
+### - [x] UX-042: Unify Mac hub-offline resolve error with GateAskActionCopy.macGateOffline
 
 - **Why:** Pre-disable copy `macGateOffline` vs post-tap `AgentActivity.describe` socketUnavailable string — same meaning, two shipping strings.
 - **Platforms:** macOS
 - **Area:** `AgentActivity.describe`, `GateAskActionCopy`
 - **First slice:** Map socketUnavailable → shared Core token; pure test forbids dual literal.
+- **Done:** `describeResolveError(.socketUnavailable)` → `GateAskActionCopy.macGateOffline`; pure + structural tests; remote-answer path asserts same token.
 - **Priority:** P2
 
 ### - [ ] UX-043: Roster Gate · approve hint requires gateAvailable
@@ -491,6 +492,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (loop 31):** `--quick` all PASS (ran=4). No open P0/P1 (swarm closed UX-035…041). Claimed **UX-042** (P2): post-tap socketUnavailable → `macGateOffline`. Considered already-queued: UX-043 roster gateAvailable; UX-044 AirPods Confirmed/Denied; UX-050 watch “No notifications”; pad “No matches” surface-specific (leave). **No additional UX-0xx**.
 - **2026-07-26 (P0/P1 parallel agents):** Implemented **UX-035…041** + **ENH-023** via five background agents (phone WidgetKit/gesture/offline, Mac clearAsk, GateInlineCard, pad offline chip, watch gate count + complication). ShannonCore 261 + Pill CloudPublisher/SessionUIWiring green; apple --quick re-run on commit path.
 - **2026-07-26 (loop 30):** `--quick` all PASS. Open P0 **UX-035** (phone WidgetKit reload after SnapshotCache) claimed. Closed with PhoneModel + structural test. Next open: **UX-036** GateInlineCard macGateAffordance (P1). Considered: UX-037 gesture arm honesty; UX-038 widget offline; watch No notifications (P2+). **No additional UX-0xx**.
 - **2026-07-26 (Grok 4.5 OS swarm):** Four background audits (`swarm_{macos,ios,ipados,watchos}.md`) + `./scripts/test_apple_platforms.sh --quick` **PASS** (ran=4 failed=0). Enqueued **UX-035…052** (18 open), plus ENH-023…025 and PET **E6/E7** on sibling queues. Per-OS enqueue: macOS 3 UX + 1 ENH; iOS 6 UX + 2 ENH + 1 PET; iPadOS 6 UX + 1 PET (F1+F2 merged; comment-only 20s dropped); watchOS 4 UX. Dropped: companion bubble character empty, status-item spoken brand prose, palette/No matches surface-specific, watch face quiet-offline P3 polish, configurationDisplayName catalog.

@@ -1,4 +1,5 @@
 import XCTest
+import ShannonCore
 @testable import PillCore
 
 final class AgentActivityTests: XCTestCase {
@@ -630,6 +631,63 @@ final class AgentActivityTests: XCTestCase {
         XCTAssertTrue(
             UICadence.agentFullScanInterval > UICadence.agentHubInterval,
             "full pets scan must be coarser than every gate tick"
+        )
+    }
+
+    /// UX-042: post-tap socketUnavailable uses the same Core token as pre-disable
+    /// `macGateAffordance` — no dual “then retry” vs “approve from here”.
+    func testSocketUnavailableResolveErrorUsesMacGateOffline() {
+        let offline = AgentActivityMonitor.describeResolveError(
+            GateApprovalClient.ApprovalError.socketUnavailable
+        )
+        XCTAssertEqual(offline, GateAskActionCopy.macGateOffline)
+        XCTAssertEqual(
+            offline,
+            GateAskActionCopy.macGateAffordance(gateAvailable: false).statusMessage
+        )
+        XCTAssertFalse(
+            offline.contains("then retry"),
+            "must not ship dual socket-unavailable prose"
+        )
+
+        // Other ApprovalError cases stay distinct (not forced onto offline token).
+        XCTAssertNotEqual(
+            AgentActivityMonitor.describeResolveError(
+                GateApprovalClient.ApprovalError.timedOut
+            ),
+            GateAskActionCopy.macGateOffline
+        )
+        XCTAssertEqual(
+            AgentActivityMonitor.describeResolveError(
+                GateApprovalClient.ApprovalError.connectFailed(61)
+            ),
+            "Gate refused the connection — retry"
+        )
+    }
+
+    /// UX-042 structural: shipped describe path wires Core token, forbids dual literal.
+    func testDescribeResolveErrorWiresMacGateOfflineToken() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let src = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "Sources/PillCore/AgentActivity.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            src.contains("GateAskActionCopy.macGateOffline"),
+            "describeResolveError must map socketUnavailable → macGateOffline"
+        )
+        XCTAssertTrue(
+            src.contains("describeResolveError"),
+            "resolve path must call describeResolveError"
+        )
+        XCTAssertFalse(
+            src.contains("start the gate, then retry"),
+            "must not hard-code dual hub-offline resolve string"
         )
     }
 }

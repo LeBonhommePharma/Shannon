@@ -1178,16 +1178,22 @@ public final class AgentActivityMonitor: ObservableObject {
             )
             clearAsk(iid)
         } catch {
-            lastResolveError = Self.describe(error)
+            lastResolveError = Self.describeResolveError(error)
         }
     }
 
-    private static func describe(_ error: Error) -> String {
+    /// Maps gate resolve failures to the status line shown on gate cards.
+    ///
+    /// **UX-042:** `.socketUnavailable` shares `GateAskActionCopy.macGateOffline`
+    /// with pre-disable chrome (`macGateAffordance`) — one shipping string for
+    /// the same hub-offline meaning (no dual “then retry” vs “approve from here”).
+    /// Pure / nonisolated so tests and off-main resolve paths share one mapper.
+    nonisolated static func describeResolveError(_ error: Error) -> String {
         guard let e = error as? GateApprovalClient.ApprovalError else {
             return "Couldn't reach the gate — \(error.localizedDescription)"
         }
         switch e {
-        case .socketUnavailable: return "Hub offline — start the gate, then retry"
+        case .socketUnavailable: return GateAskActionCopy.macGateOffline
         case .connectFailed:     return "Gate refused the connection — retry"
         case .writeFailed:       return "Write to gate failed — retry"
         case .timedOut:          return "Gate not responding — retry"

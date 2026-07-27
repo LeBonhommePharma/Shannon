@@ -126,11 +126,11 @@ final class CloudPublisherRemoteAnswerTests: XCTestCase {
             "failed gate resolve must not clearAsk — local path keeps the card"
         )
         let err = try XCTUnwrap(monitor.lastResolveError)
-        XCTAssertTrue(
-            err.localizedCaseInsensitiveContains("hub")
-                || err.localizedCaseInsensitiveContains("gate")
-                || err.localizedCaseInsensitiveContains("offline"),
-            "expected a visible gate/hub error, got: \(err)"
+        // UX-042: post-tap resolve error equals pre-disable macGateOffline token.
+        XCTAssertEqual(
+            err,
+            GateAskActionCopy.macGateOffline,
+            "socketUnavailable must surface GateAskActionCopy.macGateOffline"
         )
     }
 }

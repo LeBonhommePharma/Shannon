@@ -148,11 +148,18 @@ public struct CompanionBoardDensity: Sendable, Equatable {
 /// Assembles session cards and collapsed status from real local signals only.
 public enum SessionContentPresenter {
 
-    /// Build usage from session token fields — fail-closed when none reported.
+    /// Build usage from session token + window fields — fail-closed when none reported.
     ///
     /// Delegates to `UsageBridge` (UsageCore) so readers + presenters share one map.
+    /// Windows pass through only when the session already carries provider-reported
+    /// windows (ENH-026); never derived from token totals.
     public static func usageFromSession(_ session: AgentSession) -> AgentUsageSnapshot? {
-        UsageBridge.fromTokens(input: session.tokensIn, output: session.tokensOut)
+        UsageBridge.snapshot(
+            tokensIn: session.tokensIn,
+            tokensOut: session.tokensOut,
+            windows: session.usageWindows,
+            planLabel: session.usagePlanLabel
+        )
     }
 
     /// Map sessions → usage snapshots for surface resolve (fail-closed, no zeros).

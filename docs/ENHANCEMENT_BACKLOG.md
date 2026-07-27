@@ -241,11 +241,12 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **First slice:** Document honest no-op **or** minimal freeform RemoteCommand + Mac consume; show previewCommand if kept.
 - **Priority:** P3
 
-### - [ ] ENH-026: Multi-provider usage windows when source provides them (parity G1)
+### - [x] ENH-026: Multi-provider usage windows when source provides them (parity G1)
 
 - **Why:** AgentNotch/Peek surface plan/context windows (5h/7d, monthly) when readable; Shannon `UsageSnapshot` is fail-closed but thin — no honest multi-window presentation when gate/artifacts already expose window fields.
 - **Area:** `UsageCore` / `UsageSnapshot`, session presenters, collapsed usage chip
 - **First slice:** Inventory which readers already carry window/limit fields; extend `UsageSnapshot` only for real fields; pure tests forbid inventing totals.
+- **Done:** Inventory: Codex `token_count.rate_limits` (primary 300m / secondary 10080m + `used_percent` + `resets_at` + `plan_type`) on disk; ClaudeUsage local API shape documented in pure parser (no network). `UsageWindow` + `UsageSnapshot.windows`; `UsageBridge.windowsFromCodexRateLimits` / `windowFromProvider` never invent % from tokens; `AgentSession.usageWindows` + presenter `usageFromSession` → chip `5h 26% · 7d 94%`; Codex reader + fixture; pure + artifact tests.
 - **Priority:** P2
 - **Parity:** AgentPeek usage / AgentNotch plan gauge (candidate G1)
 

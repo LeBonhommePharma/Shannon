@@ -1,11 +1,13 @@
 import Foundation
 import PillCore
+import UsageCore
 
 // MARK: - Codex on-disk session reader
 
 /// Reads Codex rollout JSONL under `~/.codex/sessions/**` (and optional archived).
 ///
 /// Fail-closed: missing store → empty list. Never invents token/quota numbers.
+/// Provider plan windows come from `token_count.rate_limits` when present (ENH-026).
 public struct CodexSessionReader: SessionProviding {
     public let providerId = "codex_artifacts"
     public var sessionsRoot: URL
@@ -126,6 +128,8 @@ public struct CodexSessionReader: SessionProviding {
         var updatedAt: Date?
         var tokensIn: Int?
         var tokensOut: Int?
+        var usageWindows: [UsageWindow] = []
+        var usagePlanLabel: String?
         var completed = false
         var started = false
         var lineCount = 0
@@ -158,9 +162,18 @@ public struct CodexSessionReader: SessionProviding {
                 if et == "task_started" { started = true }
                 if et == "task_complete" || et == "task_completed" { completed = true }
                 // Latest token_count wins; prefer total_token_usage over last.
-                if et == "token_count", let usage = extractTokenCount(from: payload) {
-                    if let tin = usage.tokensIn { tokensIn = tin }
-                    if let tout = usage.tokensOut { tokensOut = tout }
+                // rate_limits windows ride the same event when the source provides them.
+                if et == "token_count" {
+                    if let usage = extractTokenCount(from: payload) {
+                        if let tin = usage.tokensIn { tokensIn = tin }
+                        if let tout = usage.tokensOut { tokensOut = tout }
+                    }
+                    let rl = extractRateLimits(from: payload)
+                    let windows = UsageBridge.windowsFromCodexRateLimits(rl)
+                    if !windows.isEmpty { usageWindows = windows }
+                    if let plan = UsageBridge.planLabelFromCodexRateLimits(rl) {
+                        usagePlanLabel = plan
+                    }
                 }
                 if let msg = payload["message"] as? String, !msg.isEmpty {
                     lastTask = msg
@@ -220,9 +233,25 @@ public struct CodexSessionReader: SessionProviding {
             branch: branch,
             tokensIn: tokensIn,
             tokensOut: tokensOut,
+            usageWindows: usageWindows,
+            usagePlanLabel: usagePlanLabel,
             sourcePath: url.path,
             startedAt: startedAt,
             activitySummary: lastTask.map { AgentActivitySnapshot.shorten($0, max: 120) }
+        )
+    }
+
+    /// Provider-agnostic usage snapshot from Codex tokens + rate_limits windows.
+    public static func usageSnapshot(
+        tokensIn: Int?,
+        tokensOut: Int?,
+        rateLimits: [String: Any]? = nil
+    ) -> UsageSnapshot? {
+        UsageBridge.snapshot(
+            tokensIn: tokensIn,
+            tokensOut: tokensOut,
+            windows: UsageBridge.windowsFromCodexRateLimits(rateLimits),
+            planLabel: UsageBridge.planLabelFromCodexRateLimits(rateLimits)
         )
     }
 
@@ -249,6 +278,17 @@ public struct CodexSessionReader: SessionProviding {
         let tout = totals["output_tokens"] != nil ? nonNegativeInt(totals["output_tokens"]) : nil
         if tin == nil && tout == nil { return nil }
         return (tokensIn: tin, tokensOut: tout)
+    }
+
+    /// Extract the `rate_limits` object from a Codex `token_count` payload.
+    ///
+    /// Lives at `payload.rate_limits` (sibling of `info`). Returns nil when
+    /// absent, null, or not a dictionary — never invents slots.
+    public static func extractRateLimits(from payload: [String: Any]) -> [String: Any]? {
+        guard let rl = payload["rate_limits"] as? [String: Any], !rl.isEmpty else {
+            return nil
+        }
+        return rl
     }
 
     /// Fail-closed non-negative integer from JSONSerialization values.

@@ -340,6 +340,53 @@ final class AgentArtifactReaderTests: XCTestCase {
         XCTAssertEqual(usage?.tokensUsed, 1040)
     }
 
+    /// ENH-026: Codex fixture with rate_limits → real 5h/7d windows on session + chip.
+    func testCodexReaderParsesRateLimitWindowsFromFixture() {
+        let root = fixturesRoot
+            .appendingPathComponent("codex/sessions", isDirectory: true)
+        let sessions = CodexSessionReader.readSessions(
+            sessionsRoot: root,
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10,
+            resolveBranch: { _ in nil }
+        )
+        let s = sessions.first { $0.id.contains("cccccccc-cccc-cccc-cccc-cccccccccccc") }
+        XCTAssertNotNil(s)
+        XCTAssertEqual(s?.usageWindows.count, 2)
+        XCTAssertEqual(s?.usageWindows[0].kind, .fiveHour)
+        XCTAssertEqual(s?.usageWindows[0].usedPercent, 26)
+        XCTAssertEqual(s?.usageWindows[1].kind, .sevenDay)
+        XCTAssertEqual(s?.usageWindows[1].usedPercent, 94)
+        XCTAssertEqual(s?.usagePlanLabel, "plus")
+
+        guard let session = s else { return }
+        let usage = SessionContentPresenter.usageFromSession(session)
+        XCTAssertEqual(usage?.shortLabel, "5h 26% · 7d 94%")
+        XCTAssertEqual(usage?.planLabel, "plus")
+
+        // No-usage fixture must stay window-empty (fail-closed).
+        let bare = sessions.first { $0.id.contains("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb") }
+        XCTAssertNotNil(bare)
+        XCTAssertTrue(bare?.usageWindows.isEmpty == true)
+        XCTAssertNil(bare?.usagePlanLabel)
+    }
+
+    func testCodexExtractRateLimitsFailClosed() {
+        XCTAssertNil(CodexSessionReader.extractRateLimits(from: [:]))
+        XCTAssertNil(CodexSessionReader.extractRateLimits(from: [
+            "type": "token_count",
+            "rate_limits": NSNull(),
+        ]))
+        let rl = CodexSessionReader.extractRateLimits(from: [
+            "type": "token_count",
+            "rate_limits": [
+                "primary": ["used_percent": 1.0, "window_minutes": 300],
+            ],
+        ])
+        XCTAssertNotNil(rl)
+        XCTAssertEqual(UsageBridge.windowsFromCodexRateLimits(rl).count, 1)
+    }
+
     func testClaudeExtractUsageFailClosed() {
         XCTAssertNil(ClaudeCodeSessionReader.extractUsage(from: [:]))
         XCTAssertNil(ClaudeCodeSessionReader.extractUsage(from: [

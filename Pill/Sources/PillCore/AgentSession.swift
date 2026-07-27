@@ -1,4 +1,5 @@
 import Foundation
+import UsageCore
 
 // MARK: - Multi-source session model (AgentPeek-parity W0)
 
@@ -44,6 +45,11 @@ public struct AgentSession: Sendable, Equatable, Identifiable {
     public var branch: String?
     public var tokensIn: Int?
     public var tokensOut: Int?
+    /// Provider-reported plan/quota windows (Codex rate_limits, etc.). Empty when
+    /// the source did not expose window fields — never invent (ENH-026).
+    public var usageWindows: [UsageWindow]
+    /// Provider plan label when reported (e.g. Codex `plan_type`).
+    public var usagePlanLabel: String?
     public var sourcePath: String?
     public var startedAt: Date?
     public var activitySummary: String?
@@ -66,6 +72,8 @@ public struct AgentSession: Sendable, Equatable, Identifiable {
         branch: String? = nil,
         tokensIn: Int? = nil,
         tokensOut: Int? = nil,
+        usageWindows: [UsageWindow] = [],
+        usagePlanLabel: String? = nil,
         sourcePath: String? = nil,
         startedAt: Date? = nil,
         activitySummary: String? = nil
@@ -87,6 +95,9 @@ public struct AgentSession: Sendable, Equatable, Identifiable {
         self.branch = branch
         self.tokensIn = tokensIn.flatMap { $0 >= 0 ? $0 : nil }
         self.tokensOut = tokensOut.flatMap { $0 >= 0 ? $0 : nil }
+        self.usageWindows = usageWindows
+        let plan = usagePlanLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.usagePlanLabel = (plan?.isEmpty == false) ? plan : nil
         self.sourcePath = sourcePath
         self.startedAt = startedAt
         self.activitySummary = activitySummary
@@ -234,6 +245,10 @@ public enum SessionMerge {
         if out.branch == nil { out.branch = secondary.branch }
         if out.tokensIn == nil { out.tokensIn = secondary.tokensIn }
         if out.tokensOut == nil { out.tokensOut = secondary.tokensOut }
+        if out.usageWindows.isEmpty, !secondary.usageWindows.isEmpty {
+            out.usageWindows = secondary.usageWindows
+        }
+        if out.usagePlanLabel == nil { out.usagePlanLabel = secondary.usagePlanLabel }
         if out.sourcePath == nil { out.sourcePath = secondary.sourcePath }
         if out.startedAt == nil { out.startedAt = secondary.startedAt }
         if out.activitySummary == nil { out.activitySummary = secondary.activitySummary }

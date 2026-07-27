@@ -1007,6 +1007,21 @@ extension EntropyProvenance {
         return .absent(gateDBAvailable ? .noDetector : .gateUnavailable)
     }
 
+    /// Prefer a **currently measured** live resolve over memory that may be
+    /// stale under enforce (display nil → "—" / "no H" despite attach bridge H).
+    ///
+    /// Order: measured live → measured memory → live (absent/stale) → memory.
+    public static func preferredRowReading(
+        live: EntropyReading,
+        memory: EntropyReading?
+    ) -> EntropyReading {
+        if live.isMeasured { return live }
+        guard let memory else { return live }
+        if memory.isMeasured { return memory }
+        if case .absent = live { return memory }
+        return live
+    }
+
     /// Resolve an independent reading for every listed agent id.
     ///
     /// Order of `agentIds` is preserved in the returned array of pairs; the map

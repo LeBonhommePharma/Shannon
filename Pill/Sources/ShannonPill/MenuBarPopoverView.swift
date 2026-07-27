@@ -72,10 +72,17 @@ struct MenuBarPopoverView: View {
 
     /// Independent H per listed agent — never a single anonymous number.
     private var agentReadings: [String: EntropyReading] {
-        let pool = busy.isEmpty ? summary.agents : busy
-        let liveIds = Set(pool.filter { $0.presence == .live }.map(\.id))
+        let pendingIDs = Set(activity.pendingAsks.map(\.agentId))
+        let admitted = LiveRosterAdmission.filterListed(
+            agents: summary.agents,
+            pendingAgentIDs: pendingIDs
+        )
+        // Prefer busy among admitted; sole-live only among admitted live rows.
+        let pool = admitted.filter { $0.status.isBusy }
+        let use = pool.isEmpty ? admitted : pool
+        let liveIds = Set(admitted.filter { $0.presence == .live }.map(\.id))
         return EntropyProvenance.resolveAll(
-            agentIds: pool.map(\.id),
+            agentIds: use.map(\.id),
             bridgeConnected: bridge.connected,
             bridgeStatus: bridge.status,
             gate: activity.agentEntropy,

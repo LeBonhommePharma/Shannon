@@ -185,9 +185,14 @@ final class DesktopCompanionModel: ObservableObject {
         packagePetId: String?
     ) -> DesktopCompanionCycle.PresentResult {
         let summary = activity.summary
-        let liveIds = Set(summary.agents.filter { $0.presence == .live }.map(\.id))
+        let pendingIDs = Set(activity.pendingAsks.map(\.agentId))
+        let admitted = LiveRosterAdmission.filterListed(
+            agents: summary.agents,
+            pendingAgentIDs: pendingIDs
+        )
+        let liveIds = Set(admitted.filter { $0.presence == .live }.map(\.id))
         let deltas = EntropyProvenance.companionDeltas(
-            agentIds: summary.agents.map(\.id),
+            agentIds: admitted.map(\.id),
             bridgeConnected: bridge.connected,
             bridgeStatus: bridge.status,
             gate: activity.agentEntropy,

@@ -236,4 +236,73 @@ final class LiveRosterAdmissionTests: XCTestCase {
         XCTAssertFalse(ids.contains("window_junk"))
         XCTAssertFalse(ids.contains("finder_junk"))
     }
+
+    func testSpamOnlyRosterAdmissionIsEmpty() {
+        let spam = [
+            snap(id: "window_junk", presence: .observed),
+            snap(id: "finder_junk", presence: .live, attachBundle: "com.apple.finder"),
+        ]
+        let ranked = AgentLiveSurfaceLogic.rankedAgentSurfaces(agents: spam, limit: 10)
+        XCTAssertTrue(ranked.isEmpty, "spam-only roster must yield empty board")
+        let filtered = LiveRosterAdmission.filterListed(agents: spam)
+        XCTAssertTrue(filtered.isEmpty)
+    }
+
+    func testPreferredRowReadingPrefersMeasuredLiveOverStaleMemory() {
+        let bridge = ShannonStatus(
+            entropy: 7.25,
+            deltaH: -0.5,
+            collapsed: false,
+            tokenCount: 12,
+            backend: "cpp",
+            agent: nil
+        )
+        let live = EntropyProvenance.resolveForAgent(
+            agentId: "claude_code",
+            bridgeConnected: true,
+            bridgeStatus: bridge,
+            applyUnnamedFleetBridge: true
+        )
+        XCTAssertTrue(live.isMeasured)
+        // Stale gate memory for same agent would blank UI under enforce.
+        let staleMeas = EntropyMeasurement(
+            bits: 3.0,
+            deltaH: nil,
+            collapsed: false,
+            source: .gate(agentId: "claude_code", presence: .offline),
+            measuredAt: Date().addingTimeInterval(-10_000),
+            now: Date()
+        )!
+        let memory: EntropyReading = .stale(staleMeas, age: 10_000)
+        let preferred = EntropyProvenance.preferredRowReading(live: live, memory: memory)
+        XCTAssertTrue(preferred.isMeasured)
+        if case .measured(let m) = preferred {
+            XCTAssertEqual(m.bits, 7.25, accuracy: 1e-9)
+        } else {
+            XCTFail("expected measured live bridge")
+        }
+    }
+
+    func testSoleLiveAmongAdmittedIgnoresExtraStickyLiveHosts() {
+        // Cursor host sticky-live + real attach: only admitted lives count for fleet H.
+        let admittedLive = ["claude_code"]
+        let status = ShannonStatus(
+            entropy: 5.5,
+            deltaH: -0.2,
+            collapsed: false,
+            tokenCount: 8,
+            backend: "cpp",
+            agent: ""
+        )
+        let map = EntropyProvenance.resolveAll(
+            agentIds: ["claude_code", "cursor"],
+            bridgeConnected: true,
+            bridgeStatus: status,
+            gate: [],
+            liveAgentIds: Set(admittedLive) // not {claude_code, cursor}
+        )
+        XCTAssertTrue(map["claude_code"]?.isMeasured == true)
+        // cursor not in liveAgentIds sole set → no fleet H paint
+        XCTAssertFalse(map["cursor"]?.isMeasured == true)
+    }
 }

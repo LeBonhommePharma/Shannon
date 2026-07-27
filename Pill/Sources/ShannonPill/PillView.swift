@@ -161,13 +161,20 @@ struct PillView: View {
             usageByAgent: usageByAgent,
             limit: limit
         )
+        // Never fall back to raw summary.agents — that re-admits Finder /
+        // WindowManager-class spam when ranked admission correctly returns [].
         if !pairs.isEmpty { return pairs }
-        let fallback = Array((busy.isEmpty ? summary.agents.prefix(3) : busy.prefix(4)))
+        let pendingIDs = Set(activity.pendingAsks.map(\.agentId))
+        let admitted = LiveRosterAdmission.filterListed(
+            agents: Array(busy.isEmpty ? summary.agents.prefix(limit) : busy.prefix(limit)),
+            pendingAgentIDs: pendingIDs
+        )
+        guard !admitted.isEmpty else { return [] }
         let merged = SessionContentPresenter.mergedUsageByAgent(
             usageByAgent: usageByAgent,
             sessionsByAgent: sessionsByAgent
         )
-        return fallback.map { a in
+        return admitted.map { a in
             let surface = AgentLiveSurfaceLogic.resolve(
                 agent: a,
                 pendingAsks: activity.pendingAsks,
@@ -189,6 +196,8 @@ struct PillView: View {
     /// Independent per-agent readings for every listed agent id.
     private var agentReadings: [String: EntropyReading] {
         let listed = listedAgents
+        // Sole-live fleet bridge only among **admitted** live rows (not every
+        // sticky Cursor host still open in the full summary).
         let liveIds = Set(listed.filter { $0.presence == .live }.map(\.id))
         return EntropyProvenance.resolveAll(
             agentIds: listed.map(\.id),
@@ -200,11 +209,16 @@ struct PillView: View {
         )
     }
 
-    /// Per-agent companion deltas (measured only).
+    /// Per-agent companion deltas (measured only) — admitted live set only.
     private var agentCompanionDeltas: [String: Double] {
-        let liveIds = Set(summary.agents.filter { $0.presence == .live }.map(\.id))
+        let pendingIDs = Set(activity.pendingAsks.map(\.agentId))
+        let admitted = LiveRosterAdmission.filterListed(
+            agents: summary.agents,
+            pendingAgentIDs: pendingIDs
+        )
+        let liveIds = Set(admitted.filter { $0.presence == .live }.map(\.id))
         return EntropyProvenance.companionDeltas(
-            agentIds: summary.agents.map(\.id),
+            agentIds: admitted.map(\.id),
             bridgeConnected: bridge.connected,
             bridgeStatus: bridge.status,
             gate: activity.agentEntropy,
@@ -1293,21 +1307,26 @@ struct PillView: View {
         surface: AgentLiveSurface
     ) -> some View {
         let style = style(for: agent)
-        // Memory series: simultaneous H history; currency from presence+age.
-        let memReading = activity.entropyMemory.latest(for: agent.id) != nil
+        // Prefer measured sole-live/alias bridge resolve over stale gate memory
+        // that would blank the strip under enforce ("no H" despite attach H).
+        let memReading: EntropyReading? = activity.entropyMemory.latest(for: agent.id) != nil
             ? activity.entropyMemory.reading(
                 for: agent.id,
                 gateDBAvailable: activity.gateDBAvailable
             )
-            : reading
-        let display = memReading.display(at: Date())
+            : nil
+        let preferred = EntropyProvenance.preferredRowReading(
+            live: reading,
+            memory: memReading
+        )
+        let display = preferred.display(at: Date())
         let attached = agent.presence == .live
             || AgentEntropyMemory.shouldKeepTracking(
                 presence: agent.presence,
                 latest: activity.entropyMemory.latest(for: agent.id)?.measurement
             )
-        let current = activity.entropyMemory.isCurrent(agentId: agent.id)
-            || (memReading.isMeasured && agent.presence == .live)
+        let current = preferred.isMeasured
+            && (agent.presence == .live || activity.entropyMemory.isCurrent(agentId: agent.id))
         let series = activity.entropyMemory.series(for: agent.id).bitSeries
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 8) {
@@ -1316,14 +1335,14 @@ struct PillView: View {
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if let display, current || memReading.isStale {
+                if let display, current || preferred.isStale {
                     Text(display.shortLabel)
                         .font(.shannonPillMono)
                         .foregroundStyle(Self.color(from: display.gaugeColorRGB()))
                         .contentTransition(.identity)
                         .opacity(current ? 1 : 0.55)
                 } else {
-                    Text(memReading.isStale ? "stale" : "no H")
+                    Text(preferred.isStale ? "stale" : "no H")
                         .font(.shannonPillMono)
                         .foregroundStyle(Color.shannonNeutral)
                 }
@@ -1352,9 +1371,9 @@ struct PillView: View {
                     .lineLimit(1)
             }
         }
-        .help(memReading.explain(at: Date()))
+        .help(preferred.explain(at: Date()))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(style.displayName) entropy. \(memReading.explain(at: Date())). \(surface.activityLine)")
+        .accessibilityLabel("\(style.displayName) entropy. \(preferred.explain(at: Date())). \(surface.activityLine)")
     }
 
     private func fleetEntropyRow(_ reading: EntropyReading) -> some View {

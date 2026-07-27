@@ -163,4 +163,27 @@ final class SessionUIWiringTests: XCTestCase {
             "presenter must not hard-code dual quiet-face literal"
         )
     }
+
+    /// Spam-only roster must not re-paint raw agents; measured resolve preferred over stale memory.
+    func testPillEntropyAttachWiringPrefersMeasuredResolveAndAdmission() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // ShannonPillTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // Pill
+            .appendingPathComponent("Sources/ShannonPill", isDirectory: true)
+        let pill = try String(contentsOf: root.appendingPathComponent("PillView.swift"), encoding: .utf8)
+        let roster = try String(contentsOf: root.appendingPathComponent("MenuBarAgentRoster.swift"), encoding: .utf8)
+        let pop = try String(contentsOf: root.appendingPathComponent("MenuBarPopoverView.swift"), encoding: .utf8)
+        let desk = try String(contentsOf: root.appendingPathComponent("DesktopCompanionWindowController.swift"), encoding: .utf8)
+        XCTAssertTrue(pill.contains("preferredRowReading"), "PillView strip must prefer measured resolve")
+        XCTAssertTrue(pill.contains("LiveRosterAdmission.filterListed"), "PillView fallback must filter admission")
+        XCTAssertTrue(
+            pill.contains("guard !admitted.isEmpty else { return [] }"),
+            "spam-only must empty board"
+        )
+        XCTAssertTrue(roster.contains("preferredRowReading"), "MenuBarAgentRoster must prefer measured resolve")
+        XCTAssertTrue(pop.contains("LiveRosterAdmission.filterListed"), "popover liveAgentIds from admitted")
+        XCTAssertTrue(desk.contains("LiveRosterAdmission.filterListed"), "desktop companion liveAgentIds from admitted")
+    }
+
 }

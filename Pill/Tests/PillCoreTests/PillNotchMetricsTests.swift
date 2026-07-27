@@ -95,6 +95,35 @@ final class PillNotchMetricsTests: XCTestCase {
         XCTAssertEqual(idle, 220, accuracy: 0.01, "idle must still paint the black hole")
     }
 
+    /// AgentNotch wings: live work extends past the pure camera hole, clamped.
+    func testPhysicalNotchWingedWidthExtendsPastCutout() {
+        let mbpW: CGFloat = 220
+        let winged = ShannonLayout.Pill.collapsedWidth(
+            notchWidth: mbpW, recessive: false, physicalNotch: true, winged: true
+        )
+        XCTAssertEqual(
+            winged,
+            mbpW + DynamicIslandGeometry.wingExtension * 2,
+            accuracy: 0.01
+        )
+        XCTAssertGreaterThan(winged, mbpW)
+        XCTAssertLessThanOrEqual(winged, DynamicIslandGeometry.maxWingedWidth)
+    }
+
+    /// AgentNotch closed radii: inward top 6, outward bottom 14.
+    func testIslandRadiiMatchAgentNotchClosed() {
+        let r = ShannonLayout.Pill.islandRadii(expanded: false)
+        XCTAssertEqual(r.top, DynamicIslandGeometry.closedTopRadius, accuracy: 0.01)
+        XCTAssertEqual(r.bottom, DynamicIslandGeometry.closedBottomRadius, accuracy: 0.01)
+        XCTAssertTrue(
+            DynamicIslandGeometry.isInwardTopOutwardBottom(
+                in: CGRect(x: 0, y: 0, width: 220, height: 40),
+                topRadius: r.top,
+                bottomRadius: r.bottom
+            )
+        )
+    }
+
     func testPhysicalNotchWidthNoInset() {
         XCTAssertEqual(ShannonLayout.Pill.notchWidthInset, 0, accuracy: 0.01)
         let w = ShannonLayout.Pill.collapsedWidth(

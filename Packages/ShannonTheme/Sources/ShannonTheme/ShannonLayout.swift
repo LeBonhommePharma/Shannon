@@ -135,22 +135,37 @@ public enum ShannonLayout {
         ///   - recessive: quiet idle strip (narrower) — **ignored** when
         ///     `physicalNotch` is true so the island always covers the cutout.
         ///   - physicalNotch: hardware cutout present; fill full measured width.
+        ///   - winged: AgentNotch-style left/right wings past the camera hole
+        ///     when live work / ask / collapse is present (physical notch only).
         public static func collapsedWidth(
             notchWidth: CGFloat?,
             recessive: Bool,
-            physicalNotch: Bool = false
+            physicalNotch: Bool = false,
+            winged: Bool = false
         ) -> CGFloat {
-            if let nw = notchWidth, nw > 40 {
-                let full = max(nw - notchWidthInset * 2, minCollapsedWidth)
-                // Always paint the full cutout on real hardware — shrinking idle
-                // width floats a small capsule *inside* the black notch hole.
-                if physicalNotch { return full }
-                if recessive {
-                    return min(defaultIdleWidth, full * 0.62)
+            let base: CGFloat = {
+                if let nw = notchWidth, nw > 40 {
+                    let full = max(nw - notchWidthInset * 2, minCollapsedWidth)
+                    // Always paint the full cutout on real hardware — shrinking idle
+                    // width floats a small capsule *inside* the black notch hole.
+                    if physicalNotch { return full }
+                    if recessive {
+                        return min(defaultIdleWidth, full * 0.62)
+                    }
+                    return full
                 }
-                return full
-            }
-            return recessive ? defaultIdleWidth : defaultCollapsedWidth
+                return recessive ? defaultIdleWidth : defaultCollapsedWidth
+            }()
+            return DynamicIslandGeometry.closedWidth(
+                baseWidth: base,
+                winged: winged,
+                physicalNotch: physicalNotch
+            )
+        }
+
+        /// AgentNotch closed/open island radii (inward top / outward bottom).
+        public static func islandRadii(expanded: Bool) -> (top: CGFloat, bottom: CGFloat) {
+            DynamicIslandGeometry.radii(expanded: expanded)
         }
 
         /// Gap between the icon and its label in the collapsed state.

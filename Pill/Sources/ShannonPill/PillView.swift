@@ -2,18 +2,35 @@ import SwiftUI
 import PillCore
 import Routes
 import ShannonCore
+import ShannonTheme
 
 // `ShannonStatus.isSynthetic` / `.syntheticBackends` and the provenance rules
 // built on them now live in PillCore (`EntropyProvenance.swift`), so the
 // companion board, the popover and this view cannot drift apart on what counts
 // as a measured reading.
 
+/// Hit-test shape: AgentNotch island on hardware so inward wing "bites" stay
+/// click-through; capsule on external displays.
+private struct PillHitShapeModifier: ViewModifier {
+    var physicalNotch: Bool
+    var island: NotchIslandShape
+    var capsule: RoundedRectangle
+
+    func body(content: Content) -> some View {
+        if physicalNotch {
+            content.contentShape(island)
+        } else {
+            content.contentShape(capsule)
+        }
+    }
+}
+
 /// Sizes for the two pill states.
 ///
 /// Collapsed metrics are **physical-notch-first** (MacBook Pro 14"/16"):
 /// height fills `safeAreaInsets.top` (~38 pt), width matches the measured cutout
-/// (~220 pt at common 14" scales), and the shape is flush-top with a bottom lip
-/// so the software island and the hardware hole share one silhouette.
+/// (~220 pt at common 14" scales), and the shape is AgentNotch Dynamic Island
+/// (inward top wings + outward bottom lip) so software and hardware read as one.
 public enum PillMetrics {
     /// Collapsed strip height — matches `ShannonLayout.Pill.collapsedHeight` and
     /// the typical notch band. Prefer `collapsedHeight(notchBand:physicalNotch:)` when geometry is known.
@@ -40,21 +57,29 @@ public enum PillMetrics {
         ShannonLayout.Pill.collapsedCorner(height: height)
     }
 
-    /// Bottom lip radius for the hardware island.
+    /// Bottom lip radius for the hardware island (legacy lip helper).
     public static func notchBottomRadius(height: CGFloat) -> CGFloat {
         ShannonLayout.Pill.notchBottomRadius(height: height)
     }
 
+    /// AgentNotch closed/open island radii.
+    public static func islandRadii(expanded: Bool) -> (top: CGFloat, bottom: CGFloat) {
+        ShannonLayout.Pill.islandRadii(expanded: expanded)
+    }
+
     /// Width from measured hardware notch (or defaults).
+    /// - Parameter winged: live work / ask / collapse extends past the cutout.
     public static func collapsedWidth(
         notchWidth: CGFloat?,
         recessive: Bool,
-        physicalNotch: Bool = false
+        physicalNotch: Bool = false,
+        winged: Bool = false
     ) -> CGFloat {
         ShannonLayout.Pill.collapsedWidth(
             notchWidth: notchWidth,
             recessive: recessive,
-            physicalNotch: physicalNotch
+            physicalNotch: physicalNotch,
+            winged: winged
         )
     }
 }
@@ -267,34 +292,49 @@ struct PillView: View {
     /// Physical camera cutout on the preferred screen (MBP 14"/16").
     private var isPhysicalNotch: Bool { notchGeometry.hasNotch }
 
-    /// Expanded board radius. Collapsed on hardware uses the notch bottom lip;
-    /// collapsed on external displays uses a full capsule.
+    /// Expanded board radius (non-island paths). Island uses ``islandRadii``.
     private var corner: CGFloat {
         if showExpanded { return ShannonRadius.xl }
         if isPhysicalNotch {
-            return PillMetrics.notchBottomRadius(height: liveCollapsedHeight)
+            return DynamicIslandGeometry.closedBottomRadius
         }
         return PillMetrics.collapsedCorner(height: liveCollapsedHeight)
     }
 
-    /// Hit-test / overlay shape matching chrome: flush-top island vs capsule.
-    private var pillOutline: UnevenRoundedRectangle {
-        if !showExpanded && isPhysicalNotch {
-            return UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: corner,
-                bottomTrailingRadius: corner,
-                topTrailingRadius: 0,
-                style: .continuous
-            )
-        }
-        return UnevenRoundedRectangle(
-            topLeadingRadius: corner,
-            bottomLeadingRadius: corner,
-            bottomTrailingRadius: corner,
-            topTrailingRadius: corner,
-            style: .continuous
+    /// AgentNotch closed/open radii for the Dynamic Island path.
+    private var islandRadii: (top: CGFloat, bottom: CGFloat) {
+        PillMetrics.islandRadii(expanded: showExpanded)
+    }
+
+    /// True when live work / ask / collapse should grow left/right wings.
+    private var islandWings: Bool {
+        DynamicIslandGeometry.shouldWing(
+            liveWork: islandWorking,
+            hasPendingAsk: hasPendingAsk,
+            collapseAlarm: collapseAlarm
         )
+    }
+
+    /// AgentNotch Dynamic Island outline (physical notch only).
+    private var notchOutline: NotchIslandShape {
+        NotchIslandShape(
+            topCornerRadius: islandRadii.top,
+            bottomCornerRadius: islandRadii.bottom
+        )
+    }
+
+    /// Capsule outline for non-notch / external displays.
+    private var capsuleOutline: RoundedRectangle {
+        RoundedRectangle(cornerRadius: corner, style: .continuous)
+    }
+
+    @ViewBuilder
+    private func strokePillOutline(color: Color, lineWidth: CGFloat) -> some View {
+        if isPhysicalNotch {
+            notchOutline.stroke(color, lineWidth: lineWidth)
+        } else {
+            capsuleOutline.stroke(color, lineWidth: lineWidth)
+        }
     }
 
     /// Notch-band height when the hosting screen is known; falls back to layout default.
@@ -325,13 +365,14 @@ struct PillView: View {
     private var isRecessive: Bool { !showExpanded && !hasSomethingToSay && isQuiet }
 
     /// Width from measured hardware notch when present; defaults otherwise.
-    /// On a physical cutout always fills the full measured width (never recess).
+    /// On a physical cutout fills the cutout; live work grows AgentNotch wings.
     private var collapsedWidth: CGFloat {
         let measured: CGFloat? = isPhysicalNotch ? notchGeometry.notchRect.width : nil
         return PillMetrics.collapsedWidth(
             notchWidth: measured,
             recessive: isRecessive,
-            physicalNotch: isPhysicalNotch
+            physicalNotch: isPhysicalNotch,
+            winged: islandWings
         )
     }
 
@@ -394,14 +435,21 @@ struct PillView: View {
             isActive: showExpanded ? boardActive : islandWorking,
             isQuiet: isRecessive,
             isCollapsed: !showExpanded,
-            // Hardware cutout: flush top + bottom lip so we paint the black hole.
-            notchIsland: !showExpanded && isPhysicalNotch,
-            cornerRadius: corner
+            // Hardware: AgentNotch Dynamic Island (inward top + outward bottom).
+            notchIsland: isPhysicalNotch,
+            cornerRadius: corner,
+            topCornerRadius: isPhysicalNotch ? islandRadii.top : nil,
+            bottomCornerRadius: isPhysicalNotch ? islandRadii.bottom : nil
         )
+        .overlay(islandWorkingGlow)
         .overlay(flashOverlay)
-        // Only the pill island takes hits. The transparent surround around it
-        // must stay click-through — see PillHost in PillWindowController.
-        .contentShape(pillOutline)
+        // Only the pill island takes hits. Transparent bezel "bites" stay
+        // click-through (AgentNotch inward top wings).
+        .modifier(PillHitShapeModifier(
+            physicalNotch: isPhysicalNotch,
+            island: notchOutline,
+            capsule: capsuleOutline
+        ))
         // Only intentional expand/collapse morphs via withAnimation below.
         // Never attach value-based .animation to recessive/busy text — those
         // flip on live telemetry and made the notch island "pop" on refresh.
@@ -533,33 +581,35 @@ struct PillView: View {
             // Pending-approval border. Amber, and strictly distinct from the red
             // collapse border below: one means "answer me", the other means
             // "this agent may be deceiving you".
-            pillOutline
-                .stroke(Color.shannonWarning, lineWidth: askPulse ? 2.0 : 1.0)
-                .opacity(hasPendingAsk ? (askPulse ? 0.95 : 0.35) : 0)
-                .allowsHitTesting(false)
+            strokePillOutline(
+                color: Color.shannonWarning,
+                lineWidth: askPulse ? 2.0 : 1.0
+            )
+            .opacity(hasPendingAsk ? (askPulse ? 0.95 : 0.35) : 0)
+            .allowsHitTesting(false)
 
             // Entropy-collapse deception-alert border: always present,
             // invisible until entropy collapses, then pulses red.
-            pillOutline
-                .stroke(
-                    Color.shannonError,
-                    lineWidth: (collapseAlarm && collapsePulse) ? 2.0 : 0.5
-                )
-                .opacity(collapseAlarm ? (collapsePulse ? 0.90 : 0.22) : 0)
-                .allowsHitTesting(false)
+            strokePillOutline(
+                color: Color.shannonError,
+                lineWidth: (collapseAlarm && collapsePulse) ? 2.0 : 0.5
+            )
+            .opacity(collapseAlarm ? (collapsePulse ? 0.90 : 0.22) : 0)
+            .allowsHitTesting(false)
         }
     }
 
     // MARK: Collapsed
 
+    /// AgentNotch-minimal closed header: status tint + short label + optional chips.
+    /// Dense multi-metric stacks (CPU/H/battery) live on the expanded board.
     private var collapsed: some View {
         HStack(spacing: 6) {
-            // Glyph stays compact so labels + metrics fit the notch band.
+            // Source-aware status indicator (agent tint / activity glyph).
             statusGlyph
                 .frame(width: 16, height: 16)
 
-            // Single eye-line: agent status or most-constrained host metric.
-            // Recessive mode drops the filler copy entirely.
+            // Short activity label; recessive quiet drops filler copy.
             if !isRecessive {
                 Text(collapsedText)
                     .font(.shannonPillLabel)
@@ -567,24 +617,13 @@ struct PillView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                     .truncationMode(.tail)
-                    // No opacity/content transition — live H/CPU text must swap
-                    // in place. Crossfades looked like the island popping.
                     .contentTransition(.identity)
             }
 
             Spacer(minLength: 2)
 
-            // Busy + load: secondary chip only when title is agent text.
-            if !busy.isEmpty, resources.snapshot.mostConstrained.map({ $0.percent >= 60 }) == true {
-                constrainedResourceChip
-            }
-
-            // Entropy only when measured — "no H" is noise in the notch.
-            if fleetReading.isMeasured {
-                entropyReadout
-            }
-
-            // Usage chip only when a real local source reported tokens / ctx %.
+            // Trailing chips: prefer one fleet/usage metric, not a dense stack.
+            // Usage when measured; else multi-agent count when fleet > 1.
             if let usage = collapsedUsageChip {
                 Text(usage)
                     .font(.shannonMenuSection)
@@ -593,17 +632,13 @@ struct PillView: View {
                     .padding(.vertical, 1)
                     .background(Capsule().fill(Color.shannonSurfaceElevated.opacity(0.7)))
                     .help("Usage from local session telemetry")
-            }
-
-            // Multi-agent count: needs-you + working fleet (AgentNotch density).
-            if collapsedActiveCount > 1 {
+            } else if collapsedActiveCount > 1 {
                 Text("\(collapsedActiveCount)")
                     .font(.shannonMenuSection)
                     .foregroundStyle(Color.shannonAccent)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(Capsule().fill(Color.shannonAccentSubtle))
-                    // UX-055: fleet help shares AgentListSkim (phone HomeView caption).
                     .help(
                         AgentListSkim.multiAgentAccessibilityLabel(
                             activeCount: collapsedActiveCount
@@ -619,23 +654,40 @@ struct PillView: View {
             }
 
             if collapseAlarm {
-                // Red — matches status legend / MenuBarController collapse glyph.
-                // Amber is reserved for pending approval only.
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.shannonMenuFootnote)
                     .foregroundStyle(Color.shannonError)
             }
-
-            if let snap = battery.snapshot {
-                BatteryRing(snapshot: snap, diameter: 13)
-            }
         }
-        // Physical notch (~220×38 band + hang on MBP 14"): keep glyphs in the
-        // upper (menu-bar) portion; overhang below is pure black island chrome.
-        .padding(.horizontal, isPhysicalNotch ? 14 : 12)
+        // Physical notch: glyphs in the menu-bar band; overhang is black lip.
+        .padding(.horizontal, isPhysicalNotch ? (islandWings ? 18 : 14) : 12)
         .padding(.bottom, isPhysicalNotch ? ShannonLayout.Pill.physicalIslandOverhang : 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .frame(height: liveCollapsedHeight)
+    }
+
+    /// Working-state lip glow (AgentNotch cyan/activity). Reduce Motion: solid
+    /// accent stroke, no rotating gradient. Idle island stays quiet.
+    @ViewBuilder
+    private var islandWorkingGlow: some View {
+        let show = !showExpanded && isPhysicalNotch && islandWorking
+        if show {
+            let shape = NotchIslandShape(
+                topCornerRadius: islandRadii.top,
+                bottomCornerRadius: islandRadii.bottom
+            )
+            if reduceMotion {
+                shape
+                    .stroke(Color.shannonAccent.opacity(0.55), lineWidth: 1.5)
+                    .allowsHitTesting(false)
+            } else {
+                shape
+                    .stroke(Color.shannonAccent.opacity(0.35), lineWidth: 2)
+                    .shadow(color: Color.shannonAccent.opacity(0.45), radius: 6)
+                    .shadow(color: Color.shannonAccent.opacity(0.2), radius: 12)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     /// Leading indicator in the collapsed pill.

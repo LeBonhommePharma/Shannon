@@ -70,6 +70,10 @@ public struct PillMaterial: NSViewRepresentable {
 /// app "does nothing". Idle chrome now keeps a readable border and a soft
 /// ambient shadow even when `isActive` is false; the accent glow still only
 /// blooms when an agent is live.
+///
+/// Collapsed / physical-notch chrome uses ``NotchIslandShape`` (AgentNotch
+/// Dynamic Island: inward top wings + outward bottom lip), not a flat
+/// flush-top rectangle.
 public struct PillStyle: ViewModifier {
     public var isActive: Bool
     /// Nothing to report — no busy agent, no pending approval, no alert.
@@ -78,38 +82,54 @@ public struct PillStyle: ViewModifier {
     /// Collapsed notch-resident state: black island chrome (matches hardware
     /// notch), no ambient shadow halo, hairline outline only.
     public var isCollapsed: Bool
-    /// Physical camera cutout: flush top edge + bottom lip only (MBP 14"/16").
+    /// Physical camera cutout: AgentNotch Dynamic Island silhouette.
     /// When false, collapsed uses a full continuous capsule (external displays).
     public var notchIsland: Bool
     public var cornerRadius: CGFloat
+    /// Explicit top / bottom island radii (AgentNotch closed vs open). When
+    /// nil, derived from `isCollapsed` + `notchIsland`.
+    public var topCornerRadius: CGFloat?
+    public var bottomCornerRadius: CGFloat?
 
     public init(
         isActive: Bool,
         isQuiet: Bool = false,
         isCollapsed: Bool = false,
         notchIsland: Bool = false,
-        cornerRadius: CGFloat = ShannonLayout.Pill.collapsedRadius
+        cornerRadius: CGFloat = ShannonLayout.Pill.collapsedRadius,
+        topCornerRadius: CGFloat? = nil,
+        bottomCornerRadius: CGFloat? = nil
     ) {
         self.isActive = isActive
         self.isQuiet = isQuiet
         self.isCollapsed = isCollapsed
         self.notchIsland = notchIsland
         self.cornerRadius = cornerRadius
+        self.topCornerRadius = topCornerRadius
+        self.bottomCornerRadius = bottomCornerRadius
     }
 
-    /// Island on hardware: top corners 0 (flush with bezel), bottom = lip radius.
-    /// Everywhere else: continuous rounded rectangle (all corners equal).
-    private var shape: UnevenRoundedRectangle {
-        if isCollapsed && notchIsland {
-            return UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: cornerRadius,
-                bottomTrailingRadius: cornerRadius,
-                topTrailingRadius: 0,
-                style: .continuous
-            )
+    /// Resolved island radii for the Dynamic Island path.
+    private var islandRadii: (top: CGFloat, bottom: CGFloat) {
+        if let t = topCornerRadius, let b = bottomCornerRadius {
+            return (t, b)
         }
-        return UnevenRoundedRectangle(
+        // Expanded board on hardware still morphs through open radii.
+        let expanded = !isCollapsed
+        return DynamicIslandGeometry.radii(expanded: expanded)
+    }
+
+    /// AgentNotch Dynamic Island silhouette (physical notch path).
+    private var usesNotchIslandShape: Bool { notchIsland }
+
+    private var islandShape: NotchIslandShape {
+        let r = islandRadii
+        return NotchIslandShape(topCornerRadius: r.top, bottomCornerRadius: r.bottom)
+    }
+
+    /// Capsule / continuous rounded rect for non-island surfaces.
+    private var capsuleShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
             topLeadingRadius: cornerRadius,
             bottomLeadingRadius: cornerRadius,
             bottomTrailingRadius: cornerRadius,
@@ -169,9 +189,15 @@ public struct PillStyle: ViewModifier {
             .background {
                 ZStack {
                     if isCollapsed {
-                        // Opaque black island only — no vibrancy/tint (those grey
-                        // the silhouette and break the continuous camera hole).
+                        // Opaque pure black island (AgentNotch) — no vibrancy/tint.
                         notchIslandFill
+                    } else if notchIsland {
+                        // Expanded island morph: still black shell; glass lives
+                        // in board content sections, not the outer silhouette.
+                        notchIslandFill.opacity(0.92)
+                        PillMaterial(kind: .sheet)
+                        Color.pillBackground.opacity(fillOpacity * 0.85)
+                        Color.pillScrim.opacity(isQuiet ? 0.45 : 0.75)
                     } else {
                         // Liquid Glass stack: vibrancy → indigo tint → scrim →
                         // top-edge specular (macOS 27 system panels use a soft
@@ -190,17 +216,20 @@ public struct PillStyle: ViewModifier {
                         )
                     }
                 }
-                .clipShape(shape)
+                .clipShape(resolvedClipShape)
             }
             .overlay {
-                // Dual-stroke: soft outer rim + crisp inner hairline (Liquid Glass).
-                ZStack {
-                    shape.strokeBorder(borderColor.opacity(0.45), lineWidth: borderWidth + 0.75)
-                    shape.strokeBorder(borderColor, lineWidth: borderWidth)
+                // Dual-stroke: soft outer rim + crisp inner hairline.
+                if usesNotchIslandShape {
+                    islandShape.stroke(borderColor.opacity(0.45), lineWidth: borderWidth + 0.75)
+                    islandShape.stroke(borderColor, lineWidth: borderWidth)
+                } else {
+                    capsuleShape.strokeBorder(borderColor.opacity(0.45), lineWidth: borderWidth + 0.75)
+                    capsuleShape.strokeBorder(borderColor, lineWidth: borderWidth)
                 }
             }
-            // Accent glow: expanded + working only. Collapsed never glows
-            // (even when isActive) — that was the blue halo on the notch.
+            // Accent glow: expanded + working only. Collapsed uses optional lip
+            // glow overlay in PillView (Reduce Motion: solid accent, no spin).
             .shadow(
                 color: showActiveChrome
                     ? Color.shannonAccent.opacity(ShannonStroke.glowOpacity)
@@ -218,6 +247,26 @@ public struct PillStyle: ViewModifier {
             // (looked like the notch pill popping in and out while refreshing).
             .animation(.shannonFloat, value: isCollapsed)
     }
+
+    private var resolvedClipShape: AnyShape {
+        if usesNotchIslandShape {
+            return AnyShape(islandShape)
+        }
+        return AnyShape(capsuleShape)
+    }
+}
+
+/// Type-erased shape so background can clip either island or capsule.
+private struct AnyShape: Shape, @unchecked Sendable {
+    private let builder: @Sendable (CGRect) -> Path
+
+    init<S: Shape>(_ shape: S) {
+        // Shape.path is pure geometry — safe to capture for clipShape.
+        let s = shape
+        builder = { rect in s.path(in: rect) }
+    }
+
+    func path(in rect: CGRect) -> Path { builder(rect) }
 }
 
 // MARK: - Grouped glass section (popover / expanded board)
@@ -261,21 +310,25 @@ public extension View {
     /// swap the hairline for the accent border and light the glow; pass
     /// `isQuiet: true` when there is nothing to report; pass `isCollapsed: true`
     /// for the notch-resident strip (black island, no floating shadow); pass
-    /// `notchIsland: true` on a physical MacBook cutout so top corners stay
-    /// flush with the bezel.
+    /// `notchIsland: true` for AgentNotch Dynamic Island silhouette (inward
+    /// top wings + outward bottom lip).
     func shannonPill(
         isActive: Bool = false,
         isQuiet: Bool = false,
         isCollapsed: Bool = false,
         notchIsland: Bool = false,
-        cornerRadius: CGFloat = ShannonLayout.Pill.collapsedRadius
+        cornerRadius: CGFloat = ShannonLayout.Pill.collapsedRadius,
+        topCornerRadius: CGFloat? = nil,
+        bottomCornerRadius: CGFloat? = nil
     ) -> some View {
         modifier(PillStyle(
             isActive: isActive,
             isQuiet: isQuiet,
             isCollapsed: isCollapsed,
             notchIsland: notchIsland,
-            cornerRadius: cornerRadius
+            cornerRadius: cornerRadius,
+            topCornerRadius: topCornerRadius,
+            bottomCornerRadius: bottomCornerRadius
         ))
     }
 }

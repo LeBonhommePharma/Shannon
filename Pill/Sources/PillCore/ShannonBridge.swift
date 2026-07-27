@@ -386,16 +386,21 @@ public final class ShannonBridge: ObservableObject {
         let box = clientBox
         pollQueue.async { [weak self] in
             let result: ShannonStatus? = {
-                do {
-                    if !box.client.isConnected {
-                        try box.client.connect(to: path)
+                // One automatic reconnect after a dead peer — avoids publishing
+                // a transient nil when the previous response closed the socket.
+                for attempt in 0..<2 {
+                    do {
+                        if !box.client.isConnected {
+                            try box.client.connect(to: path)
+                        }
+                        return try box.client.request(BridgeRequest(command: "status"))
+                    } catch {
+                        box.client.close()
+                        if attempt == 0 { continue }
+                        return nil
                     }
-                    return try box.client.request(BridgeRequest(command: "status"))
-                } catch {
-                    // Drop a dead socket so the next poll reconnects cleanly.
-                    box.client.close()
-                    return nil
                 }
+                return nil
             }()
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -409,31 +414,26 @@ public final class ShannonBridge: ObservableObject {
     /// Pure-side effects are limited to published properties; never blocks the
     /// producer socket (caller already decoded off-main).
     ///
-    /// - When `result == nil` and `fromPush == false` (poll failure): clear
-    ///   connected — heartbeat is the authority for liveness.
-    /// - When `result == nil` and `fromPush == true`: push path lost the
-    ///   producer; clear connected only if status is already gone or we force
-    ///   a disconnect publish so a dead producer cannot leave a stale live flag
-    ///   if poll is also quiet. Prefer poll for truth; still publish nil so a
-    ///   push-only death is visible before the next poll tick.
+    /// Liveness authority is the **poll heartbeat**: `result == nil` from poll
+    /// clears `connected` / `status`. A push disconnect alone must not wipe a
+    /// poll-backed reading (subscribe failure while status polls still work).
+    /// When the producer dies, the next poll also fails and clears — poll is
+    /// no longer starved by the push loop (dedicated ``pushQueue``).
     public func applyStatus(_ result: ShannonStatus?, fromPush: Bool) {
         let previous = status
         if result == nil {
-            // Disconnect: fail closed. Poll nil always clears; push nil clears
-            // when we were showing a live status so producer death is not sticky.
-            if !fromPush || previous != nil {
+            if !fromPush {
+                // Poll heartbeat failure is fail-closed liveness.
                 if connected { connected = false }
                 if BridgePushLogic.shouldPublishStatus(previous: previous, next: nil) {
                     status = nil
                 }
-            }
-            if !fromPush {
                 lastUpdateWasPush = false
             }
+            // Push-path disconnect: do not clear poll-backed status here.
             return
         }
-        let up = true
-        if connected != up { connected = up }
+        if !connected { connected = true }
         if !fromPush {
             pollGeneration &+= 1
         }
@@ -487,12 +487,8 @@ public final class ShannonBridge: ObservableObject {
                 }
             } catch {
                 box.pushClient.close()
-                // Producer / subscribe path died — publish disconnect so a
-                // stale "connected" does not linger until the next poll.
-                Task { @MainActor [weak self] in
-                    self?.applyStatus(nil, fromPush: true)
-                }
-                // Back off briefly; poll heartbeat covers the gap.
+                // Subscribe path died. Poll owns liveness (dedicated pollQueue
+                // still runs); backoff and retry subscribe while pushRunning.
                 if box.pushRunning {
                     Thread.sleep(forTimeInterval: 0.4)
                 }

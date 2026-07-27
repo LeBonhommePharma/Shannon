@@ -314,12 +314,20 @@ final class DesktopCompanionSelectorTests: XCTestCase {
 
 final class DesktopCompanionRefreshCadenceTests: XCTestCase {
 
-    func testQuietPollIsThirtySecondsNotTwo() {
-        XCTAssertEqual(DesktopCompanionRefreshCadence.quietPollInterval, 30, accuracy: 1e-9)
-        XCTAssertEqual(DesktopCompanionRefreshCadence.nearSleepyPollInterval, 2, accuracy: 1e-9)
-        XCTAssertGreaterThan(
-            DesktopCompanionRefreshCadence.quietPollInterval,
+    func testActivePollIsSubSecondResponsive() {
+        XCTAssertTrue(DesktopCompanionRefreshCadence.activeDefaultIsResponsive())
+        XCTAssertLessThanOrEqual(DesktopCompanionRefreshCadence.activePollInterval, 1.0)
+        XCTAssertGreaterThanOrEqual(
+            DesktopCompanionRefreshCadence.activePollInterval,
+            DesktopCompanionRefreshCadence.pollIntervalMin
+        )
+        XCTAssertLessThan(
+            DesktopCompanionRefreshCadence.activePollInterval,
             DesktopCompanionRefreshCadence.nearSleepyPollInterval
+        )
+        XCTAssertLessThan(
+            DesktopCompanionRefreshCadence.nearSleepyPollInterval,
+            DesktopCompanionRefreshCadence.quietPollInterval
         )
         XCTAssertGreaterThanOrEqual(
             DesktopCompanionRefreshCadence.nearSleepyWindow,
@@ -361,7 +369,7 @@ final class DesktopCompanionRefreshCadenceTests: XCTestCase {
         )
     }
 
-    func testNearSleepyThresholdUsesTwoSecondPoll() {
+    func testNearSleepyThresholdUsesFinePoll() {
         let window = DesktopCompanionRefreshCadence.nearSleepyWindow
         let nearAge = CompanionMood.sleepyAfter - (window / 2)
         XCTAssertTrue(
@@ -459,18 +467,156 @@ final class DesktopCompanionRefreshCadenceTests: XCTestCase {
         )
     }
 
+    /// Live busy agents must not sit on the multi-second quiet timer.
+    func testLiveBusyAgentUsesActivePoll() {
+        let now = Date()
+        let busy = snap(status: .active, presence: .live, secondsAgo: 2, now: now)
+        let interval = DesktopCompanionRefreshCadence.pollInterval(
+            agents: [busy],
+            now: now
+        )
+        XCTAssertEqual(
+            interval,
+            DesktopCompanionRefreshCadence.activePollInterval,
+            accuracy: 1e-9
+        )
+        XCTAssertTrue(DesktopCompanionRefreshCadence.hasActiveWork([busy]))
+    }
+
+    func testPendingAskUsesActivePollEvenIfIdle() {
+        let now = Date()
+        let idle = snap(status: .idle, presence: .live, secondsAgo: 1, now: now)
+        let interval = DesktopCompanionRefreshCadence.pollInterval(
+            agents: [idle],
+            now: now,
+            hasPendingAsk: true
+        )
+        XCTAssertEqual(
+            interval,
+            DesktopCompanionRefreshCadence.activePollInterval,
+            accuracy: 1e-9
+        )
+    }
+
+    /// Active work outranks near-sleepy so bubble stays fluid while working.
+    func testActiveOutranksNearSleepy() {
+        let now = Date()
+        let busyNearSleep = snap(
+            status: .active,
+            presence: .live,
+            secondsAgo: CompanionMood.sleepyAfter - 5,
+            now: now
+        )
+        XCTAssertEqual(
+            DesktopCompanionRefreshCadence.pollInterval(agents: [busyNearSleep], now: now),
+            DesktopCompanionRefreshCadence.activePollInterval,
+            accuracy: 1e-9
+        )
+    }
+
     func testPolicySnapshotKeys() {
         let snap = DesktopCompanionRefreshCadence.policySnapshot
         for key in [
+            "activePollInterval",
             "quietPollInterval",
             "nearSleepyPollInterval",
             "nearSleepyWindow",
             "sleepyAfter",
+            "activeDefaultIsResponsive",
         ] {
             XCTAssertNotNil(snap[key], "missing \(key)")
         }
-        XCTAssertEqual(snap["quietPollInterval"], "30.0")
-        XCTAssertEqual(snap["nearSleepyPollInterval"], "2.0")
+        XCTAssertEqual(snap["activeDefaultIsResponsive"], "true")
+    }
+}
+
+// MARK: - Pet motion tick policy (pure)
+
+final class PetMotionCadenceTests: XCTestCase {
+
+    func testActiveTickMatchesAtlasFPS() {
+        XCTAssertTrue(PetMotionCadence.activeTickIsFluid())
+        XCTAssertEqual(
+            PetMotionCadence.activeTickInterval,
+            1.0 / PetAtlasGrid.defaultFPS,
+            accuracy: 1e-9
+        )
+    }
+
+    func testIdleFasterThanLegacyHalfSecond() {
+        XCTAssertTrue(PetMotionCadence.idleFasterThanLegacyHalfSecond())
+        XCTAssertLessThan(PetMotionCadence.idleTickInterval, 0.5)
+    }
+
+    func testReduceMotionYieldsStaticPose() {
+        XCTAssertNil(
+            PetMotionCadence.timelineInterval(
+                mood: .alert,
+                motion: .running,
+                reduceMotion: true
+            )
+        )
+        XCTAssertNil(
+            PetMotionCadence.timelineInterval(
+                mood: .idle,
+                motion: .idle,
+                reduceMotion: true
+            )
+        )
+    }
+
+    func testActiveMoodUsesActiveTick() {
+        let t = PetMotionCadence.timelineInterval(
+            mood: .alert,
+            motion: .running,
+            reduceMotion: false
+        )
+        XCTAssertEqual(t ?? -1, PetMotionCadence.activeTickInterval, accuracy: 1e-9)
+    }
+
+    func testIdleMoodUsesIdleTick() {
+        let t = PetMotionCadence.timelineInterval(
+            mood: .idle,
+            motion: .idle,
+            reduceMotion: false
+        )
+        XCTAssertEqual(t ?? -1, PetMotionCadence.idleTickInterval, accuracy: 1e-9)
+    }
+
+    func testWaitingMotionIsActiveEvenIfMoodIdle() {
+        // Gate blocked → waiting motion must not fall into sleepy 0.5 s freeze.
+        let t = PetMotionCadence.timelineInterval(
+            mood: .idle,
+            motion: .waiting,
+            reduceMotion: false
+        )
+        XCTAssertEqual(t ?? -1, PetMotionCadence.activeTickInterval, accuracy: 1e-9)
+        XCTAssertTrue(PetMotionCadence.isActiveMotion(.waiting))
+        XCTAssertFalse(PetMotionCadence.isActiveMotion(.idle))
+    }
+
+    func testAtlasFrameAdvancesOnActiveCadence() {
+        let fps = PetAtlasGrid.defaultFPS
+        let a = PetAtlasFrame.select(motion: .running, tSeconds: 0, fps: fps)
+        let b = PetAtlasFrame.select(
+            motion: .running,
+            tSeconds: PetMotionCadence.activeTickInterval,
+            fps: fps
+        )
+        // One tick at atlas FPS should advance at least one frame when frames > 1.
+        XCTAssertNotEqual(a.frameIndex, b.frameIndex)
+    }
+
+    func testPolicySnapshotKeys() {
+        let snap = PetMotionCadence.policySnapshot
+        for key in [
+            "activeTickInterval", "idleTickInterval", "atlasFPS",
+            "activeTickIsFluid", "idleFasterThanLegacyHalfSecond",
+        ] {
+            XCTAssertNotNil(snap[key], "missing \(key)")
+        }
+        XCTAssertEqual(snap["activeTickIsFluid"], "true")
+        XCTAssertEqual(snap["idleFasterThanLegacyHalfSecond"], "true")
     }
 }
 

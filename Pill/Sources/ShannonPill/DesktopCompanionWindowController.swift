@@ -22,9 +22,9 @@ final class DesktopCompanionPanel: NSPanel {
             backing: .buffered,
             defer: false
         )
-        isOpaque = false
+        isOpaque = DesktopCompanionWindowPolicy.panelIsOpaque
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = DesktopCompanionWindowPolicy.panelHasShadow
         level = NSWindow.Level(rawValue: DesktopCompanionWindowPolicy.windowLevelRawValue)
         collectionBehavior = DesktopCompanionWindowPolicy.collectionBehavior
         isMovable = DesktopCompanionWindowPolicy.isMovable
@@ -159,15 +159,24 @@ final class DesktopCompanionModel: ObservableObject {
     }
 
     private func apply(_ built: DesktopCompanionCycle.PresentResult) {
-        presentation = built.presentation
-        selectedIndex = built.selectedIndex
-        cycleCount = built.cycleCount
+        // Equality-gate so identical activity ticks do not thrash SwiftUI while
+        // still publishing when mood / bubble / motion / agent identity flips.
+        if presentation != built.presentation {
+            presentation = built.presentation
+        }
+        if selectedIndex != built.selectedIndex {
+            selectedIndex = built.selectedIndex
+        }
+        if cycleCount != built.cycleCount {
+            cycleCount = built.cycleCount
+        }
         selectedAgentId = built.presentation.state?.id
     }
 
     private func ensurePollTimer() {
         let interval = DesktopCompanionRefreshCadence.pollInterval(
-            agents: activity.summary.agents
+            agents: activity.summary.agents,
+            hasPendingAsk: !activity.pendingAsks.isEmpty
         )
         if currentPollInterval == interval, pollCancellable != nil { return }
         currentPollInterval = interval
@@ -375,13 +384,12 @@ final class DesktopCompanionWindowController {
     }
 
     /// Bottom-trailing corner of the preferred screen (with margin).
+    /// Delegates geometry to `DesktopCompanionWindowPolicy` so placement contracts
+    /// stay unit-testable without a live window server.
     static func defaultFrame(size: CGSize, screen: NSScreen? = nil) -> CGRect {
         let scr = screen ?? NSScreen.main ?? NSScreen.screens.first
         let visible = scr?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1280, height: 800)
-        let margin: CGFloat = 24
-        let x = visible.maxX - size.width - margin
-        let y = visible.minY + margin
-        return CGRect(x: x, y: y, width: size.width, height: size.height)
+        return DesktopCompanionWindowPolicy.defaultFrame(size: size, visibleFrame: visible)
     }
 }
 
@@ -439,6 +447,7 @@ struct DesktopCompanionLegacyView: View {
 @available(macOS 14.0, *)
 struct DesktopCompanionView: View {
     let presentation: DesktopCompanionPresentation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
@@ -447,6 +456,15 @@ struct DesktopCompanionView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
+        // Smooth bubble text swaps when agent / attention flips.
+        .animation(
+            reduceMotion ? nil : .shannonLiquid,
+            value: presentation.bubble.text
+        )
+        .animation(
+            reduceMotion ? nil : .shannonChrome,
+            value: presentation.mood
+        )
     }
 
     private var accessibilityLabel: String {
@@ -461,20 +479,17 @@ struct DesktopCompanionView: View {
     private var petBody: some View {
         let size: CGFloat = 72
         if let state = presentation.state {
-            CompanionBadge(state: state, size: size)
+            CompanionBadge(state: state, size: size, reduceMotion: reduceMotion)
         } else if let kind = presentation.kind {
+            // No hard black disc — pet sits in the desktop without sticker chrome.
             CompanionView(
                 kind: kind,
                 mood: presentation.mood,
                 agentColor: Color.shannonAccent,
                 size: size,
                 codexMotion: presentation.motion,
-                packagePetId: presentation.packagePetId
-            )
-            .background(
-                Circle()
-                    .fill(Color.black.opacity(0.22))
-                    .frame(width: size + 8, height: size + 8)
+                packagePetId: presentation.packagePetId,
+                reduceMotion: reduceMotion
             )
         } else {
             Image(systemName: "cat.fill")
@@ -486,36 +501,45 @@ struct DesktopCompanionView: View {
 }
 
 // MARK: - Shared bubble chrome
+//
+// Same material stack as menubar popover / fleet glance: PillMaterial(.popover)
+// + shannonBackground tint, continuous radius, hairline border, Shannon type tokens.
+// No drop-shadow — avoids double-shadow sticker look over a transparent panel.
 
 @ViewBuilder
 private func bubbleChrome(_ b: CompanionBubbleContent) -> some View {
+    let radius = CGFloat(DesktopCompanionWindowPolicy.bubbleCornerRadius)
     VStack(alignment: .leading, spacing: 2) {
         Text(b.text)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(Color.primary)
+            .font(.shannonMenuBody)
+            .foregroundStyle(Color.shannonPrimary)
         if let detail = b.detail {
             Text(detail)
-                .font(.system(size: 10))
-                .foregroundStyle(Color.secondary)
+                .font(.shannonMenuFootnote)
+                .foregroundStyle(Color.shannonSecondary)
                 .lineLimit(2)
         }
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 7)
-    .background(
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(.ultraThinMaterial)
-    )
-    .overlay(
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
+    .background {
+        ZStack {
+            PillMaterial(kind: .popover)
+            Color.shannonBackground.opacity(
+                DesktopCompanionWindowPolicy.bubbleBackgroundTintOpacity
+            )
+        }
+    }
+    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+    .overlay {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
             .strokeBorder(bubbleBorderColor(b), lineWidth: b.claimsWork ? 1.2 : 0.5)
-    )
-    .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+    }
 }
 
 private func bubbleBorderColor(_ b: CompanionBubbleContent) -> Color {
     if b.mood == .wary { return Color.shannonError.opacity(0.7) }
     if b.motion == .waiting { return Color.shannonWarning.opacity(0.7) }
     if b.claimsWork { return Color.shannonAccent.opacity(0.55) }
-    return Color.white.opacity(0.12)
+    return Color.white.opacity(DesktopCompanionWindowPolicy.bubbleHairlineOpacity)
 }

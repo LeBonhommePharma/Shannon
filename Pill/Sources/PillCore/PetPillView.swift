@@ -45,6 +45,8 @@ public struct CompanionView: View {
     /// Optional Codex package pet id (e.g. "shannon"). When a v2 package is
     /// found, atlas frames are preferred; otherwise procedural Canvas art.
     public let packagePetId: String?
+    /// Accessibility: static pose when the user prefers reduced motion.
+    public let reduceMotion: Bool
 
     /// Resolved once per `packagePetId` — never on every TimelineView tick.
     @State private var cachedPackage: PetPackage?
@@ -56,7 +58,8 @@ public struct CompanionView: View {
                 size: CGFloat = 26,
                 happyStart: Date? = nil,
                 codexMotion: PetCodexMotion? = nil,
-                packagePetId: String? = PetPackageResolver.defaultPetId) {
+                packagePetId: String? = PetPackageResolver.defaultPetId,
+                reduceMotion: Bool = false) {
         self.kind = kind
         self.mood = mood
         self.agentColor = agentColor
@@ -64,18 +67,23 @@ public struct CompanionView: View {
         self.happyStart = happyStart
         self.codexMotion = codexMotion ?? PetCodexMotion.from(mood: mood)
         self.packagePetId = packagePetId
+        self.reduceMotion = reduceMotion
     }
 
     public var body: some View {
         Group {
-            // A companion with nothing to report costs a redraw every 500 ms
-            // instead of one every frame. Idle is the overwhelmingly common
-            // case, and the pill has no business burning a display link on a
-            // breathing owl.
-            if mood == .idle || mood == .sleepy {
-                TimelineView(.periodic(from: .now, by: 0.5)) { tl in content(at: tl.date) }
+            // Tick policy: Reduce Motion → static; active work → atlas FPS;
+            // idle breathing → ~8 Hz (legacy 0.5 s freeze felt stuck).
+            if let interval = PetMotionCadence.timelineInterval(
+                mood: mood,
+                motion: codexMotion,
+                reduceMotion: reduceMotion
+            ) {
+                TimelineView(.periodic(from: .now, by: interval)) { tl in
+                    content(at: tl.date)
+                }
             } else {
-                TimelineView(.animation) { tl in content(at: tl.date) }
+                content(at: Date())
             }
         }
         .frame(width: size, height: size)
@@ -153,11 +161,18 @@ public struct CompanionGlyph: View {
     public let size: CGFloat
     /// Optional force package id (user preference / surface). `nil` → map from agent.
     public let packagePetIdOverride: String?
+    public let reduceMotion: Bool
 
-    public init(state: CompanionState, size: CGFloat = 26, packagePetId: String? = nil) {
+    public init(
+        state: CompanionState,
+        size: CGFloat = 26,
+        packagePetId: String? = nil,
+        reduceMotion: Bool = false
+    ) {
         self.state = state
         self.size = size
         self.packagePetIdOverride = packagePetId
+        self.reduceMotion = reduceMotion
     }
 
     private var style: AgentStyle { AgentStyleCatalog.style(for: state.agent.id) }
@@ -179,7 +194,8 @@ public struct CompanionGlyph: View {
                           size: size,
                           happyStart: happyStart,
                           codexMotion: state.codexMotion,
-                          packagePetId: packagePetId)
+                          packagePetId: packagePetId,
+                          reduceMotion: reduceMotion)
         } else {
             Image(systemName: state.symbolFallback)
                 .font(.system(size: size * 0.62, weight: .medium))
@@ -205,11 +221,18 @@ public struct CompanionBadge: View {
     public let state: CompanionState
     public let size: CGFloat
     public let packagePetIdOverride: String?
+    public let reduceMotion: Bool
 
-    public init(state: CompanionState, size: CGFloat = 26, packagePetId: String? = nil) {
+    public init(
+        state: CompanionState,
+        size: CGFloat = 26,
+        packagePetId: String? = nil,
+        reduceMotion: Bool = false
+    ) {
         self.state = state
         self.size = size
         self.packagePetIdOverride = packagePetId
+        self.reduceMotion = reduceMotion
     }
 
     public var body: some View {
@@ -217,7 +240,12 @@ public struct CompanionBadge: View {
             Circle()
                 .strokeBorder(state.mood.ringColor.opacity(state.mood.ringOpacity),
                               lineWidth: state.mood == .wary ? 1.6 : 1)
-            CompanionGlyph(state: state, size: size * 0.86, packagePetId: packagePetIdOverride)
+            CompanionGlyph(
+                state: state,
+                size: size * 0.86,
+                packagePetId: packagePetIdOverride,
+                reduceMotion: reduceMotion
+            )
         }
         .frame(width: size, height: size)
     }
@@ -253,10 +281,11 @@ public struct CompanionRow: View {
     }
 
     private var style: AgentStyle { AgentStyleCatalog.style(for: state.agent.id) }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
         HStack(spacing: 8) {
-            CompanionBadge(state: state, size: 26)
+            CompanionBadge(state: state, size: 26, reduceMotion: reduceMotion)
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 5) {

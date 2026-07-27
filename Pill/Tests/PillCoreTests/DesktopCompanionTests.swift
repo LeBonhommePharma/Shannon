@@ -677,6 +677,12 @@ final class DesktopCompanionWindowPolicyTests: XCTestCase {
             "joinsAllSpaces",
             "reassertOnActiveSpaceChange",
             "isAlwaysOnTopLevel",
+            "screenMargin",
+            "bubbleCornerRadius",
+            "bubbleMaterialKindName",
+            "panelIsOpaque",
+            "panelHasShadow",
+            "petUsesBackdropDisc",
         ] {
             XCTAssertNotNil(snap[key], "missing \(key)")
         }
@@ -684,6 +690,93 @@ final class DesktopCompanionWindowPolicyTests: XCTestCase {
         XCTAssertEqual(snap["canBecomeKey"], "false")
         XCTAssertEqual(snap["joinsAllSpaces"], "true")
         XCTAssertEqual(snap["isAlwaysOnTopLevel"], "true")
+        XCTAssertEqual(snap["bubbleMaterialKindName"], "popover")
+        XCTAssertEqual(snap["panelIsOpaque"], "false")
+        XCTAssertEqual(snap["panelHasShadow"], "false")
+        XCTAssertEqual(snap["petUsesBackdropDisc"], "false")
+    }
+
+    /// HUD chrome parity: bubble uses popover glass + continuous radius + no sticker disc.
+    func testVisualChromeMatchesShannonFloatingHUD() {
+        XCTAssertEqual(DesktopCompanionWindowPolicy.bubbleMaterialKindName, "popover")
+        XCTAssertEqual(DesktopCompanionWindowPolicy.bubbleCornerRadius, 12, accuracy: 1e-9)
+        XCTAssertEqual(DesktopCompanionWindowPolicy.bubbleHairlineOpacity, 0.10, accuracy: 1e-9)
+        XCTAssertEqual(
+            DesktopCompanionWindowPolicy.bubbleBackgroundTintOpacity,
+            0.35,
+            accuracy: 1e-9
+        )
+        XCTAssertFalse(DesktopCompanionWindowPolicy.panelIsOpaque)
+        XCTAssertFalse(DesktopCompanionWindowPolicy.panelHasShadow)
+        XCTAssertFalse(DesktopCompanionWindowPolicy.petUsesBackdropDisc)
+        XCTAssertGreaterThan(DesktopCompanionWindowPolicy.screenMargin, 0)
+        // Same edge margin family as the fleet glance so surfaces share desktop inset.
+        XCTAssertEqual(
+            DesktopCompanionWindowPolicy.screenMargin,
+            FloatingGlanceWindowPolicy.screenMargin,
+            accuracy: 1e-9
+        )
+    }
+
+    /// Placement stays inside visibleFrame with a non-zero dock/menu margin.
+    func testDefaultFrameRespectsVisibleFrameMargin() {
+        let visible = CGRect(x: 100, y: 50, width: 1280, height: 800)
+        let size = CGSize(width: 200, height: 160)
+        let frame = DesktopCompanionWindowPolicy.defaultFrame(
+            size: size,
+            visibleFrame: visible
+        )
+        let margin = DesktopCompanionWindowPolicy.screenMargin
+        XCTAssertEqual(frame.width, size.width, accuracy: 1e-9)
+        XCTAssertEqual(frame.height, size.height, accuracy: 1e-9)
+        XCTAssertEqual(
+            frame.maxX,
+            visible.maxX - margin,
+            accuracy: 1e-6
+        )
+        XCTAssertEqual(
+            frame.minY,
+            visible.minY + margin,
+            accuracy: 1e-6
+        )
+        XCTAssertTrue(
+            DesktopCompanionWindowPolicy.isSafelyPlaced(
+                frame: frame,
+                visibleFrame: visible
+            ),
+            "frame \(frame) must sit inside visible \(visible) with margin \(margin)"
+        )
+        // Zero margin would collide with system chrome — contract forbids it.
+        XCTAssertFalse(
+            DesktopCompanionWindowPolicy.isSafelyPlaced(
+                frame: CGRect(
+                    x: visible.maxX - size.width,
+                    y: visible.minY,
+                    width: size.width,
+                    height: size.height
+                ),
+                visibleFrame: visible
+            )
+        )
+    }
+
+    func testDefaultFrameClampsWhenSizeExceedsVisibleInset() {
+        let visible = CGRect(x: 0, y: 0, width: 100, height: 80)
+        let huge = CGSize(width: 400, height: 300)
+        let frame = DesktopCompanionWindowPolicy.defaultFrame(
+            size: huge,
+            visibleFrame: visible,
+            margin: 10
+        )
+        XCTAssertLessThanOrEqual(frame.width, 80)
+        XCTAssertLessThanOrEqual(frame.height, 60)
+        XCTAssertTrue(
+            DesktopCompanionWindowPolicy.isSafelyPlaced(
+                frame: frame,
+                visibleFrame: visible,
+                margin: 10
+            )
+        )
     }
 
     #if canImport(AppKit)

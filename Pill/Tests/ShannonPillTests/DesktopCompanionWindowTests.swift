@@ -93,6 +93,67 @@ final class DesktopCompanionWindowTests: XCTestCase {
         }
     }
 
+    /// Transparent borderless panel — no solid fill / window shadow sticker.
+    func testPanelIsTransparentBorderlessWithoutWindowShadow() {
+        let panel = DesktopCompanionPanel(
+            contentRect: CGRect(x: 0, y: 0, width: 200, height: 160)
+        )
+        defer { panel.orderOut(nil) }
+
+        XCTAssertEqual(panel.isOpaque, DesktopCompanionWindowPolicy.panelIsOpaque)
+        XCTAssertFalse(panel.isOpaque)
+        XCTAssertEqual(panel.hasShadow, DesktopCompanionWindowPolicy.panelHasShadow)
+        XCTAssertFalse(panel.hasShadow)
+        XCTAssertEqual(panel.backgroundColor, NSColor.clear)
+        XCTAssertTrue(panel.styleMask.contains(.borderless))
+        XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+    }
+
+    /// Controller placement uses policy visibleFrame + non-zero margin.
+    func testDefaultFrameUsesPolicySafeMargin() {
+        let size = DesktopCompanionWindowController.defaultSize
+        let visible = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let policyFrame = DesktopCompanionWindowPolicy.defaultFrame(
+            size: size,
+            visibleFrame: visible
+        )
+        // Controller path with an explicit screen falls back to main/visible —
+        // pure policy path is the source of truth for margins.
+        XCTAssertGreaterThan(DesktopCompanionWindowPolicy.screenMargin, 0)
+        XCTAssertTrue(
+            DesktopCompanionWindowPolicy.isSafelyPlaced(
+                frame: policyFrame,
+                visibleFrame: visible
+            )
+        )
+        XCTAssertEqual(
+            policyFrame.maxX,
+            visible.maxX - DesktopCompanionWindowPolicy.screenMargin,
+            accuracy: 1e-6
+        )
+        XCTAssertEqual(
+            policyFrame.minY,
+            visible.minY + DesktopCompanionWindowPolicy.screenMargin,
+            accuracy: 1e-6
+        )
+    }
+
+    /// Source contracts: bubble chrome must use PillMaterial popover + Shannon tokens
+    /// (structural check of shipped policy values the host binds).
+    func testShippedChromePolicyMatchesHUDSurfaces() {
+        XCTAssertEqual(DesktopCompanionWindowPolicy.bubbleMaterialKindName, "popover")
+        XCTAssertEqual(DesktopCompanionWindowPolicy.bubbleCornerRadius, 12, accuracy: 1e-9)
+        XCTAssertFalse(DesktopCompanionWindowPolicy.petUsesBackdropDisc)
+        XCTAssertFalse(DesktopCompanionWindowPolicy.panelIsOpaque)
+        XCTAssertFalse(DesktopCompanionWindowPolicy.panelHasShadow)
+        // Glance shares the same edge margin so pet + fleet don't fight dock chrome.
+        XCTAssertEqual(
+            DesktopCompanionWindowPolicy.screenMargin,
+            FloatingGlanceWindowPolicy.screenMargin,
+            accuracy: 1e-9
+        )
+    }
+
     func testDesktopCompanionTypesAreShippedNotStubs() {
         // Structural: controller + panel + host exist on the ShannonPill product.
         XCTAssertTrue(DesktopCompanionWindowController.defaultSize.width > 0)

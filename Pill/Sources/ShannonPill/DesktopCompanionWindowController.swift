@@ -483,9 +483,12 @@ struct DesktopCompanionView: View {
         // Policy: no mood-ring / stroke outline around the desktop pet sprite.
         let ring = DesktopCompanionWindowPolicy.petDrawsOutline
         if let state = presentation.state {
+            // Settings desktopPetId lives on presentation.packagePetId — must
+            // reach CompanionBadge or the glyph ignores setPackagePetId.
             CompanionBadge(
                 state: state,
                 size: size,
+                packagePetId: presentation.packagePetId,
                 reduceMotion: reduceMotion,
                 showMoodRing: ring
             )

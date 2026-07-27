@@ -158,6 +158,59 @@ final class DesktopCompanionWindowTests: XCTestCase {
         )
     }
 
+    /// Live companion path (state non-nil) must pass Settings packagePetId into
+    /// CompanionBadge — otherwise glyph falls back to agent map and ignores picker.
+    func testPetBodyStatePathWiresPresentationPackagePetId() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/ShannonPill/DesktopCompanionWindowController.swift")
+        let src = try String(contentsOf: url, encoding: .utf8)
+        // CompanionBadge branch with state must include packagePetId: presentation.packagePetId
+        XCTAssertTrue(
+            src.contains("packagePetId: presentation.packagePetId"),
+            "CompanionBadge and CompanionView must both bind presentation.packagePetId"
+        )
+        // Ensure CompanionBadge call site is not missing the keyword (state path).
+        let badgeRegion = src.range(of: "if let state = presentation.state")
+        XCTAssertNotNil(badgeRegion)
+        if let start = badgeRegion {
+            let tail = String(src[start.lowerBound...])
+            let window = String(tail.prefix(450))
+            XCTAssertTrue(
+                window.contains("CompanionBadge("),
+                window
+            )
+            XCTAssertTrue(
+                window.contains("packagePetId: presentation.packagePetId"),
+                "state path must pass presentation.packagePetId into CompanionBadge:\n\(window)"
+            )
+        }
+
+        // Pure presentation still carries override package id when roster has an agent.
+        let now = Date()
+        let agent = AgentActivitySnapshot(
+            id: "science",
+            displayName: "Science",
+            status: .idle,
+            lastTask: "t",
+            source: "test",
+            updatedAt: now,
+            resumable: false,
+            historyCount: 0,
+            presence: .live
+        )
+        let summary = AgentActivitySummary(agents: [agent], scannedAt: now)
+        let p = DesktopCompanionSelector.present(
+            summary: summary,
+            now: now,
+            packagePetId: "shannon-hub"
+        )
+        XCTAssertNotNil(p.state, "live agent should yield presentation.state")
+        XCTAssertEqual(p.packagePetId, "shannon-hub")
+    }
+
     func testDesktopCompanionTypesAreShippedNotStubs() {
         // Structural: controller + panel + host exist on the ShannonPill product.
         XCTAssertTrue(DesktopCompanionWindowController.defaultSize.width > 0)

@@ -268,13 +268,14 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Parity:** AgentNotch jump / AgentCallout jump (candidate G3)
 - **Done:** `HostTerminalJumpPolicy` + `HostTerminalJumpInput` pure decide (running attachBundle → hostTerminal label→bundle map → live attachPid → real directory cwd; fail-closed `.none`); `HostTerminalJumpExecutor` NSWorkspace activate/open; context menus on CompanionBoard / agentRow / menu-bar roster + jump button on pulled sessions; `HostTerminalJumpPolicyTests` matrix + SessionUIWiring structural needles.
 
-### - [ ] ENH-029: Open terminal workspace action from routes (parity G7)
+### - [x] ENH-029: Open terminal workspace action from routes (parity G7)
 
 - **Why:** AgentPeek “Views” open a terminal workspace; Shannon has QuickRoutes/FastActions but no dedicated open-workspace action at project cwd.
 - **Area:** `Pill/Sources/Routes/`, terminal launcher helper
 - **First slice:** One action “Open Terminal here” for selected session cwd; structural wiring test.
 - **Priority:** P3
 - **Parity:** AgentPeek Views (candidate G7)
+- **Done:** `OpenTerminalHerePolicy` + `OpenTerminalHereInput` pure decide (existing directory cwd required; preferred attach bundle → hostTerminal label→bundle → `com.apple.Terminal`; fail-closed `.none`); `OpenTerminalHereExecutor` NSWorkspace open-dir-with-terminal; terminal button on pulled sessions + context menus on CompanionBoard / menu-bar roster; `OpenTerminalHereTests` matrix + SessionUIWiring structural needles. Never invents cwd.
 
 ### - [ ] ENH-030: Mac voice callout on completion / needs-you (parity G8)
 

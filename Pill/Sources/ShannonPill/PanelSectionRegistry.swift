@@ -218,6 +218,8 @@ struct PulledSessionsSection: View {
     var liveAgentIds: Set<String> = []
     /// ENH-028: jump to host terminal / open cwd when session evidence is known.
     var onJumpToHost: ((HostTerminalJumpInput) -> Void)? = nil
+    /// ENH-029: open a terminal workspace at session cwd when known (fail-closed).
+    var onOpenTerminalHere: ((OpenTerminalHereInput) -> Void)? = nil
 
     /// Ranked cards: needs-you → working → finished → idle; optional fields fail-closed.
     private var cards: [SessionContentCard] {
@@ -305,6 +307,21 @@ struct PulledSessionsSection: View {
                 }
             }
             Spacer(minLength: 0)
+            // ENH-029: open terminal workspace when session reports a real cwd.
+            if let termInput = openTerminalInput(for: card), termInput.hasWorkspaceEvidence {
+                Button {
+                    onOpenTerminalHere?(termInput)
+                } label: {
+                    Image(systemName: "terminal")
+                        .font(.shannonMenuSection)
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+                .buttonStyle(.plain)
+                .help(OpenTerminalHereAction.launch(cwd: "_", terminalBundleID: "_").affordanceLabel)
+                .accessibilityLabel(
+                    OpenTerminalHereAction.launch(cwd: "_", terminalBundleID: "_").affordanceLabel
+                )
+            }
             // ENH-028: jump when session reports hostTerminal and/or cwd.
             if let input = jumpInput(for: card), input.hasJumpEvidence {
                 let label = jumpAffordanceLabel(for: input)
@@ -329,16 +346,26 @@ struct PulledSessionsSection: View {
         )
     }
 
-    private func jumpInput(for card: SessionContentCard) -> HostTerminalJumpInput? {
-        let session = sessionsById[card.id]
+    private func sessionForCard(_ card: SessionContentCard) -> AgentSession? {
+        sessionsById[card.id]
             ?? sessions.first { $0.agentId == card.agentId }
-        guard let session else { return nil }
+    }
+
+    private func jumpInput(for card: SessionContentCard) -> HostTerminalJumpInput? {
+        guard let session = sessionForCard(card) else { return nil }
         let input = HostTerminalJumpInput(
             hostBundleID: nil,
             hostTerminalLabel: session.hostTerminal,
             cwd: session.cwd
         )
         return input.hasJumpEvidence ? input : nil
+    }
+
+    /// ENH-029: only when session reported a non-empty cwd (disk check in policy).
+    private func openTerminalInput(for card: SessionContentCard) -> OpenTerminalHereInput? {
+        guard let session = sessionForCard(card) else { return nil }
+        let input = OpenTerminalHereInput(session: session)
+        return input.hasWorkspaceEvidence ? input : nil
     }
 
     /// Affordance copy only — real decide runs in `onJumpToHost` with live running apps.

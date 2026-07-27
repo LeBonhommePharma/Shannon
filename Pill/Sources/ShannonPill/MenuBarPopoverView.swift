@@ -165,6 +165,10 @@ struct MenuBarPopoverView: View {
                         onJumpToHost: { input in
                             // ENH-028: pure policy + NSWorkspace activate / open cwd.
                             _ = HostTerminalJumpExecutor.jump(input: input)
+                        },
+                        onOpenTerminalHere: { input in
+                            // ENH-029: pure policy + NSWorkspace open dir with terminal app.
+                            _ = OpenTerminalHereExecutor.open(input: input)
                         }
                     )
                         .shannonGlassSection()

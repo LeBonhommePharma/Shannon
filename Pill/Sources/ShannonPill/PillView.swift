@@ -1,5 +1,6 @@
 import SwiftUI
 import PillCore
+import Routes
 import ShannonCore
 
 // `ShannonStatus.isSynthetic` / `.syntheticBackends` and the provenance rules
@@ -1154,12 +1155,18 @@ struct PillView: View {
                         : Color.shannonSurfaceElevated.opacity(0.6)
                 )
         )
-        // ENH-028: jump to host terminal / project folder when evidence exists.
+        // ENH-028 / ENH-029: jump host or open terminal workspace when evidence exists.
         .contextMenu {
             let action = jumpAction(for: a)
             if action.isAvailable {
                 Button(action.affordanceLabel) {
                     _ = HostTerminalJumpExecutor.perform(action)
+                }
+            }
+            let term = openTerminalAction(for: a)
+            if term.isAvailable {
+                Button(term.affordanceLabel) {
+                    _ = OpenTerminalHereExecutor.perform(term)
                 }
             }
         }
@@ -1171,6 +1178,14 @@ struct PillView: View {
             agent: agent,
             session: sessionsByAgent[agent.id],
             runningBundleIDs: HostTerminalJumpExecutor.runningBundleIDs()
+        )
+    }
+
+    /// ENH-029 pure policy — fail-closed when session cwd unknown / missing on disk.
+    private func openTerminalAction(for agent: AgentActivitySnapshot) -> OpenTerminalHereAction {
+        OpenTerminalHerePolicy.decide(
+            attachBundle: agent.attachBundle,
+            session: sessionsByAgent[agent.id]
         )
     }
 

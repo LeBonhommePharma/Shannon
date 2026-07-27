@@ -27,6 +27,8 @@ final class SessionUIWiringTests: XCTestCase {
                 "CompanionEmptyStateCopy.idleTitle",
                 "HostTerminalJumpPolicy",
                 "HostTerminalJumpExecutor",
+                "OpenTerminalHerePolicy",
+                "OpenTerminalHereExecutor",
             ]),
             ("PanelSectionRegistry.swift", [
                 "SessionContentPresenter.cards",
@@ -34,6 +36,8 @@ final class SessionUIWiringTests: XCTestCase {
                 "liveAgentIds",
                 "HostTerminalJumpInput",
                 "onJumpToHost",
+                "OpenTerminalHereInput",
+                "onOpenTerminalHere",
             ]),
             ("PillView.swift", [
                 "SessionContentPresenter.listedSurfaces",
@@ -49,6 +53,8 @@ final class SessionUIWiringTests: XCTestCase {
                 "CompanionEmptyStateCopy.idleTitle",
                 "HostTerminalJumpPolicy",
                 "cwdByAgent",
+                "OpenTerminalHerePolicy",
+                "OpenTerminalHereExecutor",
             ]),
             ("MenuBarPopoverView.swift", [
                 "AgentLiveSurfaceLogic.primaryFocus",
@@ -58,6 +64,8 @@ final class SessionUIWiringTests: XCTestCase {
                 "gateAvailable: activity.gateAvailable",
                 "HostTerminalJumpExecutor",
                 "onJumpToHost",
+                "OpenTerminalHereExecutor",
+                "onOpenTerminalHere",
             ]),
             ("GateAskCard.swift", [
                 "GateAskActionCopy",

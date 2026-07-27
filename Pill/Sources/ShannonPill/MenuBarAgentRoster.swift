@@ -1,5 +1,6 @@
 import SwiftUI
 import PillCore
+import Routes
 import ShannonCore
 
 // MARK: - Menu-bar popover agent roster (extracted)
@@ -156,12 +157,18 @@ struct MenuBarAgentRoster: View {
         .frame(minHeight: 18, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(rosterAccessibilityLabel(card: card, reading: agentReading))
-        // ENH-028: jump to host terminal / project folder when evidence exists.
+        // ENH-028 / ENH-029: jump host or open terminal workspace when evidence exists.
         .contextMenu {
             let action = jumpAction(for: card.agentId)
             if action.isAvailable {
                 Button(action.affordanceLabel) {
                     _ = HostTerminalJumpExecutor.perform(action)
+                }
+            }
+            let term = openTerminalAction(for: card.agentId)
+            if term.isAvailable {
+                Button(term.affordanceLabel) {
+                    _ = OpenTerminalHereExecutor.perform(term)
                 }
             }
         }
@@ -176,6 +183,16 @@ struct MenuBarAgentRoster: View {
             attachPid: agent?.attachPid,
             session: session,
             runningBundleIDs: AgentActivityMonitor.enumerateRunningBundleIDs()
+        )
+    }
+
+    /// ENH-029 pure policy — fail-closed when session cwd unknown / missing on disk.
+    private func openTerminalAction(for agentId: String) -> OpenTerminalHereAction {
+        let agent = summary.agents.first(where: { $0.id == agentId })
+        let session = sessionsByAgent[agentId]
+        return OpenTerminalHerePolicy.decide(
+            attachBundle: agent?.attachBundle,
+            session: session
         )
     }
 

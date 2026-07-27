@@ -86,6 +86,60 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(rising.entropyLabel, "H 8.4", "positive delta is not an alarm")
     }
 
+    /// UX-056: pad entropy empty-trace short vs detail share one Core family.
+    func testEntropyEmptyTraceCopyTokens() {
+        XCTAssertEqual(EntropyEmptyTraceCopy.short, "Collecting samples…")
+        XCTAssertEqual(
+            EntropyEmptyTraceCopy.detail,
+            "Collecting samples — the trace needs two readings."
+        )
+        XCTAssertTrue(EntropyEmptyTraceCopy.short.hasPrefix("Collecting samples"))
+        XCTAssertTrue(EntropyEmptyTraceCopy.detail.hasPrefix("Collecting samples"))
+        XCTAssertNotEqual(
+            EntropyEmptyTraceCopy.short,
+            EntropyEmptyTraceCopy.detail,
+            "chart density vs detail explanation remain distinct"
+        )
+    }
+
+    func testPadWiresEntropyEmptyTraceCopy() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let chart = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/StatusCardsView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        let detail = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/AgentDetailView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            chart.contains("EntropyEmptyTraceCopy.short"),
+            "StatusCardsView empty chart must use EntropyEmptyTraceCopy.short"
+        )
+        XCTAssertFalse(
+            chart.contains("Text(\"Collecting samples"),
+            "chart must not hard-code Collecting samples dual"
+        )
+        XCTAssertTrue(
+            detail.contains("EntropyEmptyTraceCopy.detail"),
+            "AgentDetailView empty trace must use EntropyEmptyTraceCopy.detail"
+        )
+        XCTAssertFalse(
+            detail.contains("Text(\"Collecting samples"),
+            "detail must not hard-code Collecting samples dual"
+        )
+    }
+
     /// UX-030: pad card/detail empty task chrome shares emptyTaskTitle / displayTaskTitle.
     func testAgentDisplayTaskTitleIdleAndTrack() {
         XCTAssertEqual(AgentState.emptyTaskTitle, "No task")

@@ -163,7 +163,8 @@ struct AgentDetailView: View {
                 .chartYAxis { AxisMarks(position: .leading) }
                 .frame(height: 200)
             } else {
-                Text("Collecting samples — the trace needs two readings.")
+                // UX-056: empty-trace chrome shares EntropyEmptyTraceCopy.detail.
+                Text(EntropyEmptyTraceCopy.detail)
                     .shannonText(.shannonCaption, color: .shannonSecondary)
                     .frame(maxWidth: .infinity, minHeight: 80)
             }

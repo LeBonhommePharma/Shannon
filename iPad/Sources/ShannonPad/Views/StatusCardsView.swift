@@ -136,7 +136,8 @@ struct EntropyChartCardView: View {
             }
 
             if plotted.isEmpty {
-                Text("Collecting samples…")
+                // UX-056: empty-trace chrome shares EntropyEmptyTraceCopy.short.
+                Text(EntropyEmptyTraceCopy.short)
                     .shannonText(.shannonCaption, color: .shannonSecondary)
                     .frame(maxWidth: .infinity, minHeight: 120)
             } else {

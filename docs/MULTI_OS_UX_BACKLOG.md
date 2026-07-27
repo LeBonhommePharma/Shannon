@@ -526,18 +526,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `AgentListSkim.multiAgentGlanceCaption`; phone + Mac wired; AgentListSkimTests.
 - **Priority:** P2
 
-### - [ ] UX-056: Pad entropy empty “Collecting samples” dual (detail vs status chart)
+### - [x] UX-056: Pad entropy empty “Collecting samples” dual (detail vs status chart)
 
 - **Why:** `StatusCardsView` uses `"Collecting samples…"`; `AgentDetailView` uses longer `"Collecting samples — the trace needs two readings."` — pad-internal empty-trace dual.
 - **Platforms:** iPadOS
 - **Area:** `StatusCardsView`, `AgentDetailView`, optional Core entropy-empty copy
 - **First slice:** Shared short + detail tokens or one empty-trace presenter; wire both; forbid dual hard-codes.
+- **Done:** `EntropyEmptyTraceCopy.short` / `.detail`; chart + detail wired; PresentationTests pure + pad wiring.
 - **Priority:** P3
 
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (UX-056):** Closed pad Collecting samples dual via Core `EntropyEmptyTraceCopy`; PresentationTests green.
 - **2026-07-26 (loop 33):** `--quick` all PASS. Backlog empty after UX-054. Residual multi-OS dual: phone/Mac fleet `"agents need a glance"` → **UX-055** (claim). Filed **UX-056** pad Collecting samples dual (P3). Considered: pad “No matches” / “Nothing from the Mac yet.” (surface-specific leave); phone status TTS “N agents running” (different metric than fleet glance — leave); HubScanLine FlexAIDdS offline (domain leave); configurationDisplayName catalog (leave).
 - **2026-07-26 (clean slate):** Closed **UX-054**; committed XcodeGen hygiene (`validate_xcodeprojs.sh`, clean generate in test/setup, docs). Primary UX/ENH/PET queues empty; working tree clean on main.
 - **2026-07-26 (loop 32):** `--quick` all PASS. Multi-OS backlog empty after parallel wave closed UX-042…052. Residual pad answer toast dual Confirmed/Denied vs outcomeLabel → **UX-053** (claim). Also filed **UX-054** (pad unanswerable post family, P3). Considered: HubScanLine FlexAIDdS offline (domain-specific leave); pad palette “No matches” (surface leave); widget Idle residual (rg clean).

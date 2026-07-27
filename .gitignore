@@ -13,6 +13,8 @@ dist/
 .eggs/
 *.whl
 .venv/
+.venv-shannon/
+.venv-install/
 venv/
 .ruff_cache/
 .mypy_cache/

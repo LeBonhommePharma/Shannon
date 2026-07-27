@@ -1,15 +1,27 @@
 #Requires -Version 5.1
-# Install shannon-entropy on Windows (PowerShell + Python).
+# Install / update shannon-entropy on Windows (PowerShell + Python).
 # Pure-Python path: sets SHANNON_SKIP_CORE=1 so pip never needs MSVC.
 #
+# PRIMARY (from a local GitHub clone — update = git pull + re-run):
 #   powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path
-#   powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1
+#   powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path -Update
 #
+# Other modes:
+#   powershell -File .\scripts\Install-Shannon.ps1                         # PyPI
+#   powershell -File .\scripts\Install-Shannon.ps1 -Source git             # GitHub HEAD
+#   powershell -File .\scripts\Install-Shannon.ps1 -Source 'git+https://github.com/LeBonhommePharma/Shannon.git'
+#   powershell -File .\scripts\Install-Shannon.ps1 -Source path -SkipTests
+#
+# Delegates to scripts/shannon_installer.py (same contract as install_shannon.sh).
+
 [CmdletBinding()]
 param(
     [string]$Source = "pypi",
     [string]$PythonExe = "",
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$Update,
+    [switch]$ResolveOnly,
+    [switch]$SmokeOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,66 +69,43 @@ if (-not (Test-Path (Join-Path $RepoRoot "pyproject.toml"))) {
     }
 }
 
-Write-Host "==> Shannon Windows install (pure-Python)" -ForegroundColor Cyan
-$py = Get-PythonExe -Preferred $PythonExe
-Write-Host "    Python: $py"
+$Installer = Join-Path $RepoRoot "scripts\shannon_installer.py"
+if (-not (Test-Path $Installer)) {
+    throw "Missing installer: $Installer"
+}
 
-Invoke-Python -Exe $py -PyArgs @("-c", "import sys; assert sys.version_info >= (3, 10), sys.version; print(sys.version.split()[0])")
+# Update default: prefer local clone when Source still pypi.
+if ($Update -and ($Source -eq "pypi") -and (Test-Path (Join-Path $RepoRoot "pyproject.toml"))) {
+    $Source = "path"
+}
+
+$py = Get-PythonExe -Preferred $PythonExe
+Write-Host "==> Shannon Windows install via shannon_installer.py" -ForegroundColor Cyan
+Write-Host "    Python: $py"
+Write-Host "    Source: $Source"
+Write-Host "    Repo:   $RepoRoot"
+
+$pyArgs = @(
+    $Installer,
+    "--source", $Source,
+    "--repo-root", $RepoRoot,
+    "--python", $(if ($py -eq "py") { "py" } else { $py })
+)
+
+# When launcher is `py`, pass through as python executable name for child.
+if ($py -eq "py") {
+    $pyArgs = @(
+        $Installer,
+        "--source", $Source,
+        "--repo-root", $RepoRoot
+    )
+}
+
+if ($SkipTests) { $pyArgs += "--skip-tests" }
+if ($Update) { $pyArgs += "--update" }
+if ($ResolveOnly) { $pyArgs += "--resolve-only" }
+if ($SmokeOnly) { $pyArgs += "--smoke-only" }
 
 $env:SHANNON_SKIP_CORE = "1"
-Write-Host "    SHANNON_SKIP_CORE=1 (pure-Python; no MSVC required)"
-
-Invoke-Python -Exe $py -PyArgs @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
-
-if ($Source -eq "pypi") {
-    Write-Host "==> pip install shannon-entropy"
-    Invoke-Python -Exe $py -PyArgs @("-m", "pip", "install", "shannon-entropy")
-} elseif ($Source -eq "path") {
-    if (-not (Test-Path (Join-Path $RepoRoot "pyproject.toml"))) {
-        throw "Local path install requires the Shannon repo root (missing pyproject.toml under $RepoRoot)"
-    }
-    Write-Host "==> pip install -e $RepoRoot"
-    Invoke-Python -Exe $py -PyArgs @("-m", "pip", "install", "-e", $RepoRoot)
-} else {
-    Write-Host "==> pip install $Source"
-    Invoke-Python -Exe $py -PyArgs @("-m", "pip", "install", $Source)
-}
-
-if ($SkipTests) {
-    Write-Host "Install complete (tests skipped)" -ForegroundColor Green
-    exit 0
-}
-
-Write-Host "==> Smoke tests"
-$smokeFile = Join-Path ([System.IO.Path]::GetTempPath()) ("shannon_smoke_{0}.py" -f [guid]::NewGuid().ToString("N"))
-@'
-import sys
-import numpy as np
-import shannon
-from shannon import ShannonCollapseDetector, shannon_entropy_from_probs
-
-assert shannon.__version__, shannon.__version__
-print("shannon", shannon.__version__, "_HAS_CORE=", getattr(shannon, "_HAS_CORE", None))
-h = shannon_entropy_from_probs(np.array([0.25, 0.25, 0.25, 0.25], dtype=float))
-assert abs(h - 2.0) < 1e-9, h
-ShannonCollapseDetector()
-print("entropy_smoke_ok", h)
-print("python", sys.version.split()[0])
-'@ | Set-Content -Path $smokeFile -Encoding UTF8
-try {
-    Invoke-Python -Exe $py -PyArgs @($smokeFile)
-} finally {
-    Remove-Item -Force $smokeFile -ErrorAction SilentlyContinue
-}
-
-Write-Host "==> shannon-monitor --help"
-try {
-    Invoke-Python -Exe $py -PyArgs @("-m", "shannon.cli", "--help")
-} catch {
-    $mon = Get-Command shannon-monitor -ErrorAction SilentlyContinue
-    if (-not $mon) { throw }
-    & $mon.Source --help
-    if ($LASTEXITCODE -ne 0) { throw "shannon-monitor --help failed" }
-}
-
-Write-Host "Shannon installed and smoke-tested on Windows PowerShell" -ForegroundColor Green
+Invoke-Python -Exe $py -PyArgs $pyArgs
+Write-Host "Shannon Windows install finished" -ForegroundColor Green

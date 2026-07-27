@@ -1,38 +1,88 @@
 #!/usr/bin/env bash
-# install_shannon.sh — cross-platform-friendly pure-Python install (Linux/macOS).
+# install_shannon.sh — pure-Python install / update (Linux / macOS).
 #
-#   ./scripts/install_shannon.sh              # pip install shannon-entropy from PyPI
-#   ./scripts/install_shannon.sh --path        # editable install from this repo
-#   ./scripts/install_shannon.sh --path --venv # create .venv first
+# PRIMARY (from a local GitHub clone — easy update = git pull + re-run):
+#   ./scripts/install_shannon.sh --path
+#   ./scripts/install_shannon.sh --path --update   # same action; documents update
 #
-# Always sets SHANNON_SKIP_CORE=1 so missing compilers never fail the install.
-# Windows users: use scripts/Install-Shannon.ps1 instead.
+# Other modes:
+#   ./scripts/install_shannon.sh                  # PyPI shannon-entropy
+#   ./scripts/install_shannon.sh --git            # git+https://github.com/…/Shannon.git
+#   ./scripts/install_shannon.sh --source 'git+https://…'
+#   ./scripts/install_shannon.sh --path --venv    # create .venv-install first
+#   ./scripts/install_shannon.sh --path --skip-tests
+#
+# Always sets SHANNON_SKIP_CORE=1. Delegates to scripts/shannon_installer.py.
+# Windows: use scripts/Install-Shannon.ps1 (same modes).
 
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODE="pypi"
+SOURCE="pypi"
 USE_VENV=0
 SKIP_TESTS=0
+UPDATE=0
+EXTRA_SOURCE=""
 
-for arg in "$@"; do
-  case "${arg}" in
-    --path) MODE="path" ;;
-    --venv) USE_VENV=1 ;;
-    --skip-tests) SKIP_TESTS=1 ;;
+usage() {
+  sed -n '2,16p' "$0" | sed 's/^# \?//'
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --path|-e|--editable)
+      SOURCE="path"
+      shift
+      ;;
+    --pypi|--release)
+      SOURCE="pypi"
+      shift
+      ;;
+    --git|--github|--head)
+      SOURCE="git"
+      shift
+      ;;
+    --source)
+      shift
+      [[ $# -gt 0 ]] || { echo "error: --source needs a value" >&2; exit 2; }
+      EXTRA_SOURCE="$1"
+      SOURCE="$1"
+      shift
+      ;;
+    --update|--upgrade)
+      UPDATE=1
+      # Default source for update when still on pypi and we have a clone: path.
+      if [[ "${SOURCE}" == "pypi" && -f "${REPO}/pyproject.toml" ]]; then
+        SOURCE="path"
+      fi
+      shift
+      ;;
+    --venv)
+      USE_VENV=1
+      shift
+      ;;
+    --skip-tests)
+      SKIP_TESTS=1
+      shift
+      ;;
     --help|-h)
-      sed -n '2,12p' "$0" | sed 's/^# \?//'
+      usage
       exit 0
       ;;
     *)
-      echo "error: unknown option ${arg}" >&2
+      echo "error: unknown option $1" >&2
+      usage >&2
       exit 2
       ;;
   esac
 done
 
+# If user passed --source, honour it (wins over --path/--git flags ordered before).
+if [[ -n "${EXTRA_SOURCE}" ]]; then
+  SOURCE="${EXTRA_SOURCE}"
+fi
+
 info() { printf '→ %s\n' "$*"; }
-ok()   { printf '✓ %s\n' "$*"; }
 die()  { printf '✗ %s\n' "$*" >&2; exit 1; }
 
 PY="${PYTHON:-}"
@@ -46,56 +96,18 @@ if [[ -z "${PY}" ]]; then
   fi
 fi
 
-"${PY}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
-  || die "Python 3.10+ required"
+# Venv creation is handled by shannon_installer.py (auto on PEP 668, or --venv).
 
-export SHANNON_SKIP_CORE=1
-info "SHANNON_SKIP_CORE=1 (pure-Python install)"
-
-if [[ "${USE_VENV}" -eq 1 ]]; then
-  VENV="${REPO}/.venv-install"
-  info "Creating venv at ${VENV}"
-  "${PY}" -m venv "${VENV}"
-  # shellcheck disable=SC1091
-  source "${VENV}/bin/activate"
-  PY=python
-fi
-
-info "Upgrading pip"
-"${PY}" -m pip install --upgrade pip setuptools wheel
-
-if [[ "${MODE}" == "path" ]]; then
-  info "Editable install from ${REPO}"
-  "${PY}" -m pip install -e "${REPO}"
-else
-  info "pip install shannon-entropy (PyPI)"
-  "${PY}" -m pip install shannon-entropy
-fi
-
+ARGS=( "${REPO}/scripts/shannon_installer.py" --source "${SOURCE}" --python "${PY}" )
 if [[ "${SKIP_TESTS}" -eq 1 ]]; then
-  ok "Install complete (tests skipped)"
-  exit 0
+  ARGS+=( --skip-tests )
+fi
+if [[ "${UPDATE}" -eq 1 ]]; then
+  ARGS+=( --update )
+fi
+if [[ "${USE_VENV}" -eq 1 ]]; then
+  # Force venv; installer also auto-venvs on PEP 668 system Pythons.
+  ARGS+=( --venv )
 fi
 
-info "Smoke: import + entropy"
-"${PY}" - <<'PY'
-import numpy as np
-import shannon
-from shannon import ShannonCollapseDetector, shannon_entropy_from_probs
-
-assert shannon.__version__, shannon.__version__
-print("shannon", shannon.__version__, "_HAS_CORE=", getattr(shannon, "_HAS_CORE", None))
-h = shannon_entropy_from_probs(np.array([0.25, 0.25, 0.25, 0.25], dtype=float))
-assert abs(h - 2.0) < 1e-9, h
-ShannonCollapseDetector()
-print("entropy_smoke_ok", h)
-PY
-
-info "Smoke: shannon-monitor --help"
-if command -v shannon-monitor >/dev/null 2>&1; then
-  shannon-monitor --help >/dev/null
-else
-  "${PY}" -m shannon.cli --help >/dev/null
-fi
-
-ok "Shannon pure-Python install smoke passed"
+exec "${PY}" "${ARGS[@]}"

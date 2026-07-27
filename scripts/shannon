@@ -367,13 +367,16 @@ usage() {
   cat <<'EOF'
 shannon — simple macOS Shannon bootstrap
 
-PRIMARY (first run / everyday):
+PRIMARY (first run / everyday — install from this GitHub clone):
   ./scripts/shannon                 pets + app (+ optional gate/bridge)
+  git pull && ./scripts/shannon update   # refresh app from latest source
 
 Also:
   ./scripts/shannon app             rebuild & restart the app only
+  ./scripts/shannon update          same as install (idempotent re-run after pull)
   ./scripts/shannon start|stop|restart|status|probe|doctor
   ./scripts/shannon pets            create default pet directories
+  ./scripts/shannon science         pure-Python library from this clone (update-safe)
   ./scripts/shannon gate            start agent gate daemon only
   ./scripts/shannon agent-demo      live socket demo agent (needs gate)
   ./scripts/shannon agent …         hub agent manager (spawn|control|monitor|kill|roster)
@@ -388,8 +391,12 @@ In the app:
        (title + URL via AppleScript / window name — offline-safe).
        Clipboard:  agent: science my task summary
 
+Science library (all platforms):
+  ./scripts/install_shannon.sh --path          macOS/Linux from clone
+  ./scripts/Install-Shannon.ps1 -Source path   Windows from clone
+  (re-run after git pull to update)
+
 Optional later:
-  pip install -e ".[dev]"           live entropy bridge
   ./setup.sh                        full dev toolchain (Xcode projects, etc.)
   brew install --cask …/shannon-pill   signed release (when published)
 EOF
@@ -402,11 +409,16 @@ case "${CMD}" in
   app|run|r)
     app_only
     ;;
-  install|i)
+  install|i|update|upgrade)
+    # install and update are the same path: rebuild from this clone and reinstall.
     stop_app || true
     build_and_install
     bootstrap_pets
-    ok "Installed. Start with: ./scripts/shannon start"
+    ok "Installed/updated from source. Start with: ./scripts/shannon start"
+    ;;
+  science|lib|python-install)
+    # Pure-Python science package from this monorepo (cross-platform helper).
+    exec "${REPO}/scripts/install_shannon.sh" --path --update "$@"
     ;;
   start|open)
     start_app

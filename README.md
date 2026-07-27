@@ -32,12 +32,17 @@
 git clone https://github.com/LeBonhommePharma/Shannon
 cd Shannon
 ./scripts/shannon                 # pets + install /Applications/Shannon.app + start
+# Update from latest main (same command after pull):
+git pull
+./scripts/shannon update          # rebuild + reinstall from this clone
 ```
 
 | Command | Purpose |
 |---------|---------|
 | `./scripts/shannon` | Bootstrap pets + app (rebuilds if missing) |
+| `./scripts/shannon update` | **Update from source** — rebuild + reinstall (after `git pull`) |
 | `./scripts/shannon app` | Force rebuild release app and reinstall |
+| `./scripts/shannon science` | Pure-Python library from this clone (`install_shannon.sh --path`) |
 | `./scripts/shannon stop` | Quit the pill (`ShannonPill`) |
 | `./scripts/shannon probe` | Diagnostics (battery, media, bridge) |
 | `./scripts/shannon status` | Running? gate? pets? |
@@ -260,23 +265,62 @@ Apple multi-device entry points are in [Quick Start — Apple platforms](#quick-
 
 ## Installation
 
+### Install / update from GitHub source (primary package path)
+
+One primary command per platform. **Update = `git pull` + re-run the same command**
+(idempotent). Shared engine: `scripts/shannon_installer.py` (pure-Python,
+`SHANNON_SKIP_CORE=1`).
+
+| Platform | Install from clone | Update from source |
+|----------|--------------------|--------------------|
+| **macOS hub (app)** | `./scripts/shannon` | `git pull && ./scripts/shannon update` |
+| **macOS / Linux science** | `./scripts/install_shannon.sh --path` | `git pull && ./scripts/install_shannon.sh --path` |
+| **Windows science** | `powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path` | same after `git pull` (or `-Update`) |
+
+```bash
+# Clone once
+git clone https://github.com/LeBonhommePharma/Shannon.git
+cd Shannon
+
+# macOS — operator hub (Pill app)
+./scripts/shannon
+
+# macOS / Linux — science library + shannon-monitor (editable from this tree)
+./scripts/install_shannon.sh --path
+# or: python3 scripts/shannon_installer.py --source path
+# Auto-creates .venv-shannon on Homebrew/Debian PEP 668 system Python.
+# Activate: source .venv-shannon/bin/activate
+
+# No local clone — install HEAD from GitHub via pip
+./scripts/install_shannon.sh --git
+# or: python3 scripts/shannon_installer.py --source git
+```
+
+```powershell
+# Windows — science library only (no Mac Pill UI)
+git clone https://github.com/LeBonhommePharma/Shannon.git
+cd Shannon
+powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path
+# Update: git pull; then re-run the same line (or add -Update)
+```
+
 ### Python (pip / PyPI)
 
 ```bash
-# After the first PyPI release:
+# Published package:
 pip install shannon-entropy
 
-# Or install from GitHub (works today):
+# Or install from GitHub without the helper scripts:
 pip install "git+https://github.com/LeBonhommePharma/Shannon.git"
 
-# Development (editable) from a clone:
+# Development extras from a clone:
 pip install -e ".[dev]"
 ```
 
 This installs the **Python package** (`import shannon`) and the `shannon-monitor` CLI.
 The optional C++ extension (`shannon._core`) is built when a C++20 compiler and
 pybind11 are available; otherwise pure-Python / Numba fallbacks are used.
-Force pure-Python with `SHANNON_SKIP_CORE=1`.
+Force pure-Python with `SHANNON_SKIP_CORE=1` (installers set this automatically).
 
 ```bash
 shannon-monitor --help

@@ -137,6 +137,68 @@ final class CompanionEmptyStateCopyTests: XCTestCase {
         )
     }
 
+    /// UX-050: notifications empty must fail-closed when phone unreachable —
+    /// never bare healthy "No notifications" while WC phone is away.
+    func testWatchNotificationEmptyWiresOfflineWhenPhoneAway() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let watch = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "watchOS/Sources/ShannonWatch/WatchRootView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(watch.isEmpty, "WatchRootView.swift must be readable")
+
+        // NotificationListView region: offline path shares agent-empty family.
+        XCTAssertTrue(
+            watch.contains("struct NotificationListView"),
+            "NotificationListView must exist"
+        )
+        XCTAssertTrue(
+            watch.contains("notifications.isEmpty"),
+            "NotificationListView must branch on empty notifications"
+        )
+        // Fail-closed: reachability must gate empty chrome (not always healthy idle).
+        let notifyIdx = watch.range(of: "struct NotificationListView")
+        XCTAssertNotNil(notifyIdx)
+        let notifyBody = notifyIdx.map { String(watch[$0.lowerBound...]) } ?? ""
+        XCTAssertTrue(
+            notifyBody.contains("CompanionEmptyStateCopy.content")
+                || notifyBody.contains("isPhoneReachable"),
+            "NotificationListView empty must consider phone reachability (UX-050)"
+        )
+        XCTAssertTrue(
+            notifyBody.contains("isPhoneReachable"),
+            "NotificationListView empty must pass isPhoneReachable"
+        )
+        XCTAssertTrue(
+            notifyBody.contains("empty.isOffline") || notifyBody.contains("isOffline"),
+            "NotificationListView must branch offline vs idle empty"
+        )
+        XCTAssertTrue(
+            notifyBody.contains("CompanionEmptyStateCopy.offlineChip")
+                || notifyBody.contains("offlineChip"),
+            "NotificationListView offline empty must show offline chip family"
+        )
+        // Bare healthy empty only on the reachable path — not as sole empty chrome.
+        // Forbid a lone always-on No notifications without reachability gating nearby.
+        XCTAssertTrue(
+            notifyBody.contains("\"No notifications\""),
+            "reachable path may keep surface idle No notifications"
+        )
+        // Ensure offline title path is present (not only the healthy string).
+        XCTAssertTrue(
+            notifyBody.contains("empty.title") || notifyBody.contains("offlineTitle"),
+            "NotificationListView offline empty must show offline title"
+        )
+    }
+
     /// UX-039: pad non-empty hub must surface offlineChip under lastError
     /// (phone DisconnectedPill parity); SyncIndicator must not stay healthy.
     func testPadNonEmptyHubWiresOfflineChipAndFailClosedSyncIndicator() {

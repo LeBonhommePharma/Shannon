@@ -93,6 +93,11 @@ public final class ShannonStore {
     /// redraw.
     public private(set) var answeredConfirmations: Set<String> = []
 
+    /// Notification IDs cleared locally (stem tertiary / companion UI).
+    /// ENH-024: optimistic dismiss only — no Mac retract protocol. Filtered on
+    /// every `apply` until the hub stops publishing those IDs.
+    public private(set) var locallyDismissedNotificationIDs: Set<String> = []
+
     /// Fired for each alert so the app layer can play the platform haptic.
     /// Not observed — a closure, so setting it does not invalidate views.
     @ObservationIgnored public var onAlert: ((SnapshotAssembler.Alert) -> Void)?
@@ -184,12 +189,33 @@ public final class ShannonStore {
         // Drop anything already answered locally, so a card cannot flicker
         // back into view on the next refresh before the Mac has retracted it.
         incoming.confirmations.removeAll { answeredConfirmations.contains($0.id) }
+        // ENH-024: keep stem-dismissed notification cards off-screen until the
+        // Mac stops publishing them (no companion → hub retract invented here).
+        let serverNoteIDs = Set(fresh.notifications.map(\.id))
+        incoming.notifications.removeAll { locallyDismissedNotificationIDs.contains($0.id) }
+        locallyDismissedNotificationIDs =
+            locallyDismissedNotificationIDs.intersection(serverNoteIDs)
         snapshot = incoming
 
         for alert in assembler.consume(incoming) {
             onAlert?(alert)
         }
         onSnapshot?(incoming)
+    }
+
+    /// Optimistic local clear of mirrored notification cards (ENH-024).
+    ///
+    /// Clears the in-memory snapshot immediately and remembers IDs so a later
+    /// CloudKit refresh cannot resurrect them while the Mac still publishes.
+    /// Does **not** write a CloudKit retract or RemoteCommand — phone UI only.
+    @discardableResult
+    public func dismissMirroredNotificationsLocally() -> Int {
+        let ids = snapshot.notifications.map(\.id)
+        guard !ids.isEmpty else { return 0 }
+        locallyDismissedNotificationIDs.formUnion(ids)
+        snapshot.notifications = []
+        onSnapshot?(snapshot)
+        return ids.count
     }
 
     /// Send a playback command back to the Mac.

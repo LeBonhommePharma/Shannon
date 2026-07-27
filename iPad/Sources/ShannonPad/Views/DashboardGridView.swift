@@ -75,9 +75,10 @@ struct DashboardGridView: View {
                         isSelected: hub.selection == .docking(progress.id),
                         onSelect: { hub.select(.docking(progress.id)) },
                         onAnnotateROI: { onAnnotate(.dockingROI(progress.id)) },
-                        onCancel: {},
+                        // UX-047: honest "not wired yet" — never silent no-op.
+                        onCancel: { hub.requestDockingCancel() },
                         onViewTargets: { hub.select(.docking(progress.id)) },
-                        onExportCSV: {}
+                        onExportCSV: { hub.requestDockingExportCSV() }
                     )
                 }
 
@@ -179,9 +180,10 @@ struct DashboardGridView: View {
         // The Mac reads the shared pasteboard through Universal Clipboard, so
         // writing locally is the whole operation.
         let pending = pendingAgentIDs.contains(agent.id)
+        // UX-052: paste matches card/detail empty chrome (displayTaskTitle).
         UIPasteboard.general.string = """
         \(agent.name) — \(agent.activity.label(hasPendingConfirmation: pending))
-        \(agent.taskTitle)
+        \(agent.displayTaskTitle)
         \(agent.lastAction)
         turns: \(agent.turnCount)\(agent.entropyLabel.map { " · \($0)" } ?? "")
         """

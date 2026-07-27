@@ -55,6 +55,27 @@ final class GateAskActionCopyTests: XCTestCase {
             GateAskActionCopy.rosterApproveAccessibility
                 .localizedCaseInsensitiveContains("approve")
         )
+        // UX-051: rectangular complication gate-glance header (no H/metrics).
+        XCTAssertEqual(GateAskActionCopy.gateGlanceTitle, "Shannon asks")
+        XCTAssertFalse(GateAskActionCopy.gateGlanceTitle.isEmpty)
+        XCTAssertEqual(GateAskActionCopy.gateGlanceHeader(pendingCount: 0), "Shannon asks")
+        XCTAssertEqual(GateAskActionCopy.gateGlanceHeader(pendingCount: 1), "Shannon asks")
+        XCTAssertEqual(
+            GateAskActionCopy.gateGlanceHeader(pendingCount: 2),
+            "Shannon asks (2)"
+        )
+        XCTAssertEqual(
+            GateAskActionCopy.gateGlanceHeader(pendingCount: 5),
+            "Shannon asks (5)"
+        )
+        // Count only when >1; never invent H or docking metrics.
+        XCTAssertFalse(GateAskActionCopy.gateGlanceHeader(pendingCount: 3).contains("H "))
+        XCTAssertFalse(GateAskActionCopy.gateGlanceHeader(pendingCount: 3).contains("Å"))
+        XCTAssertNotEqual(
+            GateAskActionCopy.gateGlanceTitle,
+            GateAskActionCopy.needsApproval,
+            "glance header is density chrome; needsApproval is capsule badge"
+        )
     }
 
     func testCompanionAnswerableWhenSyncOK() {
@@ -387,6 +408,194 @@ final class GateAskActionCopyTests: XCTestCase {
         )
     }
 
+    /// UX-048: ⌘A/⌘D disabled via shared canInteractWithOldestPending helper.
+    func testPadConfirmationMenuWiresCanInteractWithOldestPending() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let app = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/ShannonPadApp.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            app.contains("canInteractWithOldestPending"),
+            "ShannonPadApp Confirmation menu must use canInteractWithOldestPending (UX-048)"
+        )
+        XCTAssertFalse(
+            app.contains(".disabled(hub.pendingConfirmations.isEmpty)"),
+            "Confirmation menu must not disable only on empty pending (offline would stay live)"
+        )
+
+        let vm = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/ViewModels/AgentHubViewModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            vm.contains("canInteractWithOldestPending"),
+            "AgentHubViewModel must expose canInteractWithOldestPending"
+        )
+        XCTAssertTrue(
+            vm.contains("companionAffordance"),
+            "canInteractWithOldestPending must resolve via companionAffordance"
+        )
+
+        let palette = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/ViewModels/PaletteCatalogue.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            palette.contains("canInteractWithOldestPending"),
+            "PaletteCatalogue should share canInteractWithOldestPending for Approve/Deny"
+        )
+    }
+
+    /// UX-047: docking Cancel/Export must not be silent empty closures.
+    func testPadDockingCancelExportNotSilentNoOps() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let vm = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/ViewModels/AgentHubViewModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            vm.contains("requestDockingCancel") && vm.contains("requestDockingExportCSV"),
+            "AgentHubViewModel must expose honest docking cancel/export requests"
+        )
+        XCTAssertTrue(
+            vm.contains("not wired yet"),
+            "docking cancel/export must post honest not-wired-yet status"
+        )
+
+        for rel in [
+            "iPad/Sources/ShannonPad/Views/DashboardGridView.swift",
+            "iPad/Sources/ShannonPad/Views/AgentDetailView.swift",
+        ] {
+            let text = (try? String(
+                contentsOf: root.appendingPathComponent(rel),
+                encoding: .utf8
+            )) ?? ""
+            XCTAssertTrue(
+                text.contains("requestDockingCancel"),
+                "\(rel) must wire onCancel to requestDockingCancel"
+            )
+            XCTAssertTrue(
+                text.contains("requestDockingExportCSV"),
+                "\(rel) must wire onExportCSV to requestDockingExportCSV"
+            )
+            XCTAssertFalse(
+                text.contains("onCancel: {}"),
+                "\(rel) must not pass silent empty onCancel"
+            )
+            XCTAssertFalse(
+                text.contains("onExportCSV: {}"),
+                "\(rel) must not pass silent empty onExportCSV"
+            )
+        }
+    }
+
+    /// PET E6: PetRail is deferred scaffold — not mounted in hub entry points.
+    func testPadPetRailDocumentedUnmounted() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let app = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/ShannonPadApp.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            app.contains("PET E6") || app.contains("not mounted"),
+            "ShannonPadApp must document PetRail deferred / unmounted (PET E6)"
+        )
+        // Deferred comments may name types; forbid actual mount/inject patterns.
+        XCTAssertFalse(
+            app.contains("PetRailView("),
+            "ShannonPadApp must not instantiate PetRailView"
+        )
+        XCTAssertFalse(
+            app.contains(".environment(") && app.contains("PetStore"),
+            "ShannonPadApp must not inject PetStore into the environment"
+        )
+        XCTAssertFalse(
+            app.contains("PetStore.shared") || app.contains("PetStore()"),
+            "ShannonPadApp must not construct/bind PetStore"
+        )
+
+        let hub = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/AgentHubView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(
+            hub.contains("PetRailView") || hub.contains("PetStore"),
+            "AgentHubView must not mount PetRail (PET E6 deferred)"
+        )
+
+        let rail = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/PetRailView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            rail.contains("PET E6") || rail.contains("not mounted"),
+            "PetRailView must document that it is not mounted"
+        )
+    }
+
+    /// UX-044: phone AirPods answer TTS must use outcome family, not Confirmed/Denied duals.
+    func testPhoneAnswerTTSUsesOutcomeLabelNotConfirmedDenied() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let model = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/PhoneModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(model.isEmpty, "PhoneModel.swift must be readable")
+        XCTAssertTrue(
+            model.contains("GateAskActionCopy.outcomeLabel"),
+            "PhoneModel.answer must announce via GateAskActionCopy.outcomeLabel (UX-044)"
+        )
+        XCTAssertFalse(
+            model.contains("\"Confirmed\""),
+            "PhoneModel must not hard-code Confirmed TTS"
+        )
+        XCTAssertFalse(
+            model.contains("\"Denied\""),
+            "PhoneModel must not hard-code Denied TTS"
+        )
+    }
+
     /// UX-021: pad detail + notification panel disable when hub offline (not GateCard only).
     func testPadDetailAndNotificationWireCompanionAffordance() {
         let root = URL(fileURLWithPath: #filePath)
@@ -443,6 +652,37 @@ final class GateAskActionCopyTests: XCTestCase {
         XCTAssertTrue(
             hub.contains("lastError: hub.store.lastError"),
             "AgentHubView must pass store.lastError into NotificationPanelView"
+        )
+    }
+
+    /// UX-051: rectangular complication must wire Core gate-glance — no hard-coded Shannon asks.
+    func testWatchRectangularComplicationWiresGateGlanceHeader() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let complication = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "watchOS/Sources/ShannonWatchComplication/ShannonComplication.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(complication.isEmpty, "ShannonComplication.swift must be readable")
+        XCTAssertTrue(
+            complication.contains("GateAskActionCopy.gateGlanceHeader")
+                || complication.contains("GateAskActionCopy.gateGlanceTitle"),
+            "rectangular complication must use GateAskActionCopy gate-glance token (UX-051)"
+        )
+        XCTAssertFalse(
+            complication.contains("\"Shannon asks\""),
+            "complication must not hard-code dual Shannon asks string"
+        )
+        XCTAssertFalse(
+            complication.contains("\"Shannon asks ("),
+            "complication must not hard-code dual Shannon asks (N) string"
         )
     }
 

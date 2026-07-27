@@ -21,7 +21,8 @@ public final class VoiceDictation {
     public private(set) var levels: [Float] = Array(repeating: 0, count: 24)
     public private(set) var isAuthorized = false
     public private(set) var isAvailable = false
-    /// Double-tap the mic to keep listening without holding.
+    /// UX-045: double-tap the mic to keep listening without holding; second
+    /// double-tap finishes. Toggled by `PhoneModel.toggleHandsFreeDictation`.
     public var isHandsFree = false
 
     @ObservationIgnored private let recognizer = SFSpeechRecognizer(locale: Locale.current)

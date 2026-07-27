@@ -2,6 +2,11 @@ import SwiftUI
 import ShannonCore
 import ShannonTheme
 
+// PET E6: `PetRailView` / `PetStore` / pencil hosting exist under Sources but
+// are intentionally **not mounted** here. The three-column hub does not inject
+// PetStore or place the rail — pad pet chrome is deferred scaffold, not live.
+// Do not add a dead toolbar entry that implies the rail is active.
+
 @main
 struct ShannonPadApp: App {
     @StateObject private var hub = AgentHubViewModel()
@@ -51,13 +56,15 @@ struct ShannonPadApp: App {
             // ⌘A / ⌘D act on the oldest pending gate question — the one the
             // floating gate card shows. Kept here as the single owner of these
             // keys so no two visible buttons register the same shortcut.
+            // UX-048: disable when empty **or** oldest ask cannot interact
+            // (hub offline / expired) — same policy as GateCard / detail.
             Button("Approve Pending") { hub.answerPendingConfirmation(approved: true) }
                 .keyboardShortcut("a", modifiers: .command)
-                .disabled(hub.pendingConfirmations.isEmpty)
+                .disabled(!hub.canInteractWithOldestPending)
 
             Button("Deny Pending") { hub.answerPendingConfirmation(approved: false) }
                 .keyboardShortcut("d", modifiers: .command)
-                .disabled(hub.pendingConfirmations.isEmpty)
+                .disabled(!hub.canInteractWithOldestPending)
 
             Divider()
 

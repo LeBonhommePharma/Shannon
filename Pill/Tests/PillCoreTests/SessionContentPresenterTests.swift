@@ -610,7 +610,8 @@ final class SessionContentPresenterTests: XCTestCase {
             activityLine: "Waiting for approval",
             needsYou: true,
             canAnswerInline: true,
-            pendingPrompt: "Run npm run db:migrate on production?"
+            pendingPrompt: "Run npm run db:migrate on production?",
+            gateAvailable: true
         )
         XCTAssertEqual(
             card.rosterDetailLine,
@@ -668,7 +669,7 @@ final class SessionContentPresenterTests: XCTestCase {
         XCTAssertFalse(card.showsApproveHint)
     }
 
-    func testShowsApproveHintStrictlyFollowsCanAnswerInline() {
+    func testShowsApproveHintRequiresCanAnswerInlineAndGateAvailable() {
         var card = SessionContentCard(
             id: "g:c",
             agentId: "claude_code",
@@ -678,14 +679,58 @@ final class SessionContentPresenterTests: XCTestCase {
             activityLine: "short",
             needsYou: true,
             canAnswerInline: false,
-            pendingPrompt: "Approve this?"
+            pendingPrompt: "Approve this?",
+            gateAvailable: true
         )
-        // Prompt may still show; Approve hint is gated on canAnswerInline.
+        // Prompt may still show; Approve hint is gated on canAnswerInline + gate.
         XCTAssertEqual(card.rosterDetailLine, "Approve this?")
         XCTAssertFalse(card.showsApproveHint)
 
         card.canAnswerInline = true
         XCTAssertTrue(card.showsApproveHint)
+
+        // UX-043: hub offline — never invent Gate · approve when socket is down.
+        card.gateAvailable = false
+        XCTAssertFalse(card.showsApproveHint)
+        XCTAssertTrue(card.canAnswerInline, "canAnswerInline still true; hint requires gate")
+    }
+
+    /// UX-043: offline + pending ask → no roster Approve hint.
+    func testShowsApproveHintFalseWhenGateOfflineWithPendingAsk() {
+        let ask = GateDBReader.PendingAsk(
+            interactionId: "own",
+            agentId: "claude_code",
+            prompt: "Run migrate?",
+            createdAt: now
+        )
+        let a = agent(
+            id: "claude_code", name: "Claude Code",
+            status: .blocked, presence: .live, task: "waiting"
+        )
+        let offline = SessionContentPresenter.cardsFromAgents(
+            agents: [a],
+            pendingAsks: [ask],
+            now: now,
+            limit: 1,
+            gateAvailable: false
+        )
+        XCTAssertEqual(offline.count, 1)
+        XCTAssertTrue(offline[0].needsYou)
+        XCTAssertTrue(offline[0].canAnswerInline)
+        XCTAssertFalse(offline[0].gateAvailable)
+        XCTAssertFalse(
+            offline[0].showsApproveHint,
+            "offline hub must not show Gate · approve hint"
+        )
+
+        let online = SessionContentPresenter.cardsFromAgents(
+            agents: [a],
+            pendingAsks: [ask],
+            now: now,
+            limit: 1,
+            gateAvailable: true
+        )
+        XCTAssertTrue(online[0].showsApproveHint)
     }
 
     // MARK: - Approval affordance honesty

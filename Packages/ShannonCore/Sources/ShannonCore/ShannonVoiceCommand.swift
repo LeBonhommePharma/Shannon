@@ -11,8 +11,9 @@ public enum VoiceCommand: Equatable, Sendable {
     case status
     case benchmark
     case nowPlaying
-    /// Anything unrecognised, normalised but otherwise untouched, for the Mac
-    /// to treat as a query.
+    /// Anything unrecognised, normalised but otherwise untouched.
+    /// Phone freeform is an explicit no-op until a freeform RemoteCommand /
+    /// Mac query transport ships (ENH-025) — not a silent Mac hand-off.
     case freeform(String)
 
     /// Phrases that answer a pending confirmation. Ordered longest-first at
@@ -43,8 +44,8 @@ public enum VoiceCommand: Equatable, Sendable {
     ]
 
     /// Parse a raw transcript. Never throws and never returns nil: unmatched
-    /// speech becomes `.freeform`, which the Mac answers as a question rather
-    /// than silently dropping.
+    /// speech becomes `.freeform` so callers can branch honestly (phone: no-op
+    /// haptic; Mac may own freeform later when transport exists — ENH-025).
     public static func parse(_ transcript: String) -> VoiceCommand {
         let normalised = normalise(transcript)
         guard !normalised.isEmpty else { return .freeform("") }

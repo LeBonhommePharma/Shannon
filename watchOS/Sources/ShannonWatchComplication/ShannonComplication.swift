@@ -183,8 +183,8 @@ struct ComplicationView: View {
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: isInSmartStack ? 3 : 1) {
             if let pending = snapshot.oldestPendingConfirmation() {
-                Text(pendingGateCount > 1 ? "Shannon asks (\(pendingGateCount))"
-                                          : "Shannon asks")
+                // UX-051: Core gate-glance token (gateGlanceHeader) — no dual hard-code.
+                Text(GateAskActionCopy.gateGlanceHeader(pendingCount: pendingGateCount))
                     .font(.caption2.weight(.semibold))
                     .widgetAccentable()
                 Text(pending.question)

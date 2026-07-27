@@ -40,6 +40,15 @@ final class HostCapacityCompanionPresenceTests: XCTestCase {
         let text = (try? String(contentsOf: path, encoding: .utf8)) ?? ""
         XCTAssertTrue(text.contains("HostCapacityCard"), "iOS must show host capacity")
         XCTAssertTrue(text.contains("LocalHostCapacity"))
+        // UX-046: capacity cards must not paint under EmptyStateView on full empty.
+        XCTAssertTrue(
+            text.contains("!snapshot.isEmpty") && text.contains("HostCapacityCard"),
+            "iOS must gate HostCapacityCard on !snapshot.isEmpty (UX-046)"
+        )
+        XCTAssertTrue(
+            text.contains("UX-046") || text.contains("fail-closed"),
+            "HomeView must document empty capacity hide (UX-046)"
+        )
     }
 
     func testIPadDashboardWiresHostCapacity() {

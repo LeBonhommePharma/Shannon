@@ -66,6 +66,19 @@ public enum GateAskActionCopy: Sendable {
     /// Accessibility when `rosterApproveHint` is shown.
     public static let rosterApproveAccessibility = "Gate approve available"
 
+    /// Compact rectangular complication / glance header when a gate ask is open (UX-051).
+    /// Distinct from badge `needsApproval` / `AgentAttentionCopy.needsYou` — density chrome.
+    public static let gateGlanceTitle = "Shannon asks"
+
+    /// Rectangular gate-glance header; count only when more than one pending ask.
+    /// Does not invent H/metrics — count is the answerable gate backlog only.
+    public static func gateGlanceHeader(pendingCount: Int) -> String {
+        if pendingCount > 1 {
+            return "\(gateGlanceTitle) (\(pendingCount))"
+        }
+        return gateGlanceTitle
+    }
+
     // MARK: Affordance resolution
 
     /// Resolved UI policy for one ask surface.

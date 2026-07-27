@@ -26,7 +26,9 @@ struct MenuBarAgentRoster: View {
             pendingAsks: activity.pendingAsks,
             activity: activity.recentActivity,
             sessionsByAgent: sessionsByAgent,
-            limit: 3
+            limit: 3,
+            // UX-043: roster Approve hint requires hub socket (showsApproveHint).
+            gateAvailable: activity.gateAvailable
         )
     }
 

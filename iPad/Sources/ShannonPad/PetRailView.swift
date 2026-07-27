@@ -4,7 +4,14 @@ import ShannonTheme
 
 // MARK: - PetRailView
 
-/// Pet lives at the top of the right-column notification rail on iPad.
+// PET E6 — **not mounted** in the shipped hub.
+// `ShannonPadApp` / `AgentHubView` never inject `PetStore` / `PetInteractionEngine`
+// or place this rail above the notification feed. Sources + pencil hosting
+// remain for a future mount; until then this is deferred scaffold, not live
+// chrome. Do not add a visible entry point that implies the pet rail is active.
+
+/// Pet lives at the top of the right-column notification rail on iPad
+/// (when mounted — currently deferred; see PET E6 above).
 /// 96 pt avatar · mood idle animation · today's diary · XP bar with level.
 /// Pencil hover triggers gaze offset (via `updatePencilGaze(to:in:)`).
 @available(iOS 17.0, *)

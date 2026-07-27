@@ -154,6 +154,18 @@ final class AgentHubViewModel: ObservableObject {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
+    /// UX-048: whether ⌘A / ⌘D, palette Approve/Deny, and related chrome may
+    /// act on the oldest pending ask. False when pending is empty **or** the
+    /// oldest ask is offline / expired (`companionAffordance.canInteract`).
+    /// Shared by `ShannonPadApp` Confirmation menu and `PaletteCatalogue`.
+    var canInteractWithOldestPending: Bool {
+        guard let pending = pendingConfirmations.first else { return false }
+        return GateAskActionCopy.companionAffordance(
+            pending: pending,
+            lastError: store.lastError
+        ).canInteract
+    }
+
     /// The question blocking one particular agent, if any.
     func confirmation(forAgent agentID: String) -> PendingConfirmation? {
         pendingConfirmations.first { $0.agentID == agentID }
@@ -342,6 +354,18 @@ final class AgentHubViewModel: ObservableObject {
             select(.docking(benchmark.id))
         }
         post("Starting a run needs a Mac-side command record — not wired yet.")
+    }
+
+    /// UX-047: docking Cancel has no Mac-side `RemoteCommand` yet — honest
+    /// status rather than a silent no-op that looks live.
+    func requestDockingCancel() {
+        post("Cancel run needs a Mac-side command record — not wired yet.")
+    }
+
+    /// UX-047: docking Export CSV has no Mac-side export path yet — honest
+    /// status rather than a silent no-op that looks live.
+    func requestDockingExportCSV() {
+        post("Export results CSV needs a Mac-side command record — not wired yet.")
     }
 
     func send(_ command: PlaybackCommand) {

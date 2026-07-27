@@ -152,7 +152,10 @@ public final class PhoneModel {
         guard accepted else { return }
         lastAnswer = (answer, Date())
         Haptics.confirmation(answer)
-        airPods.announce(answer == .confirmed ? "Confirmed" : "Denied")
+        // UX-044: spoken outcome shares GateAskActionCopy family (not dual Confirmed/Denied).
+        airPods.announce(
+            GateAskActionCopy.outcomeLabel(approved: answer == .confirmed)
+        )
         // Re-derive arming from the mutated snapshot rather than waiting for
         // the next refresh, or the detector stays live after the card is gone.
         updateGestureArming(for: store.snapshot)
@@ -180,11 +183,16 @@ public final class PhoneModel {
                 send(.nextTrack)
             }
         case .tertiary:
+            // ENH-024: optimistic local clear of mirrored notifications (no Mac retract).
             dismissAllNotifications()
         }
     }
 
+    /// Stem tertiary: clear notification cards on-device immediately.
+    /// Does not invent a CloudKit retract — Mac-published notes stay filtered
+    /// until the hub drops them (``ShannonStore.dismissMirroredNotificationsLocally``).
     private func dismissAllNotifications() {
+        _ = store.dismissMirroredNotificationsLocally()
         Haptics.transition()
     }
 
@@ -194,12 +202,27 @@ public final class PhoneModel {
         voice.start()
     }
 
-    /// Called on mic release. Parses with the same command table as the Mac
-    /// and the Watch.
+    /// Called on mic release (hold-to-talk) or second double-tap (hands-free).
+    /// Parses with the same command table as the Mac and the Watch.
     public func finishDictation() {
+        // Leaving hands-free whenever we intentionally stop (UX-045).
+        voice.isHandsFree = false
         voice.stop { [weak self] transcript in
             guard let self, let transcript, !transcript.isEmpty else { return }
             self.handle(VoiceCommand.parse(transcript))
+        }
+    }
+
+    /// UX-045: double-tap mic toggles hands-free listen; second double-tap finishes.
+    public func toggleHandsFreeDictation() {
+        if voice.isHandsFree {
+            finishDictation()
+            return
+        }
+        voice.isHandsFree = true
+        Haptics.transition()
+        if !voice.isListening {
+            startDictation()
         }
     }
 
@@ -219,8 +242,13 @@ public final class PhoneModel {
             }
         case .status:
             airPods.announce("\(store.snapshot.agents.runningCount) agents running")
-        case .confirm, .deny, .freeform:
-            // Nothing to answer, or a free query: the Mac owns interpretation.
+        case .confirm, .deny:
+            // No answerable pending ask — ignore (do not invent success).
+            Haptics.transition()
+        case .freeform:
+            // ENH-025: freeform is an explicit phone no-op. There is no
+            // freeform RemoteCommand / CloudKit query transport yet; unrecognised
+            // speech is not forwarded to the Mac. Haptic acknowledges release only.
             Haptics.transition()
         }
     }

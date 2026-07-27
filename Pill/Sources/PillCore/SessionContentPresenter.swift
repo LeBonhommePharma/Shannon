@@ -33,6 +33,8 @@ public struct SessionContentCard: Sendable, Equatable, Identifiable {
     public var canAnswerInline: Bool
     /// Pending ask prompt when `needsYou` and an ask exists.
     public var pendingPrompt: String?
+    /// Gate Unix socket present — fail-closed when unknown (UX-043).
+    public var gateAvailable: Bool
 
     public init(
         id: String,
@@ -52,7 +54,8 @@ public struct SessionContentCard: Sendable, Equatable, Identifiable {
         sourceKind: SessionSourceKind = .observed,
         collapsedFocus: String = "",
         canAnswerInline: Bool = false,
-        pendingPrompt: String? = nil
+        pendingPrompt: String? = nil,
+        gateAvailable: Bool = false
     ) {
         self.id = id
         self.agentId = agentId
@@ -72,6 +75,7 @@ public struct SessionContentCard: Sendable, Equatable, Identifiable {
         self.collapsedFocus = collapsedFocus
         self.canAnswerInline = canAnswerInline
         self.pendingPrompt = pendingPrompt
+        self.gateAvailable = gateAvailable
     }
 
     /// Secondary meta chips: project · branch · model — only real fields.
@@ -110,9 +114,9 @@ public struct SessionContentCard: Sendable, Equatable, Identifiable {
 
     /// Whether to show a tertiary gate-approve hint on roster rows
     /// (`GateAskActionCopy.rosterApproveHint`). True only when the gate has a
-    /// matching ask (`canAnswerInline`) — never invent Approve affordances when
-    /// the hub is offline / ask is missing.
-    public var showsApproveHint: Bool { canAnswerInline }
+    /// matching ask **and** the hub socket is up (`canAnswerInline && gateAvailable`)
+    /// — never invent Approve affordances when offline / ask is missing (UX-043).
+    public var showsApproveHint: Bool { canAnswerInline && gateAvailable }
 }
 
 // MARK: - Companion board density (macOS 14+ expanded path)
@@ -290,7 +294,8 @@ public enum SessionContentPresenter {
         session: AgentSession,
         pendingAsks: [GateDBReader.PendingAsk] = [],
         activity: [GateDBReader.ActivityEvent] = [],
-        now: Date = Date()
+        now: Date = Date(),
+        gateAvailable: Bool = false
     ) -> SessionContentCard {
         let surface = resolveSurface(
             session: session,
@@ -330,7 +335,8 @@ public enum SessionContentPresenter {
             sourceKind: session.sourceKind,
             collapsedFocus: surface.collapsedFocus,
             canAnswerInline: surface.needsYou && ask != nil,
-            pendingPrompt: ask.map(\.prompt).flatMap { nonEmpty($0) }
+            pendingPrompt: ask.map(\.prompt).flatMap { nonEmpty($0) },
+            gateAvailable: gateAvailable
         )
     }
 
@@ -354,11 +360,18 @@ public enum SessionContentPresenter {
         activity: [GateDBReader.ActivityEvent] = [],
         now: Date = Date(),
         limit: Int = 8,
-        liveAgentIds: Set<String> = []
+        liveAgentIds: Set<String> = [],
+        gateAvailable: Bool = false
     ) -> [SessionContentCard] {
         let filtered = sessionsExcludingLiveAgents(sessions, liveAgentIds: liveAgentIds)
         let built = filtered.map {
-            card(session: $0, pendingAsks: pendingAsks, activity: activity, now: now)
+            card(
+                session: $0,
+                pendingAsks: pendingAsks,
+                activity: activity,
+                now: now,
+                gateAvailable: gateAvailable
+            )
         }
         let ranked = built.sorted { lhs, rhs in
             let lp = rank(lhs.attention)
@@ -379,7 +392,8 @@ public enum SessionContentPresenter {
         usageByAgent: [String: AgentUsageSnapshot] = [:],
         sessionsByAgent: [String: AgentSession] = [:],
         now: Date = Date(),
-        limit: Int = 4
+        limit: Int = 4,
+        gateAvailable: Bool = false
     ) -> [SessionContentCard] {
         // Merge session token usage once so roster cards share one surface tick
         // with notch `listedSurfaces` (ENH-007 / product-class density).
@@ -423,7 +437,8 @@ public enum SessionContentPresenter {
                     ?? (agent.presence == .live ? .gate : .observed),
                 collapsedFocus: surface.collapsedFocus,
                 canAnswerInline: surface.needsYou && ask != nil,
-                pendingPrompt: ask.map(\.prompt).flatMap { nonEmpty($0) }
+                pendingPrompt: ask.map(\.prompt).flatMap { nonEmpty($0) },
+                gateAvailable: gateAvailable
             ))
         }
         return Array(out.prefix(max(0, limit)))

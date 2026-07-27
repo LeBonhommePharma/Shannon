@@ -5,7 +5,8 @@ import ShannonCore
 // MARK: - PetPencilTracker
 
 /// Tracks Apple Pencil hover proximity over the pet rail and maps it to a
-/// gaze offset in `PetRailView`. Also handles Pencil Pro squeeze (barrel roll
+/// gaze offset in `PetRailView` (PET E6: rail not mounted — tracker is scaffold).
+/// Also handles Pencil Pro squeeze (barrel roll
 /// angle is read from `UIPencilInteraction` in iPadOS 17.5+).
 @available(iOS 17.5, *)
 public final class PetPencilTracker: NSObject {

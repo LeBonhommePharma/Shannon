@@ -112,9 +112,11 @@ final class PresentationTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
 
+        // UX-030 card/detail + UX-052 clipboard.
         for rel in [
             "iPad/Sources/ShannonPad/Views/AgentCardView.swift",
             "iPad/Sources/ShannonPad/Views/AgentDetailView.swift",
+            "iPad/Sources/ShannonPad/Views/DashboardGridView.swift",
         ] {
             let text = (try? String(
                 contentsOf: root.appendingPathComponent(rel),
@@ -129,6 +131,21 @@ final class PresentationTests: XCTestCase {
                 "\(rel) must not hard-code dual No task string"
             )
         }
+        // Clipboard must not paste raw taskTitle (blank when empty).
+        let grid = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/Views/DashboardGridView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            grid.contains("copyToClipboard") && grid.contains("displayTaskTitle"),
+            "copyToClipboard must use displayTaskTitle (UX-052)"
+        )
+        XCTAssertFalse(
+            grid.contains("\\(agent.taskTitle)"),
+            "copyToClipboard must not interpolate raw taskTitle"
+        )
     }
 
     func testCompactLinesTruncateToWatchWidth() {

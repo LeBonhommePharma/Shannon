@@ -63,7 +63,11 @@ enum PaletteCatalogue {
             }
         }
 
-        if let question = hub.pendingConfirmations.first {
+        // UX-048: same canInteract gate as ⌘A/⌘D — do not offer Approve/Deny
+        // in the palette when the oldest ask is offline / unanswerable.
+        if hub.canInteractWithOldestPending,
+           let question = hub.pendingConfirmations.first
+        {
             let name = hub.agentName(for: question) ?? "the Mac"
             // UX-012: palette titles match GateAskActionCopy (Approve/Deny).
             actions.append(

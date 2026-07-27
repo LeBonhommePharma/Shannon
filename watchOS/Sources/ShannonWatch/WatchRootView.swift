@@ -341,9 +341,27 @@ struct NotificationListView: View {
                 }
 
                 if model.snapshot.notifications.isEmpty {
-                    Text("No notifications")
-                        .font(.shannonCaption)
-                        .foregroundStyle(Color.shannonTertiary)
+                    // UX-050: phone-away must not read as healthy quiet empty.
+                    // Reachable keeps surface idle "No notifications"; offline
+                    // shares CompanionEmptyStateCopy offline title/chip (agent empty family).
+                    let empty = CompanionEmptyStateCopy.content(
+                        isPhoneReachable: model.isPhoneReachable
+                    )
+                    if empty.isOffline {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(empty.title)
+                                .font(.shannonCaption)
+                                .foregroundStyle(Color.shannonWarning)
+                            Text(CompanionEmptyStateCopy.offlineChip)
+                                .font(.shannonCaption)
+                                .foregroundStyle(Color.shannonTertiary)
+                                .accessibilityLabel(CompanionEmptyStateCopy.offlineAccessibility)
+                        }
+                    } else {
+                        Text("No notifications")
+                            .font(.shannonCaption)
+                            .foregroundStyle(Color.shannonTertiary)
+                    }
                 }
             }
         }

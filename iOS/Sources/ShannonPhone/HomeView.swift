@@ -63,21 +63,26 @@ struct HomeView: View {
                         AgentCard(row: row)
                     }
 
-                    // Host capacity (SSD / thermal / most-constrained) from Mac.
-                    HostCapacityCard(
-                        title: snapshot.device?.deviceName ?? "Mac",
-                        capacity: snapshot.device?.capacity,
-                        platformSymbol: "laptopcomputer"
-                    )
-                    .shannonCard()
+                    // UX-046: capacity under empty/offline EmptyStateView undercuts
+                    // fail-closed tone (local Nominal thermal still paints as "live").
+                    // Show Mac + phone capacity only when the roster has content.
+                    if !snapshot.isEmpty {
+                        // Host capacity (SSD / thermal / most-constrained) from Mac.
+                        HostCapacityCard(
+                            title: snapshot.device?.deviceName ?? "Mac",
+                            capacity: snapshot.device?.capacity,
+                            platformSymbol: "laptopcomputer"
+                        )
+                        .shannonCard()
 
-                    // Local phone pressure (ProcessInfo thermal only — no die temp).
-                    HostCapacityCard(
-                        title: "iPhone",
-                        capacity: LocalHostCapacity.current(platform: "iOS"),
-                        platformSymbol: "iphone"
-                    )
-                    .shannonCard()
+                        // Local phone pressure (ProcessInfo thermal only — no die temp).
+                        HostCapacityCard(
+                            title: "iPhone",
+                            capacity: LocalHostCapacity.current(platform: "iOS"),
+                            platformSymbol: "iphone"
+                        )
+                        .shannonCard()
+                    }
 
                     ForEach(snapshot.notifications) { note in
                         NotificationCard(note: note)
@@ -653,7 +658,7 @@ struct AirPodsIndicator: View {
     }
 }
 
-/// Press and hold to dictate; release submits. Double-tap toggles hands-free.
+/// Press and hold to dictate; release submits. Double-tap toggles hands-free (UX-045).
 @available(iOS 17.0, *)
 struct MicButton: View {
     let model: PhoneModel
@@ -661,16 +666,32 @@ struct MicButton: View {
 
     var body: some View {
         if model.voice.isAvailable && model.voice.isAuthorized {
-            Image(systemName: model.voice.isListening ? "mic.fill" : "mic")
-                .foregroundStyle(model.voice.isListening ? Color.shannonAccent : Color.shannonTertiary)
-                .scaleEffect(isHolding ? 1.15 : 1)
+            Image(systemName: model.voice.isListening || model.voice.isHandsFree ? "mic.fill" : "mic")
+                .foregroundStyle(
+                    model.voice.isListening || model.voice.isHandsFree
+                        ? Color.shannonAccent
+                        : Color.shannonTertiary
+                )
+                .scaleEffect(isHolding || model.voice.isHandsFree ? 1.15 : 1)
                 .animation(.shannonSnap, value: isHolding)
-                .accessibilityLabel("Dictate")
+                .animation(.shannonSnap, value: model.voice.isHandsFree)
+                .accessibilityLabel(
+                    model.voice.isHandsFree ? "Hands-free dictation on — double-tap to finish" : "Dictate"
+                )
+                .accessibilityHint("Hold to talk, or double-tap for hands-free")
+                // UX-045: double-tap enters/exits hands-free (must not depend on long-press alone).
+                .simultaneousGesture(
+                    TapGesture(count: 2).onEnded {
+                        model.toggleHandsFreeDictation()
+                    }
+                )
                 .onLongPressGesture(minimumDuration: 0.15) {
-                    // Fires on hold begin.
+                    // Fires on hold complete — unused; press state drives start/stop.
                 } onPressingChanged: { pressing in
                     isHolding = pressing
                     if pressing {
+                        // Hold while already hands-free keeps listening; no restart.
+                        guard !model.voice.isHandsFree else { return }
                         Haptics.transition()
                         model.startDictation()
                     } else if !model.voice.isHandsFree {

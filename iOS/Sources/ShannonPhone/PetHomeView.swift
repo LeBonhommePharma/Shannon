@@ -8,6 +8,11 @@ import ShannonTheme
 /// Full-screen pet interaction view for iPhone.
 /// Swipe up → diary sheet. Tap → playful + haptic. Long press → rename.
 /// Voice: "How are you [name]?" → AVSpeechSynthesizer response.
+///
+/// **PET E7 (scaffold only):** not mounted from `ShannonPhoneApp` (root is
+/// `HomeView` only). No `PetStore` environment, no App Group
+/// `pet.widget.entry` writer, no `ShannonPetWidget` reload. Keep this file as
+/// UI draft until the phone pet path ships — do not treat as live mood.
 @available(iOS 17.0, *)
 struct PetHomeView: View {
     @Environment(PetStore.self) private var store

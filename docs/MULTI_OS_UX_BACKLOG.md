@@ -401,6 +401,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ### - [x] UX-042: Unify Mac hub-offline resolve error with GateAskActionCopy.macGateOffline
 
+- **Done:** AgentActivity.describe socketUnavailable → GateAskActionCopy.macGateOffline; pure dual-literal forbidden.
 - **Why:** Pre-disable copy `macGateOffline` vs post-tap `AgentActivity.describe` socketUnavailable string — same meaning, two shipping strings.
 - **Platforms:** macOS
 - **Area:** `AgentActivity.describe`, `GateAskActionCopy`
@@ -408,7 +409,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `describeResolveError(.socketUnavailable)` → `GateAskActionCopy.macGateOffline`; pure + structural tests; remote-answer path asserts same token.
 - **Priority:** P2
 
-### - [ ] UX-043: Roster Gate · approve hint requires gateAvailable
+### - [x] UX-043: Roster Gate · approve hint requires gateAvailable
+- **Done:** SessionContentCard.gateAvailable + showsApproveHint; MenuBarAgentRoster wires activity.gateAvailable; offline+pending unit test.
 
 - **Why:** `showsApproveHint` is needsYou+ask only; comment claims no invent when hub offline but no `gateAvailable` input — menu roster still claims answerability offline.
 - **Platforms:** macOS
@@ -416,7 +418,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Thread gateAvailable; `showsApproveHint = canAnswerInline && gateAvailable`; pure unit test offline + pending → no hint.
 - **Priority:** P2
 
-### - [ ] UX-044: AirPods answer TTS uses GateAskActionCopy outcome family
+### - [x] UX-044: AirPods answer TTS uses GateAskActionCopy outcome family
+- **Done:** PhoneModel.answer AirPods TTS → outcomeLabel; GateAskActionCopyTests forbid Confirmed/Denied.
 
 - **Why:** `PhoneModel.answer` announces hard-coded `"Confirmed"` / `"Denied"` while banner uses Approve/Deny and Core outcomes are approved/denied — third dual on answer path.
 - **Platforms:** iOS
@@ -424,7 +427,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Spoken outcome tokens (or reuse approve/deny); forbid literal Confirmed/Denied in phone answer path.
 - **Priority:** P2
 
-### - [ ] UX-045: Mic double-tap hands-free toggle actually works (or drop claim)
+### - [x] UX-045: Mic double-tap hands-free toggle actually works (or drop claim)
+- **Done:** MicButton double-tap toggleHandsFreeDictation; VoiceDictation hands-free path; ConfirmationAndVoiceTests.
 
 - **Why:** MicButton docs claim double-tap hands-free; only long-press implemented; `VoiceDictation.isHandsFree` never set true under iOS/.
 - **Platforms:** iOS
@@ -432,7 +436,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Wire double-tap toggle + second-tap finish, or remove claim and dead branch.
 - **Priority:** P2
 
-### - [ ] UX-046: Hide HostCapacity cards on full empty/offline phone home
+### - [x] UX-046: Hide HostCapacity cards on full empty/offline phone home
+- **Done:** HomeView HostCapacity only when !snapshot.isEmpty; HostCapacityCompanionPresenceTests.
 
 - **Why:** Empty offline still always paints Mac + iPhone capacity cards (local Nominal thermal) under EmptyStateView — undercuts UX-002 fail-closed empty tone.
 - **Platforms:** iOS
@@ -440,7 +445,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** When `snapshot.isEmpty`, hide capacity (or Mac-only when device nil); keep when non-empty.
 - **Priority:** P2
 
-### - [ ] UX-047: Pad docking Cancel/Export not silent no-ops
+### - [x] UX-047: Pad docking Cancel/Export not silent no-ops
+- **Done:** Docking cancel/export hub.post not-wired-yet; Dashboard/Detail wired; GateAskActionCopyTests pad docking.
 
 - **Why:** `DockingProgressView` offers Cancel Run / Export CSV but dashboard/detail pass empty closures — looks live, does nothing (unlike honest “not wired yet” benchmark request).
 - **Platforms:** iPadOS
@@ -448,7 +454,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Hide until RemoteCommand exists, or wire honest hub.post status; no fake success.
 - **Priority:** P2
 
-### - [ ] UX-048: Pad ⌘A/⌘D disabled when companionAffordance cannot interact
+### - [x] UX-048: Pad ⌘A/⌘D disabled when companionAffordance cannot interact
+- **Done:** canInteractWithOldestPending; ⌘A/⌘D + palette disabled offline; wiring tests.
 
 - **Why:** GateCard/detail honor offline disable; Confirmation menu only disables when pending empty — offline + open ask still shows live keyboard Approve/Deny.
 - **Platforms:** iPadOS
@@ -456,7 +463,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Disable when pending empty or `!canInteract`; share helper with palette if convenient.
 - **Priority:** P2
 
-### - [ ] UX-049: Pad notification “Needs You” uses HubCompactNeedsYouChrome.sectionTitle
+### - [x] UX-049: Pad notification “Needs You” uses HubCompactNeedsYouChrome.sectionTitle
+- **Done:** NotificationPanelView → HubCompactNeedsYouChrome.sectionTitle; HubCompactNeedsYouChromeTests.
 
 - **Why:** Compact pin uses shared section title; NotificationPanel hard-codes same string — dual token ownership.
 - **Platforms:** iPadOS
@@ -464,7 +472,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Replace literal; wiring test.
 - **Priority:** P2
 
-### - [ ] UX-050: Watch notifications empty fail-closed when phone unreachable
+### - [x] UX-050: Watch notifications empty fail-closed when phone unreachable
+- **Done:** NotificationListView offline via CompanionEmptyStateCopy when !isPhoneReachable; wiring test.
 
 - **Why:** Agent empty list uses CompanionEmptyStateCopy offline path; notifications empty always `"No notifications"` — healthy quiet when WC phone away.
 - **Platforms:** watchOS
@@ -472,7 +481,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** When empty && !isPhoneReachable show offline title/chip; reachable keeps idle empty; wiring test.
 - **Priority:** P2
 
-### - [ ] UX-051: Watch rectangular complication “Shannon asks” shares Core gate glance token
+### - [x] UX-051: Watch rectangular complication “Shannon asks” shares Core gate glance token
+- **Done:** gateGlanceTitle/Header Core tokens; rectangular complication wired; GateAskActionCopyTests.
 
 - **Why:** Hard-coded `"Shannon asks"` / N-count while face uses CompanionFocusCopy / AgentAttentionCopy needs-you vocabulary — watch-internal dual.
 - **Platforms:** watchOS complication
@@ -480,7 +490,8 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Core compact gate-glance title; wire rectangular header; forbid dual hard-coded Shannon asks.
 - **Priority:** P2
 
-### - [ ] UX-052: Pad clipboard task uses AgentState.displayTaskTitle
+### - [x] UX-052: Pad clipboard task uses AgentState.displayTaskTitle
+- **Done:** copyToClipboard uses displayTaskTitle; PresentationTests path check.
 
 - **Why:** Card/detail use displayTaskTitle (UX-030); `copyToClipboard` still interpolates raw `taskTitle` so empty pastes blank vs UI “No task”.
 - **Platforms:** iPadOS
@@ -492,6 +503,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (P2/P3 parallel wave):** Five agents closed **UX-042…052**, **ENH-024/025**, PET **E6/E7**. ShannonCore 275 green; apple --quick on commit path.
 - **2026-07-26 (loop 31):** `--quick` all PASS (ran=4). No open P0/P1 (swarm closed UX-035…041). Claimed **UX-042** (P2): post-tap socketUnavailable → `macGateOffline`. Considered already-queued: UX-043 roster gateAvailable; UX-044 AirPods Confirmed/Denied; UX-050 watch “No notifications”; pad “No matches” surface-specific (leave). **No additional UX-0xx**.
 - **2026-07-26 (P0/P1 parallel agents):** Implemented **UX-035…041** + **ENH-023** via five background agents (phone WidgetKit/gesture/offline, Mac clearAsk, GateInlineCard, pad offline chip, watch gate count + complication). ShannonCore 261 + Pill CloudPublisher/SessionUIWiring green; apple --quick re-run on commit path.
 - **2026-07-26 (loop 30):** `--quick` all PASS. Open P0 **UX-035** (phone WidgetKit reload after SnapshotCache) claimed. Closed with PhoneModel + structural test. Next open: **UX-036** GateInlineCard macGateAffordance (P1). Considered: UX-037 gesture arm honesty; UX-038 widget offline; watch No notifications (P2+). **No additional UX-0xx**.

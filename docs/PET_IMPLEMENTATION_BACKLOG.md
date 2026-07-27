@@ -98,7 +98,7 @@ Test baseline (must stay green while implementing):
   **Done:** Pill README “Pet paths (operators)” + `hub/pet_manager.py` /
   `hub/pet_paths.py` docstrings with `SHANNON_PETS=$HOME/.codex/pets` layout.
 
-- [ ] **E6 — Mount pad PetRail (or document deferred / hide dead entry)**  
+- [x] **E6 — Mount pad PetRail (or document deferred / hide dead entry)**  
   Observation (2026-07-26 OS swarm iPad): `PetRailView`, pencil hosting, and
   annotation stamp depend on `PetStore` / `PetInteractionEngine`, but
   `ShannonPadApp` / `AgentHubView` never inject store or place the rail —
@@ -107,8 +107,9 @@ Test baseline (must stay green while implementing):
   enabled; **or** document deferred + stub so dead entry points do not imply
   live chrome. Structural presence test when mounted.
   **Priority:** P2 · Platforms: iPadOS
+  **Done:** Documented unmounted scaffold on PetRail/PadApp/PencilTracker; structural test no live mount.
 
-- [ ] **E7 — Phone PetHome + App Group `pet.widget.entry` writer**  
+- [x] **E7 — Phone PetHome + App Group `pet.widget.entry` writer**  
   Observation (2026-07-26 OS swarm iOS): `ShannonPhoneApp` root is only
   `HomeView` — no PetStore/PetHome. `PetWidgetProvider` reads App Group
   `pet.widget.entry` but no phone writer (watch has pet complication reload).
@@ -116,11 +117,13 @@ Test baseline (must stay green while implementing):
   Work: follow pet backlog path — store + write entry + reload
   `ShannonPetWidget` kind; or demote widget until live.
   **Priority:** P3 · Platforms: iOS
+  **Done:** Pet widget scaffold when no App Group entry; PetHome unmounted honesty; PetTests.
 
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (P2/P3 parallel wave):** Closed E6 (pad deferred) + E7 (phone scaffold honesty).
 - **2026-07-26 (Grok 4.5 OS swarm):** Filed open **E6** (pad PetRail unmounted) and **E7** (phone pet widget data path) from iPadOS/iOS audits. Multi-OS UX/ENH items land in sibling backlogs.
 
 ---

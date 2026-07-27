@@ -117,4 +117,23 @@ final class HubCompactNeedsYouChromeTests: XCTestCase {
         XCTAssertTrue(grid.contains("partitionForDisplay") || grid.contains("needsYou"),
                       "DashboardGridView must elevate needs-you band when pinned")
     }
+
+    /// UX-049: notification panel section header shares sectionTitle token.
+    func testPadNotificationPanelWiresSectionTitle() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let panel = (try? String(contentsOf: root.appendingPathComponent(
+            "iPad/Sources/ShannonPad/Views/NotificationPanelView.swift"
+        ), encoding: .utf8)) ?? ""
+        XCTAssertTrue(
+            panel.contains("HubCompactNeedsYouChrome.sectionTitle"),
+            "NotificationPanelView must use HubCompactNeedsYouChrome.sectionTitle"
+        )
+        XCTAssertFalse(
+            panel.contains("sectionHeader(\"Needs You\""),
+            "NotificationPanelView must not hard-code dual Needs You section header"
+        )
+    }
 }

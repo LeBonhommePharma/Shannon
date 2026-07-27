@@ -16,6 +16,7 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 
 ## Investigation notes
 
+- **2026-07-26 (P2/P3 parallel wave):** Closed ENH-024/025 with phone agents.
 - **2026-07-26 (P0/P1 parallel agents):** Closed **ENH-023** remote clearAsk fail-open via activity.resolve parity.
 - 2026-07-26 15:40 — health sample: Pill SessionContent|AgentLiveSurface|Pet|Companion 180 passed; hub `test_pet_*.py` 114 passed. ENH-001–017 closed. No new ENH items (no dual-HUD gaps / Sendable warnings / fail-closed regressions observed this pass).
 
@@ -226,14 +227,14 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Done:** `applyRemoteAnswer` → `activity.resolve` (same terminal as local); clearAsk only on success; `CloudPublisherRemoteAnswerTests`.
 - **Priority:** P0
 
-### - [ ] ENH-024: AirPods tertiary stem dismiss notifications is real or removed
+### - [x] ENH-024: AirPods tertiary stem dismiss notifications is real or removed
 
 - **Why:** `PhoneModel.handleStemPress` tertiary → `dismissAllNotifications()` only fires haptics — no notification mutation or Mac retract. Mapping claims dismiss effect.
 - **Area:** `iOS/Sources/ShannonPhone/PhoneModel.swift`, notification mirror if retract needed
 - **First slice:** Optimistic local dismiss + optional retract, or remove tertiary mapping until real.
 - **Priority:** P3
 
-### - [ ] ENH-025: Phone freeform voice: implement Mac query transport or drop claim
+### - [x] ENH-025: Phone freeform voice: implement Mac query transport or drop claim
 
 - **Why:** `PhoneModel.handle` freeform / non-awaiting confirm is haptic-only with comment “Mac owns interpretation”; no CloudKit freeform/`RemoteCommand` path. Dead promise.
 - **Area:** `PhoneModel.handle`, `ShannonStore.send`, optional Core command type, Mac consumer

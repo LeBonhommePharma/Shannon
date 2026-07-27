@@ -23,6 +23,7 @@ final class SessionUIWiringTests: XCTestCase {
                 "card.badgeLabel",
                 "rosterDetailLine",
                 "showsApproveHint",
+                "gateAvailable: activity.gateAvailable",
                 "CompanionEmptyStateCopy.idleTitle",
             ]),
             ("PanelSectionRegistry.swift", [

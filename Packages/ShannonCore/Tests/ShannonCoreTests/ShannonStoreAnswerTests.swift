@@ -104,4 +104,84 @@ final class ShannonStoreAnswerTests: XCTestCase {
         XCTAssertFalse(didSuccessHaptic)
         XCTAssertEqual(s.snapshot.confirmations.map(\.id), ["exp"])
     }
+
+    // MARK: ENH-024 — local notification dismiss (no Mac retract)
+
+    func testDismissMirroredNotificationsLocallyClearsSnapshot() {
+        let s = store()
+        let notes = [
+            NotificationMirror(id: "n1", sender: "S", title: "T1", body: "B1"),
+            NotificationMirror(id: "n2", sender: "S", title: "T2", body: "B2"),
+        ]
+        s.apply(ShannonSnapshot(notifications: notes, capturedAt: now))
+        XCTAssertEqual(s.snapshot.notifications.count, 2)
+
+        let cleared = s.dismissMirroredNotificationsLocally()
+        XCTAssertEqual(cleared, 2)
+        XCTAssertTrue(s.snapshot.notifications.isEmpty)
+        XCTAssertEqual(s.locallyDismissedNotificationIDs, Set(["n1", "n2"]))
+    }
+
+    func testDismissMirroredNotificationsSurvivesReapplyUntilMacDrops() {
+        let s = store()
+        let notes = [
+            NotificationMirror(id: "n1", sender: "S", title: "T1", body: "B1"),
+            NotificationMirror(id: "n2", sender: "S", title: "T2", body: "B2"),
+        ]
+        s.apply(ShannonSnapshot(notifications: notes, capturedAt: now))
+        _ = s.dismissMirroredNotificationsLocally()
+        XCTAssertTrue(s.snapshot.notifications.isEmpty)
+
+        // Mac still publishes both — local dismiss must keep them hidden.
+        s.apply(ShannonSnapshot(notifications: notes, capturedAt: now))
+        XCTAssertTrue(s.snapshot.notifications.isEmpty)
+        XCTAssertEqual(s.locallyDismissedNotificationIDs, Set(["n1", "n2"]))
+
+        // Mac drops n1; n2 still published → only n2 stays dismissed.
+        s.apply(ShannonSnapshot(
+            notifications: [notes[1]],
+            capturedAt: now
+        ))
+        XCTAssertTrue(s.snapshot.notifications.isEmpty)
+        XCTAssertEqual(s.locallyDismissedNotificationIDs, Set(["n2"]))
+
+        // Mac drops all → tracking set empties; new note can surface.
+        s.apply(ShannonSnapshot(notifications: [], capturedAt: now))
+        XCTAssertTrue(s.locallyDismissedNotificationIDs.isEmpty)
+
+        let fresh = NotificationMirror(id: "n3", sender: "S", title: "T3", body: "B3")
+        s.apply(ShannonSnapshot(notifications: [fresh], capturedAt: now))
+        XCTAssertEqual(s.snapshot.notifications.map(\.id), ["n3"])
+    }
+
+    func testDismissMirroredNotificationsEmptyIsNoOp() {
+        let s = store()
+        s.apply(ShannonSnapshot(capturedAt: now))
+        XCTAssertEqual(s.dismissMirroredNotificationsLocally(), 0)
+        XCTAssertTrue(s.locallyDismissedNotificationIDs.isEmpty)
+    }
+
+    /// Phone stem tertiary must call store local dismiss (not haptic-only).
+    func testPhoneStemTertiaryWiresLocalDismiss() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let model = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/PhoneModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            model.contains("dismissMirroredNotificationsLocally"),
+            "PhoneModel tertiary stem must call store.dismissMirroredNotificationsLocally (ENH-024)"
+        )
+        XCTAssertTrue(
+            model.contains("case .tertiary"),
+            "PhoneModel must keep tertiary stem mapping"
+        )
+    }
 }

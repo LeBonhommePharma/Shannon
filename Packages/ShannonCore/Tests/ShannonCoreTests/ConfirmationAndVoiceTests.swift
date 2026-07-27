@@ -286,6 +286,86 @@ final class ConfirmationAndVoiceTests: XCTestCase {
         )
     }
 
+    /// UX-045: mic double-tap hands-free must be wired (not a dead claim / dead branch).
+    func testPhoneMicHandsFreeDoubleTapWired() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let home = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/HomeView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            home.contains("TapGesture(count: 2)") || home.contains("onTapGesture(count: 2"),
+            "MicButton must wire double-tap for hands-free (UX-045)"
+        )
+        XCTAssertTrue(
+            home.contains("toggleHandsFreeDictation"),
+            "MicButton double-tap must call toggleHandsFreeDictation"
+        )
+
+        let model = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/PhoneModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            model.contains("func toggleHandsFreeDictation"),
+            "PhoneModel must implement toggleHandsFreeDictation"
+        )
+        XCTAssertTrue(
+            model.contains("isHandsFree"),
+            "PhoneModel hands-free path must touch isHandsFree"
+        )
+
+        let voice = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/VoiceDictation.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            voice.contains("isHandsFree"),
+            "VoiceDictation must expose isHandsFree"
+        )
+    }
+
+    /// ENH-025: freeform voice must be an honest phone no-op (no Mac-owns claim).
+    func testPhoneFreeformVoiceIsHonestNoOp() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let model = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/PhoneModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            model.contains("case .freeform"),
+            "PhoneModel must branch freeform explicitly"
+        )
+        XCTAssertFalse(
+            model.contains("Mac owns interpretation"),
+            "PhoneModel must not claim Mac owns freeform interpretation (ENH-025)"
+        )
+        XCTAssertTrue(
+            model.contains("no-op") || model.contains("ENH-025"),
+            "PhoneModel freeform path must document honest no-op"
+        )
+    }
+
     // MARK: Confirmation records
 
     func testPendingConfirmationRoundTrips() throws {

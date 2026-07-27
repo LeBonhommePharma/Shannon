@@ -166,4 +166,69 @@ final class PetTests: XCTestCase {
             .appendingPathComponent(".shannon/pets/\(id)")
         try? FileManager.default.removeItem(at: dir)
     }
+
+    // MARK: - PET E7 phone pet widget path honesty
+
+    /// Phone root must not imply live PetStore/PetHome; widget must fail-closed
+    /// when App Group writer is missing.
+    func testPhonePetWidgetPathDocumentedScaffoldOnly() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let app = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/ShannonPhoneApp.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(app.isEmpty, "ShannonPhoneApp.swift must be readable")
+        XCTAssertTrue(
+            app.contains("HomeView"),
+            "phone root is HomeView"
+        )
+        XCTAssertFalse(
+            app.contains("PetHomeView") || app.contains("PetStore"),
+            "ShannonPhoneApp must not mount PetHome/PetStore (PET E7 scaffold)"
+        )
+
+        let home = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/PetHomeView.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            home.contains("PET E7") || home.contains("scaffold"),
+            "PetHomeView must document scaffold-only / not mounted (PET E7)"
+        )
+
+        let widget = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonWidget/PetWidgetExtension.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(widget.isEmpty, "PetWidgetExtension.swift must be readable")
+        XCTAssertTrue(
+            widget.contains("PET E7") || widget.contains("isLive"),
+            "Pet widget must document non-live scaffold path (PET E7)"
+        )
+        XCTAssertTrue(
+            widget.contains("isLive"),
+            "Pet widget entry must distinguish live vs scaffold"
+        )
+        XCTAssertTrue(
+            widget.contains("pet.widget.entry"),
+            "Pet widget must still read App Group key when a writer ships"
+        )
+        // Must not present hard-coded live "Shan" placeholder as default live mood.
+        XCTAssertFalse(
+            widget.contains("petName: \"Shan\""),
+            "scaffold must not invent a live Shan pet name"
+        )
+    }
 }

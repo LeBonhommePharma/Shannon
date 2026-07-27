@@ -225,9 +225,10 @@ struct DockingDetailView: View {
                     isSelected: false,
                     onSelect: {},
                     onAnnotateROI: { onAnnotate(.dockingROI(progress.id)) },
-                    onCancel: {},
+                    // UX-047: honest "not wired yet" — never silent no-op.
+                    onCancel: { hub.requestDockingCancel() },
                     onViewTargets: {},
-                    onExportCSV: {}
+                    onExportCSV: { hub.requestDockingExportCSV() }
                 )
 
                 VStack(alignment: .leading, spacing: ShannonSpacing.sm) {

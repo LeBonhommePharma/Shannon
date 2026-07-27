@@ -24,7 +24,12 @@ struct NotificationPanelView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: ShannonSpacing.md) {
                 if !pending.isEmpty {
-                    sectionHeader("Needs You", count: pending.count, tint: .shannonWarning)
+                    // UX-049: shared section token with compact needs-you pin.
+                    sectionHeader(
+                        HubCompactNeedsYouChrome.sectionTitle,
+                        count: pending.count,
+                        tint: .shannonWarning
+                    )
                     ForEach(pending) { question in
                         ConfirmationRow(
                             confirmation: question,

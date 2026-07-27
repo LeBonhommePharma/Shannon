@@ -5,7 +5,8 @@ import SwiftUI
 //
 // Pure policy + animatable shape for the Mac notch pill. Matches the silhouette
 // used by AgentNotch / DynamicNotchKit: **inward top wing curves** into the
-// bezel and an **outward bottom lip** — not a flat flush-top rectangle.
+// bezel and an **outward bottom lip** — not an inverted keystone (wide top /
+// narrow bottom), which stroked as inverted parentheses under the camera.
 
 /// Closed / open corner radii and wing-width policy for the Shannon notch island.
 public enum DynamicIslandGeometry: Sendable {
@@ -82,53 +83,101 @@ public enum DynamicIslandGeometry: Sendable {
 
     // MARK: Path samples (pure, no SwiftUI)
 
-    /// Sample points on the island outline for unit tests (rect in local coords).
+    /// Key outline points for unit tests (rect in local coords).
     ///
-    /// Returns key control points: top-left wing, bottom-left lip, bottom-right
-    /// lip, top-right wing. Used to prove inward top / outward bottom geometry
-    /// without rendering.
+    /// Geometry contract for a **full-width body** uneven rounded rect
+    /// (correct Dynamic Island — not an inverted keystone):
+    /// - Top edge sits at `minY`, inset by `topRadius` from left/right.
+    /// - Bottom edge sits at `maxY`, inset by `bottomRadius` from left/right.
+    /// - Vertical sides run at `minX` / `maxX` (full body width).
+    /// - Bottom lip radius is typically larger than top wing radius.
     public static func outlineKeyPoints(
         in rect: CGRect,
         topRadius: CGFloat,
         bottomRadius: CGFloat
     ) -> (
-        topLeftInner: CGPoint,
-        bottomLeftOuter: CGPoint,
-        bottomRightOuter: CGPoint,
-        topRightInner: CGPoint
+        topLeft: CGPoint,
+        topRight: CGPoint,
+        bottomLeft: CGPoint,
+        bottomRight: CGPoint,
+        leftSideX: CGFloat,
+        rightSideX: CGFloat
     ) {
         let t = max(0, topRadius)
         let b = max(0, bottomRadius)
         return (
-            topLeftInner: CGPoint(x: rect.minX + t, y: rect.minY + t),
-            bottomLeftOuter: CGPoint(x: rect.minX + t + b, y: rect.maxY),
-            bottomRightOuter: CGPoint(x: rect.maxX - t - b, y: rect.maxY),
-            topRightInner: CGPoint(x: rect.maxX - t, y: rect.minY + t)
+            topLeft: CGPoint(x: rect.minX + t, y: rect.minY),
+            topRight: CGPoint(x: rect.maxX - t, y: rect.minY),
+            bottomLeft: CGPoint(x: rect.minX + b, y: rect.maxY),
+            bottomRight: CGPoint(x: rect.maxX - b, y: rect.maxY),
+            leftSideX: rect.minX,
+            rightSideX: rect.maxX
         )
     }
 
-    /// True when top curves sit **inboard** of the left/right edges (wing bite)
-    /// and bottom lip sits at `maxY` outside the vertical sides.
+    /// True when the outline is a non-inverted island:
+    /// full-width vertical sides, top edge at `minY`, bottom lip at `maxY`,
+    /// and bottom radius ≥ top (outward lip at least as deep as the top wing).
     public static func isInwardTopOutwardBottom(
         in rect: CGRect,
         topRadius: CGFloat,
         bottomRadius: CGFloat
     ) -> Bool {
-        let p = outlineKeyPoints(in: rect, topRadius: topRadius, bottomRadius: bottomRadius)
-        // Top inner points inset from left/right edges.
-        let topInset = p.topLeftInner.x > rect.minX + 0.5
-            && p.topRightInner.x < rect.maxX - 0.5
-        // Bottom outer points further inset (lip curves out under the body).
-        let bottomLip = p.bottomLeftOuter.y >= rect.maxY - 0.5
-            && p.bottomLeftOuter.x > p.topLeftInner.x
-            && p.bottomRightOuter.x < p.topRightInner.x
-        return topInset && bottomLip
+        guard rect.width > 1, rect.height > 1 else { return false }
+        let t = max(0, topRadius)
+        let b = max(0, bottomRadius)
+        // Must fit both radii on each side.
+        guard t + b < rect.width, t + b < rect.height * 2 else { return false }
+        let p = outlineKeyPoints(in: rect, topRadius: t, bottomRadius: b)
+        // Top edge on the bezel line, inset from outer corners.
+        let topOnBezel = abs(p.topLeft.y - rect.minY) < 0.5
+            && abs(p.topRight.y - rect.minY) < 0.5
+            && p.topLeft.x > rect.minX + 0.5
+            && p.topRight.x < rect.maxX - 0.5
+        // Bottom lip on maxY.
+        let bottomLip = abs(p.bottomLeft.y - rect.maxY) < 0.5
+            && abs(p.bottomRight.y - rect.maxY) < 0.5
+            && p.bottomLeft.x > rect.minX + 0.5
+            && p.bottomRight.x < rect.maxX - 0.5
+        // Full-width body (not keystone: sides must be at outer edges).
+        let fullWidthSides = abs(p.leftSideX - rect.minX) < 0.5
+            && abs(p.rightSideX - rect.maxX) < 0.5
+        // Bottom lip at least as deep as top wing (AgentNotch closed 6/14).
+        let lipAtLeastTop = b + 0.01 >= t
+        return topOnBezel && bottomLip && fullWidthSides && lipAtLeastTop
+    }
+
+    /// Bounding-box of the island path must match the input rect (full width).
+    /// Catches the inverted-keystone bug where sides inset and bottom narrows.
+    public static func pathUsesFullWidthBody(
+        in rect: CGRect,
+        topRadius: CGFloat,
+        bottomRadius: CGFloat
+    ) -> Bool {
+        let shape = NotchIslandShape(
+            topCornerRadius: topRadius,
+            bottomCornerRadius: bottomRadius
+        )
+        let path = shape.path(in: rect)
+        let bounds = path.boundingRect
+        // Path may be slightly inside due to curve control points sitting on
+        // the edge — require near-full width (not the old minX+top inset).
+        let widthOK = bounds.width >= rect.width - 1.0
+        let heightOK = bounds.height >= rect.height - 1.0
+        let leftOK = bounds.minX <= rect.minX + 0.5
+        let rightOK = bounds.maxX >= rect.maxX - 0.5
+        return widthOK && heightOK && leftOK && rightOK
     }
 }
 
 // MARK: - SwiftUI shape
 
-/// AgentNotch / DynamicNotchKit silhouette: inward top wings + outward bottom lip.
+/// AgentNotch / DynamicNotchKit silhouette: full-width body with rounded top
+/// wings and a deeper outward bottom lip.
+///
+/// Path is a standard uneven rounded rectangle (convex body). The previous
+/// keystone path (top edge full width, sides inset by top radius, bottom even
+/// narrower) stroked as inverted parentheses under the hardware notch.
 ///
 /// Animatable via ``animatableData`` so expand/collapse can spring the radii.
 public struct NotchIslandShape: Shape {
@@ -158,48 +207,59 @@ public struct NotchIslandShape: Shape {
     }
 
     public func path(in rect: CGRect) -> Path {
-        let top = max(0, topCornerRadius)
-        let bottom = max(0, bottomCornerRadius)
+        // Clamp radii so corners never overlap on a small rect.
+        let maxR = min(rect.width, rect.height) / 2
+        let top = min(max(0, topCornerRadius), maxR)
+        let bottom = min(max(0, bottomCornerRadius), maxR)
         var path = Path()
 
-        // Start top-left (outer bezel corner).
-        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        // Full-width uneven rounded rect (Y-down, clockwise from top edge):
+        //
+        //      (minX+top)————(maxX-top)        top edge at minY
+        //     /                               \
+        //  (minX)                           (maxX)   vertical sides
+        //     \                               /
+        //      (minX+bot)————(maxX-bot)        bottom lip at maxY
 
-        // Top-left curve (inward wing).
+        // Start top edge, after top-left corner.
+        path.move(to: CGPoint(x: rect.minX + top, y: rect.minY))
+
+        // Top edge → top-right corner start.
+        path.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY))
+
+        // Top-right wing (convex, control on outer corner).
         path.addQuadCurve(
-            to: CGPoint(x: rect.minX + top, y: rect.minY + top),
-            control: CGPoint(x: rect.minX + top, y: rect.minY)
+            to: CGPoint(x: rect.maxX, y: rect.minY + top),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
         )
 
-        // Left edge down.
-        path.addLine(to: CGPoint(x: rect.minX + top, y: rect.maxY - bottom))
+        // Right side down → bottom-right corner start.
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - bottom))
 
-        // Bottom-left curve (outward lip).
+        // Bottom-right lip (outward / convex).
         path.addQuadCurve(
-            to: CGPoint(x: rect.minX + top + bottom, y: rect.maxY),
-            control: CGPoint(x: rect.minX + top, y: rect.maxY)
+            to: CGPoint(x: rect.maxX - bottom, y: rect.maxY),
+            control: CGPoint(x: rect.maxX, y: rect.maxY)
         )
 
         // Bottom edge.
-        path.addLine(to: CGPoint(x: rect.maxX - top - bottom, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX + bottom, y: rect.maxY))
 
-        // Bottom-right curve (outward lip).
+        // Bottom-left lip.
         path.addQuadCurve(
-            to: CGPoint(x: rect.maxX - top, y: rect.maxY - bottom),
-            control: CGPoint(x: rect.maxX - top, y: rect.maxY)
+            to: CGPoint(x: rect.minX, y: rect.maxY - bottom),
+            control: CGPoint(x: rect.minX, y: rect.maxY)
         )
 
-        // Right edge up.
-        path.addLine(to: CGPoint(x: rect.maxX - top, y: rect.minY + top))
+        // Left side up → top-left corner start.
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + top))
 
-        // Top-right curve (inward wing).
+        // Top-left wing.
         path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY),
-            control: CGPoint(x: rect.maxX - top, y: rect.minY)
+            to: CGPoint(x: rect.minX + top, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY)
         )
 
-        // Top edge back to start.
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
         path.closeSubpath()
         return path
     }

@@ -49,12 +49,58 @@ final class DynamicIslandGeometryTests: XCTestCase {
             topRadius: 6,
             bottomRadius: 14
         )
-        XCTAssertEqual(pts.topLeftInner.x, 6, accuracy: 0.01)
-        XCTAssertEqual(pts.topLeftInner.y, 6, accuracy: 0.01)
-        XCTAssertEqual(pts.bottomLeftOuter.x, 20, accuracy: 0.01) // 6+14
-        XCTAssertEqual(pts.bottomLeftOuter.y, 40, accuracy: 0.01)
-        XCTAssertEqual(pts.topRightInner.x, 214, accuracy: 0.01) // 220-6
-        XCTAssertEqual(pts.bottomRightOuter.x, 200, accuracy: 0.01) // 220-6-14
+        // Top edge on bezel line, inset by top radius only.
+        XCTAssertEqual(pts.topLeft.x, 6, accuracy: 0.01)
+        XCTAssertEqual(pts.topLeft.y, 0, accuracy: 0.01)
+        XCTAssertEqual(pts.topRight.x, 214, accuracy: 0.01) // 220-6
+        XCTAssertEqual(pts.topRight.y, 0, accuracy: 0.01)
+        // Bottom lip at maxY, inset by bottom radius (not top+bottom keystone).
+        XCTAssertEqual(pts.bottomLeft.x, 14, accuracy: 0.01)
+        XCTAssertEqual(pts.bottomLeft.y, 40, accuracy: 0.01)
+        XCTAssertEqual(pts.bottomRight.x, 206, accuracy: 0.01) // 220-14
+        // Full-width vertical sides — rejects inverted keystone (sides at minX+top).
+        XCTAssertEqual(pts.leftSideX, 0, accuracy: 0.01)
+        XCTAssertEqual(pts.rightSideX, 220, accuracy: 0.01)
+    }
+
+    /// Path bounding box must span full rect width (not inset keystone).
+    func testNotchIslandPathUsesFullWidthBody() {
+        let rect = CGRect(x: 0, y: 0, width: 220, height: 40)
+        XCTAssertTrue(
+            DynamicIslandGeometry.pathUsesFullWidthBody(
+                in: rect,
+                topRadius: DynamicIslandGeometry.closedTopRadius,
+                bottomRadius: DynamicIslandGeometry.closedBottomRadius
+            )
+        )
+        let openRect = CGRect(x: 0, y: 0, width: 400, height: 190)
+        XCTAssertTrue(
+            DynamicIslandGeometry.pathUsesFullWidthBody(
+                in: openRect,
+                topRadius: DynamicIslandGeometry.openTopRadius,
+                bottomRadius: DynamicIslandGeometry.openBottomRadius
+            )
+        )
+    }
+
+    /// Bounding rect of the path must not collapse to a keystone (width loss).
+    func testNotchIslandPathBoundingRectMatchesInputWidth() {
+        let rect = CGRect(x: 10, y: 5, width: 200, height: 36)
+        let shape = NotchIslandShape(
+            topCornerRadius: DynamicIslandGeometry.closedTopRadius,
+            bottomCornerRadius: DynamicIslandGeometry.closedBottomRadius
+        )
+        let bounds = shape.path(in: rect).boundingRect
+        XCTAssertEqual(bounds.minX, rect.minX, accuracy: 0.5)
+        XCTAssertEqual(bounds.maxX, rect.maxX, accuracy: 0.5)
+        XCTAssertEqual(bounds.minY, rect.minY, accuracy: 0.5)
+        XCTAssertEqual(bounds.maxY, rect.maxY, accuracy: 0.5)
+        // Explicit anti-keystone: path width ≈ rect width (old bug: width − 2×top).
+        XCTAssertGreaterThan(bounds.width, rect.width - 1.0)
+        XCTAssertGreaterThan(
+            bounds.width,
+            rect.width - 2 * DynamicIslandGeometry.closedTopRadius - 1.0
+        )
     }
 
     func testShouldWingOnLiveWorkAskOrCollapse() {
@@ -126,6 +172,30 @@ final class DynamicIslandGeometryTests: XCTestCase {
         XCTAssertFalse(path.isEmpty)
         let open = NotchIslandShape(expanded: true)
         XCTAssertFalse(open.path(in: CGRect(x: 0, y: 0, width: 400, height: 190)).isEmpty)
+    }
+
+    /// Open + closed orientation contract on representative closed sizes.
+    func testOrientationContractClosedAndOpenSizes() {
+        let samples: [(CGRect, CGFloat, CGFloat)] = [
+            (CGRect(x: 0, y: 0, width: 160, height: 32), 6, 14),
+            (CGRect(x: 0, y: 0, width: 220, height: 40), 6, 14),
+            (CGRect(x: 0, y: 0, width: 276, height: 48), 6, 14),
+            (CGRect(x: 0, y: 0, width: 400, height: 190), 19, 24),
+        ]
+        for (rect, top, bottom) in samples {
+            XCTAssertTrue(
+                DynamicIslandGeometry.isInwardTopOutwardBottom(
+                    in: rect, topRadius: top, bottomRadius: bottom
+                ),
+                "orientation failed for \(rect)"
+            )
+            XCTAssertTrue(
+                DynamicIslandGeometry.pathUsesFullWidthBody(
+                    in: rect, topRadius: top, bottomRadius: bottom
+                ),
+                "full-width body failed for \(rect)"
+            )
+        }
     }
 
     func testIslandRadiiHelperOnLayout() {

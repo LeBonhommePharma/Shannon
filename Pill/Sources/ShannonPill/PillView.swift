@@ -760,28 +760,6 @@ struct PillView: View {
     /// synthetic backends and absent detectors never raise the red border.
     private var collapseAlarm: Bool { fleetReading.collapsed == true }
 
-    /// Collapsed-pill entropy badge driven by the provenance-bearing reading.
-    /// Shows a number only when `display` returns one; otherwise "no H".
-    @ViewBuilder
-    private var entropyReadout: some View {
-        let reading = fleetReading
-        if let display = reading.display(at: Date()) {
-            Text(display.shortLabel)
-                .font(.shannonPillMono)
-                .foregroundStyle(entropyTint(for: reading))
-                // Identity swap — numeric morph + animation looked like a pop.
-                .contentTransition(.identity)
-                .help(reading.explain(at: Date()))
-                .accessibilityLabel(reading.explain(at: Date()))
-        } else {
-            Text("no H")
-                .font(.shannonPillMono)
-                .foregroundStyle(Color.shannonNeutral)
-                .help(reading.explain(at: Date()))
-                .accessibilityLabel(reading.explain(at: Date()))
-        }
-    }
-
     /// Continuous multi-stop gradient over measured H — not discrete RYG.
     private func entropyTint(for reading: EntropyReading) -> Color {
         if let display = reading.display(at: Date()) {

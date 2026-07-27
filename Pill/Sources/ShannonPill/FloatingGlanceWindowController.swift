@@ -52,6 +52,7 @@ final class FloatingGlanceModel: ObservableObject {
     private let activity: AgentActivityMonitor
     private var cancellables = Set<AnyCancellable>()
     private var pollCancellable: AnyCancellable?
+    private var currentPollInterval: TimeInterval?
     /// Fail-closed usage map — only ids with real session tokens.
     private var usageByAgent: [String: AgentUsageSnapshot] = [:]
     private var lastUsageScan: Date = .distantPast
@@ -70,10 +71,11 @@ final class FloatingGlanceModel: ObservableObject {
     }
 
     private func bind() {
+        // Already on main via receive(on: RunLoop.main) — no extra async hop.
         activity.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                DispatchQueue.main.async { self?.refresh() }
+                self?.refresh()
             }
             .store(in: &cancellables)
     }
@@ -137,10 +139,17 @@ final class FloatingGlanceModel: ObservableObject {
     }
 
     private func ensurePollTimer() {
-        if pollCancellable != nil { return }
-        // Same band as desktop companion idle poll — activity.objectWillChange
-        // already drives most updates; timer covers quiet usage rescans.
-        pollCancellable = Timer.publish(every: 5.0, on: .main, in: .common)
+        // Adaptive cadence (same as desktop companion): busy agents ~0.55s,
+        // near-sleepy ~1s, quiet ~12s. activity.objectWillChange still drives
+        // most updates; timer covers quiet usage rescans + mood ages.
+        let interval = DesktopCompanionRefreshCadence.pollInterval(
+            agents: activity.summary.agents,
+            hasPendingAsk: !activity.pendingAsks.isEmpty
+        )
+        if currentPollInterval == interval, pollCancellable != nil { return }
+        currentPollInterval = interval
+        pollCancellable?.cancel()
+        pollCancellable = Timer.publish(every: interval, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in self?.refresh() }
     }

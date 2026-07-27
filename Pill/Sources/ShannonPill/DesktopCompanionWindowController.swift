@@ -93,17 +93,19 @@ final class DesktopCompanionModel: ObservableObject {
     }
 
     private func bind() {
+        // Already on main via receive(on: RunLoop.main) — no extra async hop
+        // (that delayed pet bubble/mood behind agent ticks).
         activity.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                DispatchQueue.main.async { self?.refresh() }
+                self?.refresh()
             }
             .store(in: &cancellables)
 
         bridge.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                DispatchQueue.main.async { self?.refresh() }
+                self?.refresh()
             }
             .store(in: &cancellables)
     }

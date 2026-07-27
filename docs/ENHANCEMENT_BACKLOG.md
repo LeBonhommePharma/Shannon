@@ -241,10 +241,67 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **First slice:** Document honest no-op **or** minimal freeform RemoteCommand + Mac consume; show previewCommand if kept.
 - **Priority:** P3
 
+### - [ ] ENH-026: Multi-provider usage windows when source provides them (parity G1)
+
+- **Why:** AgentNotch/Peek surface plan/context windows (5h/7d, monthly) when readable; Shannon `UsageSnapshot` is fail-closed but thin — no honest multi-window presentation when gate/artifacts already expose window fields.
+- **Area:** `UsageCore` / `UsageSnapshot`, session presenters, collapsed usage chip
+- **First slice:** Inventory which readers already carry window/limit fields; extend `UsageSnapshot` only for real fields; pure tests forbid inventing totals.
+- **Priority:** P2
+- **Parity:** AgentPeek usage / AgentNotch plan gauge (candidate G1)
+
+### - [ ] ENH-027: Expand works-with session readers for high-value local agents (parity G2)
+
+- **Why:** AgentPeek lists ~25 brands; Shannon ships Claude Code, Codex, Cursor, Cowork, Kimi. Category present; residual brands with local disk/process signals remain uncovered.
+- **Area:** `Pill/Sources/AgentReaders/`, `PanelSectionRegistry`, TerminalAgentProbe
+- **First slice:** Add 1–2 readers with fixtures where local session paths exist; fail-closed empty roots; pure parse tests.
+- **Priority:** P2
+- **Parity:** AgentPeek agent matrix / AgentNotch works-with (candidate G2)
+
+### - [ ] ENH-028: Jump-to-host-terminal for live session (parity G3)
+
+- **Why:** Competitors “jump” to the session host; Shannon can expand/focus pill row but does not consistently activate the terminal app/window for known cwd/host.
+- **Area:** Pill focus/handoff, TerminalAgentProbe host map, `NSWorkspace` activation
+- **First slice:** When host process + cwd known, activate host or open cwd; pure policy + one integration smoke path.
+- **Priority:** P2
+- **Parity:** AgentNotch jump / AgentCallout jump (candidate G3)
+
+### - [ ] ENH-029: Open terminal workspace action from routes (parity G7)
+
+- **Why:** AgentPeek “Views” open a terminal workspace; Shannon has QuickRoutes/FastActions but no dedicated open-workspace action at project cwd.
+- **Area:** `Pill/Sources/Routes/`, terminal launcher helper
+- **First slice:** One action “Open Terminal here” for selected session cwd; structural wiring test.
+- **Priority:** P3
+- **Parity:** AgentPeek Views (candidate G7)
+
+### - [ ] ENH-030: Mac voice callout on completion / needs-you (parity G8)
+
+- **Why:** AgentCallout’s defining feature is spoken callouts; Shannon has phone AirPods announce on ask but no Mac multi-agent completion/needs-you voice product.
+- **Area:** Pill notification path, `NSSpeechSynthesizer` or AVSpeech, preferences mute
+- **First slice:** One system voice on needs-you or task_complete when pref enabled; pure “should announce” policy tests; no invent content.
+- **Priority:** P2
+- **Parity:** AgentCallout voice (candidate G8)
+
+### - [ ] ENH-031: Gate ask surfaces change paths/summary when payload has them (parity G9)
+
+- **Why:** AgentCallout shows diffs/paths on approve; Shannon gate shows prompt text only — partial when ask payload already includes paths/files.
+- **Area:** GateDB ask model, `GateAskCard` / `GateInlineCard`, presenters
+- **First slice:** If payload has path list, show clipped paths under prompt; pure formatter tests; no fake diffs.
+- **Priority:** P2
+- **Parity:** AgentCallout diff review (candidate G9)
+
+### - [ ] ENH-032: Always Allow only when hub policy supports sticky approve (parity G10)
+
+- **Why:** AgentPeek offers Always Allow when supported; Shannon is Approve/Deny only — may be intentional safety, but gap is real if gate protocol already has sticky modes.
+- **Area:** hub gate protocol, `GateApprovalClient`, Mac gate cards
+- **First slice:** Audit protocol for sticky approve; if present, wire opt-in UI + tests; if absent, document fail-closed “not supported” and close as N/A.
+- **Priority:** P3
+- **Parity:** AgentPeek Always Allow (candidate G10)
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (AgentNotch/Peek/Callout parity):** User approved G1–G4,G6–G10 (not G5 chat, not G11 OTEL). Enqueued **ENH-026…032** + UX-057/058. Inventory: `{SCRATCH}/parity_inventory.md`. Counts: present 16 / partial 9 / missing 5 (defining rows).
 - **2026-07-26 (Grok 4.5 OS swarm):** macOS audit filed **ENH-023** (remote clearAsk fail-open). iOS filed **ENH-024** (stem dismiss no-op) and **ENH-025** (freeform dead). Cross-check: not ENH-018…022 (closed multi-device honesty). UI dual-copy/gate chrome → `docs/MULTI_OS_UX_BACKLOG.md` UX-035…052.
 
 ---

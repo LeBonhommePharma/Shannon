@@ -67,6 +67,31 @@ public enum LiveRosterAdmission: Sendable {
         "terminal", "browser", "finder", "windowmanager", "dock", "systemuiserver",
     ]
 
+    /// Never list these — mis-captures of macOS chrome (WindowManager, Dock, …).
+    public static let refusedAgentIds: Set<String> = [
+        "windowmanager", "finder", "dock", "systemuiserver", "loginwindow",
+        "spotlight", "controlcenter", "notificationcenter", "siri",
+        "window server", "windowserver",
+    ]
+
+    /// ⌘D placeholder task when no real work string was captured.
+    /// Must not count as “work evidence” for generic container rows.
+    public static func isAttachPlaceholderTask(_ task: String) -> Bool {
+        let t = task.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return true }
+        if t.hasPrefix("Working in ") { return true }
+        if t.hasPrefix("Working in\u{00a0}") { return true } // nbsp
+        return false
+    }
+
+    /// Meaningful work evidence beyond attach placeholder copy.
+    public static func hasRealWorkSignal(_ agent: AgentActivitySnapshot) -> Bool {
+        if agent.status.isBusy, agent.presence.canBeBusy { return true }
+        if agent.historyCount > 0 { return true }
+        if !isAttachPlaceholderTask(agent.lastTask) { return true }
+        return false
+    }
+
     /// Whether the agent may appear on pill roster / companion board.
     public static func shouldList(
         agent: AgentActivitySnapshot,
@@ -75,6 +100,8 @@ public enum LiveRosterAdmission: Sendable {
     ) -> Bool {
         let id = agent.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if id.isEmpty { return false }
+        // System chrome never lists — even with a pending ask (ask is mis-attributed).
+        if refusedAgentIds.contains(id) { return false }
 
         // Actionable attention always wins (approval / working / just finished).
         if hasPendingAsk { return true }
@@ -87,6 +114,8 @@ public enum LiveRosterAdmission: Sendable {
             }
         }
         if agent.status.isBusy, agent.presence.canBeBusy {
+            // Still refuse system chrome even if somehow busy.
+            if refusedAgentIds.contains(id) { return false }
             return true
         }
 
@@ -98,9 +127,10 @@ public enum LiveRosterAdmission: Sendable {
             // as a live agent row (avoids registry spam).
             return false
         case .live:
-            // Generic container ids (bare "terminal"/"browser") need real work signal.
+            // Generic container (bare "terminal"/"browser"): only **gate busy**.
+            // "Working in Ghostty" last_task is attach placeholder — never enough.
             if genericContainerAgentIds.contains(id) {
-                return agent.status.isBusy || !agent.lastTask.isEmpty || agent.historyCount > 0
+                return agent.status.isBusy && agent.presence.canBeBusy
             }
             // Non-agent host bundle without a live CLI pid must not list
             // (defence if presence was forced live from a bad capture).
@@ -109,7 +139,8 @@ public enum LiveRosterAdmission: Sendable {
             if let bundle, !bundle.isEmpty, !isAllowedAgentHostBundle(bundle), !hasPid {
                 return false
             }
-            // Named live agent (gate heartbeat / allow-host / attach pid / fixtures).
+            // Named live agent: ProcessAttach already restricted host allow-list;
+            // gate/fixtures set presence.live intentionally.
             return true
         }
     }

@@ -513,6 +513,10 @@ public enum AgentActivityReader {
                let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
                 for entry in arr {
                     guard let id = entry["id"] as? String, !id.isEmpty else { continue }
+                    // Never promote refused system chrome into the roster seed.
+                    if LiveRosterAdmission.refusedAgentIds.contains(id.lowercased()) {
+                        continue
+                    }
                     let name = (entry["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id
                     let source = entry["source"] as? String ?? "other"
                     let taskRaw = entry["last_task"] as? String ?? ""
@@ -554,6 +558,9 @@ public enum AgentActivityReader {
                     var isDir: ObjCBool = false
                     guard fm.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { continue }
                     let id = dir.lastPathComponent
+                    if LiveRosterAdmission.refusedAgentIds.contains(id.lowercased()) {
+                        continue
+                    }
                     let stateURL = dir.appendingPathComponent("state.json")
                     guard let data = try? Data(contentsOf: stateURL),
                           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

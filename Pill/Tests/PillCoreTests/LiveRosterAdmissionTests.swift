@@ -62,6 +62,47 @@ final class LiveRosterAdmissionTests: XCTestCase {
         XCTAssertFalse(LiveRosterAdmission.shouldList(agent: a))
     }
 
+    func testRejectsTerminalWithAttachPlaceholderLastTask() {
+        // Disk pets often have last_task "Working in Ghostty" from ⌘D — not work.
+        var a = snap(
+            id: "terminal",
+            presence: .live,
+            attachPid: 99,
+            attachBundle: "com.mitchellh.ghostty"
+        )
+        a = AgentActivitySnapshot(
+            id: a.id,
+            displayName: a.displayName,
+            status: .idle,
+            lastTask: "Working in Ghostty",
+            source: "observed",
+            updatedAt: a.updatedAt,
+            resumable: true,
+            historyCount: 0,
+            presence: .live,
+            attachPid: 99,
+            attachBundle: "com.mitchellh.ghostty"
+        )
+        XCTAssertTrue(LiveRosterAdmission.isAttachPlaceholderTask(a.lastTask))
+        XCTAssertFalse(LiveRosterAdmission.shouldList(agent: a))
+    }
+
+    func testRefusesWindowManagerAgentIdAlways() {
+        let a = snap(
+            id: "windowmanager",
+            presence: .live,
+            status: .active,
+            attachBundle: "com.apple.WindowManager"
+        )
+        XCTAssertFalse(LiveRosterAdmission.shouldList(agent: a, hasPendingAsk: false))
+        // Even with pending ask? Refuse system chrome — pending shouldn't invent WindowManager as agent.
+        // Exception: if hasPendingAsk true we currently admit — change to still refuse refused ids.
+        XCTAssertFalse(
+            LiveRosterAdmission.shouldList(agent: a, hasPendingAsk: true),
+            "system chrome must never list even with ask"
+        )
+    }
+
     func testAdmitsLiveAttachPidForNamedAgent() {
         let a = snap(
             id: "claude_code",

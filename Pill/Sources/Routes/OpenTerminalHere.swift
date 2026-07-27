@@ -292,13 +292,16 @@ public enum OpenTerminalHereExecutor {
     public static func perform(_ action: OpenTerminalHereAction) -> Bool {
         switch action {
         case .launch(let path, let bid):
+            // Fail-closed: expand ~ and re-check existence so we never trigger
+            // macOS "file can't be found" dialogs for stale/temp paths.
             var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir),
+            let expanded = (path as NSString).expandingTildeInPath
+            guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir),
                   isDir.boolValue
             else {
                 return false
             }
-            let dirURL = URL(fileURLWithPath: path, isDirectory: true)
+            let dirURL = URL(fileURLWithPath: expanded, isDirectory: true)
             let resolvedBid = resolveInstalledBundleID(bid)
                 ?? resolveInstalledBundleID(OpenTerminalHerePolicy.defaultTerminalBundleID)
             guard let appURL = resolvedBid.flatMap({
@@ -308,12 +311,22 @@ public enum OpenTerminalHereExecutor {
             }
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
+            // Prefer opening the *folder* in the terminal app. If the app
+            // cannot open directories, fall back to activating the app only
+            // (no Finder "can't be found" dialog).
             NSWorkspace.shared.open(
                 [dirURL],
                 withApplicationAt: appURL,
-                configuration: config,
-                completionHandler: nil
-            )
+                configuration: config
+            ) { _, error in
+                if error != nil {
+                    // Silent fallback: just bring the terminal forward.
+                    let apps = NSRunningApplication.runningApplications(
+                        withBundleIdentifier: resolvedBid ?? bid
+                    )
+                    _ = apps.first?.activate(options: [.activateIgnoringOtherApps])
+                }
+            }
             return true
         case .none:
             return false

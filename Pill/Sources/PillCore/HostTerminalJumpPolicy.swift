@@ -331,12 +331,17 @@ public enum HostTerminalJumpExecutor {
             }
             return app.activate(options: [.activateIgnoringOtherApps])
         case .openCwd(let path):
+            // Fail-closed: never hand NSWorkspace a missing path (macOS shows
+            // a system dialog: "… can't be found" — e.g. stale test/temp cwd).
             var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else {
+            let expanded = (path as NSString).expandingTildeInPath
+            guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir),
+                  isDir.boolValue
+            else {
                 return false
             }
             return NSWorkspace.shared.open(
-                URL(fileURLWithPath: path, isDirectory: isDir.boolValue)
+                URL(fileURLWithPath: expanded, isDirectory: true)
             )
         case .none:
             return false

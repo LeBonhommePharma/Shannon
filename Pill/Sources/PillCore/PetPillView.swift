@@ -115,11 +115,18 @@ public struct CompanionView: View {
     @ViewBuilder
     private func content(at date: Date) -> some View {
         let t = date.timeIntervalSinceReferenceDate
-        // Prefer atlas only when crop succeeds this frame; otherwise procedural
-        // so a corrupt/missing sheet never blanks the companion.
+        // Atlas playback: busy-in-place `running` can use foot-walk rows when
+        // a package is available; Reduce Motion keeps in-place (no walk thrash).
+        // Procedural fallback never claims foot-walk — only mood curves.
+        let playback = PetCodexMotion.atlasPlaybackMotion(
+            base: codexMotion,
+            tSeconds: t,
+            agentSeed: packagePetId ?? kind.rawValue,
+            allowLocomotion: !reduceMotion
+        )
         if let package = cachedPackage,
            let cg = PetAtlasRenderer.frameImage(
-               package: package, motion: codexMotion, tSeconds: t
+               package: package, motion: playback, tSeconds: t
            ) {
             Canvas { ctx, sz in
                 ctx.draw(Image(decorative: cg, scale: 1), in: CGRect(origin: .zero, size: sz))

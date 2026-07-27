@@ -251,6 +251,126 @@ final class CompanionBubbleTextTests: XCTestCase {
             XCTAssertEqual(b.motion, motion, text)
         }
     }
+
+    /// Foot-walk motions keep claimsWork + locomotion identity (no dual vocab).
+    func testLocomotionMotionPreservedInWorkBubble() {
+        for walk in [PetCodexMotion.runningLeft, .runningRight] {
+            let b = CompanionBubbleText.derive(.init(
+                presence: .live,
+                status: .midTask,
+                mood: .alert,
+                motion: walk,
+                displayName: "Grok Build",
+                lastTask: "Wiring pet walk frames"
+            ))
+            XCTAssertTrue(b.claimsWork, "\(walk)")
+            XCTAssertEqual(b.motion, walk, "must not collapse to busy-in-place running")
+            XCTAssertTrue(b.motion.isLocomotion)
+            XCTAssertFalse(b.text.isEmpty)
+            XCTAssertEqual(b.detail, "Wiring pet walk frames")
+        }
+    }
+
+    /// Bare status tokens never appear as bubble detail / invented work.
+    func testBareStatusTokensNotUsedAsBubbleDetail() {
+        XCTAssertTrue(CompanionBubbleText.isBareBubbleToken("live"))
+        XCTAssertTrue(CompanionBubbleText.isBareBubbleToken("WORKING"))
+        XCTAssertFalse(CompanionBubbleText.isBareBubbleToken("docking 1ACJ"))
+        let b = CompanionBubbleText.derive(.init(
+            presence: .live,
+            status: .idle,
+            mood: .idle,
+            motion: .idle,
+            displayName: "Science",
+            statusLine: "live",
+            lastTask: "live"
+        ))
+        XCTAssertEqual(b.text, "Resting")
+        XCTAssertFalse(b.claimsWork)
+        // "live" task/status stripped — fall back to agent name, not the token.
+        XCTAssertEqual(b.detail, "Science")
+    }
+
+    /// Every shipped mood path yields non-empty primary text.
+    func testPrimaryTextNeverEmptyAcrossMoods() {
+        let moods = CompanionMood.allCases
+        let motions = PetCodexMotion.allCases
+        for mood in moods {
+            for motion in motions {
+                let b = CompanionBubbleText.derive(.init(
+                    presence: mood == .sleepy ? .offline : .live,
+                    status: motion.claimsWork ? .midTask : .idle,
+                    mood: mood,
+                    motion: motion,
+                    displayName: "Agent",
+                    lastTask: ""
+                ))
+                XCTAssertFalse(
+                    b.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    "mood=\(mood) motion=\(motion)"
+                )
+            }
+        }
+    }
+}
+
+// MARK: - Bubble ↔ walk consistency (same fixture signals)
+
+final class CompanionBubbleWalkConsistencyTests: XCTestCase {
+
+    func testBusyLiveBubbleAndMotionBothClaimWork() {
+        let state = CompanionState(
+            agent: snap(status: .active, presence: .live, secondsAgo: 1,
+                        lastTask: "tighten bubble copy")
+        )
+        let bubble = CompanionBubbleText.derive(from: state)
+        XCTAssertTrue(state.codexMotion.claimsWork)
+        XCTAssertTrue(bubble.claimsWork)
+        XCTAssertEqual(bubble.claimsWork, state.codexMotion.claimsWork)
+        XCTAssertFalse(bubble.text.lowercased().contains("sleep"))
+        XCTAssertFalse(bubble.text.lowercased().contains("resting"))
+        // Playback may become locomotion; claimsWork stays true.
+        let play = PetCodexMotion.atlasPlaybackMotion(
+            base: state.codexMotion, tSeconds: 5.0, agentSeed: state.id
+        )
+        XCTAssertTrue(play.claimsWork)
+        XCTAssertTrue(play.isLocomotion || play.isBusyInPlace)
+    }
+
+    func testObservedIdleNeverWalksOrClaimsWork() {
+        let state = CompanionState(
+            agent: snap(status: .idle, presence: .observed, secondsAgo: 2)
+        )
+        let bubble = CompanionBubbleText.derive(from: state)
+        XCTAssertFalse(state.codexMotion.claimsWork)
+        XCTAssertFalse(bubble.claimsWork)
+        XCTAssertEqual(bubble.text, "Resting")
+        let play = PetCodexMotion.atlasPlaybackMotion(
+            base: state.codexMotion, tSeconds: 10, agentSeed: "x"
+        )
+        XCTAssertEqual(play, .idle)
+        XCTAssertFalse(play.isLocomotion)
+    }
+
+    func testCyclePresentBusyAlignsBubbleAndMotion() {
+        let now = Date()
+        let summary = AgentActivitySummary(agents: [
+            snap(id: "science", status: .midTask, presence: .live, secondsAgo: 1,
+                 lastTask: "phase A", now: now),
+        ], scannedAt: now)
+        let result = DesktopCompanionCycle.present(summary: summary, now: now)
+        let p = result.presentation
+        XCTAssertTrue(p.bubble.claimsWork)
+        XCTAssertTrue(p.motion.claimsWork)
+        XCTAssertEqual(p.bubble.claimsWork, p.motion.claimsWork)
+        XCTAssertFalse(p.bubble.text.isEmpty)
+        if p.motion == .running {
+            let play = PetCodexMotion.atlasPlaybackMotion(
+                base: p.motion, tSeconds: 3.0, agentSeed: "science"
+            )
+            XCTAssertTrue(play.isLocomotion)
+        }
+    }
 }
 
 // MARK: - Desktop companion selector

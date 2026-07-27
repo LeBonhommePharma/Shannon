@@ -101,10 +101,11 @@ public enum CompanionBubbleText {
         let motion = signals.motion
         let mood = signals.mood
 
+        let content: CompanionBubbleContent
         // 1. Collapse / failed — outranks celebration and work claims.
         // Mood is always wary so copy never launders as idle/resting (T3).
         if motion == .failed || mood == .wary {
-            return CompanionBubbleContent(
+            content = CompanionBubbleContent(
                 text: "Something feels off",
                 detail: nonWorkDetail(
                     who: who,
@@ -117,21 +118,19 @@ public enum CompanionBubbleText {
                 mood: .wary
             )
         }
-
         // 2. Waiting / pending ask — never "working".
-        if motion == .waiting || signals.hasPendingAsk || signals.status == .blocked {
-            return CompanionBubbleContent(
+        else if motion == .waiting || signals.hasPendingAsk || signals.status == .blocked {
+            content = CompanionBubbleContent(
                 text: "Needs you",
                 detail: task ?? "Waiting for approval",
                 claimsWork: false,
                 motion: .waiting,
-                mood: mood
+                mood: mood == .wary ? .wary : mood
             )
         }
-
         // 3. Approval celebration — short, not a work claim.
-        if motion == .waving || motion == .jumping || mood == .happy {
-            return CompanionBubbleContent(
+        else if motion == .waving || motion == .jumping || mood == .happy {
+            content = CompanionBubbleContent(
                 text: "Approved!",
                 detail: who,
                 claimsWork: false,
@@ -139,23 +138,22 @@ public enum CompanionBubbleText {
                 mood: .happy
             )
         }
-
         // 4. Live work only when motion/mood honestly claim it.
-        let mayClaimWork = signals.presence.canBeBusy
-            && (motion.claimsWork || mood.claimsWork)
-        if mayClaimWork {
-            return CompanionBubbleContent(
-                text: "On it",
+        // Preserve locomotion motions (running-left/right) — do not collapse to
+        // busy-in-place `.running` or bubble/motion vocabulary drifts.
+        else if signals.presence.canBeBusy && (motion.claimsWork || mood.claimsWork) {
+            let workMotion: PetCodexMotion = motion.claimsWork ? motion : .running
+            content = CompanionBubbleContent(
+                text: workPrimary(task: task),
                 detail: task ?? who,
                 claimsWork: true,
-                motion: .running,
+                motion: workMotion,
                 mood: .alert
             )
         }
-
         // 5. Review — finished, not busy. Prefer task, else outcome evidence.
-        if motion == .review {
-            return CompanionBubbleContent(
+        else if motion == .review {
+            content = CompanionBubbleContent(
                 text: "Ready for review",
                 detail: task ?? outcomeEvidence(signals.lastOutcome) ?? who,
                 claimsWork: false,
@@ -163,10 +161,9 @@ public enum CompanionBubbleText {
                 mood: mood
             )
         }
-
         // 6. Offline — must not look busy.
-        if signals.presence == .offline || mood == .sleepy {
-            return CompanionBubbleContent(
+        else if signals.presence == .offline || mood == .sleepy {
+            content = CompanionBubbleContent(
                 text: "Sleeping",
                 detail: softStatus(signals.statusLine) ?? who,
                 claimsWork: false,
@@ -174,10 +171,9 @@ public enum CompanionBubbleText {
                 mood: .sleepy
             )
         }
-
         // 7. Observed (window focus only) — rest, never work.
-        if signals.presence == .observed {
-            return CompanionBubbleContent(
+        else if signals.presence == .observed {
+            content = CompanionBubbleContent(
                 text: "Resting",
                 detail: softStatus(signals.statusLine) ?? "Seen nearby",
                 claimsWork: false,
@@ -185,15 +181,41 @@ public enum CompanionBubbleText {
                 mood: mood == .sleepy ? .sleepy : .idle
             )
         }
-
         // 8. Live idle / default rest.
+        else {
+            content = CompanionBubbleContent(
+                text: "Resting",
+                detail: task ?? who,
+                claimsWork: false,
+                motion: .idle,
+                mood: mood == .sleepy ? .sleepy : .idle
+            )
+        }
+        return ensureNonEmptyPrimary(content, fallbackWho: who)
+    }
+
+    /// Primary line is never empty (chrome always has readable copy).
+    private static func ensureNonEmptyPrimary(
+        _ content: CompanionBubbleContent,
+        fallbackWho: String
+    ) -> CompanionBubbleContent {
+        let trimmed = content.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return content }
         return CompanionBubbleContent(
-            text: "Resting",
-            detail: task ?? who,
-            claimsWork: false,
-            motion: .idle,
-            mood: mood == .sleepy ? .sleepy : .idle
+            text: content.claimsWork ? "On it" : "Resting",
+            detail: content.detail ?? fallbackWho,
+            claimsWork: content.claimsWork,
+            motion: content.motion,
+            mood: content.mood
         )
+    }
+
+    /// Busy primary: short task snippet when scannable, else "On it".
+    private static func workPrimary(task: String?) -> String {
+        guard let task else { return "On it" }
+        // Keep primary scannable; long tasks stay in detail.
+        if task.count <= 28 { return task }
+        return "On it"
     }
 
     /// Convenience over a resolved companion state.
@@ -214,17 +236,31 @@ public enum CompanionBubbleText {
 
     // MARK: - Internals
 
-    /// Truncate task for bubble; empty → nil.
+    /// Truncate task for bubble; empty / bare status tokens → nil.
     private static func softTask(_ raw: String) -> String? {
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return nil }
+        guard !t.isEmpty, !isBareBubbleToken(t) else { return nil }
         if t.count <= 48 { return t }
         return String(t.prefix(45)) + "…"
     }
 
     private static func softStatus(_ line: String) -> String? {
         let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? nil : t
+        guard !t.isEmpty, !isBareBubbleToken(t) else { return nil }
+        return t
+    }
+
+    /// Placeholders that must not appear as bubble detail ("live", "working", …).
+    public static func isBareBubbleToken(_ line: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if t.isEmpty { return true }
+        switch t {
+        case "live", "working", "idle", "busy", "active", "running",
+             "online", "offline", "…", "...", "-":
+            return true
+        default:
+            return false
+        }
     }
 
     /// Honest secondary line for failed/wary: task → outcome evidence → status → who.

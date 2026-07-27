@@ -34,6 +34,60 @@ public enum PetCodexMotion: String, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// Foot-walk atlas rows (`running-left` / `running-right`) vs busy-in-place `running`.
+    public var isLocomotion: Bool {
+        switch self {
+        case .runningLeft, .runningRight: return true
+        default: return false
+        }
+    }
+
+    /// Busy-in-place work row (atlas row 7) — not foot locomotion.
+    public var isBusyInPlace: Bool { self == .running }
+
+    /// Seconds per foot-walk direction half-cycle on the desktop companion.
+    public static let locomotionStrideSeconds: Double = 2.4
+
+    /// Atlas playback motion for a resolved base motion.
+    ///
+    /// - Busy-in-place `running` can intentionally become `running-left` /
+    ///   `running-right` for desktop walk polish (phase-stable on `tSeconds`).
+    /// - Already-directed locomotion is preserved.
+    /// - Non-work motions are unchanged (never invent walk for idle/wait/fail).
+    /// - `allowLocomotion: false` keeps busy-in-place (procedural / Reduce Motion).
+    public static func atlasPlaybackMotion(
+        base: PetCodexMotion,
+        tSeconds: Double,
+        agentSeed: String = "",
+        allowLocomotion: Bool = true
+    ) -> PetCodexMotion {
+        switch base {
+        case .runningLeft, .runningRight:
+            return base
+        case .running:
+            guard allowLocomotion else { return .running }
+            return locomotionDirection(tSeconds: tSeconds, agentSeed: agentSeed)
+        default:
+            return base
+        }
+    }
+
+    /// Phase-stable left/right foot-walk from wall time + agent seed.
+    public static func locomotionDirection(
+        tSeconds: Double,
+        agentSeed: String = ""
+    ) -> PetCodexMotion {
+        let period = max(0.5, locomotionStrideSeconds)
+        let t = max(0.0, tSeconds)
+        var hash = 0
+        for b in agentSeed.utf8 {
+            hash = hash &* 31 &+ Int(b)
+        }
+        // Bucket flips every `period` seconds; seed biases start side.
+        let bucket = Int(floor(t / period)) &+ (hash & 1)
+        return (bucket & 1) == 0 ? .runningRight : .runningLeft
+    }
+
     /// Evidence inputs for deterministic motion selection.
     public struct Signals: Sendable, Equatable {
         public var presence: AgentPresence

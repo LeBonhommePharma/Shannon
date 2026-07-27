@@ -524,19 +524,25 @@ struct DesktopCompanionView: View {
 @ViewBuilder
 private func bubbleChrome(_ b: CompanionBubbleContent) -> some View {
     let radius = CGFloat(DesktopCompanionWindowPolicy.bubbleCornerRadius)
-    VStack(alignment: .leading, spacing: 2) {
+    VStack(alignment: .leading, spacing: 3) {
         Text(b.text)
-            .font(.shannonMenuBody)
+            .font(.shannonMenuBody.weight(.medium))
             .foregroundStyle(bubblePrimaryColor(b))
-        if let detail = b.detail {
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("shannon.pet.bubble.primary")
+        if let detail = b.detail, !detail.isEmpty {
             Text(detail)
                 .font(.shannonMenuFootnote)
                 .foregroundStyle(Color.shannonSecondary)
                 .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("shannon.pet.bubble.detail")
         }
     }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 7)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .frame(minWidth: 96, maxWidth: 240, alignment: .leading)
     .background {
         ZStack {
             PillMaterial(kind: .popover)
@@ -556,6 +562,8 @@ private func bubbleChrome(_ b: CompanionBubbleContent) -> some View {
                 )
         }
     }
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("shannon.pet.bubble")
 }
 
 /// Mood-aware primary text (replaces former colored stroke as attention cue).

@@ -891,6 +891,63 @@ final class PetAtlasFrameTests: XCTestCase {
         XCTAssertTrue(PetAtlasFrame.advances(motion: "waiting", from: 0, to: 1, fps: 8))
     }
 
+    /// Foot-walk rows: correct atlas mapping + frame advance at default FPS.
+    func testWalkLocomotionRowsMapAndAdvance() {
+        let left = PetAtlasFrame.select(motion: "running-left", tSeconds: 0, fps: 8)
+        let right = PetAtlasFrame.select(motion: "running-right", tSeconds: 0, fps: 8)
+        XCTAssertEqual(left.row, 2)
+        XCTAssertEqual(right.row, 1)
+        XCTAssertEqual(left.framesInRow, 8)
+        XCTAssertEqual(right.framesInRow, 8)
+        XCTAssertEqual(left.motion, "running-left")
+        XCTAssertEqual(right.motion, "running-right")
+        // Busy-in-place is a different row (7) — must not be confused with walk.
+        let busy = PetAtlasFrame.select(motion: "running", tSeconds: 0, fps: 8)
+        XCTAssertEqual(busy.row, 7)
+        XCTAssertNotEqual(busy.row, left.row)
+        XCTAssertNotEqual(busy.row, right.row)
+
+        XCTAssertTrue(PetAtlasFrame.advances(motion: "running-left", from: 0, to: 0.2, fps: 8))
+        XCTAssertTrue(PetAtlasFrame.advances(motion: "running-right", from: 0, to: 0.2, fps: 8))
+        // Phase-stable: same t → same frame.
+        let a = PetAtlasFrame.select(motion: "running-left", tSeconds: 1.25, fps: 8)
+        let b = PetAtlasFrame.select(motion: "running-left", tSeconds: 1.25, fps: 8)
+        XCTAssertEqual(a, b)
+    }
+
+    func testAtlasPlaybackTurnsBusyRunningIntoLocomotion() {
+        let base = PetCodexMotion.running
+        let play = PetCodexMotion.atlasPlaybackMotion(
+            base: base, tSeconds: 0.1, agentSeed: "science", allowLocomotion: true
+        )
+        XCTAssertTrue(play.isLocomotion, "desktop walk polish should select left/right")
+        XCTAssertTrue(play.claimsWork)
+        // Reduce Motion / procedural path keeps busy-in-place.
+        let still = PetCodexMotion.atlasPlaybackMotion(
+            base: base, tSeconds: 0.1, agentSeed: "science", allowLocomotion: false
+        )
+        XCTAssertEqual(still, .running)
+        XCTAssertTrue(still.isBusyInPlace)
+        // Non-work never invents walk.
+        XCTAssertEqual(
+            PetCodexMotion.atlasPlaybackMotion(base: .idle, tSeconds: 9, allowLocomotion: true),
+            .idle
+        )
+        XCTAssertEqual(
+            PetCodexMotion.atlasPlaybackMotion(base: .waiting, tSeconds: 9, allowLocomotion: true),
+            .waiting
+        )
+        // Already directed locomotion is preserved.
+        XCTAssertEqual(
+            PetCodexMotion.atlasPlaybackMotion(base: .runningLeft, tSeconds: 99),
+            .runningLeft
+        )
+        // Phase-stable direction for same bucket.
+        let d0 = PetCodexMotion.locomotionDirection(tSeconds: 0.0, agentSeed: "x")
+        let d1 = PetCodexMotion.locomotionDirection(tSeconds: 0.1, agentSeed: "x")
+        XCTAssertEqual(d0, d1)
+    }
+
     func testUnknownFallsBackToIdle() {
         let fr = PetAtlasFrame.select(motion: "not-a-motion", tSeconds: 0)
         XCTAssertEqual(fr.motion, "idle")

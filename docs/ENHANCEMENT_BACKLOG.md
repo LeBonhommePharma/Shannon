@@ -217,6 +217,33 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Priority:** P2
 - **Done:** Fleet `bridgeAggregate` uses `EntropyProvenance.resolve` (bridge → gate → absent) with `activity.agentEntropy`; multi-agent rows keep `resolveForAgent` + gate map. Demo collapse never published; gate-measured H publishes when resolve falls through. Tests in `CloudPublisherProvenanceTests` (demo+gate, multi-agent resolveForAgent).
 
+### - [ ] ENH-023: Remote companion answer must not clearAsk when gate resolve fails
+
+- **Why:** `CloudPublishing.applyRemoteAnswer` always `clearAsk` after `try? resolveAsync`, swallowing errors — local `AgentActivity.resolve` only clears on success. Phone/watch can retract CloudKit while Mac pill stops pulsing though agent remains blocked at dead socket.
+- **Area:** `Pill/Sources/ShannonPill/CloudPublishing.swift` `applyRemoteAnswer`, `GateApprovalClient`, optional `lastResolveError` surface
+- **First slice:** `clearAsk` only after successful resolve; on failure keep ask + visible error; unit/integration test with failing socket path.
+- **Priority:** P0
+
+### - [ ] ENH-024: AirPods tertiary stem dismiss notifications is real or removed
+
+- **Why:** `PhoneModel.handleStemPress` tertiary → `dismissAllNotifications()` only fires haptics — no notification mutation or Mac retract. Mapping claims dismiss effect.
+- **Area:** `iOS/Sources/ShannonPhone/PhoneModel.swift`, notification mirror if retract needed
+- **First slice:** Optimistic local dismiss + optional retract, or remove tertiary mapping until real.
+- **Priority:** P3
+
+### - [ ] ENH-025: Phone freeform voice: implement Mac query transport or drop claim
+
+- **Why:** `PhoneModel.handle` freeform / non-awaiting confirm is haptic-only with comment “Mac owns interpretation”; no CloudKit freeform/`RemoteCommand` path. Dead promise.
+- **Area:** `PhoneModel.handle`, `ShannonStore.send`, optional Core command type, Mac consumer
+- **First slice:** Document honest no-op **or** minimal freeform RemoteCommand + Mac consume; show previewCommand if kept.
+- **Priority:** P3
+
+---
+
+## Investigation notes
+
+- **2026-07-26 (Grok 4.5 OS swarm):** macOS audit filed **ENH-023** (remote clearAsk fail-open). iOS filed **ENH-024** (stem dismiss no-op) and **ENH-025** (freeform dead). Cross-check: not ENH-018…022 (closed multi-device honesty). UI dual-copy/gate chrome → `docs/MULTI_OS_UX_BACKLOG.md` UX-035…052.
+
 ---
 
 ## Out of scope for this backlog (do not pick here)

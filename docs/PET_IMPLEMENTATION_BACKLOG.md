@@ -98,6 +98,31 @@ Test baseline (must stay green while implementing):
   **Done:** Pill README “Pet paths (operators)” + `hub/pet_manager.py` /
   `hub/pet_paths.py` docstrings with `SHANNON_PETS=$HOME/.codex/pets` layout.
 
+- [ ] **E6 — Mount pad PetRail (or document deferred / hide dead entry)**  
+  Observation (2026-07-26 OS swarm iPad): `PetRailView`, pencil hosting, and
+  annotation stamp depend on `PetStore` / `PetInteractionEngine`, but
+  `ShannonPadApp` / `AgentHubView` never inject store or place the rail —
+  pad pet UI is orphan source vs shipped three-column hub.
+  Work: wire `@State`/environment PetStore + optional rail above feed when
+  enabled; **or** document deferred + stub so dead entry points do not imply
+  live chrome. Structural presence test when mounted.
+  **Priority:** P2 · Platforms: iPadOS
+
+- [ ] **E7 — Phone PetHome + App Group `pet.widget.entry` writer**  
+  Observation (2026-07-26 OS swarm iOS): `ShannonPhoneApp` root is only
+  `HomeView` — no PetStore/PetHome. `PetWidgetProvider` reads App Group
+  `pet.widget.entry` but no phone writer (watch has pet complication reload).
+  Pet phone + pet widget are scaffold-only.
+  Work: follow pet backlog path — store + write entry + reload
+  `ShannonPetWidget` kind; or demote widget until live.
+  **Priority:** P3 · Platforms: iOS
+
+---
+
+## Investigation notes
+
+- **2026-07-26 (Grok 4.5 OS swarm):** Filed open **E6** (pad PetRail unmounted) and **E7** (phone pet widget data path) from iPadOS/iOS audits. Multi-OS UX/ENH items land in sibling backlogs.
+
 ---
 
 ## Optimizations

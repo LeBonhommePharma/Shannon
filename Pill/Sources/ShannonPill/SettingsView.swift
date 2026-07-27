@@ -27,7 +27,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 16) {
                     keepAwakeSection
                     pillSection
                     desktopSection
@@ -38,10 +38,13 @@ struct SettingsView: View {
                     tipsSection
                     dataSection
                 }
-                .padding(16)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            // No live pet animation inside Settings chrome (anti-thrash).
+            .animation(nil, value: store.desktopPetId)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             footer
@@ -355,50 +358,63 @@ struct SettingsView: View {
                 .font(.shannonMenuSection)
                 .foregroundStyle(Color.shannonTertiary)
                 .tracking(0.6)
+                .accessibilityAddTraits(.isHeader)
             content()
-                .padding(10)
+                .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.white.opacity(0.05))
+                        .fill(Color.white.opacity(0.055))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
                 )
         }
     }
 
     private var footer: some View {
-        HStack {
-            Text("Changes apply immediately")
-                .font(.shannonMenuFootnote)
-                .foregroundStyle(Color.shannonTertiary)
-                .lineLimit(1)
-                .layoutPriority(0)
-            Spacer(minLength: 8)
-            Button("Done", action: onDone)
-                .font(.shannonMenuBody)
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.shannonAccent)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.shannonAccent.opacity(0.15))
-                )
-                // Never compress Done under a long status line.
-                .fixedSize(horizontal: true, vertical: true)
-                .layoutPriority(10)
-                .accessibilityLabel("Done")
-                .accessibilityHint("Closes Shannon Settings")
+        VStack(spacing: 0) {
+            // Clear HUD separation so Done is never visually lost in the scroll.
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .frame(height: 0.5)
+            HStack(alignment: .center, spacing: 10) {
+                Text("Changes apply immediately")
+                    .font(.shannonMenuFootnote)
+                    .foregroundStyle(Color.shannonTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .layoutPriority(0)
+                Spacer(minLength: 8)
+                Button("Done", action: onDone)
+                    .font(.shannonMenuBody.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.shannonAccent)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.shannonAccent.opacity(0.18))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.shannonAccent.opacity(0.35), lineWidth: 0.5)
+                    )
+                    // Never compress Done under a long status line.
+                    .fixedSize(horizontal: true, vertical: true)
+                    .layoutPriority(10)
+                    .accessibilityLabel("Done")
+                    .accessibilityHint("Closes Shannon Settings")
+                    .accessibilityIdentifier("shannon.settings.done")
+            }
+            .padding(.horizontal, 16)
+            // Center in a reserved bar — avoid padding + hard height that clipped
+            // the control when system font metrics ran slightly tall.
+            .frame(maxWidth: .infinity, minHeight: Self.footerMinHeight)
+            .frame(height: Self.footerMinHeight)
+            .background(Color.black.opacity(0.28))
         }
-        .padding(.horizontal, 16)
-        // Center in a reserved bar — avoid padding + hard height that clipped
-        // the control when system font metrics ran slightly tall.
-        .frame(maxWidth: .infinity, minHeight: Self.footerMinHeight)
-        .frame(height: Self.footerMinHeight)
-        .background(Color.black.opacity(0.22))
         .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(1)
     }

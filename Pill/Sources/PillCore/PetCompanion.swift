@@ -104,21 +104,21 @@ public extension CompanionKind {
         case .owl:      // still, deliberate, a rare wide blink
             return .init(breathPeriod: 2.6, breathPhase: 0.00, blinkPeriod: 6.4,
                          doubleBlink: false, swayAmp: 0.10, alertEyeWiden: 1.45)
-        case .raven:    // quick, nervous, double-blinks
+        case .raven:    // quick, nervous, double-blinks — sway kept modest
             return .init(breathPeriod: 1.7, breathPhase: 0.15, blinkPeriod: 3.8,
-                         doubleBlink: true,  swayAmp: 0.32, alertEyeWiden: 1.30)
+                         doubleBlink: true,  swayAmp: 0.26, alertEyeWiden: 1.30)
         case .fox:      // light and alert on its feet
             return .init(breathPeriod: 1.9, breathPhase: 0.35, blinkPeriod: 4.2,
-                         doubleBlink: false, swayAmp: 0.30, alertEyeWiden: 1.35)
-        case .dolphin:  // smooth, bobbing, slow single eye
+                         doubleBlink: false, swayAmp: 0.24, alertEyeWiden: 1.35)
+        case .dolphin:  // smooth bob — large sway read as scatter on multi-pet boards
             return .init(breathPeriod: 2.2, breathPhase: 0.55, blinkPeriod: 5.6,
-                         doubleBlink: false, swayAmp: 0.42, alertEyeWiden: 1.25)
+                         doubleBlink: false, swayAmp: 0.28, alertEyeWiden: 1.25)
         case .wolf:     // composed, steady, a hard alert stare
             return .init(breathPeriod: 2.4, breathPhase: 0.70, blinkPeriod: 5.8,
                          doubleBlink: false, swayAmp: 0.14, alertEyeWiden: 1.45)
         case .beaver:   // busy worker, fidgets, blinks in pairs
             return .init(breathPeriod: 2.0, breathPhase: 0.85, blinkPeriod: 4.0,
-                         doubleBlink: true,  swayAmp: 0.36, alertEyeWiden: 1.20)
+                         doubleBlink: true,  swayAmp: 0.26, alertEyeWiden: 1.20)
         case .gear:     // machinery — the animator ignores lungs and lids
             return .init(breathPeriod: 2.0, breathPhase: 0.00, blinkPeriod: 5.0,
                          doubleBlink: false, swayAmp: 0.0,  alertEyeWiden: 1.0)
@@ -301,7 +301,38 @@ public struct CompanionFrame: Sendable, Equatable {
 /// does not restart mid-breath.
 ///
 /// Pure and synchronous so the curves are unit-testable without a view.
+///
+/// **Design envelope (32×32 space):** body transforms stay inside these bounds
+/// so multi-companion boards never “scatter” (runaway sway/bounce/lean that
+/// clips or looks like pets fly apart).
 public enum CompanionMotion {
+
+    /// Max |sway| in design units (idle personality + wary tremble).
+    public static let maxAbsSway: Double = 0.55
+    /// Max |lean| in −1…1 shear units (applied as lean×5° in art).
+    public static let maxAbsLean: Double = 0.65
+    /// Vertical offset range (negative = up). Happy bounce lives here.
+    public static let yOffsetRange: ClosedRange<Double> = -5.0 ... 1.0
+    /// Breath scale envelope.
+    public static let breathRange: ClosedRange<Double> = 0.94 ... 1.06
+    /// Eyelid aperture ceiling (alert widen).
+    public static let maxEyeOpen: Double = 1.85
+    /// Head droop ceiling (sleepy).
+    public static let maxHeadDroop: Double = 3.5
+
+    /// Clamp a raw frame into the documented design envelope.
+    public static func clamp(_ frame: CompanionFrame) -> CompanionFrame {
+        var f = frame
+        f.breath = min(max(f.breath, breathRange.lowerBound), breathRange.upperBound)
+        f.eyeOpen = min(max(f.eyeOpen, 0), maxEyeOpen)
+        f.yOffset = min(max(f.yOffset, yOffsetRange.lowerBound), yOffsetRange.upperBound)
+        f.sway = min(max(f.sway, -maxAbsSway), maxAbsSway)
+        f.lean = min(max(f.lean, -maxAbsLean), maxAbsLean)
+        f.headDroop = min(max(f.headDroop, 0), maxHeadDroop)
+        if f.sparkle < 0 { f.sparkle = 0 }
+        if f.sparkle > 1 { f.sparkle = 1 }
+        return f
+    }
 
     /// Resolve the frame for a companion at time `t` (seconds, monotonic).
     ///
@@ -321,31 +352,32 @@ public enum CompanionMotion {
             f.breath  = 0.975 + 0.025 * sin(2 * .pi * (t / p.breathPeriod + p.breathPhase))
             f.eyeOpen = blink(t: t, period: p.blinkPeriod,
                               phase: p.breathPhase, double: p.doubleBlink)
-            // A slow lateral sway, offset from the breath, so idle reads as
-            // alive rather than as a mechanical pulse.
-            f.sway = p.swayAmp * sin(2 * .pi * (t / (p.breathPeriod * 2.3) + p.breathPhase))
+            // Slow lateral sway, offset from the breath — alive, not jitter.
+            // Cap amplitude so multi-pet boards stay coherent (no scatter).
+            let amp = min(p.swayAmp, maxAbsSway)
+            f.sway = amp * sin(2 * .pi * (t / (p.breathPeriod * 2.3) + p.breathPhase))
 
         case .alert:
-            // Tighter, shallower breath — attention, not exertion.
+            // Tighter, shallower breath — attention, not a full-body lunge.
             f.breath  = 0.99 + 0.01 * sin(2 * .pi * t / max(0.4, p.breathPeriod * 0.35))
             f.eyeOpen = p.alertEyeWiden
-            f.lean    = 1
-            f.yOffset = -0.5
+            // Partial lean only — lean=1 sheared hard and read as “scattered”.
+            f.lean    = 0.42
+            f.yOffset = -0.4
 
         case .wary:
-            // Eyes locked open — no blink at all — a fast shallow breath and a
-            // flinch backwards. Reads as "something is wrong", not "busy".
+            // Eyes locked open — no blink; shallow breath and a *gentle* flinch.
+            // Fast high-amp tremble was the broken “scatter” look on boards.
             f.breath  = 0.985 + 0.008 * sin(2 * .pi * t / 0.55)
-            f.eyeOpen = p.alertEyeWiden * 1.12
-            f.lean    = -0.55
-            // A fine tremble, an order of magnitude faster than any sway.
-            f.sway    = 0.22 * sin(2 * .pi * t / 0.13)
-            f.yOffset = -0.2
+            f.eyeOpen = min(p.alertEyeWiden * 1.12, maxEyeOpen)
+            f.lean    = -0.40
+            f.sway    = 0.10 * sin(2 * .pi * t / 0.28)
+            f.yOffset = -0.15
 
         case .happy:
             let u = min(max(happyElapsed / CompanionMood.happyDuration, 0), 1)
-            // Up 4pt and back down.
-            f.yOffset = -4 * sin(.pi * u)
+            // Bounce stays inside yOffsetRange (peak ≈ −3.8 design units).
+            f.yOffset = -3.8 * sin(.pi * u)
             f.breath  = 1 + 0.02 * sin(.pi * u)
             f.eyeOpen = 1.15
 
@@ -366,7 +398,7 @@ public enum CompanionMotion {
             f.lean      = 0
             f.sway      = 0
         }
-        return f
+        return clamp(f)
     }
 
     // MARK: Curves

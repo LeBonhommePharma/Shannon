@@ -144,6 +144,8 @@ public struct CompanionView: View {
                               in: &ctx,
                               size: sz)
         }
+        // Keep body transforms inside the glyph box (no scatter overflow).
+        .clipped()
     }
 }
 

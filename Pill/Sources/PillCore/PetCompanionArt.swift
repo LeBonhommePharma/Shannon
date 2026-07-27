@@ -43,20 +43,23 @@ public enum CompanionArt {
                  with: .color(agentColor.opacity(0.16)))
 
         // Body transform: breathe about the feet, bounce, sway, lean.
+        // Clamp again at draw time so callers with raw frames cannot scatter.
+        let cf = CompanionMotion.clamp(f)
         ctx.translateBy(x: 16 * s, y: 28 * s)
-        ctx.scaleBy(x: CGFloat(f.breath), y: CGFloat(f.breath))
-        ctx.translateBy(x: CGFloat(f.sway) * s, y: CGFloat(f.yOffset) * s)
-        if f.lean != 0 { ctx.rotate(by: .degrees(f.lean * 5)) }
+        ctx.scaleBy(x: CGFloat(cf.breath), y: CGFloat(cf.breath))
+        ctx.translateBy(x: CGFloat(cf.sway) * s, y: CGFloat(cf.yOffset) * s)
+        // lean is −maxAbsLean…maxAbsLean → at most ±3.25° (was ±5° at lean=1).
+        if cf.lean != 0 { ctx.rotate(by: .degrees(cf.lean * 5)) }
         ctx.translateBy(x: -16 * s, y: -28 * s)
 
         switch kind {
-        case .owl:     owl(&ctx, s, lw, f, pal)
-        case .raven:   raven(&ctx, s, lw, f, pal)
-        case .fox:     fox(&ctx, s, lw, f, pal)
-        case .dolphin: dolphin(&ctx, s, lw, f, pal)
-        case .wolf:    wolf(&ctx, s, lw, f, pal)
-        case .beaver:  beaver(&ctx, s, lw, f, pal)
-        case .gear:    gear(&ctx, s, lw, f, pal, agentColor)
+        case .owl:     owl(&ctx, s, lw, cf, pal)
+        case .raven:   raven(&ctx, s, lw, cf, pal)
+        case .fox:     fox(&ctx, s, lw, cf, pal)
+        case .dolphin: dolphin(&ctx, s, lw, cf, pal)
+        case .wolf:    wolf(&ctx, s, lw, cf, pal)
+        case .beaver:  beaver(&ctx, s, lw, cf, pal)
+        case .gear:    gear(&ctx, s, lw, cf, pal, agentColor)
         }
     }
 

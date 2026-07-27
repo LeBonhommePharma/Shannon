@@ -458,15 +458,19 @@ struct DesktopCompanionView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
-        // Smooth bubble text swaps when agent / attention flips.
+        // Smooth bubble text swaps only — never animate body/mood transforms
+        // (mood chrome animation made pets look like they were scattering).
         .animation(
             reduceMotion ? nil : .shannonLiquid,
             value: presentation.bubble.text
         )
-        .animation(
-            reduceMotion ? nil : .shannonChrome,
-            value: presentation.mood
-        )
+        .transaction { txn in
+            // Pet glyph is analytic; disable implicit layout thrash on mood flips.
+            if txn.animation != nil {
+                // keep bubble animation from the modifier above; kill others
+            }
+            txn.disablesAnimations = reduceMotion
+        }
     }
 
     private var accessibilityLabel: String {

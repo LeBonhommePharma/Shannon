@@ -288,15 +288,60 @@ final class CompanionMotionTests: XCTestCase {
                     let t = Double(i) * 0.037
                     let f = CompanionMotion.frame(kind: kind, mood: mood, t: t,
                                                   happyElapsed: t.truncatingRemainder(dividingBy: 0.4))
-                    XCTAssertTrue((0.9 ... 1.1).contains(f.breath), "\(kind)/\(mood) breath \(f.breath)")
+                    XCTAssertTrue(
+                        (CompanionMotion.breathRange).contains(f.breath),
+                        "\(kind)/\(mood) breath \(f.breath)"
+                    )
                     XCTAssertGreaterThanOrEqual(f.eyeOpen, 0, "\(kind)/\(mood)")
-                    XCTAssertLessThanOrEqual(f.eyeOpen, 2.0, "\(kind)/\(mood)")
-                    XCTAssertTrue((-1 ... 1).contains(f.lean), "\(kind)/\(mood) lean \(f.lean)")
-                    XCTAssertTrue((-6.0 ... 1.0).contains(f.yOffset), "\(kind)/\(mood)")
-                    XCTAssertLessThanOrEqual(abs(f.sway), 1.0, "\(kind)/\(mood) sway \(f.sway)")
+                    XCTAssertLessThanOrEqual(f.eyeOpen, CompanionMotion.maxEyeOpen, "\(kind)/\(mood)")
+                    XCTAssertLessThanOrEqual(abs(f.lean), CompanionMotion.maxAbsLean + 1e-12,
+                                             "\(kind)/\(mood) lean \(f.lean)")
+                    XCTAssertTrue(CompanionMotion.yOffsetRange.contains(f.yOffset),
+                                  "\(kind)/\(mood) yOffset \(f.yOffset)")
+                    XCTAssertLessThanOrEqual(abs(f.sway), CompanionMotion.maxAbsSway + 1e-12,
+                                             "\(kind)/\(mood) sway \(f.sway)")
                 }
             }
         }
+    }
+
+    /// Scatter regression: alert/wary must not use full-body lunge or high-Hz jitter.
+    func testAlertAndWaryMotionStayCoherentNotScattered() {
+        for kind in CompanionKind.allCases where kind != .gear {
+            let alert = CompanionMotion.frame(kind: kind, mood: .alert, t: 3.0)
+            XCTAssertGreaterThan(alert.lean, 0)
+            XCTAssertLessThanOrEqual(alert.lean, CompanionMotion.maxAbsLean)
+            // Full lean=1 was the broken “scatter” read on multi-pet boards.
+            XCTAssertLessThan(alert.lean, 0.7, "\(kind) alert lean too aggressive")
+
+            var maxWarySway = 0.0
+            for i in 0 ..< 200 {
+                let f = CompanionMotion.frame(kind: kind, mood: .wary, t: Double(i) * 0.02)
+                maxWarySway = max(maxWarySway, abs(f.sway))
+                XCTAssertLessThan(f.lean, 0, "\(kind) wary should flinch back")
+            }
+            // High-amp tremble (~0.22) read as pets flying apart.
+            XCTAssertLessThanOrEqual(maxWarySway, 0.16, "\(kind) wary sway \(maxWarySway)")
+        }
+    }
+
+    func testClampEnforcesDocumentedBounds() {
+        var wild = CompanionFrame()
+        wild.breath = 2.5
+        wild.eyeOpen = 9
+        wild.yOffset = -40
+        wild.sway = 12
+        wild.lean = 3
+        wild.headDroop = 99
+        wild.sparkle = 4
+        let c = CompanionMotion.clamp(wild)
+        XCTAssertEqual(c.breath, CompanionMotion.breathRange.upperBound)
+        XCTAssertEqual(c.eyeOpen, CompanionMotion.maxEyeOpen)
+        XCTAssertEqual(c.yOffset, CompanionMotion.yOffsetRange.lowerBound)
+        XCTAssertEqual(c.sway, CompanionMotion.maxAbsSway)
+        XCTAssertEqual(c.lean, CompanionMotion.maxAbsLean)
+        XCTAssertEqual(c.headDroop, CompanionMotion.maxHeadDroop)
+        XCTAssertEqual(c.sparkle, 1)
     }
 
     /// A blink that never fires is the failure mode that makes eyes look

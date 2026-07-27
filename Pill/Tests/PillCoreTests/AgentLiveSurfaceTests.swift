@@ -462,4 +462,97 @@ final class AgentLiveSurfaceTests: XCTestCase {
         )
         XCTAssertEqual(n, 1)
     }
+
+    // MARK: Grok Build conversational HUD (AgentNotch-class reply progress)
+
+    /// Busy Grok Build with a reply-style lastTask and no tool event must surface
+    /// conversational progress — not bare "working" / empty / coding-tool only.
+    func testGrokBuildWorkingPrefersConversationalLastTask() {
+        let grok = agent(
+            id: "grok_build",
+            name: "Grok Build",
+            status: .midTask,
+            presence: .live,
+            task: "I'll tighten CompanionMotion sway bounds next",
+            secondsAgo: 3
+        )
+        let surface = AgentLiveSurfaceLogic.resolve(
+            agent: grok,
+            activity: [],
+            now: now
+        )
+        XCTAssertEqual(surface.attention, .working)
+        XCTAssertEqual(surface.toolKind, .none)
+        XCTAssertFalse(surface.activityLine.isEmpty, "must not be empty")
+        XCTAssertNotEqual(surface.activityLine.lowercased(), "working")
+        XCTAssertNotEqual(surface.activityLine.lowercased(), "live")
+        XCTAssertTrue(
+            surface.activityLine.localizedCaseInsensitiveContains("CompanionMotion")
+                || surface.activityLine.localizedCaseInsensitiveContains("sway")
+                || surface.activityLine.localizedCaseInsensitiveContains("tighten"),
+            surface.activityLine
+        )
+        XCTAssertTrue(surface.collapsedFocus.contains("Grok"), surface.collapsedFocus)
+        // Dual-HUD: badge + collapsed must not invent a coding tool verb.
+        let badge = AgentLiveSurfaceLogic.badgeLabel(
+            surface: surface,
+            fallbackStatusLine: "mid-task"
+        )
+        XCTAssertFalse(badge.lowercased().hasPrefix("editing"), badge)
+        XCTAssertFalse(badge.lowercased().hasPrefix("reading"), badge)
+    }
+
+    /// Live idle Grok with a fresh status activity line uses that text over "live".
+    func testGrokBuildLiveIdleUsesReplyStyleActivityNotBareLive() {
+        let grok = agent(
+            id: "grok_build",
+            name: "Grok Build",
+            status: .idle,
+            presence: .live,
+            task: "",
+            secondsAgo: 2
+        )
+        let surface = AgentLiveSurfaceLogic.resolve(
+            agent: grok,
+            activity: [
+                event(
+                    id: 9,
+                    agent: "grok_build",
+                    type: "status",
+                    label: "Drafting the Settings footer chrome next",
+                    secondsAgo: 1
+                ),
+            ],
+            now: now
+        )
+        // Idle + live + no tool → idle attention, but activity line is conversational.
+        XCTAssertEqual(surface.attention, .idle)
+        XCTAssertNotEqual(surface.activityLine, "live")
+        XCTAssertFalse(surface.activityLine.isEmpty)
+        XCTAssertTrue(
+            surface.activityLine.localizedCaseInsensitiveContains("Settings")
+                || surface.activityLine.localizedCaseInsensitiveContains("footer")
+                || surface.activityLine.localizedCaseInsensitiveContains("Drafting"),
+            surface.activityLine
+        )
+    }
+
+    func testBareStatusTokensRejectedAsConversation() {
+        XCTAssertTrue(AgentLiveSurfaceLogic.isBareStatusToken("live"))
+        XCTAssertTrue(AgentLiveSurfaceLogic.isBareStatusToken("WORKING"))
+        XCTAssertTrue(AgentLiveSurfaceLogic.isBareStatusToken("  idle  "))
+        XCTAssertFalse(AgentLiveSurfaceLogic.isBareStatusToken("Checking entropy collapse"))
+        let empty = AgentLiveSurfaceLogic.conversationalProgressLine(
+            lastTask: "live",
+            event: nil,
+            activityFresh: false
+        )
+        XCTAssertTrue(empty.isEmpty)
+        let real = AgentLiveSurfaceLogic.conversationalProgressLine(
+            lastTask: "Checking entropy collapse on the gate path",
+            event: nil,
+            activityFresh: false
+        )
+        XCTAssertTrue(real.localizedCaseInsensitiveContains("entropy"), real)
+    }
 }

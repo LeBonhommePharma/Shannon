@@ -195,11 +195,19 @@ public enum AgentLiveSurfaceLogic {
                 lastTask: agent.lastTask,
                 activityFresh: activityFresh
             )
+            // Tool-kind: only claim a coding tool when activity is fresh *and*
+            // classified. Conversational / reply-style progress stays .none so
+            // the HUD shows session text (AgentNotch-class glance), not "Working".
+            let kind: AgentToolKind = {
+                if activityFresh, tool != .none { return tool }
+                if workingBusy, tool == .none { return .none }
+                return activityFresh ? tool : .other
+            }()
             return AgentLiveSurface(
                 agentId: agent.id,
                 displayName: name,
                 attention: .working,
-                toolKind: activityFresh ? tool : .other,
+                toolKind: kind,
                 activityLine: line,
                 usage: usageIfReal(usage),
                 needsYou: false,
@@ -208,9 +216,19 @@ public enum AgentLiveSurfaceLogic {
         }
 
         if agent.presence == .live {
-            let line = taskFresh
-                ? AgentActivitySnapshot.shorten(agent.lastTask, max: 42)
-                : "live"
+            // Prefer conversational reply / session progress over bare "live".
+            let conversational = conversationalProgressLine(
+                lastTask: agent.lastTask,
+                event: latest,
+                activityFresh: activityFresh
+            )
+            let line: String = {
+                if !conversational.isEmpty { return conversational }
+                if taskFresh {
+                    return AgentActivitySnapshot.shorten(agent.lastTask, max: 42)
+                }
+                return "live"
+            }()
             return AgentLiveSurface(
                 agentId: agent.id,
                 displayName: name,
@@ -224,12 +242,20 @@ public enum AgentLiveSurfaceLogic {
         }
 
         if agent.presence == .observed, taskFresh {
+            let conversational = conversationalProgressLine(
+                lastTask: agent.lastTask,
+                event: latest,
+                activityFresh: activityFresh
+            )
+            let line = !conversational.isEmpty
+                ? conversational
+                : AgentActivitySnapshot.shorten(agent.lastTask, max: 42)
             return AgentLiveSurface(
                 agentId: agent.id,
                 displayName: name,
                 attention: .idle,
                 toolKind: .none,
-                activityLine: AgentActivitySnapshot.shorten(agent.lastTask, max: 42),
+                activityLine: line,
                 usage: usageIfReal(usage),
                 needsYou: false,
                 isFinished: false
@@ -605,11 +631,48 @@ public enum AgentLiveSurfaceLogic {
                 if target.isEmpty { return tool.verb }
                 return "\(tool.verb) \(target)"
             }
-            if !raw.isEmpty { return raw }
+            // Tool-less fresh activity: treat as conversational / session progress.
+            if !raw.isEmpty, !isBareStatusToken(raw) { return raw }
+        }
+        // Prefer lastTask / reply-style wording before generic "working".
+        let conversational = conversationalProgressLine(
+            lastTask: lastTask,
+            event: activityFresh ? event : nil,
+            activityFresh: activityFresh
+        )
+        if !conversational.isEmpty { return conversational }
+        return tool != .none ? tool.verb : "working"
+    }
+
+    /// Session / reply-style progress when local observations provide real text.
+    ///
+    /// Never invents copy. Rejects empty and bare status tokens (`live`,
+    /// `working`, …) so the HUD does not treat placeholders as conversation.
+    public static func conversationalProgressLine(
+        lastTask: String,
+        event: GateDBReader.ActivityEvent?,
+        activityFresh: Bool
+    ) -> String {
+        if activityFresh, let event {
+            let raw = AgentActivitySnapshot.shorten(event.line, max: 42)
+            if !raw.isEmpty, !isBareStatusToken(raw) { return raw }
         }
         let task = AgentActivitySnapshot.shorten(lastTask, max: 42)
-        if !task.isEmpty { return task }
-        return tool != .none ? tool.verb : "working"
+        if !task.isEmpty, !isBareStatusToken(task) { return task }
+        return ""
+    }
+
+    /// True for placeholder tokens that must not win over real session text.
+    public static func isBareStatusToken(_ line: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if t.isEmpty { return true }
+        switch t {
+        case "live", "working", "idle", "busy", "active", "running",
+             "online", "…", "...", "-":
+            return true
+        default:
+            return false
+        }
     }
 
     /// Drop a leading tool verb from an activity label so the live line can

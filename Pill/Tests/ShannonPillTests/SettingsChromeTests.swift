@@ -36,5 +36,16 @@ final class SettingsChromeTests: XCTestCase {
         XCTAssertTrue(src.contains("DesktopPetSelector"), "easy pet selector model wired")
         XCTAssertTrue(src.contains("LazyVGrid"), "browseable pet grid, not bare menu only")
         XCTAssertTrue(src.contains("footerMinHeight"), src)
+        // HUD polish: Done is a reserved bar with explicit identity + no thrash anim.
+        XCTAssertTrue(src.contains("shannon.settings.done"), src)
+        XCTAssertTrue(src.contains("disablesAnimations"), "Settings chrome must not thrash")
+        XCTAssertTrue(src.contains("animation(nil"), "pet grid selection must not animate chrome")
+        // Scannable section hierarchy — real preference groups only.
+        for section in [
+            "Keep awake", "Notch pill", "Desktop companion", "Desktop pet",
+            "Floating glance", "Voice callouts", "Agents", "Tips", "Data",
+        ] {
+            XCTAssertTrue(src.contains(section), "missing section \(section)")
+        }
     }
 }

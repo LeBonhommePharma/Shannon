@@ -12,13 +12,13 @@ struct SettingsView: View {
     var onDone: () -> Void
 
     /// Fixed size — matches popover anti-pop discipline.
-    static let chromeWidth: CGFloat = 360
-    /// Room for glance + voice + pet package sections without thrash.
+    static let chromeWidth: CGFloat = 380
+    /// Room for glance + voice + **pet grid** without thrash.
     /// Tall enough that the pinned Done footer never collides with title-bar
     /// safe area or gets clipped by the hosting window.
-    static let chromeHeight: CGFloat = 580
+    static let chromeHeight: CGFloat = 640
     /// Pinned Done bar — reserved via `safeAreaInset`, never compressed.
-    static let footerMinHeight: CGFloat = 48
+    static let footerMinHeight: CGFloat = 52
 
     var body: some View {
         // Header + scroll body; Done is a bottom safe-area inset so the
@@ -179,43 +179,96 @@ struct SettingsView: View {
         }
     }
 
-    /// Package picker for the floating desktop companion (E1).
+    /// Browseable pet grid for the floating desktop companion (easy selector).
     private var desktopPetSection: some View {
-        settingsCard(title: "Desktop pet package") {
-            VStack(alignment: .leading, spacing: 8) {
+        settingsCard(title: "Desktop pet") {
+            VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Package")
+                    Text("Choose companion")
                         .font(.shannonMenuBody)
                         .foregroundStyle(Color.shannonPrimary)
-                    Text("Codex spritesheet used by the floating companion")
+                    Text("Tap a Codex / Shannon package — applies live when the pet is shown")
                         .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonTertiary)
                 }
-                Picker("Package", selection: $store.desktopPetId) {
-                    ForEach(availableDesktopPetIds, id: \.self) { petId in
-                        Text(petId).tag(petId)
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 8),
+                        GridItem(.flexible(), spacing: 8),
+                    ],
+                    spacing: 8
+                ) {
+                    ForEach(availableDesktopPetOptions) { option in
+                        petOptionCell(option)
                     }
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .controlSize(.small)
+                if let selected = availableDesktopPetOptions.first(where: {
+                    $0.petId == store.desktopPetId
+                }) {
+                    Text("Selected: \(selected.displayName)")
+                        .font(.shannonMenuFootnote)
+                        .foregroundStyle(Color.shannonAccent)
+                        .accessibilityLabel("Selected pet \(selected.displayName)")
+                }
             }
         }
     }
 
-    /// Discoverable package ids + default + current selection (always selectable).
-    private var availableDesktopPetIds: [String] {
-        var ids = PetPackageResolver.listPetPackageIds(requireV2: true)
-        let fallback = PetPackageResolver.defaultPetId
-        if !ids.contains(fallback) {
-            ids.insert(fallback, at: 0)
+    private func petOptionCell(_ option: DesktopPetOption) -> some View {
+        let selected = option.petId == store.desktopPetId
+        return Button {
+            store.desktopPetId = option.petId
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "pawprint.fill")
+                        .font(.shannonMenuBody)
+                        .foregroundStyle(selected ? Color.shannonAccent : Color.shannonSecondary)
+                    Text(option.displayName)
+                        .font(.shannonMenuBody)
+                        .foregroundStyle(Color.shannonPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    Spacer(minLength: 0)
+                }
+                Text(option.petId)
+                    .font(.shannonMenuMono)
+                    .foregroundStyle(Color.shannonTertiary)
+                    .lineLimit(1)
+                if !option.detail.isEmpty {
+                    Text(option.detail)
+                        .font(.shannonMenuFootnote)
+                        .foregroundStyle(Color.shannonTertiary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        selected
+                            ? Color.shannonAccent.opacity(0.14)
+                            : Color.white.opacity(0.04)
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(
+                        selected ? Color.shannonAccent.opacity(0.55) : Color.white.opacity(0.06),
+                        lineWidth: selected ? 1.0 : 0.5
+                    )
+            )
         }
-        let current = store.desktopPetId
-        if !ids.contains(current) {
-            ids.append(current)
-            ids.sort()
-        }
-        return ids
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(option.displayName) pet package")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// Discoverable packages + default + current selection (always selectable).
+    private var availableDesktopPetOptions: [DesktopPetOption] {
+        DesktopPetSelector.optionsFromDisk(currentPetId: store.desktopPetId)
     }
 
     private var agentsSection: some View {

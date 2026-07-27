@@ -480,8 +480,15 @@ struct DesktopCompanionView: View {
     @ViewBuilder
     private var petBody: some View {
         let size: CGFloat = 72
+        // Policy: no mood-ring / stroke outline around the desktop pet sprite.
+        let ring = DesktopCompanionWindowPolicy.petDrawsOutline
         if let state = presentation.state {
-            CompanionBadge(state: state, size: size, reduceMotion: reduceMotion)
+            CompanionBadge(
+                state: state,
+                size: size,
+                reduceMotion: reduceMotion,
+                showMoodRing: ring
+            )
         } else if let kind = presentation.kind {
             // No hard black disc — pet sits in the desktop without sticker chrome.
             CompanionView(
@@ -504,9 +511,8 @@ struct DesktopCompanionView: View {
 
 // MARK: - Shared bubble chrome
 //
-// Same material stack as menubar popover / fleet glance: PillMaterial(.popover)
-// + shannonBackground tint, continuous radius, hairline border, Shannon type tokens.
-// No drop-shadow — avoids double-shadow sticker look over a transparent panel.
+// Popover material + tint, continuous radius. **No strokeBorder outline** —
+// status copy stays readable via fill contrast only (mood tints text when needed).
 
 @ViewBuilder
 private func bubbleChrome(_ b: CompanionBubbleContent) -> some View {
@@ -514,7 +520,7 @@ private func bubbleChrome(_ b: CompanionBubbleContent) -> some View {
     VStack(alignment: .leading, spacing: 2) {
         Text(b.text)
             .font(.shannonMenuBody)
-            .foregroundStyle(Color.shannonPrimary)
+            .foregroundStyle(bubblePrimaryColor(b))
         if let detail = b.detail {
             Text(detail)
                 .font(.shannonMenuFootnote)
@@ -533,15 +539,22 @@ private func bubbleChrome(_ b: CompanionBubbleContent) -> some View {
         }
     }
     .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+    // Outline only if policy re-enables it (default: false — no hairline ring).
     .overlay {
-        RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .strokeBorder(bubbleBorderColor(b), lineWidth: b.claimsWork ? 1.2 : 0.5)
+        if DesktopCompanionWindowPolicy.bubbleDrawsOutline {
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(
+                    Color.white.opacity(DesktopCompanionWindowPolicy.bubbleHairlineOpacity),
+                    lineWidth: 0.5
+                )
+        }
     }
 }
 
-private func bubbleBorderColor(_ b: CompanionBubbleContent) -> Color {
-    if b.mood == .wary { return Color.shannonError.opacity(0.7) }
-    if b.motion == .waiting { return Color.shannonWarning.opacity(0.7) }
-    if b.claimsWork { return Color.shannonAccent.opacity(0.55) }
-    return Color.white.opacity(DesktopCompanionWindowPolicy.bubbleHairlineOpacity)
+/// Mood-aware primary text (replaces former colored stroke as attention cue).
+private func bubblePrimaryColor(_ b: CompanionBubbleContent) -> Color {
+    if b.mood == .wary { return Color.shannonError }
+    if b.motion == .waiting { return Color.shannonWarning }
+    if b.claimsWork { return Color.shannonAccent }
+    return Color.shannonPrimary
 }

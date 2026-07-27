@@ -110,8 +110,11 @@ public enum DesktopCompanionWindowPolicy: Sendable {
     /// Continuous corner radius for the status bubble (matches floating glance).
     public static let bubbleCornerRadius: Double = 12
 
-    /// Neutral hairline border opacity (same as popover / glance chrome).
-    public static let bubbleHairlineOpacity: Double = 0.10
+    /// Neutral hairline border opacity — **0** so the status bubble has no outline.
+    public static let bubbleHairlineOpacity: Double = 0
+
+    /// When false, desktop companion bubble must not draw strokeBorder/hairline.
+    public static let bubbleDrawsOutline: Bool = false
 
     /// Dark tint over popover material (matches FloatingGlance card stack).
     public static let bubbleBackgroundTintOpacity: Double = 0.35
@@ -127,6 +130,9 @@ public enum DesktopCompanionWindowPolicy: Sendable {
 
     /// Do not paint a hard black disc behind the pet sprite.
     public static let petUsesBackdropDisc: Bool = false
+
+    /// When false, desktop companion pet must not draw mood-ring / stroke outline.
+    public static let petDrawsOutline: Bool = false
 
     /// Bottom-trailing placement inside `visibleFrame`, inset by `margin`.
     /// Pure geometry — no AppKit / window server required.
@@ -175,10 +181,13 @@ public enum DesktopCompanionWindowPolicy: Sendable {
             "isAlwaysOnTopLevel": "\(isAlwaysOnTopLevel(windowLevelRawValue))",
             "screenMargin": "\(screenMargin)",
             "bubbleCornerRadius": "\(bubbleCornerRadius)",
+            "bubbleHairlineOpacity": "\(bubbleHairlineOpacity)",
+            "bubbleDrawsOutline": "\(bubbleDrawsOutline)",
             "bubbleMaterialKindName": bubbleMaterialKindName,
             "panelIsOpaque": "\(panelIsOpaque)",
             "panelHasShadow": "\(panelHasShadow)",
             "petUsesBackdropDisc": "\(petUsesBackdropDisc)",
+            "petDrawsOutline": "\(petDrawsOutline)",
         ]
     }
 

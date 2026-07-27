@@ -696,11 +696,13 @@ final class DesktopCompanionWindowPolicyTests: XCTestCase {
         XCTAssertEqual(snap["petUsesBackdropDisc"], "false")
     }
 
-    /// HUD chrome parity: bubble uses popover glass + continuous radius + no sticker disc.
+    /// HUD chrome: popover glass + continuous radius; **no** bubble/pet outlines.
     func testVisualChromeMatchesShannonFloatingHUD() {
         XCTAssertEqual(DesktopCompanionWindowPolicy.bubbleMaterialKindName, "popover")
         XCTAssertEqual(DesktopCompanionWindowPolicy.bubbleCornerRadius, 12, accuracy: 1e-9)
-        XCTAssertEqual(DesktopCompanionWindowPolicy.bubbleHairlineOpacity, 0.10, accuracy: 1e-9)
+        XCTAssertEqual(DesktopCompanionWindowPolicy.bubbleHairlineOpacity, 0, accuracy: 1e-9)
+        XCTAssertFalse(DesktopCompanionWindowPolicy.bubbleDrawsOutline)
+        XCTAssertFalse(DesktopCompanionWindowPolicy.petDrawsOutline)
         XCTAssertEqual(
             DesktopCompanionWindowPolicy.bubbleBackgroundTintOpacity,
             0.35,
@@ -716,6 +718,16 @@ final class DesktopCompanionWindowPolicyTests: XCTestCase {
             FloatingGlanceWindowPolicy.screenMargin,
             accuracy: 1e-9
         )
+    }
+
+    /// Policy + snapshot pin outline-free companion draw.
+    func testCompanionDrawsNoOutlinePolicy() {
+        XCTAssertFalse(DesktopCompanionWindowPolicy.bubbleDrawsOutline)
+        XCTAssertFalse(DesktopCompanionWindowPolicy.petDrawsOutline)
+        let snap = DesktopCompanionWindowPolicy.policySnapshot
+        XCTAssertEqual(snap["bubbleDrawsOutline"], "false")
+        XCTAssertEqual(snap["petDrawsOutline"], "false")
+        XCTAssertEqual(snap["bubbleHairlineOpacity"], "0.0")
     }
 
     /// Placement stays inside visibleFrame with a non-zero dock/menu margin.

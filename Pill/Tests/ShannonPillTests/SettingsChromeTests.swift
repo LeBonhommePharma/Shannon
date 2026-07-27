@@ -4,10 +4,10 @@ import XCTest
 /// Settings chrome is fixed-size (same anti-thrash discipline as the popover).
 final class SettingsChromeTests: XCTestCase {
     func testSettingsChromeIsFixedAndUsable() {
-        XCTAssertEqual(SettingsView.chromeWidth, 360)
-        // Glance + voice + pet package sections; tall enough that the pinned
+        XCTAssertEqual(SettingsView.chromeWidth, 380)
+        // Glance + voice + **pet grid**; tall enough that the pinned
         // Done footer is never cropped by title-bar safe area.
-        XCTAssertEqual(SettingsView.chromeHeight, 580)
+        XCTAssertEqual(SettingsView.chromeHeight, 640)
         XCTAssertGreaterThan(SettingsView.chromeWidth, 300)
         XCTAssertGreaterThan(SettingsView.chromeHeight, 500)
     }
@@ -22,5 +22,19 @@ final class SettingsChromeTests: XCTestCase {
             remaining, 200,
             "scroll body would be crushed; Done would sit on cropped chrome"
         )
+    }
+
+    /// Settings sources pin Done via safe-area footer (not hard-stacked crop).
+    func testSettingsSourcePinsDoneInSafeAreaFooter() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/ShannonPill/SettingsView.swift")
+        let src = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(src.contains("safeAreaInset(edge: .bottom"), src)
+        XCTAssertTrue(src.contains("DesktopPetSelector"), "easy pet selector model wired")
+        XCTAssertTrue(src.contains("LazyVGrid"), "browseable pet grid, not bare menu only")
+        XCTAssertTrue(src.contains("footerMinHeight"), src)
     }
 }

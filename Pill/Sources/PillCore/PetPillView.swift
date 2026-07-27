@@ -222,27 +222,35 @@ public struct CompanionBadge: View {
     public let size: CGFloat
     public let packagePetIdOverride: String?
     public let reduceMotion: Bool
+    /// Mood ring stroke around the pet. Desktop companion sets false (no outline).
+    public let showMoodRing: Bool
 
     public init(
         state: CompanionState,
         size: CGFloat = 26,
         packagePetId: String? = nil,
-        reduceMotion: Bool = false
+        reduceMotion: Bool = false,
+        showMoodRing: Bool = true
     ) {
         self.state = state
         self.size = size
         self.packagePetIdOverride = packagePetId
         self.reduceMotion = reduceMotion
+        self.showMoodRing = showMoodRing
     }
 
     public var body: some View {
         ZStack {
-            Circle()
-                .strokeBorder(state.mood.ringColor.opacity(state.mood.ringOpacity),
-                              lineWidth: state.mood == .wary ? 1.6 : 1)
+            if showMoodRing {
+                Circle()
+                    .strokeBorder(
+                        state.mood.ringColor.opacity(state.mood.ringOpacity),
+                        lineWidth: state.mood == .wary ? 1.6 : 1
+                    )
+            }
             CompanionGlyph(
                 state: state,
-                size: size * 0.86,
+                size: showMoodRing ? size * 0.86 : size,
                 packagePetId: packagePetIdOverride,
                 reduceMotion: reduceMotion
             )

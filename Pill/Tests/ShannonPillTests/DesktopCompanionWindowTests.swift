@@ -146,6 +146,10 @@ final class DesktopCompanionWindowTests: XCTestCase {
         XCTAssertFalse(DesktopCompanionWindowPolicy.petUsesBackdropDisc)
         XCTAssertFalse(DesktopCompanionWindowPolicy.panelIsOpaque)
         XCTAssertFalse(DesktopCompanionWindowPolicy.panelHasShadow)
+        // No outline strokes around bubble or pet sprite.
+        XCTAssertFalse(DesktopCompanionWindowPolicy.bubbleDrawsOutline)
+        XCTAssertFalse(DesktopCompanionWindowPolicy.petDrawsOutline)
+        XCTAssertEqual(DesktopCompanionWindowPolicy.bubbleHairlineOpacity, 0, accuracy: 1e-9)
         // Glance shares the same edge margin so pet + fleet don't fight dock chrome.
         XCTAssertEqual(
             DesktopCompanionWindowPolicy.screenMargin,

@@ -60,9 +60,9 @@ struct SnapshotProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<SnapshotEntry>) -> Void) {
         let entry = SnapshotEntry(date: Date(),
                                   snapshot: SnapshotCache.phone.load() ?? ShannonSnapshot())
-        // The app reloads timelines on every CloudKit push, which is what
-        // meets the 15 s target; this interval is only the fallback for when
-        // the app has not run in a while.
+        // PhoneModel reloads timelines after each successful App Group cache
+        // write (UX-035). This 15-minute policy is only the fallback when the
+        // host app has not run recently.
         completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(900))))
     }
 }

@@ -336,12 +336,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** Outcome tokens + `outcomeLabel`; GateActivitySection wired; GateAskActionCopyTests.
 - **Priority:** P2
 
-### - [ ] UX-035: Phone reloads WidgetKit after SnapshotCache write
+### - [x] UX-035: Phone reloads WidgetKit after SnapshotCache write
 
 - **Why:** `PhoneModel.onSnapshot` saves App Group cache but never calls `WidgetCenter`; widget comment claims app reloads on every push — unimplemented. Watch reloads timelines after cache write; phone lock-screen lag can exceed MultiDeviceCadence (~15 min budget).
 - **Platforms:** iOS (phone host + ShannonWidget)
 - **Area:** `PhoneModel`, `ShannonWidget`, optional pet kind
 - **First slice:** After successful `SnapshotCache.phone.save`, `WidgetCenter.shared.reloadTimelines(ofKind: "ShannonWidget")`; structural test forbids missing reload next to phone cache write.
+- **Done:** PhoneModel gates reload on save success; ShannonWidget timeline comment fixed; MultiDeviceCadenceTests structural.
 - **Priority:** P0
 
 ### - [ ] UX-036: Menu-bar GateInlineCard uses macGateAffordance when hub socket down
@@ -484,6 +485,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (loop 30):** `--quick` all PASS. Open P0 **UX-035** (phone WidgetKit reload after SnapshotCache) claimed. Closed with PhoneModel + structural test. Next open: **UX-036** GateInlineCard macGateAffordance (P1). Considered: UX-037 gesture arm honesty; UX-038 widget offline; watch No notifications (P2+). **No additional UX-0xx**.
 - **2026-07-26 (Grok 4.5 OS swarm):** Four background audits (`swarm_{macos,ios,ipados,watchos}.md`) + `./scripts/test_apple_platforms.sh --quick` **PASS** (ran=4 failed=0). Enqueued **UX-035…052** (18 open), plus ENH-023…025 and PET **E6/E7** on sibling queues. Per-OS enqueue: macOS 3 UX + 1 ENH; iOS 6 UX + 2 ENH + 1 PET; iPadOS 6 UX + 1 PET (F1+F2 merged; comment-only 20s dropped); watchOS 4 UX. Dropped: companion bubble character empty, status-item spoken brand prose, palette/No matches surface-specific, watch face quiet-offline P3 polish, configurationDisplayName catalog.
 - **2026-07-26 (loop 29):** `--quick` all PASS. Backlog empty after UX-033. Residual pad Gate Activity dual approved/denied past tense. Claimed **UX-034**. Considered: watch `"No notifications"` empty (surface-specific); watch crown coaching prose (gesture narrative); pad `"No matches"`; `configurationDisplayName` catalog (leave). **No additional UX-0xx**.
 - **2026-07-26 (loop 28):** `--quick` all PASS. Backlog empty after UX-032. Residual watch gate dual `"iPhone away"` vs `queuedForPhone` family. Claimed **UX-033**. Considered: watch `"No notifications"` empty (surface-specific); pad gate activity approved/denied past tense (optional); pad `"No matches"`; `configurationDisplayName` catalog (leave). **No additional UX-0xx**.

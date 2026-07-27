@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import ShannonCore
+import WidgetKit
 
 /// Single source of truth for the iPhone app.
 ///
@@ -64,9 +65,13 @@ public final class PhoneModel {
         store.onSnapshot = { [weak self] snapshot in
             guard let self else { return }
             self.relay.send(snapshot)
-            // The widget process cannot read this one, so each snapshot is
-            // mirrored into the App Group container, encrypted at rest.
-            SnapshotCache.phone.save(snapshot)
+            // The widget process cannot share app memory — mirror into the
+            // App Group container (encrypted at rest), then ask WidgetKit to
+            // re-read so lock-screen glance stays within MultiDeviceCadence
+            // rather than the 15-minute timeline fallback (UX-035).
+            if SnapshotCache.phone.save(snapshot) {
+                WidgetCenter.shared.reloadTimelines(ofKind: "ShannonWidget")
+            }
             self.updateGestureArming(for: snapshot)
         }
 

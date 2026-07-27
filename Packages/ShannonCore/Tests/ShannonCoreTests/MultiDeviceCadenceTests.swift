@@ -86,4 +86,37 @@ final class MultiDeviceCadenceTests: XCTestCase {
             "CloudPublisher default interval must use MultiDeviceCadence"
         )
     }
+
+    /// UX-035: phone must reload WidgetKit after successful App Group cache write.
+    func testPhoneReloadsWidgetAfterSnapshotCacheWrite() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let phone = try String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonPhone/PhoneModel.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            phone.contains("SnapshotCache.phone.save"),
+            "PhoneModel must save App Group snapshot for widget"
+        )
+        XCTAssertTrue(
+            phone.contains("WidgetCenter.shared.reloadTimelines"),
+            "PhoneModel must reload WidgetKit after cache write"
+        )
+        XCTAssertTrue(
+            phone.contains("\"ShannonWidget\""),
+            "PhoneModel must reload ShannonWidget kind"
+        )
+        // Fail-closed: only reload when save succeeds (no reload on bare save).
+        XCTAssertTrue(
+            phone.contains("if SnapshotCache.phone.save"),
+            "reload must gate on successful SnapshotCache.phone.save"
+        )
+    }
 }

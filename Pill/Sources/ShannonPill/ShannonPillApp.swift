@@ -158,17 +158,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
 
+        let multiDeviceModel = MultiDeviceStatusModel(line: cloudPub.multiDeviceStatusLine)
+        // Push account transitions into the popover footer without reopen.
+        // CloudPublisher applies status on CKAccountChanged; we mirror the line.
         let menu = MenuBarController(
             bridge: br, battery: bat, ingest: ingestSvc, activity: activityMon,
             resources: sysRes,
             keepAwake: keep,
             focusMode: focus,
-            multiDeviceStatus: cloudPub.multiDeviceStatus,
+            multiDeviceStatus: cloudPub.multiDeviceStatusLine,
             multiDeviceStatusProvider: { [weak cloudPub] in
-                // Prefer full operator line when it is more specific than the short token.
-                cloudPub?.multiDeviceStatus ?? "in-memory"
-            }
+                // Full operator line (never the short token alone).
+                cloudPub?.multiDeviceStatusLine ?? "Multi-device: in-memory"
+            },
+            multiDeviceStatusModel: multiDeviceModel
         )
+        // When iCloud account status changes, update the observed model immediately
+        // so an already-open (or next) popover never shows a stale "on (iCloud)".
+        cloudPub.onMultiDeviceStatusLineChange = { [weak multiDeviceModel] line in
+            multiDeviceModel?.update(line)
+        }
         menu.onShowPill = { [weak ctl] in ctl?.reassertVisibility(); ctl?.expand() }
         menu.isDesktopCompanionVisible = { [weak prefs] in
             prefs?.showDesktopCompanion ?? ShannonPreferences.showDesktopCompanion()

@@ -30,6 +30,10 @@ final class CloudPublisher {
     /// Full operator line (menu footer prefers this when available).
     private(set) var multiDeviceStatusLine: String = "Multi-device: in-memory"
 
+    /// Fired when ``multiDeviceStatusLine`` changes (account transition / labels).
+    /// Menu bar uses this to push live footer text into ``MultiDeviceStatusModel``.
+    var onMultiDeviceStatusLineChange: ((String) -> Void)?
+
     /// Latest system iCloud account status for the Shannon container.
     private(set) var accountStatus: ICloudAccountStatus = .couldNotDetermine
 
@@ -142,7 +146,7 @@ final class CloudPublisher {
         return InMemorySyncBackend()
     }
 
-    private func refreshStatusLabels() {
+    private func refreshStatusLabels(forceNotify: Bool = false) {
         let optIn = MultiDeviceBackendPolicy.optInFromEnvironment()
         let profile = MultiDeviceBackendPolicy.hasEmbeddedProvisioningProfile()
         multiDeviceStatus = MultiDeviceBackendPolicy.status(
@@ -151,13 +155,23 @@ final class CloudPublisher {
             cloudKitConstructed: usesCloudKit,
             accountStatus: accountStatus
         ).rawValue
-        multiDeviceStatusLine = MultiDeviceBackendPolicy.operatorStatusLine(
+        let line = MultiDeviceBackendPolicy.operatorStatusLine(
             optIn: optIn,
             hasProvisioningProfile: profile,
             cloudKitConstructed: usesCloudKit,
             accountStatus: accountStatus
         )
+        let changed = line != multiDeviceStatusLine
+        multiDeviceStatusLine = line
+        // Always notify on forced refresh (account transitions) so the menu
+        // model re-reads even when the short token stays "in-memory".
+        if changed || forceNotify {
+            onMultiDeviceStatusLineChange?(line)
+        }
     }
+
+    /// Test-only: active backend (drives sign-out swap assertions).
+    var _test_backendAccessor: ShannonSyncBackend { backend }
 
     /// Re-evaluate account + backend after system iCloud transitions.
     /// Fail-closed: if account is no longer available, swap to in-memory and
@@ -171,12 +185,14 @@ final class CloudPublisher {
             hasProvisioningProfile: profile,
             accountStatus: next
         )
+        var backendSwapped = false
         if wantCloud && !usesCloudKit {
             #if canImport(CloudKit)
             let ck = CloudKitSyncBackend()
             backend = ck
             publisher = ShannonPublisher(backend: ck)
             usesCloudKit = true
+            backendSwapped = true
             #endif
         } else if !wantCloud && usesCloudKit {
             let mem = InMemorySyncBackend()
@@ -186,8 +202,11 @@ final class CloudPublisher {
             // Clear bookkeeping so we do not invent retracts against the wrong store.
             publishedConfirmationIDs.removeAll()
             publishedAgentIDs.removeAll()
+            backendSwapped = true
         }
-        refreshStatusLabels()
+        // Force-notify observers on account apply (sign-out must refresh footer).
+        refreshStatusLabels(forceNotify: true)
+        _ = backendSwapped
     }
 
     func start() {

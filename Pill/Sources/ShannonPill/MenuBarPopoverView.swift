@@ -55,8 +55,9 @@ struct MenuBarPopoverView: View {
     @ObservedObject var resources: SystemResourceMonitor
     @ObservedObject var keepAwake: KeepAwakeMonitor
     @ObservedObject var focusMode: FocusModeMonitor
-    /// Cloud multi-device honesty: `"on"` / `"in-memory"` / `"off"`.
-    var multiDeviceStatus: String = "in-memory"
+    /// Live multi-device / iCloud footer (full operator line). Observed so
+    /// account transitions and popover reopen refresh without rebuilding the tree.
+    @ObservedObject var multiDeviceStatus: MultiDeviceStatusModel
     /// Additive AgentPeek-parity surfaces (sessions / servers / routes).
     @ObservedObject var parity: ParityPanelModel
 
@@ -720,11 +721,12 @@ struct MenuBarPopoverView: View {
     }
 
     /// Honest multi-device path from CloudPublisher (P2.7 / iCloud auth).
-    /// Never claims "on (iCloud)" for no-account / restricted / undetermined.
+    /// Source is the live ``MultiDeviceStatusModel`` line (never a stale capture).
     private var multiDeviceFooterLine: String {
-        // Prefer full operator line when the short token is an account problem
-        // (CloudPublisher multiDeviceStatusLine is the source of truth).
-        switch multiDeviceStatus {
+        let raw = multiDeviceStatus.line
+        if raw.hasPrefix("Multi-device:") { return raw }
+        // Tolerate short tokens if a caller still feeds them.
+        switch raw {
         case "on":
             return "Multi-device: on (iCloud)"
         case "off":
@@ -739,14 +741,10 @@ struct MenuBarPopoverView: View {
             return "Multi-device: iCloud temporarily unavailable"
         case "unsupported":
             return "Multi-device: iCloud is Apple-only (not available here)"
-        case "in-memory":
+        case "in-memory", "":
             return "Multi-device: in-memory"
         default:
-            // Future tokens from ICloudAccountPolicy.statusToken.
-            if multiDeviceStatus.hasPrefix("Multi-device:") {
-                return multiDeviceStatus
-            }
-            return "Multi-device: \(multiDeviceStatus)"
+            return "Multi-device: \(raw)"
         }
     }
 

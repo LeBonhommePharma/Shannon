@@ -27,8 +27,11 @@ final class MenuBarController: NSObject {
     private let resources: SystemResourceMonitor
     private let keepAwake: KeepAwakeMonitor
     private let focusMode: FocusModeMonitor
-    /// Honest multi-device backend label from CloudPublisher (re-read each open).
+    /// Honest multi-device backend label from CloudPublisher (full operator line).
+    /// Re-read on every popover open and pushed into ``multiDeviceStatusModel``.
     private let multiDeviceStatusProvider: () -> String
+    /// Live model observed by the popover footer (never a one-shot String).
+    private let multiDeviceStatusModel: MultiDeviceStatusModel
     /// AgentPeek-parity surfaces (pulled sessions, dev servers, routes).
     private let parity = ParityPanelModel()
     private var timer: Timer?
@@ -62,8 +65,9 @@ final class MenuBarController: NSObject {
         resources: SystemResourceMonitor,
         keepAwake: KeepAwakeMonitor,
         focusMode: FocusModeMonitor,
-        multiDeviceStatus: String = "in-memory",
-        multiDeviceStatusProvider: (() -> String)? = nil
+        multiDeviceStatus: String = "Multi-device: in-memory",
+        multiDeviceStatusProvider: (() -> String)? = nil,
+        multiDeviceStatusModel: MultiDeviceStatusModel? = nil
     ) {
         self.bridge = bridge
         self.battery = battery
@@ -73,7 +77,16 @@ final class MenuBarController: NSObject {
         self.keepAwake = keepAwake
         self.focusMode = focusMode
         // Prefer live provider so iCloud sign-out updates the footer without relaunch.
-        self.multiDeviceStatusProvider = multiDeviceStatusProvider ?? { multiDeviceStatus }
+        let provider = multiDeviceStatusProvider ?? { multiDeviceStatus }
+        self.multiDeviceStatusProvider = provider
+        let model = multiDeviceStatusModel ?? MultiDeviceStatusModel(line: provider())
+        model.update(provider())
+        self.multiDeviceStatusModel = model
+    }
+
+    /// Push the latest operator line into the observed model (popover open + tests).
+    func refreshMultiDeviceStatus() {
+        multiDeviceStatusModel.update(multiDeviceStatusProvider())
     }
 
     func start() {
@@ -478,6 +491,8 @@ final class MenuBarController: NSObject {
             // No open/close size animation — live metric ticks must never morph.
             p.animates = false
             p.appearance = NSAppearance(named: .darkAqua)
+            // Seed live model before first rootView so footer is never stale at create.
+            multiDeviceStatusModel.update(multiDeviceStatusProvider())
             let root = MenuBarPopoverView(
                 activity: activity,
                 bridge: bridge,
@@ -485,7 +500,7 @@ final class MenuBarController: NSObject {
                 resources: resources,
                 keepAwake: keepAwake,
                 focusMode: focusMode,
-                multiDeviceStatus: multiDeviceStatusProvider(),
+                multiDeviceStatus: multiDeviceStatusModel,
                 parity: parity,
                 onShowAllGates: { [weak self] in
                     self?.popover?.performClose(nil)
@@ -521,9 +536,9 @@ final class MenuBarController: NSObject {
             host.preferredContentSize = chrome
             pop.contentSize = chrome
         }
-        // Do not re-assign rootView on every open — that tears down SwiftUI
-        // state and flashes the whole popover. Models are ObservedObject so
-        // live data already flows through the existing tree.
+        // Refresh multi-device / iCloud footer on every open via ObservedObject.
+        // Do not re-assign rootView — that tears down SwiftUI state and flashes.
+        refreshMultiDeviceStatus()
         pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 

@@ -1,21 +1,19 @@
 import Foundation
 import Observation
+import ShannonCore
 #if canImport(HealthKit)
 import HealthKit
 #endif
 
-/// Optional ambient biofeedback: when LP's heart rate rises well above his own
-/// recent baseline during a docking run, the Shannon Face accent pulses.
+/// Optional ambient biofeedback + research SCI path (NATURaL / HealthKit).
 ///
 /// Deliberately constrained:
 ///  * **Off by default.** Nothing is read until `enable()` is called from a
-///    control LP taps himself.
-///  * **Never uploaded.** Samples are read, compared to a rolling baseline,
-///    and discarded. No heart-rate value is written to CloudKit, relayed to
-///    the phone, or persisted to the snapshot cache.
-///  * **Relative, not absolute.** A resting rate of 48 and one of 72 are both
-///    normal for different people; only the deviation from this session's own
-///    baseline is meaningful.
+///    control LP taps himself (never at launch).
+///  * **Never uploaded.** Samples stay on-device. No HR / RR / SCI is written
+///    to CloudKit agent sync, snapshot cache, or phone relay.
+///  * **Relative elevation.** Session baseline only; absolute resting rates vary.
+///  * **SCI:** BPM stream → RR (ms) → `NaturalSCI` when ≥ 4 samples (fixed 300–1500 ms).
 @available(watchOS 10.0, *)
 @MainActor
 @Observable
@@ -26,12 +24,18 @@ public final class HeartRateMonitor {
     public private(set) var currentBPM: Double?
     /// True while the rate sits meaningfully above baseline.
     public private(set) var isElevated = false
+    /// Latest NATURaL SCI from rolling BPM→RR series (nil until enough samples).
+    public private(set) var latestSCI: NaturalSCIResult?
+    /// Rolling RR intervals (ms) derived from BPM for research SCI.
+    public private(set) var recentRRMilliseconds: [Double] = []
 
     /// How far above baseline counts as elevated.
     private let elevationThreshold: Double = 12
     private var baseline: Double?
     /// Exponential smoothing keeps a single noisy sample from flipping state.
     private let smoothing = 0.1
+    private let maxRRWindow = 64
+    private let sci = NaturalSCI()
 
     #if canImport(HealthKit)
     private let store = HKHealthStore()
@@ -49,7 +53,8 @@ public final class HeartRateMonitor {
     }
 
     /// Requests read-only heart-rate access. Called only from an explicit
-    /// opt-in, never at launch.
+    /// opt-in, never at launch. Does **not** require clinical medication consent
+    /// (ambient HR only); clinical meds remain consent-gated elsewhere.
     public func enable() async {
         #if canImport(HealthKit)
         guard isAvailable, let type = HKObjectType.quantityType(forIdentifier: .heartRate) else {
@@ -72,6 +77,8 @@ public final class HeartRateMonitor {
         isElevated = false
         currentBPM = nil
         baseline = nil
+        latestSCI = nil
+        recentRRMilliseconds = []
         #if canImport(HealthKit)
         if let query { store.stop(query) }
         query = nil
@@ -101,9 +108,23 @@ public final class HeartRateMonitor {
     }
     #endif
 
-    func consume(_ values: [Double]) {
+    /// Ingest BPM samples (HealthKit or tests). Updates elevation + SCI window.
+    public func consume(_ values: [Double]) {
         guard let latest = values.last else { return }
         currentBPM = latest
+
+        // Research path: BPM → RR ms → rolling SCI (fixed domain via NaturalSCI).
+        for bpm in values {
+            if let rr = HealthResearchSamples.rrMilliseconds(fromBPM: bpm) {
+                recentRRMilliseconds.append(rr)
+            }
+        }
+        if recentRRMilliseconds.count > maxRRWindow {
+            recentRRMilliseconds = Array(recentRRMilliseconds.suffix(maxRRWindow))
+        }
+        if let result = sci.analyze(rrIntervalsMs: recentRRMilliseconds) {
+            latestSCI = result
+        }
 
         guard let current = baseline else {
             // First sample establishes the baseline; nothing is "elevated"

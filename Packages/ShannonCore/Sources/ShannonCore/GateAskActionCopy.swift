@@ -43,6 +43,10 @@ public enum GateAskActionCopy: Sendable {
     /// Phone unreachable; system will deliver later (watch delivery chrome).
     public static let queuedForPhone = "Queued — delivers when iPhone is back"
 
+    /// Compact watch gate chip when WC cannot reach the phone (UX-033).
+    /// Distinct from `queuedForPhone` (post-answer delivery status).
+    public static let phoneAwayChip = "iPhone away"
+
     /// Compact menu-bar roster tertiary hint when an ask is answerable (UX-027).
     /// Distinct from full-width Approve buttons — density-preserving, same verb root.
     public static let rosterApproveHint = "Gate · approve"

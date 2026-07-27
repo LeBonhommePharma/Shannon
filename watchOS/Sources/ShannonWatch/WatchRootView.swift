@@ -112,7 +112,8 @@ struct GateApprovalView: View {
                 .foregroundStyle(Color.shannonAccent)
             Spacer(minLength: 0)
             if !model.isPhoneReachable {
-                Label("iPhone away", systemImage: "iphone.slash")
+                // UX-033: phone-away chip shares GateAskActionCopy (queuedForPhone family).
+                Label(GateAskActionCopy.phoneAwayChip, systemImage: "iphone.slash")
                     .font(.shannonCaption)
                     .foregroundStyle(Color.shannonTertiary)
                     .labelStyle(.titleAndIcon)

@@ -27,6 +27,14 @@ final class GateAskActionCopyTests: XCTestCase {
         XCTAssertEqual(GateAskActionCopy.sent, "Sent ✓")
         XCTAssertFalse(GateAskActionCopy.queuedForPhone.isEmpty)
         XCTAssertTrue(GateAskActionCopy.queuedForPhone.localizedCaseInsensitiveContains("iphone"))
+        // UX-033: watch gate phone-away chip (distinct from post-answer queued).
+        XCTAssertEqual(GateAskActionCopy.phoneAwayChip, "iPhone away")
+        XCTAssertTrue(GateAskActionCopy.phoneAwayChip.localizedCaseInsensitiveContains("iphone"))
+        XCTAssertNotEqual(
+            GateAskActionCopy.phoneAwayChip,
+            GateAskActionCopy.queuedForPhone,
+            "chip is compact status; queued is post-answer delivery"
+        )
         // UX-027: menu-bar roster tertiary hint shares approve verb root.
         XCTAssertEqual(GateAskActionCopy.rosterApproveHint, "Gate · approve")
         XCTAssertTrue(
@@ -191,6 +199,15 @@ final class GateAskActionCopyTests: XCTestCase {
         XCTAssertFalse(
             watch.contains("Text(\"Sent ✓\")"),
             "gate status must not hard-code dual sent string"
+        )
+        // UX-033: phone-away chip shares Core token.
+        XCTAssertTrue(
+            watch.contains("GateAskActionCopy.phoneAwayChip"),
+            "watch gate must use GateAskActionCopy.phoneAwayChip"
+        )
+        XCTAssertFalse(
+            watch.contains("\"iPhone away\""),
+            "watch must not hard-code dual iPhone away chip string"
         )
     }
 

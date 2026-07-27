@@ -318,10 +318,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `DockingProgress.emptyGlance`; widget wired; PresentationTests.
 - **Priority:** P2
 
+### - [x] UX-033: Watch gate phone-away chip uses GateAskActionCopy.phoneAwayChip
+
+- **Why:** Watch gate header hard-coded `"iPhone away"` while delivery status already uses `queuedForPhone` — phone-connectivity copy family split.
+- **Platforms:** watchOS (Core token; Mac/phone delivery family reference)
+- **Area:** `GateAskActionCopy`, `WatchRootView` gate header
+- **First slice:** Core `phoneAwayChip`; wire gate Label; pure wiring test.
+- **Done:** `GateAskActionCopy.phoneAwayChip`; watch gate wired; GateAskActionCopyTests.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 28):** `--quick` all PASS. Backlog empty after UX-032. Residual watch gate dual `"iPhone away"` vs `queuedForPhone` family. Claimed **UX-033**. Considered: watch `"No notifications"` empty (surface-specific); pad gate activity approved/denied past tense (optional); pad `"No matches"`; `configurationDisplayName` catalog (leave). **No additional UX-0xx**.
 - **2026-07-26 (loop 27):** `--quick` all PASS. Backlog empty after UX-031. Residual widget docking empty `"Idle"` (deferred many loops). Claimed **UX-032**. Considered: watch `"No notifications"` / `"iPhone away"` (surface-specific); pad palette `"No matches"`; gate activity lowercase approved/denied (audit narrative, not primary verbs); `configurationDisplayName` catalog (leave). **No additional UX-0xx**.
 - **2026-07-26 (loop 26):** `--quick` all PASS. Backlog empty after UX-030. Residual desktop companion dual brand a11y. Claimed **UX-031**. Considered: widget docking `"Idle"` (leave); watch `"No notifications"` / `"iPhone away"` (surface-specific); pad `"No matches"` palette (surface-specific). **No additional UX-0xx**.
 - **2026-07-26 (loop 25):** `--quick` all PASS. Backlog empty after UX-029. Residual pad dual `"No task"` on card + detail. Claimed **UX-030**. Considered: widget docking `"Idle"` (leave); desktop `"Open in Shannon"` a11y brand (optional); watch `"No notifications"` / `"iPhone away"` (surface-specific). **No additional UX-0xx**.

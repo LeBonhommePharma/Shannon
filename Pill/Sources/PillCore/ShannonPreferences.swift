@@ -23,6 +23,8 @@ public enum ShannonPreferences {
         case desktopPetId = "shannon.prefs.desktopPetId"
         /// Floating fleet/usage glance panel (UX-058). Default **off** (opt-in).
         case showFloatingGlance = "shannon.prefs.showFloatingGlance"
+        /// Mac voice callouts for needs-you / task_complete (ENH-030). Default **off**.
+        case voiceCalloutsEnabled = "shannon.prefs.voiceCalloutsEnabled"
     }
 
     /// Snapshot of all product preferences (value type for UI + tests).
@@ -36,6 +38,8 @@ public enum ShannonPreferences {
         public var desktopPetId: String
         /// Pref-gated Mac floating fleet/usage glance (UX-058). Default off.
         public var showFloatingGlance: Bool
+        /// Pref-gated Mac voice callouts (ENH-030). Default off (noise-safe).
+        public var voiceCalloutsEnabled: Bool
 
         public init(
             autoKeepAwakeWithAgents: Bool = true,
@@ -44,7 +48,8 @@ public enum ShannonPreferences {
             startWithMonitoringPaused: Bool = false,
             showDesktopCompanion: Bool = true,
             desktopPetId: String = PetPackageResolver.defaultPetId,
-            showFloatingGlance: Bool = false
+            showFloatingGlance: Bool = false,
+            voiceCalloutsEnabled: Bool = false
         ) {
             self.autoKeepAwakeWithAgents = autoKeepAwakeWithAgents
             self.firstRunDone = firstRunDone
@@ -53,6 +58,7 @@ public enum ShannonPreferences {
             self.showDesktopCompanion = showDesktopCompanion
             self.desktopPetId = ShannonPreferences.normalizeDesktopPetId(desktopPetId)
             self.showFloatingGlance = showFloatingGlance
+            self.voiceCalloutsEnabled = voiceCalloutsEnabled
         }
     }
 
@@ -100,6 +106,11 @@ public enum ShannonPreferences {
                 defaults,
                 key: .showFloatingGlance,
                 fallback: factoryDefaults.showFloatingGlance
+            ),
+            voiceCalloutsEnabled: bool(
+                defaults,
+                key: .voiceCalloutsEnabled,
+                fallback: factoryDefaults.voiceCalloutsEnabled
             )
         )
     }
@@ -115,6 +126,7 @@ public enum ShannonPreferences {
             forKey: Key.desktopPetId.rawValue
         )
         defaults.set(snap.showFloatingGlance, forKey: Key.showFloatingGlance.rawValue)
+        defaults.set(snap.voiceCalloutsEnabled, forKey: Key.voiceCalloutsEnabled.rawValue)
     }
 
     // MARK: Individual accessors (monitors call these)
@@ -177,6 +189,18 @@ public enum ShannonPreferences {
 
     public static func setShowFloatingGlance(_ value: Bool, defaults: UserDefaults = .standard) {
         defaults.set(value, forKey: Key.showFloatingGlance.rawValue)
+    }
+
+    public static func voiceCalloutsEnabled(defaults: UserDefaults = .standard) -> Bool {
+        bool(
+            defaults,
+            key: .voiceCalloutsEnabled,
+            fallback: factoryDefaults.voiceCalloutsEnabled
+        )
+    }
+
+    public static func setVoiceCalloutsEnabled(_ value: Bool, defaults: UserDefaults = .standard) {
+        defaults.set(value, forKey: Key.voiceCalloutsEnabled.rawValue)
     }
 
     public static func firstRunDone(defaults: UserDefaults = .standard) -> Bool {

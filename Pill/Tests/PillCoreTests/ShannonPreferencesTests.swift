@@ -36,6 +36,9 @@ final class ShannonPreferencesTests: XCTestCase {
         // UX-058: floating glance is opt-in (default off).
         XCTAssertFalse(snap.showFloatingGlance)
         XCTAssertFalse(ShannonPreferences.showFloatingGlance(defaults: defaults))
+        // ENH-030: voice callouts opt-in (default off).
+        XCTAssertFalse(snap.voiceCalloutsEnabled)
+        XCTAssertFalse(ShannonPreferences.voiceCalloutsEnabled(defaults: defaults))
     }
 
     func testRoundTripSaveLoad() {
@@ -47,6 +50,7 @@ final class ShannonPreferencesTests: XCTestCase {
         snap.showDesktopCompanion = false
         snap.desktopPetId = "firebear"
         snap.showFloatingGlance = true
+        snap.voiceCalloutsEnabled = true
         ShannonPreferences.save(snap, defaults: defaults)
         let loaded = ShannonPreferences.load(defaults: defaults)
         XCTAssertEqual(loaded, snap)
@@ -56,6 +60,7 @@ final class ShannonPreferencesTests: XCTestCase {
         XCTAssertTrue(ShannonPreferences.firstRunDone(defaults: defaults))
         XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
         XCTAssertTrue(ShannonPreferences.showFloatingGlance(defaults: defaults))
+        XCTAssertTrue(ShannonPreferences.voiceCalloutsEnabled(defaults: defaults))
     }
 
     /// E2: hide desktop companion persists; missing key still defaults to shown.
@@ -201,6 +206,27 @@ final class ShannonPreferencesTests: XCTestCase {
         XCTAssertTrue(keys.contains("shannon.prefs.showDesktopCompanion"))
         XCTAssertTrue(keys.contains("shannon.prefs.desktopPetId"))
         XCTAssertTrue(keys.contains("shannon.prefs.showFloatingGlance"))
-        XCTAssertEqual(keys.count, 7)
+        XCTAssertTrue(keys.contains("shannon.prefs.voiceCalloutsEnabled"))
+        XCTAssertEqual(keys.count, 8)
+    }
+
+    /// ENH-030: voice callouts default off; store round-trip.
+    @MainActor
+    func testVoiceCalloutsDefaultOffAndRoundTrip() {
+        XCTAssertFalse(ShannonPreferences.voiceCalloutsEnabled(defaults: defaults))
+        XCTAssertNil(defaults.object(forKey: ShannonPreferences.Key.voiceCalloutsEnabled.rawValue))
+
+        ShannonPreferences.setVoiceCalloutsEnabled(true, defaults: defaults)
+        XCTAssertNotNil(defaults.object(forKey: ShannonPreferences.Key.voiceCalloutsEnabled.rawValue))
+        XCTAssertTrue(ShannonPreferences.voiceCalloutsEnabled(defaults: defaults))
+
+        ShannonPreferences.setVoiceCalloutsEnabled(false, defaults: defaults)
+        XCTAssertFalse(ShannonPreferences.voiceCalloutsEnabled(defaults: defaults))
+
+        let store = ShannonPreferencesStore(defaults: defaults)
+        XCTAssertFalse(store.voiceCalloutsEnabled)
+        store.voiceCalloutsEnabled = true
+        XCTAssertTrue(ShannonPreferences.voiceCalloutsEnabled(defaults: defaults))
+        XCTAssertTrue(store.snapshot.voiceCalloutsEnabled)
     }
 }

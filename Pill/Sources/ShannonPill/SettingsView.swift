@@ -13,8 +13,8 @@ struct SettingsView: View {
 
     /// Fixed size — matches popover anti-pop discipline.
     static let chromeWidth: CGFloat = 360
-    /// Room for desktop glance toggle (UX-058) without scroll thrash.
-    static let chromeHeight: CGFloat = 460
+    /// Room for glance + voice callout toggles (UX-058 / ENH-030) without thrash.
+    static let chromeHeight: CGFloat = 520
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -25,6 +25,7 @@ struct SettingsView: View {
                     pillSection
                     desktopSection
                     floatingGlanceSection
+                    voiceCalloutSection
                     desktopPetSection
                     agentsSection
                     tipsSection
@@ -134,6 +135,24 @@ struct SettingsView: View {
                         .font(.shannonMenuBody)
                         .foregroundStyle(Color.shannonPrimary)
                     Text("Compact always-on-top card; usage only when sourced")
+                        .font(.shannonMenuFootnote)
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+    }
+
+    /// ENH-030: opt-in Mac voice callouts (default off — noise-safe).
+    private var voiceCalloutSection: some View {
+        settingsCard(title: "Voice callouts") {
+            Toggle(isOn: $store.voiceCalloutsEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Speak needs-you and completions")
+                        .font(.shannonMenuBody)
+                        .foregroundStyle(Color.shannonPrimary)
+                    Text("System voice uses real agent names only; silent under Focus")
                         .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonTertiary)
                 }

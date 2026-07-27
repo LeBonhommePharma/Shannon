@@ -277,13 +277,14 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Parity:** AgentPeek Views (candidate G7)
 - **Done:** `OpenTerminalHerePolicy` + `OpenTerminalHereInput` pure decide (existing directory cwd required; preferred attach bundle → hostTerminal label→bundle → `com.apple.Terminal`; fail-closed `.none`); `OpenTerminalHereExecutor` NSWorkspace open-dir-with-terminal; terminal button on pulled sessions + context menus on CompanionBoard / menu-bar roster; `OpenTerminalHereTests` matrix + SessionUIWiring structural needles. Never invents cwd.
 
-### - [ ] ENH-030: Mac voice callout on completion / needs-you (parity G8)
+### - [x] ENH-030: Mac voice callout on completion / needs-you (parity G8)
 
 - **Why:** AgentCallout’s defining feature is spoken callouts; Shannon has phone AirPods announce on ask but no Mac multi-agent completion/needs-you voice product.
 - **Area:** Pill notification path, `NSSpeechSynthesizer` or AVSpeech, preferences mute
 - **First slice:** One system voice on needs-you or task_complete when pref enabled; pure “should announce” policy tests; no invent content.
 - **Priority:** P2
 - **Parity:** AgentCallout voice (candidate G8)
+- **Done:** `VoiceCalloutPolicy` pure shouldAnnounce/spokenText/decide (pref off / mute / Focus → never; needs-you uses `AgentAttentionCopy.needsYouNotifyTitle`; task_complete `"name done"` only with real agent id); explicit completion event types only (no label invent); baseline on first poll so history is silent; `MacVoiceCallout` + `SystemSpeechSynthesizer` (AVSpeech); pref `voiceCalloutsEnabled` default **off** + Settings toggle; `AgentActivityMonitor` wires needs-you + new task_complete; `VoiceCalloutPolicyTests` matrix.
 
 ### - [ ] ENH-031: Gate ask surfaces change paths/summary when payload has them (parity G9)
 

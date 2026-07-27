@@ -975,6 +975,21 @@ public final class AgentActivityMonitor: ObservableObject {
     private var lastDBMtime: Date?
     /// Previous pending-ask count — notifications fire only on increases.
     private var lastPendingCount = 0
+    /// Activity ids already considered for voice task_complete callouts (ENH-030).
+    /// Baseline is primed on first apply so historical rows do not all speak.
+    private var voiceSeenActivityIds: Set<Int64> = []
+    private var voiceActivityBaselineReady = false
+
+    /// ENH-030: speak a decided callout line (pref-gated at the call site).
+    /// Tests leave this nil; production wires `MacVoiceCallout.speakIfPresent`.
+    public var onVoiceSpeak: ((String) -> Void)?
+
+    /// Live gates for voice policy (injectable; production reads prefs / Focus).
+    public var voiceCalloutsEnabled: () -> Bool = {
+        ShannonPreferences.voiceCalloutsEnabled()
+    }
+    public var voiceMuted: () -> Bool = { false }
+    public var voiceFocusActive: () -> Bool = { false }
 
     public init(interval: TimeInterval = UICadence.agentHubInterval) {
         self.interval = UICadence.clampAgentHubInterval(interval)
@@ -1133,8 +1148,52 @@ public final class AgentActivityMonitor: ObservableObject {
         let newCount = full.pendingAsks.count
         if newCount > lastPendingCount, let newest = full.pendingAsks.first {
             ShannonNotifier.notifyAsk(prompt: newest.prompt, agentId: newest.agentId)
+            // ENH-030: Mac voice callout — real agent id + shared “needs you” token only.
+            if let line = VoiceCalloutPolicy.decide(
+                kind: .needsYou,
+                agentName: newest.agentId,
+                voiceCalloutsEnabled: voiceCalloutsEnabled(),
+                muted: voiceMuted(),
+                focusActive: voiceFocusActive()
+            ) {
+                onVoiceSpeak?(line)
+            }
         }
         lastPendingCount = newCount
+
+        // ENH-030: task_complete voice — only explicit new completion rows.
+        // First tick primes the baseline so a cold start does not narrate history.
+        let activityRows = full.activity.map {
+            (id: $0.id, agentId: $0.agentId, type: $0.type)
+        }
+        if !voiceActivityBaselineReady {
+            voiceSeenActivityIds = Set(activityRows.map(\.id))
+            voiceActivityBaselineReady = true
+        } else {
+            let callouts = VoiceCalloutPolicy.newTaskCompleteCallouts(
+                activity: activityRows,
+                previouslySeenIds: voiceSeenActivityIds
+            )
+            voiceSeenActivityIds.formUnion(activityRows.map(\.id))
+            // Cap memory: keep recent ids only (activity feed is short).
+            if voiceSeenActivityIds.count > 256 {
+                voiceSeenActivityIds = Set(activityRows.map(\.id))
+            }
+            let enabled = voiceCalloutsEnabled()
+            let muted = voiceMuted()
+            let focus = voiceFocusActive()
+            for row in callouts {
+                if let line = VoiceCalloutPolicy.decide(
+                    kind: .taskComplete,
+                    agentName: row.agentId,
+                    voiceCalloutsEnabled: enabled,
+                    muted: muted,
+                    focusActive: focus
+                ) {
+                    onVoiceSpeak?(line)
+                }
+            }
+        }
     }
 
     /// Cached running-bundle set for tests / callers that already hold MainActor.

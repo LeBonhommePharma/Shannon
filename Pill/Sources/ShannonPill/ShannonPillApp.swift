@@ -32,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var focusMode: FocusModeMonitor?
     private var preferencesStore: ShannonPreferencesStore?
     private var settingsWindow: SettingsWindowController?
+    /// ENH-030: holds AVSpeech path for needs-you / task_complete callouts.
+    private var voiceCallout: MacVoiceCallout?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard claimSingleInstance() else { return }
@@ -86,6 +88,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // UI
         // Prefer notification permission early so ask alerts can fire later.
         ShannonNotifier.requestPermission()
+
+        // ENH-030: Mac voice callouts (AVSpeech; pref default off).
+        let voiceCallout = MacVoiceCallout(synthesizer: MacVoiceCallout.makeDefaultSynthesizer())
+        voiceCallout.voiceCalloutsEnabled = { ShannonPreferences.voiceCalloutsEnabled() }
+        voiceCallout.isFocusActive = { [weak focus] in focus?.state == .on }
+        activityMon.voiceCalloutsEnabled = { ShannonPreferences.voiceCalloutsEnabled() }
+        activityMon.voiceFocusActive = { [weak focus] in focus?.state == .on }
+        activityMon.onVoiceSpeak = { [weak voiceCallout] line in
+            voiceCallout?.speakIfPresent(line)
+        }
+        // Keep the speaker alive for the app lifetime (ActivityMonitor holds the sink).
+        self.voiceCallout = voiceCallout
 
         let cloudPub = CloudPublisher(
             nowPlaying: np, battery: bat, bridge: br, activity: activityMon, resources: sysRes

@@ -60,6 +60,14 @@ public final class ShannonPreferencesStore: ObservableObject {
         }
     }
 
+    /// ENH-030: Mac voice callouts for needs-you / task_complete (default off).
+    @Published public var voiceCalloutsEnabled: Bool {
+        didSet {
+            guard voiceCalloutsEnabled != oldValue else { return }
+            ShannonPreferences.setVoiceCalloutsEnabled(voiceCalloutsEnabled, defaults: defaults)
+        }
+    }
+
     @Published public private(set) var firstRunDone: Bool
 
     /// Optional sink so KeepAwakeMonitor stays in sync without polling.
@@ -82,6 +90,7 @@ public final class ShannonPreferencesStore: ObservableObject {
         self.desktopPetId = snap.desktopPetId
         self.showDesktopCompanion = snap.showDesktopCompanion
         self.showFloatingGlance = snap.showFloatingGlance
+        self.voiceCalloutsEnabled = snap.voiceCalloutsEnabled
         self.firstRunDone = snap.firstRunDone
     }
 
@@ -93,6 +102,7 @@ public final class ShannonPreferencesStore: ObservableObject {
         desktopPetId = snap.desktopPetId
         showDesktopCompanion = snap.showDesktopCompanion
         showFloatingGlance = snap.showFloatingGlance
+        voiceCalloutsEnabled = snap.voiceCalloutsEnabled
         firstRunDone = snap.firstRunDone
     }
 
@@ -115,7 +125,8 @@ public final class ShannonPreferencesStore: ObservableObject {
             startWithMonitoringPaused: startWithMonitoringPaused,
             showDesktopCompanion: showDesktopCompanion,
             desktopPetId: desktopPetId,
-            showFloatingGlance: showFloatingGlance
+            showFloatingGlance: showFloatingGlance,
+            voiceCalloutsEnabled: voiceCalloutsEnabled
         )
     }
 }

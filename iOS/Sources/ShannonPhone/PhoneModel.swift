@@ -28,7 +28,11 @@ public final class PhoneModel {
 
     public init(backend: ShannonSyncBackend? = nil) {
         let resolved = backend ?? PhoneModel.defaultBackend()
-        self.store = ShannonStore(backend: resolved, interval: 30, deviceName: "iPhone")
+        self.store = ShannonStore(
+            backend: resolved,
+            interval: MultiDeviceCadence.companionRefreshInterval,
+            deviceName: "iPhone"
+        )
         self.gestures = HeadGestureListener()
         self.airPods = AirPodsMonitor()
         self.voice = VoiceDictation()

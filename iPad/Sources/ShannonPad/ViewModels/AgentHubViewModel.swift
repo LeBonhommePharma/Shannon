@@ -79,7 +79,11 @@ final class AgentHubViewModel: ObservableObject {
 
     init(backend: ShannonSyncBackend? = nil) {
         let resolved = backend ?? AgentHubViewModel.defaultBackend()
-        self.store = ShannonStore(backend: resolved, interval: 20, deviceName: "iPad")
+        self.store = ShannonStore(
+            backend: resolved,
+            interval: MultiDeviceCadence.companionRefreshInterval,
+            deviceName: "iPad"
+        )
     }
 
     /// Mirrors the phone: CloudKit when the process is entitled and running on

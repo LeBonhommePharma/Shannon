@@ -108,7 +108,7 @@ public final class ShannonStore {
 
     public init(
         backend: ShannonSyncBackend,
-        interval: TimeInterval = 30,
+        interval: TimeInterval = MultiDeviceCadence.companionRefreshInterval,
         deviceName: String = "device"
     ) {
         self.backend = backend
@@ -117,7 +117,9 @@ public final class ShannonStore {
     }
 
     /// Periodic refresh as a safety net. Push subscriptions drive the common
-    /// case; this covers a missed silent push.
+    /// case; this covers a missed silent push. Default interval matches Mac
+    /// publish (``MultiDeviceCadence``) so approvals are not delayed by an
+    /// extra 20 s of safety-net lag.
     public func start() {
         guard refreshTask == nil else { return }
         refreshTask = Task { [weak self] in

@@ -52,7 +52,7 @@ final class CloudPublisher {
         activity: AgentActivityMonitor? = nil,
         resources: SystemResourceMonitor? = nil,
         backend: ShannonSyncBackend? = nil,
-        interval: TimeInterval = 10,
+        interval: TimeInterval = MultiDeviceCadence.macPublishInterval,
         deviceName: String = Host.current().localizedName ?? "Mac"
     ) {
         self.nowPlaying = nowPlaying

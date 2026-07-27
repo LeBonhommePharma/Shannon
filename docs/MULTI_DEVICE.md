@@ -261,10 +261,19 @@ flags this the first time a query runs.
 
 1. Run the Mac pill with a track playing.
 2. Launch the iPhone app — the Now Playing card and Mac battery card appear
-   within ~10 s (the publish interval).
+   within ~10 s (Mac publish interval; see `MultiDeviceCadence`).
 3. Tap next-track on the phone; the Mac skips within one publish cycle.
 4. With the watch paired and the phone app foregrounded, the watch shows the
    same three cards.
+
+### Latency budget (Mac → companions)
+
+| Hop | Default | Notes |
+|---|---|---|
+| Mac `CloudPublisher` | **10 s** (`MultiDeviceCadence.macPublishInterval`) | Fires immediately on start; then timer. Unchanged records suppressed. |
+| Phone / iPad `ShannonStore` safety-net poll | **10 s** (`MultiDeviceCadence.companionRefreshInterval`) | Silent CloudKit push is the common path; poll covers missed push. Was 30 s on phone (and 20 s on pad) — capped to Mac publish so approvals are not delayed by an extra ~20 s. |
+| Worst-case without push | **≤ 20 s** | publish period + one companion poll (`MultiDeviceCadence.worstCaseMissedPushLag`). |
+| Phone → Watch | WatchConnectivity `updateApplicationContext` | Latest snapshot only; no CloudKit on watch. |
 
 If the phone shows "Can't reach iCloud", the device is not signed into iCloud
 or the container entitlement is missing — those are the only two causes of that

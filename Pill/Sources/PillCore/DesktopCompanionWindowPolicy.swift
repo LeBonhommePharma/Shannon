@@ -102,6 +102,61 @@ public enum DesktopCompanionWindowPolicy: Sendable {
     public static let launchReassertInterval: TimeInterval = 1.0
     public static let launchReassertTickCount: Int = 6
 
+    // MARK: - Visual chrome (parity with menubar popover / fleet glance)
+
+    /// Margin from dock / menu edges when placing the companion in `visibleFrame`.
+    public static let screenMargin: Double = 24
+
+    /// Continuous corner radius for the status bubble (matches floating glance).
+    public static let bubbleCornerRadius: Double = 12
+
+    /// Neutral hairline border opacity (same as popover / glance chrome).
+    public static let bubbleHairlineOpacity: Double = 0.10
+
+    /// Dark tint over popover material (matches FloatingGlance card stack).
+    public static let bubbleBackgroundTintOpacity: Double = 0.35
+
+    /// Material role name for the bubble — `PillMaterial(kind: .popover)`.
+    public static let bubbleMaterialKindName: String = "popover"
+
+    /// Panel composites transparently (no solid rectangular window fill).
+    public static let panelIsOpaque: Bool = false
+
+    /// No AppKit window shadow under irregular pet content (avoids sticker look).
+    public static let panelHasShadow: Bool = false
+
+    /// Do not paint a hard black disc behind the pet sprite.
+    public static let petUsesBackdropDisc: Bool = false
+
+    /// Bottom-trailing placement inside `visibleFrame`, inset by `margin`.
+    /// Pure geometry — no AppKit / window server required.
+    public static func defaultFrame(
+        size: CGSize,
+        visibleFrame: CGRect,
+        margin: Double = screenMargin
+    ) -> CGRect {
+        let m = CGFloat(max(0, margin))
+        let maxW = max(0, visibleFrame.width - 2 * m)
+        let maxH = max(0, visibleFrame.height - 2 * m)
+        let width = min(size.width, maxW)
+        let height = min(size.height, maxH)
+        let x = visibleFrame.maxX - width - m
+        let y = visibleFrame.minY + m
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// True when `frame` sits fully inside `visibleFrame` inset by `margin`.
+    public static func isSafelyPlaced(
+        frame: CGRect,
+        visibleFrame: CGRect,
+        margin: Double = screenMargin
+    ) -> Bool {
+        let m = CGFloat(max(0, margin))
+        let safe = visibleFrame.insetBy(dx: m, dy: m)
+        // Half-point tolerance for floating geometry from screen metrics.
+        return safe.insetBy(dx: -0.5, dy: -0.5).contains(frame)
+    }
+
     /// Pure checklist of policy facts tests and launch diagnostics can dump.
     public static var policySnapshot: [String: String] {
         [
@@ -118,6 +173,12 @@ public enum DesktopCompanionWindowPolicy: Sendable {
             "reassertOnActiveSpaceChange": "\(reassertOnActiveSpaceChange)",
             "reassertOnScreenParametersChange": "\(reassertOnScreenParametersChange)",
             "isAlwaysOnTopLevel": "\(isAlwaysOnTopLevel(windowLevelRawValue))",
+            "screenMargin": "\(screenMargin)",
+            "bubbleCornerRadius": "\(bubbleCornerRadius)",
+            "bubbleMaterialKindName": bubbleMaterialKindName,
+            "panelIsOpaque": "\(panelIsOpaque)",
+            "panelHasShadow": "\(panelHasShadow)",
+            "petUsesBackdropDisc": "\(petUsesBackdropDisc)",
         ]
     }
 

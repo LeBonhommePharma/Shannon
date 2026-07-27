@@ -294,6 +294,23 @@ def handrail_roster() -> list[dict[str, Any]]:
 # are only delegated through this handrail (skill + CLI).
 BENCHMARK_PHASES: tuple[str, ...] = ("A", "B0", "B")
 
+# Well-known FlexAIDdS Dataset / red-pair campaign names (aliases → canonical).
+# Unknown names still plan; this map only normalises spelling for task_id stability.
+DATASET_CAMPAIGN_ALIASES: dict[str, str] = {
+    "red-pair": "red_pair",
+    "redpair": "red_pair",
+    "red_pair": "red_pair",
+    "astex": "astex",
+    "astex85": "astex",
+    "astex_85": "astex",
+    "hap2": "hap2",
+    "casf": "casf",
+    "casf2016": "casf",
+    "casf_2016": "casf",
+    "three_engine": "red_pair",
+    "three-engine": "red_pair",
+}
+
 # Only these agents may own a heavy docking arm (benchmark_update / DatasetRunner).
 HEAVY_DOCKING_OWNER_IDS: frozenset[str] = frozenset({"dataset_runner"})
 
@@ -317,6 +334,15 @@ CAMPAIGN_ROLE_DEFAULTS: dict[str, str] = {
     "cowork": "cowork",
     "opencode": "opencode",
 }
+
+
+def normalize_campaign_name(campaign: str) -> str:
+    """Canonical Dataset campaign slug for plans / task_id prefixes."""
+    raw = (campaign or "red-pair").strip().lower().replace(" ", "_")
+    if raw in DATASET_CAMPAIGN_ALIASES:
+        return DATASET_CAMPAIGN_ALIASES[raw]
+    # Hyphenated unknown names → underscores for stable task ids.
+    return raw.replace("-", "_")
 
 
 @dataclass(frozen=True)
@@ -487,7 +513,7 @@ def plan_benchmark_campaign(
     this campaign, the plan is **refused** (ok=False) and includes no owner
     spawn; non-owner roles may still appear as refused-owner-only failure.
     """
-    camp = (campaign or "red-pair").strip().lower().replace(" ", "_")
+    camp = normalize_campaign_name(campaign)
     tid = task_id or default_task_id(f"flexaidds_{camp}")
     owner_role, owner_aid = resolve_campaign_role("docking_owner", owner)
     phase_tuple = phases or BENCHMARK_PHASES
@@ -497,11 +523,18 @@ def plan_benchmark_campaign(
         agent_tasks=agent_tasks,
         campaign_task_id=tid,
     )
+    known = camp in set(DATASET_CAMPAIGN_ALIASES.values())
     notes = (
         "Shannon owns this campaign plan — agents only act via skill/CLI lifecycle.",
         "Heavy docking owner is dataset_runner (or explicit alias); one arm at a time.",
         "No fabricated CF, RMSD, or entropy in the plan — those come from live results only.",
         "monitor first before any second docking owner spawn.",
+        (
+            f"Dataset campaign '{camp}' is a known FlexAIDdS benchmark name."
+            if known
+            else f"Campaign '{camp}' planned as custom Dataset-style name."
+        ),
+        "Computation churn: dataset_runner_bridge ingests .result files → benchmark_state.",
     )
 
     if existing and is_heavy_docking_owner(owner_aid):

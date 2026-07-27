@@ -28,6 +28,7 @@ class TestCampaignOwnership:
         assert d["ok"] is True
         assert d["refused"] is False
         assert d["task_id"] == "flexaidds_redpair_20260726"
+        assert d["campaign"] == "red_pair"  # normalised Dataset name
         assert d["phases"] == ["A", "B0", "B"]
         assert d["owner_agent_id"] == "dataset_runner"
         assert d["owner_role"] in ("docking_owner", "owner")
@@ -53,7 +54,20 @@ class TestCampaignOwnership:
     def test_auto_task_id_prefix(self):
         plan = am.plan_benchmark_campaign("astex")
         assert "flexaidds" in plan.task_id
+        assert "astex" in plan.task_id
+        assert plan.campaign == "astex"
         assert plan.task_id
+
+    def test_known_dataset_campaign_aliases(self):
+        assert am.normalize_campaign_name("red-pair") == "red_pair"
+        assert am.normalize_campaign_name("astex85") == "astex"
+        assert am.normalize_campaign_name("casf2016") == "casf"
+        assert am.normalize_campaign_name("hap2") == "hap2"
+        plan = am.plan_benchmark_campaign("astex85", task_id="flexaidds_astex_fixed")
+        assert plan.campaign == "astex"
+        assert plan.refused is False
+        assert plan.as_dict()["ok"] is True
+        assert plan.owner_agent_id == "dataset_runner"
 
 
 class TestDualOwnerRefusal:

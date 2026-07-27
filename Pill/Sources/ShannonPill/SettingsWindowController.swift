@@ -39,17 +39,16 @@ final class SettingsWindowController {
                 onDone: { [weak self] in self?.close() }
             )
             let host = NSHostingController(rootView: root)
+            // Fixed chrome only — never adopt intrinsic size (would thrash height
+            // and crop the Done footer the way the menu-bar popover used to).
             host.sizingOptions = []
-            host.preferredContentSize = NSSize(
+            let chrome = NSSize(
                 width: SettingsView.chromeWidth,
                 height: SettingsView.chromeHeight
             )
+            host.preferredContentSize = chrome
             win = NSWindow(
-                contentRect: NSRect(
-                    x: 0, y: 0,
-                    width: SettingsView.chromeWidth,
-                    height: SettingsView.chromeHeight
-                ),
+                contentRect: NSRect(origin: .zero, size: chrome),
                 styleMask: [.titled, .closable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
@@ -61,7 +60,12 @@ final class SettingsWindowController {
             win.contentViewController = host
             win.appearance = NSAppearance(named: .darkAqua)
             win.backgroundColor = .clear
-            win.setContentSize(host.preferredContentSize)
+            // Content size == SwiftUI chrome; fullSizeContentView draws under
+            // the title bar while SettingsView ignores top safe area so Done
+            // stays inside the 580 pt band.
+            win.setContentSize(chrome)
+            win.contentMinSize = chrome
+            win.contentMaxSize = chrome
             win.center()
             // Accessory apps need this so Settings can become key.
             win.level = .normal

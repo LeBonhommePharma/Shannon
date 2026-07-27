@@ -15,7 +15,9 @@ struct MenuBarPopoverView: View {
     /// Fixed chrome size while the popover is open. Live telemetry must not
     /// resize the window or the footer (Quit) jumps out from under the cursor.
     static let chromeWidth: CGFloat = 320
-    static let chromeHeight: CGFloat = 448
+    /// Tall enough for resources + roster + parity sections with a pinned
+    /// footer; still a compact menu, not a sheet (aspect stays < 2).
+    static let chromeHeight: CGFloat = 520
 
     /// Minimum Quit hit target — wide enough for the power glyph + "Quit" label
     /// and never compressed by a long multi-device footer line.
@@ -25,6 +27,10 @@ struct MenuBarPopoverView: View {
     /// Footer action row height (icons + Quit). Fixed so status ticks above
     /// cannot reflow the hit targets.
     static let footerActionRowHeight: CGFloat = 26
+
+    /// Full pinned footer band (status line + action row + vertical padding).
+    /// Reserved via `safeAreaInset` so rounded chrome never crops Quit.
+    static let footerBandMinHeight: CGFloat = 68
 
     /// Shipped popover content size. Controllers must use this instead of
     /// SwiftUI intrinsic size so live body growth never resizes chrome.
@@ -126,109 +132,114 @@ struct MenuBarPopoverView: View {
         // Intrinsic height used to reflow every resource tick so the Quit
         // control "escaped" the cursor mid-click. Footer stays docked; only
         // the middle scrolls when sections grow.
-        VStack(alignment: .leading, spacing: 0) {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 10) {
-                    header
-                    if showFirstRun && summary.agents.isEmpty {
-                        firstRunTips
-                            .shannonGlassSection(emphasized: true)
-                    }
-                    if let ask {
-                        GateInlineCard(
-                            ask: ask,
-                            isResolving: activity.resolving.contains(ask.interactionId),
-                            error: activity.lastResolveError,
-                            gateAvailable: activity.gateAvailable,
-                            extraPending: max(0, activity.pendingAsks.count - 1),
-                            onAnswer: { approved in
-                                Task { await activity.resolve(ask, approved: approved) }
-                            },
-                            onShowAll: onShowAllGates
-                        )
-                        // Stable id so only ask *identity* changes swap the card.
-                        .id(ask.interactionId)
-                    }
-                    MenuBarResourcesSection(resources: resources)
-                        .shannonGlassSection()
-                    if BenchmarkRunLogic.shouldShowCard(activity.benchmark) {
-                        benchmarkSection
-                            .shannonGlassSection(
-                                emphasized: activity.benchmark.map { !$0.isComplete } ?? false
-                            )
-                    }
-                    keepAwakeSection
-                        .shannonGlassSection()
-                    MenuBarAgentRoster(
-                        activity: activity,
-                        bridge: bridge,
-                        agentReadings: agentReadings,
-                        entropyTint: entropyTint,
-                        sessionsByAgent: sessionsByAgentId
-                    )
-                        .shannonGlassSection()
-                    PulledSessionsSection(
-                        sessions: parity.sessions,
-                        pendingAsks: activity.pendingAsks,
-                        activity: activity.recentActivity,
-                        liveAgentIds: Set(summary.agents.map(\.id)),
-                        onJumpToHost: { input in
-                            // ENH-028: pure policy + NSWorkspace activate / open cwd.
-                            _ = HostTerminalJumpExecutor.jump(input: input)
-                        },
-                        onOpenTerminalHere: { input in
-                            // ENH-029: pure policy + NSWorkspace open dir with terminal app.
-                            _ = OpenTerminalHereExecutor.open(input: input)
-                        }
-                    )
-                        .shannonGlassSection()
-                    DevServersSection(
-                        servers: parity.servers,
-                        onOpen: { s in
-                            if let url = DevServerDiscovery.openURL(for: s) {
-                                NSWorkspace.shared.open(url)
-                            }
-                        },
-                        onCopy: { s in
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(s.url, forType: .string)
-                        },
-                        onStop: { s in
-                            _ = DevServerDiscovery.stop(s)
-                            parity.refresh(gateAgents: summary.agents, force: true)
-                        }
-                    )
-                    .shannonGlassSection()
-                    QuickRoutesSection(routes: parity.routes) { route in
-                        NSWorkspace.shared.open(URL(fileURLWithPath: route.path))
-                    }
-                    .shannonGlassSection()
-                    FastActionsSection(
-                        actions: parity.actions,
-                        status: parity.lastActionStatus,
-                        error: parity.lastActionError,
-                        onRun: { parity.runAction($0) }
-                    )
-                    .shannonGlassSection()
-                    staleAskNotice
-                    recentSection
+        // Scroll body only; Quit footer is a bottom safe-area inset so fixed
+        // chrome + corner clipShape can never crop the hit target.
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 10) {
+                header
+                if showFirstRun && summary.agents.isEmpty {
+                    firstRunTips
+                        .shannonGlassSection(emphasized: true)
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
-                // Fill width inside the scroll so gauges do not reflow sideways.
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                if let ask {
+                    GateInlineCard(
+                        ask: ask,
+                        isResolving: activity.resolving.contains(ask.interactionId),
+                        error: activity.lastResolveError,
+                        gateAvailable: activity.gateAvailable,
+                        extraPending: max(0, activity.pendingAsks.count - 1),
+                        onAnswer: { approved in
+                            Task { await activity.resolve(ask, approved: approved) }
+                        },
+                        onShowAll: onShowAllGates
+                    )
+                    // Stable id so only ask *identity* changes swap the card.
+                    .id(ask.interactionId)
+                }
+                MenuBarResourcesSection(resources: resources)
+                    .shannonGlassSection()
+                if BenchmarkRunLogic.shouldShowCard(activity.benchmark) {
+                    benchmarkSection
+                        .shannonGlassSection(
+                            emphasized: activity.benchmark.map { !$0.isComplete } ?? false
+                        )
+                }
+                keepAwakeSection
+                    .shannonGlassSection()
+                MenuBarAgentRoster(
+                    activity: activity,
+                    bridge: bridge,
+                    agentReadings: agentReadings,
+                    entropyTint: entropyTint,
+                    sessionsByAgent: sessionsByAgentId
+                )
+                    .shannonGlassSection()
+                PulledSessionsSection(
+                    sessions: parity.sessions,
+                    pendingAsks: activity.pendingAsks,
+                    activity: activity.recentActivity,
+                    liveAgentIds: Set(summary.agents.map(\.id)),
+                    onJumpToHost: { input in
+                        // ENH-028: pure policy + NSWorkspace activate / open cwd.
+                        _ = HostTerminalJumpExecutor.jump(input: input)
+                    },
+                    onOpenTerminalHere: { input in
+                        // ENH-029: pure policy + NSWorkspace open dir with terminal app.
+                        _ = OpenTerminalHereExecutor.open(input: input)
+                    }
+                )
+                    .shannonGlassSection()
+                DevServersSection(
+                    servers: parity.servers,
+                    onOpen: { s in
+                        if let url = DevServerDiscovery.openURL(for: s) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    },
+                    onCopy: { s in
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(s.url, forType: .string)
+                    },
+                    onStop: { s in
+                        _ = DevServerDiscovery.stop(s)
+                        parity.refresh(gateAgents: summary.agents, force: true)
+                    }
+                )
+                .shannonGlassSection()
+                QuickRoutesSection(routes: parity.routes) { route in
+                    NSWorkspace.shared.open(URL(fileURLWithPath: route.path))
+                }
+                .shannonGlassSection()
+                FastActionsSection(
+                    actions: parity.actions,
+                    status: parity.lastActionStatus,
+                    error: parity.lastActionError,
+                    onRun: { parity.runAction($0) }
+                )
+                .shannonGlassSection()
+                staleAskNotice
+                recentSection
             }
-
-            // Pinned action bar — never moves with live HUD ticks.
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+            // Fill width inside the scroll so gauges do not reflow sideways.
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Pinned action bar — never moves with live HUD ticks, never cropped.
             footer
                 .padding(.horizontal, 14)
                 .padding(.top, 8)
-                .padding(.bottom, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // ≥ corner radius so Quit clears the rounded clipShape.
+                .padding(.bottom, 14)
+                .frame(maxWidth: .infinity, minHeight: Self.footerBandMinHeight, alignment: .leading)
                 .background {
                     Color.black.opacity(0.22)
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
         }
         .frame(width: Self.chromeWidth, height: Self.chromeHeight, alignment: .top)
         .transaction { txn in

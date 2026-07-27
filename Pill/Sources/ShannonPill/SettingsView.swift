@@ -13,10 +13,17 @@ struct SettingsView: View {
 
     /// Fixed size — matches popover anti-pop discipline.
     static let chromeWidth: CGFloat = 360
-    /// Room for glance + voice callout toggles (UX-058 / ENH-030) without thrash.
-    static let chromeHeight: CGFloat = 520
+    /// Room for glance + voice + pet package sections without thrash.
+    /// Tall enough that the pinned Done footer never collides with title-bar
+    /// safe area or gets clipped by the hosting window.
+    static let chromeHeight: CGFloat = 580
+    /// Pinned Done bar — reserved via `safeAreaInset`, never compressed.
+    static let footerMinHeight: CGFloat = 48
 
     var body: some View {
+        // Header + scroll body; Done is a bottom safe-area inset so the
+        // fixed chrome height cannot crop the control (title-bar insets used
+        // to eat ~28 pt from the bottom of a hard-stacked footer).
         VStack(alignment: .leading, spacing: 0) {
             header
             ScrollView(.vertical, showsIndicators: true) {
@@ -34,9 +41,16 @@ struct SettingsView: View {
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             footer
         }
         .frame(width: Self.chromeWidth, height: Self.chromeHeight, alignment: .top)
+        // Fill the full content view under a transparent title bar so the
+        // fixed height is not double-counted against title-bar safe area.
+        .ignoresSafeArea(.container, edges: .top)
+        .clipped()
         .transaction { txn in
             txn.animation = nil
             txn.disablesAnimations = true
@@ -52,9 +66,11 @@ struct SettingsView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
+            // Offset past traffic lights (fullSizeContentView + ignored top safe area).
             Image(systemName: "gearshape.fill")
                 .font(.shannonMenuTitle)
                 .foregroundStyle(Color.shannonAccent)
+                .padding(.leading, 52)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Shannon Settings")
                     .font(.shannonMenuTitle)
@@ -66,8 +82,9 @@ struct SettingsView: View {
             Spacer(minLength: 4)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(height: 52)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .frame(minHeight: 52)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.white.opacity(0.08))
@@ -304,7 +321,9 @@ struct SettingsView: View {
             Text("Changes apply immediately")
                 .font(.shannonMenuFootnote)
                 .foregroundStyle(Color.shannonTertiary)
-            Spacer()
+                .lineLimit(1)
+                .layoutPriority(0)
+            Spacer(minLength: 8)
             Button("Done", action: onDone)
                 .font(.shannonMenuBody)
                 .buttonStyle(.plain)
@@ -315,10 +334,19 @@ struct SettingsView: View {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(Color.shannonAccent.opacity(0.15))
                 )
+                // Never compress Done under a long status line.
+                .fixedSize(horizontal: true, vertical: true)
+                .layoutPriority(10)
+                .accessibilityLabel("Done")
+                .accessibilityHint("Closes Shannon Settings")
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(height: 44)
+        // Center in a reserved bar — avoid padding + hard height that clipped
+        // the control when system font metrics ran slightly tall.
+        .frame(maxWidth: .infinity, minHeight: Self.footerMinHeight)
+        .frame(height: Self.footerMinHeight)
         .background(Color.black.opacity(0.22))
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(1)
     }
 }

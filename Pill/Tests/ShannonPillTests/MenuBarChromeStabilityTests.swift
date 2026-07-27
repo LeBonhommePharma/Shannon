@@ -11,13 +11,28 @@ final class MenuBarChromeStabilityTests: XCTestCase {
         // Width: enough for gauges + labeled Quit; height: room for scroll body
         // + pinned footer. Values are intentional product constants.
         XCTAssertEqual(MenuBarPopoverView.chromeWidth, 320)
-        XCTAssertEqual(MenuBarPopoverView.chromeHeight, 448)
+        XCTAssertEqual(MenuBarPopoverView.chromeHeight, 520)
         XCTAssertGreaterThan(MenuBarPopoverView.chromeWidth, 280)
-        XCTAssertGreaterThan(MenuBarPopoverView.chromeHeight, 360)
+        XCTAssertGreaterThan(MenuBarPopoverView.chromeHeight, 480)
         // Aspect roughly "menu, not sheet".
         let aspect = MenuBarPopoverView.chromeHeight / MenuBarPopoverView.chromeWidth
         XCTAssertGreaterThan(aspect, 1.0)
         XCTAssertLessThan(aspect, 2.0)
+    }
+
+    /// Footer band is reserved via safeAreaInset — must leave scroll room and
+    /// clear the rounded clipShape so Quit is never cropped.
+    func testFooterBandReservesQuitWithoutCrushingScroll() {
+        XCTAssertGreaterThanOrEqual(MenuBarPopoverView.footerBandMinHeight, 60)
+        XCTAssertGreaterThanOrEqual(
+            MenuBarPopoverView.footerBandMinHeight,
+            MenuBarPopoverView.footerActionRowHeight + 14 /* status */ + 8 + 14 /* pads */
+        )
+        let remaining = MenuBarPopoverView.chromeHeight - MenuBarPopoverView.footerBandMinHeight
+        XCTAssertGreaterThan(
+            remaining, 300,
+            "scroll body crushed — Quit would sit on clipped chrome"
+        )
     }
 
     func testChromeSizeStableAcrossRepeatedReads() {

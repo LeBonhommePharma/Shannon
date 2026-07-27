@@ -80,12 +80,16 @@ final class AgentArtifactReaderTests: XCTestCase {
         let cursorRoot = fixturesRoot.appendingPathComponent("cursor/projects", isDirectory: true)
         let coworkRoot = fixturesRoot.appendingPathComponent("cowork/sessions", isDirectory: true)
         let kimiRoot = fixturesRoot.appendingPathComponent("kimi/sessions", isDirectory: true)
+        let geminiRoot = fixturesRoot.appendingPathComponent("gemini/tmp", isDirectory: true)
+        let opencodeDB = fixturesRoot.appendingPathComponent("opencode/opencode.db")
         let reg = SessionRegistry()
         reg.register(ClaudeCodeSessionReader(projectsRoot: projects, maxSessions: 5))
         reg.register(CodexSessionReader(sessionsRoot: codexRoot, maxSessions: 5))
         reg.register(CursorSessionReader(projectsRoot: cursorRoot, maxSessions: 5))
         reg.register(CoworkSessionReader(sessionsRoot: coworkRoot, maxSessions: 5))
         reg.register(KimiSessionReader(sessionRoots: [kimiRoot], maxSessions: 5))
+        reg.register(GeminiSessionReader(sessionRoots: [geminiRoot], maxSessions: 5, resolveBranch: { _ in nil }))
+        reg.register(OpenCodeSessionReader(databasePaths: [opencodeDB], maxSessions: 5, resolveBranch: { _ in nil }))
         // Gate live should outrank when same agent appears (science only on gate).
         reg.register(GateSessionProvider(agents: [
             AgentActivitySnapshot(
@@ -100,6 +104,8 @@ final class AgentArtifactReaderTests: XCTestCase {
         XCTAssertTrue(all.contains { $0.agentId == "cursor" && $0.sourceKind == .artifact })
         XCTAssertTrue(all.contains { $0.agentId == "cowork" && $0.sourceKind == .artifact })
         XCTAssertTrue(all.contains { $0.agentId == "kimi" && $0.sourceKind == .artifact })
+        XCTAssertTrue(all.contains { $0.agentId == "gemini" && $0.sourceKind == .artifact })
+        XCTAssertTrue(all.contains { $0.agentId == "opencode" && $0.sourceKind == .artifact })
         let science = all.first { $0.agentId == "science" }
         XCTAssertEqual(science?.presence, .live)
         XCTAssertEqual(science?.sourceKind, .gate)
@@ -286,9 +292,141 @@ final class AgentArtifactReaderTests: XCTestCase {
             "CodexSessionReader",
             "CursorSessionReader",
             "KimiSessionReader",
+            "OpenCodeSessionReader",
+            "GeminiSessionReader",
         ] {
             XCTAssertTrue(text.contains(needle), "PanelSectionRegistry must register \(needle)")
         }
+    }
+
+    // MARK: - ENH-027 residual high-value local agents
+
+    func testOpenCodeReaderParsesFixtureDatabase() {
+        let db = fixturesRoot.appendingPathComponent("opencode/opencode.db")
+        let sessions = OpenCodeSessionReader.readSessions(
+            databasePaths: [db],
+            now: Date(timeIntervalSince1970: 1_721_500_200),
+            maxSessions: 10,
+            resolveBranch: { _ in nil }
+        )
+        XCTAssertFalse(sessions.isEmpty, "expected OpenCode sessions from fixture at \(db.path)")
+        let s = sessions.first { $0.id.contains("ses_fixture_aaaa1111") }
+        XCTAssertNotNil(s, "usage fixture ses_fixture_aaaa1111")
+        guard let s else { return }
+        XCTAssertEqual(s.agentId, "opencode")
+        XCTAssertEqual(s.displayName, "OpenCode")
+        XCTAssertEqual(s.sourceKind, .artifact)
+        XCTAssertEqual(s.cwd, "/Users/test/DemoApp")
+        XCTAssertEqual(s.project, "DemoApp")
+        XCTAssertEqual(s.model, "glm-test")
+        XCTAssertEqual(s.lastTask, "Build spring HUD")
+        XCTAssertEqual(s.tokensIn, 1200)
+        XCTAssertEqual(s.tokensOut, 40)
+        XCTAssertEqual(s.status, .idle)
+        XCTAssertFalse((s.stateLabel ?? "").lowercased().contains("approve"))
+    }
+
+    func testOpenCodeZeroTokensStayNil() {
+        let db = fixturesRoot.appendingPathComponent("opencode/opencode.db")
+        let sessions = OpenCodeSessionReader.readSessions(
+            databasePaths: [db],
+            now: Date(timeIntervalSince1970: 1_721_500_200),
+            maxSessions: 10,
+            resolveBranch: { _ in nil }
+        )
+        let s = sessions.first { $0.id.contains("ses_fixture_bbbb2222") }
+        XCTAssertNotNil(s)
+        // Schema default 0 is not a measurement.
+        XCTAssertNil(s?.tokensIn)
+        XCTAssertNil(s?.tokensOut)
+        XCTAssertEqual(s?.model, "plain-model-id")
+    }
+
+    func testOpenCodeMissingDatabaseReturnsEmpty() {
+        let missing = URL(fileURLWithPath: "/tmp/shannon-no-opencode-\(UUID().uuidString).db")
+        XCTAssertTrue(
+            OpenCodeSessionReader.readSessions(databasePaths: [missing], resolveBranch: { _ in nil })
+                .isEmpty
+        )
+    }
+
+    func testOpenCodeSessionFromRowPureParse() {
+        let row = OpenCodeSessionReader.SessionRow(
+            id: "ses_pure",
+            title: "Pure parse title",
+            directory: "/tmp/proj",
+            modelRaw: #"{"id":"gpt-test","providerID":"x"}"#,
+            tokensInput: 10,
+            tokensOutput: 2,
+            timeUpdated: 1_721_500_000_000
+        )
+        let s = OpenCodeSessionReader.sessionFromRow(row, now: Date(timeIntervalSince1970: 0))
+        XCTAssertEqual(s.id, "opencode:ses_pure")
+        XCTAssertEqual(s.agentId, "opencode")
+        XCTAssertEqual(s.model, "gpt-test")
+        XCTAssertEqual(s.tokensIn, 10)
+        XCTAssertEqual(s.tokensOut, 2)
+        XCTAssertEqual(s.project, "proj")
+        XCTAssertEqual(
+            OpenCodeSessionReader.parseModelLabel("bare-model"),
+            "bare-model"
+        )
+        XCTAssertNil(OpenCodeSessionReader.parseModelLabel("   "))
+        XCTAssertNil(OpenCodeSessionReader.parseModelLabel(nil))
+    }
+
+    func testGeminiReaderParsesFixtureSession() {
+        let root = fixturesRoot.appendingPathComponent("gemini/tmp", isDirectory: true)
+        let sessions = GeminiSessionReader.readSessions(
+            roots: [root],
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10,
+            resolveBranch: { _ in nil }
+        )
+        XCTAssertFalse(sessions.isEmpty, "expected Gemini sessions at \(root.path)")
+        let s = sessions.first { $0.id.contains("aaaa1111") }
+        XCTAssertNotNil(s, "expected multi-turn fixture aaaa1111")
+        guard let s else { return }
+        XCTAssertEqual(s.agentId, "gemini")
+        XCTAssertEqual(s.displayName, "Gemini CLI")
+        XCTAssertEqual(s.sourceKind, .artifact)
+        XCTAssertEqual(s.cwd, "/Users/test/DemoApp")
+        XCTAssertEqual(s.project, "DemoApp")
+        XCTAssertEqual(s.status, .idle)
+        let task = s.lastTask ?? s.activitySummary ?? ""
+        XCTAssertTrue(
+            task.lowercased().contains("spring") || task.lowercased().contains("hud"),
+            "task=\(task)"
+        )
+        XCTAssertNil(s.tokensIn)
+        XCTAssertNil(s.tokensOut)
+        XCTAssertFalse((s.stateLabel ?? "").lowercased().contains("approve"))
+    }
+
+    func testGeminiUserOnlyIsWorkingNotNeedsYou() {
+        let root = fixturesRoot.appendingPathComponent("gemini/tmp", isDirectory: true)
+        let sessions = GeminiSessionReader.readSessions(
+            roots: [root],
+            now: Date(timeIntervalSince1970: 1_721_500_000),
+            maxSessions: 10,
+            resolveBranch: { _ in nil }
+        )
+        let s = sessions.first { $0.id.contains("useronly2222") }
+        XCTAssertNotNil(s)
+        guard let s else { return }
+        XCTAssertEqual(s.status, .midTask)
+        XCTAssertEqual(s.stateLabel, "working")
+        let card = SessionContentPresenter.card(session: s, pendingAsks: [], now: Date())
+        XCTAssertFalse(card.needsYou)
+        XCTAssertFalse(card.canAnswerInline)
+    }
+
+    func testGeminiMissingRootReturnsEmpty() {
+        let missing = URL(fileURLWithPath: "/tmp/shannon-no-gemini-\(UUID().uuidString)")
+        XCTAssertTrue(
+            GeminiSessionReader.readSessions(roots: [missing], resolveBranch: { _ in nil })
+                .isEmpty
+        )
     }
 
     func testProjectDirectoryDecodePrefersHome() {

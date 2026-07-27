@@ -250,13 +250,14 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Priority:** P2
 - **Parity:** AgentPeek usage / AgentNotch plan gauge (candidate G1)
 
-### - [ ] ENH-027: Expand works-with session readers for high-value local agents (parity G2)
+### - [x] ENH-027: Expand works-with session readers for high-value local agents (parity G2)
 
 - **Why:** AgentPeek lists ~25 brands; Shannon ships Claude Code, Codex, Cursor, Cowork, Kimi. Category present; residual brands with local disk/process signals remain uncovered.
 - **Area:** `Pill/Sources/AgentReaders/`, `PanelSectionRegistry`, TerminalAgentProbe
 - **First slice:** Add 1–2 readers with fixtures where local session paths exist; fail-closed empty roots; pure parse tests.
 - **Priority:** P2
 - **Parity:** AgentPeek agent matrix / AgentNotch works-with (candidate G2)
+- **Done:** OpenCode (`~/.local/share/opencode/opencode.db` SQLite + pure `sessionFromRow`) and Gemini CLI (`~/.gemini/tmp/*/chats/session-*.jsonl` + `.project_root`); fail-closed missing roots; fixtures + tests; `PanelSectionRegistry` registration; TerminalAgentProbe `opencode` only (gate-valid). No invented sessions/tokens.
 
 ### - [ ] ENH-028: Jump-to-host-terminal for live session (parity G3)
 

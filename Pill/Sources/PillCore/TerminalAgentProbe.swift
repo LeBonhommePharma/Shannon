@@ -196,6 +196,9 @@ public enum TerminalAgentProbe {
               agentID: "kimi", displayName: "Kimi"),
         .init(executables: ["cursor-agent", "cursor-cli", "cursor_agent"],
               agentID: "cursor", displayName: "Cursor"),
+        // OpenCode CLI (VALID_AGENTS / hub handrail `opencode`).
+        .init(executables: ["opencode", "open-code", "oc"],
+              agentID: "opencode", displayName: "OpenCode"),
     ]
 
     /// Interpreters that tell you nothing on their own — the agent is in argv.

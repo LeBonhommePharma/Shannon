@@ -64,6 +64,8 @@ final class TerminalAgentProbeTests: XCTestCase {
         XCTAssertEqual(TerminalAgentProbe.classify(executable: "kimi")?.agentID, "kimi")
         XCTAssertEqual(TerminalAgentProbe.classify(executable: "kimi-cli")?.agentID, "kimi")
         XCTAssertEqual(TerminalAgentProbe.classify(executable: "cursor-agent")?.agentID, "cursor")
+        XCTAssertEqual(TerminalAgentProbe.classify(executable: "opencode")?.agentID, "opencode")
+        XCTAssertEqual(TerminalAgentProbe.classify(executable: "open-code")?.agentID, "opencode")
         // Most specific first: claude-science / claude-design must not be swallowed by claude.
         XCTAssertNotEqual(TerminalAgentProbe.classify(executable: "claude-science")?.agentID, "claude_code")
         XCTAssertNotEqual(TerminalAgentProbe.classify(executable: "claude-design")?.agentID, "claude_code")

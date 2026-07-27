@@ -1,0 +1,4 @@
+{"sessionId":"aaaa1111-bbbb-cccc-dddd-eeeeeeeeeeee","projectHash":"abc123","startTime":"2026-07-01T12:00:00.000Z","lastUpdated":"2026-07-01T12:05:00.000Z","kind":"chat"}
+{"$set":{"messages":[{"id":"m1","timestamp":"2026-07-01T12:00:01.000Z","type":"user","content":[{"text":"Add spring HUD to DemoApp"}]}],"lastUpdated":"2026-07-01T12:00:01.000Z"}}
+{"id":"m2","timestamp":"2026-07-01T12:01:00.000Z","type":"gemini","content":"I'll add a spring-based HUD overlay."}
+{"$set":{"lastUpdated":"2026-07-01T12:05:00.000Z"}}

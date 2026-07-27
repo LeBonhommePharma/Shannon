@@ -115,6 +115,16 @@ public enum AgentStyleCatalog {
               systemImage: "moon.stars.fill", emoji: "🌙",
               red: 0.55, green: 0.35, blue: 0.90,
               pet: "owl", petSymbol: "bird.fill"),
+        // Aligned with hub/agent_identity.py `opencode` (handrail).
+        .init(id: "opencode", displayName: "OpenCode", shortName: "OC",
+              systemImage: "terminal.fill", emoji: "⌨️",
+              red: 0.25, green: 0.85, blue: 0.75,
+              pet: "octopus", petSymbol: "ellipsis.circle.fill"),
+        // Gemini CLI artifacts (ENH-027); observational reader only — not gate probe.
+        .init(id: "gemini", displayName: "Gemini CLI", shortName: "Gem",
+              systemImage: "sparkle", emoji: "✦",
+              red: 0.35, green: 0.55, blue: 0.98,
+              pet: "star", petSymbol: "sparkle"),
         .init(id: "vscode", displayName: "VS Code", shortName: "Code",
               systemImage: "chevron.left.forwardslash.chevron.right", emoji: "💙",
               red: 0.20, green: 0.50, blue: 0.90,

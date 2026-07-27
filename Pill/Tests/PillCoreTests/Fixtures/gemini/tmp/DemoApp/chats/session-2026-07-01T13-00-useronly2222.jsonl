@@ -1,0 +1,2 @@
+{"sessionId":"useronly2222-bbbb-cccc-dddd-eeeeeeeeeeee","projectHash":"abc123","startTime":"2026-07-01T13:00:00.000Z","lastUpdated":"2026-07-01T13:00:30.000Z","kind":"chat"}
+{"$set":{"messages":[{"id":"m1","timestamp":"2026-07-01T13:00:01.000Z","type":"user","content":[{"text":"Refactor auth module"}]}],"lastUpdated":"2026-07-01T13:00:01.000Z"}}

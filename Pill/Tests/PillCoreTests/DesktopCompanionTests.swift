@@ -53,14 +53,24 @@ final class CompanionBubbleTextTests: XCTestCase {
     }
 
     func testLiveBusyBubbleClaimsWork() {
+        // Empty task → default "On it" primary (short tasks may own primary).
         let state = CompanionState(
-            agent: snap(status: .active, presence: .live, secondsAgo: 1)
+            agent: snap(status: .active, presence: .live, secondsAgo: 1, lastTask: "")
         )
         let bubble = CompanionBubbleText.derive(from: state)
         XCTAssertTrue(bubble.claimsWork)
         XCTAssertEqual(bubble.text, "On it")
         XCTAssertEqual(bubble.motion, .running)
         XCTAssertEqual(bubble.mood, .alert)
+
+        // Scannable short task becomes primary; detail still honest.
+        let withTask = CompanionBubbleText.derive(from: CompanionState(
+            agent: snap(status: .active, presence: .live, secondsAgo: 1,
+                        lastTask: "docking 1ACJ")
+        ))
+        XCTAssertTrue(withTask.claimsWork)
+        XCTAssertEqual(withTask.text, "docking 1ACJ")
+        XCTAssertEqual(withTask.detail, "docking 1ACJ")
     }
 
     func testPendingAskBubbleIsNeedsYouNotWorking() {

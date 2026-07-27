@@ -301,7 +301,7 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 
 ## Investigation notes
 
-- **2026-07-26 (AgentNotch/Peek/Callout parity):** User approved G1–G4,G6–G10 (not G5 chat, not G11 OTEL). Enqueued **ENH-026…032** + UX-057/058. Inventory: `{SCRATCH}/parity_inventory.md`. Counts: present 16 / partial 9 / missing 5 (defining rows).
+- **2026-07-26 (AgentNotch/Peek/Callout parity):** Sources https://www.agentnotch.app · https://agentpeek.app/ · https://agentcallout.com/. User approved G1–G4,G6–G10 (not G5 chat, not G11 OTEL). Enqueued **ENH-026…032** + UX-057/058. Inventory: `{SCRATCH}/parity_inventory.md`. Counts: present 17 / partial 8 / missing 5 (C1–C30).
 - **2026-07-26 (Grok 4.5 OS swarm):** macOS audit filed **ENH-023** (remote clearAsk fail-open). iOS filed **ENH-024** (stem dismiss no-op) and **ENH-025** (freeform dead). Cross-check: not ENH-018…022 (closed multi-device honesty). UI dual-copy/gate chrome → `docs/MULTI_OS_UX_BACKLOG.md` UX-035…052.
 
 ---

@@ -557,7 +557,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
-- **2026-07-26 (AgentNotch/Peek/Callout parity):** Inventory of three products vs Shannon. User approved G1–G4,G6–G10 (excluded G5 chat, G11 OTEL). Enqueued **UX-057/058** + ENH-026…032. Present 16 / partial 9 / missing 5. Evidence in goal scratch `parity_inventory.md`.
+- **2026-07-26 (AgentNotch/Peek/Callout parity):** Inventory of https://www.agentnotch.app · https://agentpeek.app/ · https://agentcallout.com/ vs Shannon. User approved G1–G4,G6–G10 (excluded G5 chat, G11 OTEL). Enqueued **UX-057/058** + ENH-026…032. Counts: present 17 / partial 8 / missing 5 (C1–C30). Evidence in goal scratch `parity_inventory.md`.
 - **2026-07-26 (UX-056):** Closed pad Collecting samples dual via Core `EntropyEmptyTraceCopy`; PresentationTests green.
 - **2026-07-26 (loop 33):** `--quick` all PASS. Backlog empty after UX-054. Residual multi-OS dual: phone/Mac fleet `"agents need a glance"` → **UX-055** (claim). Filed **UX-056** pad Collecting samples dual (P3). Considered: pad “No matches” / “Nothing from the Mac yet.” (surface-specific leave); phone status TTS “N agents running” (different metric than fleet glance — leave); HubScanLine FlexAIDdS offline (domain leave); configurationDisplayName catalog (leave).
 - **2026-07-26 (clean slate):** Closed **UX-054**; committed XcodeGen hygiene (`validate_xcodeprojs.sh`, clean generate in test/setup, docs). Primary UX/ENH/PET queues empty; working tree clean on main.

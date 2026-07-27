@@ -197,6 +197,68 @@ final class GateDBReaderTests: XCTestCase {
         XCTAssertFalse(snap.pendingAsks[0].isOrphaned)
         XCTAssertEqual(snap.pendingAsks[0].waitingFor, "30s")
         XCTAssertTrue(snap.staleAsks.isEmpty)
+        // ENH-031: no payload → no invented paths.
+        XCTAssertTrue(snap.pendingAsks[0].changePaths.isEmpty)
+        XCTAssertNil(snap.pendingAsks[0].changeSummary)
+        XCTAssertTrue(snap.pendingAsks[0].changePathsPresentation.isEmpty)
+    }
+
+    /// ENH-031: paths/summary from agent_messages payload when interaction_id matches.
+    func testAskSurfacesChangePathsFromMatchingPayload() throws {
+        let payload = """
+        {"interaction_id":"ask-paths","approval_needed":true,"paths":["src/a.swift","src/b.swift"],"change_summary":"Two file edit"}
+        """
+        // Escape single quotes for SQL string literal.
+        let escaped = payload.replacingOccurrences(of: "'", with: "''")
+        try exec("""
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at)
+        VALUES ('science', 'active', \(ns(2)), NULL);
+        INSERT INTO agent_interactions (interaction_id, agent_id, prompt, status, created_at_ns)
+        VALUES ('ask-paths', 'science', 'Apply edit?', 'pending', \(ns(10)));
+        INSERT INTO agent_messages (received_at_ns, agent_id, task_id, message_type, payload_json)
+        VALUES (\(ns(10)), 'science', 't', 'approval_needed', '\(escaped)');
+        """)
+        let ask = try XCTUnwrap(GateDBReader.readSnapshot(path: dbPath).pendingAsks.first)
+        XCTAssertEqual(ask.interactionId, "ask-paths")
+        XCTAssertEqual(ask.changePaths, ["src/a.swift", "src/b.swift"])
+        XCTAssertEqual(ask.changeSummary, "Two file edit")
+        let presentation = ask.changePathsPresentation
+        XCTAssertFalse(presentation.isEmpty)
+        XCTAssertEqual(presentation.summary, "Two file edit")
+        XCTAssertEqual(presentation.pathLines, ["src/a.swift", "src/b.swift"])
+    }
+
+    /// ENH-031: prompt text that merely *names* a path must not invent changePaths.
+    func testAskDoesNotInventPathsFromPromptProse() throws {
+        try exec("""
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at)
+        VALUES ('science', 'active', \(ns(2)), NULL);
+        INSERT INTO agent_interactions (interaction_id, agent_id, prompt, status, created_at_ns)
+        VALUES ('ask-prose', 'science', 'Edit /Users/me/main.py and util.ts?', 'pending', \(ns(10)));
+        INSERT INTO agent_messages (received_at_ns, agent_id, task_id, message_type, payload_json)
+        VALUES (\(ns(10)), 'science', 't', 'approval_needed',
+                '{"interaction_id":"ask-prose","prompt":"Edit /Users/me/main.py and util.ts?"}');
+        """)
+        let ask = try XCTUnwrap(GateDBReader.readSnapshot(path: dbPath).pendingAsks.first)
+        XCTAssertTrue(ask.changePaths.isEmpty)
+        XCTAssertNil(ask.changeSummary)
+        XCTAssertTrue(ask.changePathsPresentation.isEmpty)
+    }
+
+    /// ENH-031: payload for a *different* interaction_id must not leak paths.
+    func testAskIgnoresPathsFromOtherInteraction() throws {
+        try exec("""
+        INSERT INTO agents (agent_id, status, last_seen_ns, disconnected_at)
+        VALUES ('science', 'active', \(ns(2)), NULL);
+        INSERT INTO agent_interactions (interaction_id, agent_id, prompt, status, created_at_ns)
+        VALUES ('ask-live', 'science', 'Proceed?', 'pending', \(ns(10)));
+        INSERT INTO agent_messages (received_at_ns, agent_id, task_id, message_type, payload_json)
+        VALUES (\(ns(5)), 'science', 't', 'approval_needed',
+                '{"interaction_id":"ask-other","paths":["secret.swift"]}');
+        """)
+        let ask = try XCTUnwrap(GateDBReader.readSnapshot(path: dbPath).pendingAsks.first)
+        XCTAssertEqual(ask.interactionId, "ask-live")
+        XCTAssertTrue(ask.changePaths.isEmpty, "must not attribute another ask's paths")
     }
 
     /// An ask from an agent the `agents` table never saw cannot be proven dead,

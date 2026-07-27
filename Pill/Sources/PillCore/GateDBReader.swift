@@ -1,4 +1,5 @@
 import Foundation
+import ShannonCore
 #if canImport(SQLite3)
 import SQLite3
 #endif
@@ -393,6 +394,10 @@ public enum GateDBReader {
     /// Source: `agent_interactions` rows with status = 'pending', the same table
     /// the hub popup treats as authoritative. `interactionId` is the gate's own
     /// id — it must be echoed back verbatim to resolve the ask.
+    ///
+    /// **ENH-031:** Optional `changePaths` / `changeSummary` come from real
+    /// `agent_messages.payload_json` fields (`paths`, `files`, …) attributed to
+    /// this interaction — never invented from prompt prose.
     public struct PendingAsk: Identifiable, Equatable, Sendable {
         public var id: String { interactionId }
         public let interactionId: String
@@ -404,19 +409,34 @@ public enum GateDBReader {
         /// True when the asking agent disconnected *after* creating the row —
         /// nobody is on the other end any more, so answering it is theatre.
         public let isOrphaned: Bool
+        /// Real path strings from the approval payload (`paths`/`files`/…). Empty
+        /// when the payload omitted them or no matching message was found.
+        public let changePaths: [String]
+        /// Optional one-line change summary from a real payload field.
+        public let changeSummary: String?
 
         public init(
             interactionId: String,
             agentId: String,
             prompt: String,
             createdAt: Date = .distantPast,
-            isOrphaned: Bool = false
+            isOrphaned: Bool = false,
+            changePaths: [String] = [],
+            changeSummary: String? = nil
         ) {
             self.interactionId = interactionId
             self.agentId = agentId
             self.prompt = prompt
             self.createdAt = createdAt
             self.isOrphaned = isOrphaned
+            self.changePaths = GateAskChangePaths.sanitizePaths(changePaths)
+            let sum = changeSummary?.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.changeSummary = (sum?.isEmpty == false) ? sum : nil
+        }
+
+        /// Clipped paths/summary for gate cards. `nil` display when absent.
+        public var changePathsPresentation: GateAskChangePaths.Presentation {
+            GateAskChangePaths.present(paths: changePaths, summary: changeSummary)
         }
 
         /// "12s" / "4m" / "2d" since the agent asked. Computed at read time, so
@@ -513,17 +533,92 @@ public enum GateDBReader {
         while sqlite3_step(stmt) == SQLITE_ROW {
             let iid = string(stmt, 0)
             guard !iid.isEmpty else { continue }
+            let agentId = string(stmt, 1)
             let created = sqlite3_column_double(stmt, 3)
+            // ENH-031: attach real change paths/summary from agent_messages when
+            // the approval payload carried them (fail-closed empty otherwise).
+            let change = changeFields(db, agentId: agentId, interactionId: iid)
             out.append(PendingAsk(
                 interactionId: iid,
-                agentId: string(stmt, 1),
+                agentId: agentId,
                 prompt: AgentActivitySnapshot.shorten(string(stmt, 2), max: 160),
                 createdAt: created > 0 ? Date(timeIntervalSince1970: created) : .distantPast,
-                isOrphaned: sqlite3_column_int(stmt, 4) == 1
+                isOrphaned: sqlite3_column_int(stmt, 4) == 1,
+                changePaths: change.paths,
+                changeSummary: change.summary
             ))
         }
         return out
     }
+
+    /// Look up `agent_messages.payload_json` for this interaction and extract
+    /// real path/summary fields via ``GateAskChangePaths``.
+    ///
+    /// Attribution is strict: a payload is used only when its `interaction_id`
+    /// matches the ask (or is absent and the message is an approval type for
+    /// the same agent with path fields — still only the newest such row).
+    /// Never invents paths from prompt text.
+    private static func changeFields(
+        _ db: OpaquePointer,
+        agentId: String,
+        interactionId: String
+    ) -> (paths: [String], summary: String?) {
+        guard !agentId.isEmpty, !interactionId.isEmpty else { return ([], nil) }
+        // Pull a small recent window for this agent; JSON parse + key extract
+        // in Swift (SQLite has no portable JSON1 guarantee on all hosts).
+        let sql = """
+            SELECT payload_json, message_type
+            FROM agent_messages
+            WHERE agent_id = ?
+            ORDER BY received_at_ns DESC
+            LIMIT 16;
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return ([], nil)
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, agentId, -1, SQLITE_TRANSIENT)
+
+        var fallback: (paths: [String], summary: String?)?
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let json = string(stmt, 0)
+            guard !json.isEmpty,
+                  let data = json.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+
+            let extracted = GateAskChangePaths.extract(fromPayload: obj)
+            guard !extracted.paths.isEmpty || extracted.summary != nil else { continue }
+
+            let payloadIid = (obj["interaction_id"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if payloadIid == interactionId {
+                return extracted
+            }
+
+            // Fallback: newest approval-shaped message with path fields and no
+            // conflicting interaction_id (empty / missing id only).
+            if fallback == nil && payloadIid.isEmpty {
+                let mtype = string(stmt, 1).lowercased()
+                let approvalShaped = mtype == "approval_needed"
+                    || mtype == "approval"
+                    || mtype == "confirm"
+                    || (obj["approval_needed"] as? Bool) == true
+                    || (obj["require_approval"] as? Bool) == true
+                if approvalShaped {
+                    fallback = extracted
+                }
+            }
+        }
+        return fallback ?? ([], nil)
+    }
+
+    /// SQLite bind destructor for ephemeral Swift strings.
+    private static let SQLITE_TRANSIENT = unsafeBitCast(
+        -1,
+        to: sqlite3_destructor_type.self
+    )
     #endif
 
     // MARK: - Activity feed

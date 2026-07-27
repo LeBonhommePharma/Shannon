@@ -71,12 +71,14 @@ final class SessionUIWiringTests: XCTestCase {
                 "GateAskActionCopy",
                 "macGateAffordance",
                 "gateAvailable",
+                "changePathsPresentation",
             ]),
             ("GateInlineCard.swift", [
                 "GateAskActionCopy",
                 "macGateAffordance",
                 "gateAvailable",
                 "a.canInteract",
+                "changePathsPresentation",
             ]),
         ]
 

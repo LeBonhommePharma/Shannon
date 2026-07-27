@@ -58,6 +58,19 @@ struct GateAskCard: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // ENH-031: real change paths/summary from payload only — never invent.
+            if let changeBlock = ask.changePathsPresentation.joinedDisplay {
+                Text(changeBlock)
+                    .font(.shannonMenuFootnote)
+                    .foregroundStyle(Color.shannonSecondary)
+                    .lineLimit(6)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(
+                        ask.changePathsPresentation.accessibilityLabel
+                            ?? "Change paths"
+                    )
+            }
+
             if let status = a.statusMessage {
                 Text(status)
                     .font(.shannonMenuFootnote)

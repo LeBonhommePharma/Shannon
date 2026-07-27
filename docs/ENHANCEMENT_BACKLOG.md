@@ -286,13 +286,14 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Parity:** AgentCallout voice (candidate G8)
 - **Done:** `VoiceCalloutPolicy` pure shouldAnnounce/spokenText/decide (pref off / mute / Focus → never; needs-you uses `AgentAttentionCopy.needsYouNotifyTitle`; task_complete `"name done"` only with real agent id); explicit completion event types only (no label invent); baseline on first poll so history is silent; `MacVoiceCallout` + `SystemSpeechSynthesizer` (AVSpeech); pref `voiceCalloutsEnabled` default **off** + Settings toggle; `AgentActivityMonitor` wires needs-you + new task_complete; `VoiceCalloutPolicyTests` matrix.
 
-### - [ ] ENH-031: Gate ask surfaces change paths/summary when payload has them (parity G9)
+### - [x] ENH-031: Gate ask surfaces change paths/summary when payload has them (parity G9)
 
 - **Why:** AgentCallout shows diffs/paths on approve; Shannon gate shows prompt text only — partial when ask payload already includes paths/files.
 - **Area:** GateDB ask model, `GateAskCard` / `GateInlineCard`, presenters
 - **First slice:** If payload has path list, show clipped paths under prompt; pure formatter tests; no fake diffs.
 - **Priority:** P2
 - **Parity:** AgentCallout diff review (candidate G9)
+- **Done:** `GateAskChangePaths` pure extract/present (real keys only: `paths`/`files`/scalars + `change_summary` family; clip + overflow; never invent from prose). `PendingAsk.changePaths`/`changeSummary` + `changePathsPresentation`; GateDBReader attributes from matching `agent_messages.payload_json` only (interaction_id match; fail-closed empty). Mac `GateAskCard` + `GateInlineCard` show clipped block under prompt when present. Pure + DB + SessionUIWiring tests. No fake diffs.
 
 ### - [ ] ENH-032: Always Allow only when hub policy supports sticky approve (parity G10)
 

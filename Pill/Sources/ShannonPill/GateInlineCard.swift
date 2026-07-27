@@ -55,6 +55,19 @@ struct GateInlineCard: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // ENH-031: real change paths/summary from payload only — never invent.
+            if let changeBlock = ask.changePathsPresentation.joinedDisplay {
+                Text(changeBlock)
+                    .font(.shannonMenuFootnote)
+                    .foregroundStyle(Color.shannonSecondary)
+                    .lineLimit(5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(
+                        ask.changePathsPresentation.accessibilityLabel
+                            ?? "Change paths"
+                    )
+            }
+
             if let status = a.statusMessage {
                 Text(status)
                     .font(.shannonMenuFootnote)
@@ -116,9 +129,14 @@ struct GateInlineCard: View {
                 .shadow(color: Color.shannonWarning.opacity(0.12), radius: 8, y: 2)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(
-            "\(style.displayName) \(GateAskActionCopy.needsApproval): \(ask.prompt)"
-        )
+        .accessibilityLabel({
+            var label =
+                "\(style.displayName) \(GateAskActionCopy.needsApproval): \(ask.prompt)"
+            if let changeA11y = ask.changePathsPresentation.accessibilityLabel {
+                label += ". \(changeA11y)"
+            }
+            return label
+        }())
     }
 
     private func answerButton(

@@ -23,7 +23,9 @@ public enum UICadence: Sendable {
     // MARK: Agent / gate hub
 
     /// Gate DB poll period for `AgentActivityMonitor` (agents, asks, entropy).
-    public static let agentHubInterval: TimeInterval = 0.75
+    /// Snappier than the historical 0.75 s so roster/status in the dropdown
+    /// tracks live agents without multi-second lag; still above the hard floor.
+    public static let agentHubInterval: TimeInterval = 0.55
     public static let agentHubIntervalMin: TimeInterval = 0.5
     public static let agentHubIntervalMax: TimeInterval = 1.5
     /// Full pets + registry disk scan (heavier).
@@ -43,8 +45,9 @@ public enum UICadence: Sendable {
     // MARK: Menu-bar status item backup timer
 
     /// Fallback paint when resource `onSnapshotPublished` is quiet.
-    public static let menuBarBackupInterval: TimeInterval = 0.4
-    public static let menuBarBackupIntervalMin: TimeInterval = 0.3
+    /// At-or-under resource interval so the status glyph never lags gauges.
+    public static let menuBarBackupInterval: TimeInterval = 0.35
+    public static let menuBarBackupIntervalMin: TimeInterval = 0.28
     public static let menuBarBackupIntervalMax: TimeInterval = 0.75
 
     // MARK: Fixed-chrome thrash guard (popover / menu bar)

@@ -238,15 +238,29 @@ final class OpenTerminalHereTests: XCTestCase {
         XCTAssertFalse(OpenTerminalHerePerformer.perform(.none))
     }
 
-    func testExecutorLaunchSmoke() throws {
-        let dir = FileManager.default.temporaryDirectory
+    /// Executor must fail-closed on missing paths — never NSWorkspace.open a
+    /// deleted temp dir (that produced Finder "shannon-term-here-* can't be found").
+    func testExecutorLaunchRejectsMissingPath() {
+        let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("shannon-term-here-\(UUID().uuidString)", isDirectory: true)
+            .path
+        // Do not create the directory — path must not exist.
+        XCTAssertFalse(
+            OpenTerminalHereExecutor.perform(
+                .launch(cwd: missing, terminalBundleID: OpenTerminalHerePolicy.defaultTerminalBundleID)
+            )
+        )
+    }
+
+    /// Policy still decides launch for a real existing directory (no side effect).
+    func testExecutorLaunchPolicyForExistingDir() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-term-policy-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let action = OpenTerminalHerePolicy.decide(
             input: OpenTerminalHereInput(cwd: dir.path),
-            // Live install check for Terminal.app on the test host.
             isTerminalInstalled: { bid in
                 NSWorkspace.shared.urlForApplication(withBundleIdentifier: bid) != nil
                     || bid.lowercased() == "com.apple.terminal"
@@ -256,8 +270,8 @@ final class OpenTerminalHereTests: XCTestCase {
             return XCTFail("expected launch for existing temp dir, got \(action)")
         }
         XCTAssertEqual(path, dir.path)
-        // Side effect: may open a terminal window — acceptable smoke for ENH-029.
-        _ = OpenTerminalHereExecutor.perform(action)
+        // Intentionally do NOT call OpenTerminalHereExecutor.perform here:
+        // async terminal apps race with defer-delete and spam Finder dialogs.
     }
 
     func testDefaultDirectoryExistsRejectsFile() throws {

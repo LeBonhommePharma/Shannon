@@ -46,7 +46,8 @@ public enum ShannonPreferences {
             firstRunDone: Bool = false,
             expandPillOnLaunch: Bool = true,
             startWithMonitoringPaused: Bool = false,
-            showDesktopCompanion: Bool = true,
+            // Default off — always-on-top pet is opt-in (was too invasive on first run).
+            showDesktopCompanion: Bool = false,
             desktopPetId: String = PetPackageResolver.defaultPetId,
             showFloatingGlance: Bool = false,
             voiceCalloutsEnabled: Bool = false

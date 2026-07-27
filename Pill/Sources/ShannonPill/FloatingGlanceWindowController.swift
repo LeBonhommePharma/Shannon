@@ -87,7 +87,12 @@ final class FloatingGlanceModel: ObservableObject {
         )
         maybeScanUsage()
         ensurePollTimer()
+        onPresentationChanged?(presentation)
     }
+
+    /// Notifies the window controller when content becomes empty / non-empty
+    /// so the always-on-top panel can hide while idle (less invasive).
+    var onPresentationChanged: ((FloatingGlancePresentation) -> Void)?
 
     /// Inject usage for tests / shared parity without inventing tokens.
     func setUsageByAgentForTesting(_ map: [String: AgentUsageSnapshot]) {
@@ -98,6 +103,7 @@ final class FloatingGlanceModel: ObservableObject {
             activity: activity.recentActivity,
             usageByAgent: usageByAgent
         )
+        onPresentationChanged?(presentation)
     }
 
     private func maybeScanUsage() {
@@ -127,6 +133,7 @@ final class FloatingGlanceModel: ObservableObject {
             activity: activity.recentActivity,
             usageByAgent: usageByAgent
         )
+        onPresentationChanged?(presentation)
     }
 
     private func ensurePollTimer() {
@@ -191,6 +198,9 @@ final class FloatingGlanceWindowController {
         shouldBeVisible = true
         let model = self.model ?? FloatingGlanceModel(activity: activity)
         self.model = model
+        model.onPresentationChanged = { [weak self] presentation in
+            self?.applyContentVisibility(presentation)
+        }
         model.refresh()
 
         let size = Self.defaultSize
@@ -199,7 +209,7 @@ final class FloatingGlanceWindowController {
         let panel: FloatingGlancePanel
         if let existing = self.panel {
             panel = existing
-            if !existing.isVisible {
+            if !existing.isVisible, !model.presentation.isEmpty {
                 panel.setFrame(frame, display: true)
             }
         } else {
@@ -227,8 +237,21 @@ final class FloatingGlanceWindowController {
             }
         }
 
-        applyFrontIfWanted()
+        applyContentVisibility(model.presentation)
         startLaunchReassertBurst()
+    }
+
+    /// Pref is on, but empty "No fleet activity" must not sit always-on-top.
+    private func applyContentVisibility(_ presentation: FloatingGlancePresentation) {
+        guard shouldBeVisible else {
+            panel?.orderOut(nil)
+            return
+        }
+        if presentation.isEmpty {
+            panel?.orderOut(nil)
+        } else {
+            applyFrontIfWanted()
+        }
     }
 
     func hide() {
@@ -244,11 +267,20 @@ final class FloatingGlanceWindowController {
             show()
             return
         }
-        applyFrontIfWanted()
+        if let presentation = model?.presentation {
+            applyContentVisibility(presentation)
+        } else {
+            applyFrontIfWanted()
+        }
     }
 
     private func applyFrontIfWanted() {
         guard shouldBeVisible, let panel else { return }
+        // Empty glance stays ordered out — reassert must not resurrect it.
+        if model?.presentation.isEmpty == true {
+            panel.orderOut(nil)
+            return
+        }
         panel.applyAlwaysOnTopPolicy()
         panel.orderFrontRegardless()
         panel.contentView?.needsLayout = true

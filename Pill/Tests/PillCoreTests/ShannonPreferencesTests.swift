@@ -27,9 +27,9 @@ final class ShannonPreferencesTests: XCTestCase {
         XCTAssertFalse(snap.firstRunDone)
         XCTAssertTrue(snap.expandPillOnLaunch)
         XCTAssertFalse(snap.startWithMonitoringPaused)
-        // E2: desktop companion shows on launch by default.
-        XCTAssertTrue(snap.showDesktopCompanion)
-        XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
+        // E2: desktop companion is opt-in (always-on-top pet was too invasive).
+        XCTAssertFalse(snap.showDesktopCompanion)
+        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
         // E1: desktop pet package defaults to shannon.
         XCTAssertEqual(snap.desktopPetId, PetPackageResolver.defaultPetId)
         XCTAssertEqual(ShannonPreferences.desktopPetId(defaults: defaults), "shannon")
@@ -63,17 +63,17 @@ final class ShannonPreferencesTests: XCTestCase {
         XCTAssertTrue(ShannonPreferences.voiceCalloutsEnabled(defaults: defaults))
     }
 
-    /// E2: hide desktop companion persists; missing key still defaults to shown.
+    /// E2: show desktop companion is opt-in; missing key defaults to hidden.
     func testShowDesktopCompanionDefaultAndToggle() {
-        XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
+        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
         XCTAssertNil(defaults.object(forKey: ShannonPreferences.Key.showDesktopCompanion.rawValue))
 
-        ShannonPreferences.setShowDesktopCompanion(false, defaults: defaults)
-        XCTAssertNotNil(defaults.object(forKey: ShannonPreferences.Key.showDesktopCompanion.rawValue))
-        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
-
         ShannonPreferences.setShowDesktopCompanion(true, defaults: defaults)
+        XCTAssertNotNil(defaults.object(forKey: ShannonPreferences.Key.showDesktopCompanion.rawValue))
         XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
+
+        ShannonPreferences.setShowDesktopCompanion(false, defaults: defaults)
+        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
     }
 
 
@@ -130,16 +130,16 @@ final class ShannonPreferencesTests: XCTestCase {
     @MainActor
     func testStorePersistsShowDesktopCompanionToggle() {
         let store = ShannonPreferencesStore(defaults: defaults)
-        XCTAssertTrue(store.showDesktopCompanion)
+        XCTAssertFalse(store.showDesktopCompanion)
         var callbackValues: [Bool] = []
         store.onShowDesktopCompanionChanged = { callbackValues.append($0) }
-        store.showDesktopCompanion = false
-        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
-        XCTAssertEqual(callbackValues, [false])
-        let store2 = ShannonPreferencesStore(defaults: defaults)
-        XCTAssertFalse(store2.showDesktopCompanion)
-        store2.showDesktopCompanion = true
+        store.showDesktopCompanion = true
         XCTAssertTrue(ShannonPreferences.showDesktopCompanion(defaults: defaults))
+        XCTAssertEqual(callbackValues, [true])
+        let store2 = ShannonPreferencesStore(defaults: defaults)
+        XCTAssertTrue(store2.showDesktopCompanion)
+        store2.showDesktopCompanion = false
+        XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
     }
 
     @MainActor

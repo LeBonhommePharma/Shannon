@@ -13,8 +13,10 @@ final class UICadenceTests: XCTestCase {
 
     func testAgentHubFasterThanLegacyOnePointFive() {
         XCTAssertTrue(UICadence.agentHubFasterThanLegacy())
-        XCTAssertEqual(UICadence.agentHubInterval, 0.75, accuracy: 1e-9)
+        XCTAssertEqual(UICadence.agentHubInterval, 0.55, accuracy: 1e-9)
+        XCTAssertLessThan(UICadence.agentHubInterval, 0.75)
         XCTAssertLessThan(UICadence.agentHubInterval, 1.5)
+        XCTAssertGreaterThanOrEqual(UICadence.agentHubInterval, UICadence.agentHubIntervalMin)
     }
 
     func testMenuBarBackupKeepsPaceWithResources() {
@@ -140,9 +142,10 @@ final class UICadenceTests: XCTestCase {
 
     /// Full pets scan stays coarser than every gate tick (off-main load policy).
     func testFullScanLessFrequentThanAgentHubTick() {
+        // Hub tick ~0.55 s; full pets scan must stay multi-second (not every tick).
         XCTAssertGreaterThan(
             UICadence.agentFullScanInterval,
-            UICadence.agentHubInterval * 4
+            UICadence.agentHubInterval * 8
         )
         XCTAssertEqual(
             AgentActivityMonitor.fullScanInterval,

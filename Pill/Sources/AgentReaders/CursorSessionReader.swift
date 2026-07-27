@@ -150,7 +150,7 @@ public struct CursorSessionReader: SessionProviding {
 
         // …/projects/<project>/agent-transcripts/<id>/<id>.jsonl
         let projectDirName: String? = {
-            var parts = url.pathComponents
+            let parts = url.pathComponents
             if let idx = parts.firstIndex(of: "agent-transcripts"), idx > 0 {
                 return parts[idx - 1]
             }

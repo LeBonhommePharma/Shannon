@@ -323,8 +323,16 @@ struct MenuBarSmoothLoadBar: View {
                 Capsule()
                     .fill(tint.opacity(isPlaceholder ? 0.12 : 0.9))
                     .frame(width: w)
+                    // Re-enable liquid motion even when the popover thrash-guards
+                    // layout with `disablesAnimations` / nil animation.
                     .transaction { txn in
-                        txn.animation = reduceMotion ? nil : .shannonLiquid
+                        if reduceMotion {
+                            txn.animation = nil
+                            txn.disablesAnimations = true
+                        } else {
+                            txn.disablesAnimations = false
+                            txn.animation = .shannonLiquid
+                        }
                     }
             }
         }
@@ -356,7 +364,13 @@ struct MenuBarSmoothCoreBar: View {
                 }
             }
             .transaction { txn in
-                txn.animation = reduceMotion ? nil : .shannonLiquid
+                if reduceMotion {
+                    txn.animation = nil
+                    txn.disablesAnimations = true
+                } else {
+                    txn.disablesAnimations = false
+                    txn.animation = .shannonLiquid
+                }
             }
     }
 }

@@ -470,10 +470,13 @@ public enum SystemResourceLogic {
     }
 
     /// Core signature bucket size for menu-bar redraw: finer when fewer cores.
+    ///
+    /// Kept tight so the status-item glyph tracks exponential-smoothed samples
+    /// fluidly (sub-second) without painting every sub-percent noise tick.
     public static func coreSignatureBucket(coreCount: Int) -> Int {
         if coreCount <= 8 { return 1 }   // 1% steps
-        if coreCount <= 16 { return 5 }  // 5% steps
-        return 10                        // 10% for many cores
+        if coreCount <= 16 { return 2 }  // 2% steps (was 5 — felt laggy on M-series)
+        return 5                         // 5% for many cores (was 10)
     }
 
     /// Compact signature of per-core load for status-item paint gating.

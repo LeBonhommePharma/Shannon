@@ -133,7 +133,7 @@ struct SettingsView: View {
                     Text("Show desktop pet")
                         .font(.shannonMenuBody)
                         .foregroundStyle(Color.shannonPrimary)
-                    Text("Floating pet and status bubble (menu ⌥-click also toggles)")
+                    Text("Opt-in floating pet and status bubble (menu ⌥-click also toggles)")
                         .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonTertiary)
                 }

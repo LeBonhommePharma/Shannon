@@ -336,19 +336,27 @@ final class HostTerminalJumpPolicyTests: XCTestCase {
         XCTAssertFalse(HostTerminalJumpPerformer.perform(.none))
     }
 
-    func testExecutorOpenCwdSmoke() throws {
+    /// Policy decides openCwd for a real directory; executor must fail-closed
+    /// when the path is gone (no Finder "can't be found" after defer-delete).
+    func testExecutorOpenCwdPolicyAndMissingPath() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("shannon-jump-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.path
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let action = HostTerminalJumpPolicy.decide(
-            input: HostTerminalJumpInput(cwd: dir.path),
+            input: HostTerminalJumpInput(cwd: path),
             runningBundleIDs: [],
             pidAlive: { _ in false }
         )
-        XCTAssertEqual(action, .openCwd(path: dir.path))
-        _ = HostTerminalJumpExecutor.perform(action)
+        XCTAssertEqual(action, .openCwd(path: path))
+
+        // Missing path: never NSWorkspace.open → no Finder spam.
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shannon-jump-missing-\(UUID().uuidString)", isDirectory: true)
+            .path
+        XCTAssertFalse(HostTerminalJumpExecutor.perform(.openCwd(path: missing)))
     }
 
     func testDefaultDirectoryExistsRejectsFile() throws {

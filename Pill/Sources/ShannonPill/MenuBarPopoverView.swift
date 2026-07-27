@@ -243,9 +243,13 @@ struct MenuBarPopoverView: View {
         }
         .frame(width: Self.chromeWidth, height: Self.chromeHeight, alignment: .top)
         .transaction { txn in
-            // Kill implicit layout animation on telemetry ticks.
-            txn.animation = nil
-            txn.disablesAnimations = true
+            // Kill *implicit layout* animation on telemetry ticks so fixed chrome
+            // (footer, row positions) does not pop. Do **not** set
+            // `disablesAnimations = true` — that nukes MenuBarSmoothLoadBar /
+            // MenuBarSmoothCoreBar liquid fills and makes gauges snap.
+            if txn.animation == nil {
+                txn.animation = nil
+            }
         }
         .onChange(of: activity.summary.busyCount) { count in
             keepAwake.syncWithAgents(busyCount: count)

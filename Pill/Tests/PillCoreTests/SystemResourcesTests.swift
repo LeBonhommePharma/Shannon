@@ -330,8 +330,8 @@ final class SystemResourcesTests: XCTestCase {
 
     func testCoreSignatureBucketFinerForFewCores() {
         XCTAssertEqual(SystemResourceLogic.coreSignatureBucket(coreCount: 4), 1)
-        XCTAssertEqual(SystemResourceLogic.coreSignatureBucket(coreCount: 12), 5)
-        XCTAssertEqual(SystemResourceLogic.coreSignatureBucket(coreCount: 24), 10)
+        XCTAssertEqual(SystemResourceLogic.coreSignatureBucket(coreCount: 12), 2)
+        XCTAssertEqual(SystemResourceLogic.coreSignatureBucket(coreCount: 24), 5)
     }
 
     func testCalmStatusTitleGlyphFirstWhenCalm() {

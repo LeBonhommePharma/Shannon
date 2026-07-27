@@ -29,6 +29,11 @@ final class AgentListSkimTests: XCTestCase {
         )
         XCTAssertEqual(AgentListSkim.activeFleetCount(in: snap, now: now), 2)
         XCTAssertEqual(AgentListSkim.multiAgentCountLabel(activeCount: 2), "2")
+        XCTAssertEqual(AgentListSkim.multiAgentGlanceCaption, "agents need a glance")
+        XCTAssertEqual(
+            AgentListSkim.multiAgentAccessibilityLabel(activeCount: 2),
+            "2 \(AgentListSkim.multiAgentGlanceCaption)"
+        )
         XCTAssertEqual(
             AgentListSkim.multiAgentAccessibilityLabel(activeCount: 2),
             "2 agents need a glance"
@@ -189,6 +194,29 @@ final class AgentListSkimTests: XCTestCase {
         XCTAssertTrue(
             phone.contains("multiAgentCountLabel") || phone.contains("activeFleetCount"),
             "phone must surface multi-agent count when >1 active"
+        )
+        // UX-055: phone caption must use Core token, not dual hard-coded prose.
+        XCTAssertTrue(
+            phone.contains("AgentListSkim.multiAgentGlanceCaption"),
+            "phone fleet chip must use multiAgentGlanceCaption"
+        )
+        XCTAssertFalse(
+            phone.contains("Text(\"agents need a glance\")"),
+            "phone must not hard-code dual agents-need-a-glance caption"
+        )
+
+        let mac = (try? String(
+            contentsOf: root.appendingPathComponent("Pill/Sources/ShannonPill/PillView.swift"),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            mac.contains("multiAgentAccessibilityLabel")
+                || mac.contains("multiAgentGlanceCaption"),
+            "Mac collapsed fleet help must use AgentListSkim glance token (UX-055)"
+        )
+        XCTAssertFalse(
+            mac.contains("\"\\(collapsedActiveCount) agents need a glance\""),
+            "Mac must not hard-code dual agents-need-a-glance help"
         )
     }
 }

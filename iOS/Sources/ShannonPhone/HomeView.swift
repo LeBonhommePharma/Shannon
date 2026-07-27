@@ -45,7 +45,8 @@ struct HomeView: View {
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 3)
                                 .background(Color.shannonSurfaceElevated, in: Capsule())
-                            Text("agents need a glance")
+                            // UX-055: fleet caption shares AgentListSkim (Mac collapsed help).
+                            Text(AgentListSkim.multiAgentGlanceCaption)
                                 .font(.shannonCaption)
                                 .foregroundStyle(Color.shannonTertiary)
                             Spacer(minLength: 0)

@@ -78,9 +78,13 @@ public enum AgentListSkim: Sendable {
         return "\(activeCount)"
     }
 
+    /// Secondary fleet caption after the count chip (phone HomeView + Mac collapsed help).
+    /// **UX-055:** one token so Mac/phone “need a glance” cannot fork.
+    public static let multiAgentGlanceCaption = "agents need a glance"
+
     public static func multiAgentAccessibilityLabel(activeCount: Int) -> String? {
         guard activeCount > 1 else { return nil }
-        return "\(activeCount) agents need a glance"
+        return "\(activeCount) \(multiAgentGlanceCaption)"
     }
 
     public static func skimLine(

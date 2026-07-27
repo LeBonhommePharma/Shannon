@@ -583,7 +583,12 @@ struct PillView: View {
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(Capsule().fill(Color.shannonAccentSubtle))
-                    .help("\(collapsedActiveCount) agents need a glance")
+                    // UX-055: fleet help shares AgentListSkim (phone HomeView caption).
+                    .help(
+                        AgentListSkim.multiAgentAccessibilityLabel(
+                            activeCount: collapsedActiveCount
+                        ) ?? "\(collapsedActiveCount) \(AgentListSkim.multiAgentGlanceCaption)"
+                    )
             }
 
             if hasPendingAsk {

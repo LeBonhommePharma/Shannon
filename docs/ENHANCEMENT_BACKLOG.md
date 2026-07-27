@@ -259,13 +259,14 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Parity:** AgentPeek agent matrix / AgentNotch works-with (candidate G2)
 - **Done:** OpenCode (`~/.local/share/opencode/opencode.db` SQLite + pure `sessionFromRow`) and Gemini CLI (`~/.gemini/tmp/*/chats/session-*.jsonl` + `.project_root`); fail-closed missing roots; fixtures + tests; `PanelSectionRegistry` registration; TerminalAgentProbe `opencode` only (gate-valid). No invented sessions/tokens.
 
-### - [ ] ENH-028: Jump-to-host-terminal for live session (parity G3)
+### - [x] ENH-028: Jump-to-host-terminal for live session (parity G3)
 
 - **Why:** Competitors “jump” to the session host; Shannon can expand/focus pill row but does not consistently activate the terminal app/window for known cwd/host.
 - **Area:** Pill focus/handoff, TerminalAgentProbe host map, `NSWorkspace` activation
 - **First slice:** When host process + cwd known, activate host or open cwd; pure policy + one integration smoke path.
 - **Priority:** P2
 - **Parity:** AgentNotch jump / AgentCallout jump (candidate G3)
+- **Done:** `HostTerminalJumpPolicy` + `HostTerminalJumpInput` pure decide (running attachBundle → hostTerminal label→bundle map → live attachPid → real directory cwd; fail-closed `.none`); `HostTerminalJumpExecutor` NSWorkspace activate/open; context menus on CompanionBoard / agentRow / menu-bar roster + jump button on pulled sessions; `HostTerminalJumpPolicyTests` matrix + SessionUIWiring structural needles.
 
 ### - [ ] ENH-029: Open terminal workspace action from routes (parity G7)
 

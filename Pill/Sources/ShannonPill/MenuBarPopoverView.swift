@@ -161,7 +161,11 @@ struct MenuBarPopoverView: View {
                         sessions: parity.sessions,
                         pendingAsks: activity.pendingAsks,
                         activity: activity.recentActivity,
-                        liveAgentIds: Set(summary.agents.map(\.id))
+                        liveAgentIds: Set(summary.agents.map(\.id)),
+                        onJumpToHost: { input in
+                            // ENH-028: pure policy + NSWorkspace activate / open cwd.
+                            _ = HostTerminalJumpExecutor.jump(input: input)
+                        }
                     )
                         .shannonGlassSection()
                     DevServersSection(

@@ -366,17 +366,21 @@ public struct CompanionBoardView: View {
     public var focusedAgentId: String?
     /// Per-agent meta + usage from sessions (fail-closed).
     public var densityByAgent: [String: CompanionBoardDensity]
+    /// Session cwd by agent id for jump-to-host fallback (ENH-028). Fail-closed empty.
+    public var cwdByAgent: [String: String]
 
     public init(
         states: [CompanionState],
         maxRows: Int = 6,
         focusedAgentId: String? = nil,
-        densityByAgent: [String: CompanionBoardDensity] = [:]
+        densityByAgent: [String: CompanionBoardDensity] = [:],
+        cwdByAgent: [String: String] = [:]
     ) {
         self.states = states
         self.maxRows = maxRows
         self.focusedAgentId = focusedAgentId
         self.densityByAgent = densityByAgent
+        self.cwdByAgent = cwdByAgent
     }
 
     /// Convenience: build straight from an activity summary.
@@ -390,7 +394,8 @@ public struct CompanionBoardView: View {
                 activity: [GateDBReader.ActivityEvent] = [],
                 maxRows: Int = 6,
                 focusedAgentId: String? = nil,
-                densityByAgent: [String: CompanionBoardDensity] = [:]) {
+                densityByAgent: [String: CompanionBoardDensity] = [:],
+                cwdByAgent: [String: String] = [:]) {
         self.states = CompanionRoster.build(from: summary,
                                             now: now,
                                             approvals: approvals,
@@ -402,6 +407,7 @@ public struct CompanionBoardView: View {
         self.maxRows = maxRows
         self.focusedAgentId = focusedAgentId
         self.densityByAgent = densityByAgent
+        self.cwdByAgent = cwdByAgent
     }
 
     public var body: some View {
@@ -474,6 +480,22 @@ public struct CompanionBoardView: View {
             ),
             density: densityByAgent[state.id] ?? CompanionBoardDensity()
         )
+        .contextMenu {
+            // ENH-028: resolve only when the menu opens (no per-frame NSWorkspace scan).
+            let action = HostTerminalJumpPolicy.decide(
+                input: HostTerminalJumpInput(
+                    hostBundleID: state.agent.attachBundle,
+                    attachPid: state.agent.attachPid,
+                    cwd: cwdByAgent[state.id]
+                ),
+                runningBundleIDs: HostTerminalJumpExecutor.runningBundleIDs()
+            )
+            if action.isAvailable {
+                Button(action.affordanceLabel) {
+                    _ = HostTerminalJumpExecutor.perform(action)
+                }
+            }
+        }
     }
 }
 

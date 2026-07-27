@@ -156,6 +156,27 @@ struct MenuBarAgentRoster: View {
         .frame(minHeight: 18, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(rosterAccessibilityLabel(card: card, reading: agentReading))
+        // ENH-028: jump to host terminal / project folder when evidence exists.
+        .contextMenu {
+            let action = jumpAction(for: card.agentId)
+            if action.isAvailable {
+                Button(action.affordanceLabel) {
+                    _ = HostTerminalJumpExecutor.perform(action)
+                }
+            }
+        }
+    }
+
+    /// Pure policy for roster row — fail-closed when host + cwd both unknown.
+    private func jumpAction(for agentId: String) -> HostTerminalJumpAction {
+        let agent = summary.agents.first(where: { $0.id == agentId })
+        let session = sessionsByAgent[agentId]
+        return HostTerminalJumpPolicy.decide(
+            attachBundle: agent?.attachBundle,
+            attachPid: agent?.attachPid,
+            session: session,
+            runningBundleIDs: AgentActivityMonitor.enumerateRunningBundleIDs()
+        )
     }
 
     /// Accessibility label: prefer pending ask prompt when present (ENH-006).

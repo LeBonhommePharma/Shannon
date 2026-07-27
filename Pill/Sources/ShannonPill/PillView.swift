@@ -1051,6 +1051,13 @@ struct PillView: View {
                     focusedAgentId: focusedAgentId,
                     densityByAgent: SessionContentPresenter.companionBoardDensity(
                         from: listedAgentSurfaces
+                    ),
+                    // ENH-028: session cwd for jump-to-host folder fallback.
+                    cwdByAgent: Dictionary(
+                        uniqueKeysWithValues: sessionsByAgent.compactMap { id, s in
+                            guard let cwd = s.cwd, !cwd.isEmpty else { return nil }
+                            return (id, cwd)
+                        }
                     )
                 )
             } else {
@@ -1146,6 +1153,24 @@ struct PillView: View {
                         ? Color.shannonWarning.opacity(0.10)
                         : Color.shannonSurfaceElevated.opacity(0.6)
                 )
+        )
+        // ENH-028: jump to host terminal / project folder when evidence exists.
+        .contextMenu {
+            let action = jumpAction(for: a)
+            if action.isAvailable {
+                Button(action.affordanceLabel) {
+                    _ = HostTerminalJumpExecutor.perform(action)
+                }
+            }
+        }
+    }
+
+    /// ENH-028 pure policy for a board row (attach + session meta/cwd).
+    private func jumpAction(for agent: AgentActivitySnapshot) -> HostTerminalJumpAction {
+        HostTerminalJumpPolicy.decide(
+            agent: agent,
+            session: sessionsByAgent[agent.id],
+            runningBundleIDs: HostTerminalJumpExecutor.runningBundleIDs()
         )
     }
 

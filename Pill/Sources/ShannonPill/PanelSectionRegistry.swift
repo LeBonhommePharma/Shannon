@@ -216,6 +216,8 @@ struct PulledSessionsSection: View {
     var activity: [GateDBReader.ActivityEvent] = []
     /// Agent ids already shown on the live roster — hide matching disk rows (ENH-005).
     var liveAgentIds: Set<String> = []
+    /// ENH-028: jump to host terminal / open cwd when session evidence is known.
+    var onJumpToHost: ((HostTerminalJumpInput) -> Void)? = nil
 
     /// Ranked cards: needs-you → working → finished → idle; optional fields fail-closed.
     private var cards: [SessionContentCard] {
@@ -226,6 +228,10 @@ struct PulledSessionsSection: View {
             limit: 5,
             liveAgentIds: liveAgentIds
         )
+    }
+
+    private var sessionsById: [String: AgentSession] {
+        Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
     }
 
     var body: some View {
@@ -299,6 +305,20 @@ struct PulledSessionsSection: View {
                 }
             }
             Spacer(minLength: 0)
+            // ENH-028: jump when session reports hostTerminal and/or cwd.
+            if let input = jumpInput(for: card), input.hasJumpEvidence {
+                let label = jumpAffordanceLabel(for: input)
+                Button {
+                    onJumpToHost?(input)
+                } label: {
+                    Image(systemName: "arrow.up.forward.app")
+                        .font(.shannonMenuSection)
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+                .buttonStyle(.plain)
+                .help(label)
+                .accessibilityLabel(label)
+            }
             Text(card.sourceKind == .artifact ? "disk" : card.sourceKind.rawValue)
                 .font(.shannonMenuSection)
                 .foregroundStyle(Color.shannonTertiary)
@@ -307,6 +327,30 @@ struct PulledSessionsSection: View {
         .accessibilityLabel(
             "\(card.displayName), \(card.badgeLabel), \(card.activityLine), \(card.metaLine ?? "")"
         )
+    }
+
+    private func jumpInput(for card: SessionContentCard) -> HostTerminalJumpInput? {
+        let session = sessionsById[card.id]
+            ?? sessions.first { $0.agentId == card.agentId }
+        guard let session else { return nil }
+        let input = HostTerminalJumpInput(
+            hostBundleID: nil,
+            hostTerminalLabel: session.hostTerminal,
+            cwd: session.cwd
+        )
+        return input.hasJumpEvidence ? input : nil
+    }
+
+    /// Affordance copy only — real decide runs in `onJumpToHost` with live running apps.
+    /// Never invents a fake bundle id just for labels.
+    private func jumpAffordanceLabel(for input: HostTerminalJumpInput) -> String {
+        if input.hostBundleID != nil || input.hostTerminalLabel != nil {
+            return HostTerminalJumpAction.activateApp(bundleID: "_").affordanceLabel
+        }
+        if input.cwd != nil {
+            return HostTerminalJumpAction.openCwd(path: "_").affordanceLabel
+        }
+        return HostTerminalJumpAction.none.affordanceLabel
     }
 }
 

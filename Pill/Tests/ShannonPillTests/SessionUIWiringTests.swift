@@ -25,11 +25,15 @@ final class SessionUIWiringTests: XCTestCase {
                 "showsApproveHint",
                 "gateAvailable: activity.gateAvailable",
                 "CompanionEmptyStateCopy.idleTitle",
+                "HostTerminalJumpPolicy",
+                "HostTerminalJumpExecutor",
             ]),
             ("PanelSectionRegistry.swift", [
                 "SessionContentPresenter.cards",
                 "card.badgeLabel",
                 "liveAgentIds",
+                "HostTerminalJumpInput",
+                "onJumpToHost",
             ]),
             ("PillView.swift", [
                 "SessionContentPresenter.listedSurfaces",
@@ -43,6 +47,8 @@ final class SessionUIWiringTests: XCTestCase {
                 "AgentLiveChrome.badgeLabel",
                 "metaLine",
                 "CompanionEmptyStateCopy.idleTitle",
+                "HostTerminalJumpPolicy",
+                "cwdByAgent",
             ]),
             ("MenuBarPopoverView.swift", [
                 "AgentLiveSurfaceLogic.primaryFocus",
@@ -50,6 +56,8 @@ final class SessionUIWiringTests: XCTestCase {
                 "liveAgentIds",
                 "GateInlineCard",
                 "gateAvailable: activity.gateAvailable",
+                "HostTerminalJumpExecutor",
+                "onJumpToHost",
             ]),
             ("GateAskCard.swift", [
                 "GateAskActionCopy",

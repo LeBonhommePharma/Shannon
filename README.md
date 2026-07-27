@@ -2,9 +2,14 @@
 
 # Shannon
 
-*Entropy collapse detection meets AI safety.*
+### Drug-docking entropy → LLM evaluation-awareness detection
 
-**A white-box physicochemical referee for zero-shot detection of evaluation awareness and strategic deception in frontier LLM agents.**
+**When a molecule locks into a binding site, configurational entropy collapses.
+When an LLM realizes it’s being evaluated, its token distribution does the same thing.**
+
+Shannon is a white-box, physics-grounded referee: real-time **entropy collapse**
+detection for frontier agents — plus a multi-agent **macOS notch pill** hub that
+makes concurrent agent work observable and killable.
 
 [![CI](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml/badge.svg)](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -15,1213 +20,292 @@
 [![iOS](https://img.shields.io/badge/iOS-17%2B-lightgrey.svg)](iOS/README.md)
 [![watchOS](https://img.shields.io/badge/watchOS-10%2B-lightgrey.svg)](watchOS/README.md)
 
-> **Apple-first operator path** — macOS Pill hub first, then iPhone / iPad / Watch companions.
-> Scientific entropy library (Python / C++) remains available below and via PyPI.
->
-> Ported from the configurational entropy engine in [FlexAIDdS](https://github.com/LeBonhommePharma/FlexAIDdS).
+```
+Normal generation:    H ~ 8–12 bits   (broad, exploratory)
+Evaluation-aware:     H ~ 2–4 bits    (narrow, strategic)
+                      ΔH < −3.2 bits  →  COLLAPSE DETECTED
+```
+
+*Same log-sum-exp configurational-entropy kernel as molecular docking
+([FlexAIDdS](https://github.com/LeBonhommePharma/FlexAIDdS)) — domain change, not math cosplay.*
 
 </div>
 
 ---
 
-## Quick Start — Apple platforms
+## Why this is weird (and why geeks care)
 
-### macOS hub (primary)
+| Domain | Entropy of… | Collapse means |
+|--------|-------------|----------------|
+| **Docking** (FlexAIDdS) | conformational states | ligand locks into pocket |
+| **LLMs** (Shannon) | next-token distribution | agent goes eval-aware / strategic |
+
+Most “AI safety” tooling is black-box classifiers or vibe. Shannon is a
+**streaming numerical primitive**: sliding-window entropy, stable variance,
+z-score / ΔH threshold (documented signature ≈ **−3.2 bits**). No neural
+monitor. No invented CF/RMSD scores in the plan layer.
+
+Then it ships something operators actually want: a **menu-bar + notch pill** that
+hosts multi-agent work (Codex, Claude Code, DatasetRunner, …) through a real
+gate — spawn / control / result / kill — not another chat tab.
+
+**Deep theory** (thermodynamic core, FlexAIDΔS transfer): [`docs/theory.md`](docs/theory.md) ·
+**Architecture**: [`docs/architecture.md`](docs/architecture.md)
+
+---
+
+## 30-second install
+
+### A · macOS hub (primary operator path)
 
 ```bash
 git clone https://github.com/LeBonhommePharma/Shannon
 cd Shannon
 ./scripts/shannon                 # pets + install /Applications/Shannon.app + start
-# Update from latest main (same command after pull):
-git pull
-./scripts/shannon update          # rebuild + reinstall from this clone
+# Later:
+git pull && ./scripts/shannon update
 ```
 
-| Command | Purpose |
-|---------|---------|
-| `./scripts/shannon` | Bootstrap pets + app (rebuilds if missing) |
-| `./scripts/shannon update` | **Update from source** — rebuild + reinstall (after `git pull`) |
-| `./scripts/shannon app` | Force rebuild release app and reinstall |
-| `./scripts/shannon science` | Pure-Python library from this clone (`install_shannon.sh --path`) |
-| `./scripts/shannon stop` | Quit the pill (`ShannonPill`) |
-| `./scripts/shannon probe` | Diagnostics (battery, media, bridge) |
+| Command | What it does |
+|---------|----------------|
+| `./scripts/shannon` | Bootstrap pets + app |
+| `./scripts/shannon update` | Rebuild + reinstall from this clone |
+| `./scripts/shannon stop` | Quit the pill |
+| `./scripts/shannon probe` | Diagnostics |
 | `./scripts/shannon status` | Running? gate? pets? |
 | `./scripts/shannon help` | Full command list |
 
-On launch:
+On launch: **menu-bar** glyph (`○ ready` / agent name) · **notch pill** (or
+menu-bar capsule) · **⌘D** captures the frontmost app as an agent + pet.
+**Quit:** menu-bar → Quit Shannon, or `./scripts/shannon stop`.
 
-1. **Menu-bar** glyph: `○ ready` or an active agent name (always present — use it to quit).
-2. **Notch pill** (or menu-bar-adjacent capsule on non-notch displays).
-3. **⌘D** captures the frontmost app (Terminal / Claude / ChatGPT / Codex / browser) as an agent + pet.
+Pill deep-dive: [`Pill/README.md`](Pill/README.md) · honest gaps: [`Pill/BLOCKED.md`](Pill/BLOCKED.md)
 
-**Quit:** menu-bar → **Quit Shannon**, or `./scripts/shannon stop`.
-
-**Homebrew (optional, same monorepo tap):**
+### B · Python library (any OS)
 
 ```bash
-brew tap lebonhommepharma/shannon https://github.com/LeBonhommePharma/Shannon
-brew trust --formula lebonhommepharma/shannon/shannon
-brew install lebonhommepharma/shannon/shannon    # shannon-agent CLI (stable v2.1.0+)
-# Cask (requires published ZIP sha — already pinned for v2.1.0):
-brew trust --cask lebonhommepharma/shannon/shannon-pill
-brew install --cask lebonhommepharma/shannon/shannon-pill
-```
-
-Local unsigned rebuild without a release: `./scripts/package_pill.sh --install`  
-Deep pill detail: [`Pill/README.md`](Pill/README.md) · honest gaps: [`Pill/BLOCKED.md`](Pill/BLOCKED.md)
-
-### iOS (iPhone) · iPadOS · watchOS
-
-| Platform | Min OS | What it is | Doc |
-|----------|--------|------------|-----|
-| **iPhone** | iOS 17 | Live agent cards, confirmations, widget | [`iOS/README.md`](iOS/README.md) |
-| **iPad** | iPadOS 17 | Multi-agent hub canvas (not a phone scale-up) | [`iPad/README.md`](iPad/README.md) |
-| **Apple Watch** | watchOS 10 | Shannon Face + complications (display relay) | [`watchOS/README.md`](watchOS/README.md) |
-
-Sync direction is **Mac → iPhone (CloudKit) → Watch (WatchConnectivity)**. Playback / confirmation answers flow back as `RemoteCommand` / `ConfirmationResponse`. Full architecture: [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md).
-
-```bash
-# Shared model (no signing, no simulator required)
-cd Packages/ShannonCore && swift test
-
-# Multi-OS health (macOS always; iOS / iPad / watch Simulator builds when Xcode allows)
-./scripts/test_apple_platforms.sh
-./scripts/test_apple_platforms.sh --quick    # packages + unsigned app builds
-# Guide: docs/APPLE_PLATFORM_TESTING.md · UX backlog: docs/MULTI_OS_UX_BACKLOG.md
-
-# Clean-generate + prove .xcodeproj loadable under active Xcode / Xcode-beta
-./scripts/validate_xcodeprojs.sh
-# Then open (never open a bloated/stale package — validate wipes first):
-open Pill/ShannonPill.xcodeproj   # macOS Pill
-open iOS/Shannon.xcodeproj        # iPhone + Watch schemes
-open iPad/ShannonPad.xcodeproj    # iPad hub
-```
-
-CloudKit sync needs a paid Apple Developer team (container `iCloud.com.lebonhommepharma.shannon`). Without it, apps still **build and launch** with an empty in-memory backend — they simply do not sync. Steps: [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md#what-lp-needs-to-configure-in-xcode).
-
-### Tests on a Mac (no UI required)
-
-```bash
-# Pill pure logic (presence, entropy provenance, companions, layout, …)
-cd Pill && swift test
-
-# Shared multi-device model + sync codecs
-cd Packages/ShannonCore && swift test
-
-# Theme tokens
-cd Packages/ShannonTheme && swift test
-
-# Doc/path contracts (README claims vs shipped scripts)
-export PYTHONPATH=hub
-python3 -m pytest hub/tests/test_apple_docs_contract.py -v
-```
-
-**Secondary paths (science library / Linux / Windows):** see [Installation](#installation) below for `pip install shannon-entropy`, pure-Python fallbacks, and C++ `shannon-agent`.
----
-
-## Overview
-
-When an LLM agent becomes aware it is being evaluated, its token probability distributions undergo a characteristic **entropy collapse** — the exact same thermodynamic signature observed when a drug molecule locks into a protein binding site.
-
-```
-Normal generation:    H ~ 8-12 bits  (broad, exploratory distribution)
-Evaluation-aware:     H ~ 2-4 bits   (narrow, strategic distribution)
-                      dH < -3.2 bits  -->  COLLAPSE DETECTED
-```
-
-Shannon detects this in real-time, with <1% overhead on token generation.
-
----
-
-## v2 Architecture
-
-Shannon v2 is a modular C++20 library with Python bindings, a CLI agent, and multi-backend SIMD dispatch.
-
-```
-LLM Stream (logits / probs / logprobs / JSONL / socket / shared memory)
-     |
-     v
-+------------------------------------------------------------------+
-|  shannon-agent / TerminalAgent                                    |
-|  +------------------+  +-----------------+  +-----------------+   |
-|  | UnifiedDispatch  |  | CollapseDetector|  | HandrailEngine  |   |
-|  | (auto-selects    |  | (sliding window,|  | (escalation:    |   |
-|  |  best SIMD       |  |  stable 2-pass  |  |  alert/throttle/|   |
-|  |  backend)        |  |  variance,      |  |  kill/coredump/ |   |
-|  |                  |  |  z-score)       |  |  webhook)       |   |
-|  +-------+----------+  +--------+--------+  +--------+--------+   |
-|          |                       |                     |           |
-|  +-------v----------+           |              callbacks           |
-|  | Entropy Kernels  |           |                     |           |
-|  | Scalar / OMP /   |-> entropy + delta -> collapsed?--+           |
-|  | SSE4.2 / AVX2 /  |           |                                 |
-|  | AVX-512 / NEON   |           v                                 |
-|  |                  |     [log / alert / kill]                    |
-|  +------------------+                                           |
-+------------------------------------------------------------------+
-```
-
-### Component overview
-
-| Component | Header | Purpose |
-|-----------|--------|---------|
-| `UnifiedDispatch` | `unified_dispatch.hpp` | Auto-selects best compute backend (AVX-512 > AVX2 > SSE4.2/NEON > OpenMP > Scalar) |
-| `CollapseDetector` | `collapse_detector.hpp` | Sliding-window entropy tracker with numerically stable two-pass variance, z-score, and delta computation |
-| `HandrailEngine` | `handrail.hpp` | Configurable escalation engine: LOG_ONLY / ALERT / THROTTLE / KILL / COREDUMP / WEBHOOK |
-| `TerminalAgent` | `terminal_agent.hpp` | Full pipeline: stream ingestion + entropy + collapse detection + handrail actions |
-| `HardwareCapabilities` | `hardware_detect.hpp` | Runtime CPUID / XCR0 SIMD probe with OSXSAVE validation |
-| `TurboQuant` | `turbo_quant.hpp` | MSE-optimal Lloyd-Max quantization for bounded-entropy monitoring |
-
----
-
-## Features
-
-### Entropy Engine
-
-- **Log-sum-exp kernel** — numerically stable configurational entropy (ported from `FlexAIDdS/LIB/statmech.cpp`)
-- **6 CPU backends** — Scalar, OpenMP, SSE4.2, AVX2, AVX-512, ARM NEON (vectorized double-precision `exp`; no GPU — see note below)
-- **Kernel-aware dispatch** — SSE4.2/NEON used only for configurational entropy; probs/logprobs fall through to AVX2/OMP/Scalar
-- **Three input modes** — raw logits, probabilities, or log-probabilities
-- **`[[nodiscard]]` + `noexcept`** on all entropy kernel declarations
-- **NaN-safe** — `std::fmax` clamping, debug-mode normalization assertion for log-probabilities
-
-### Collapse Detection
-
-- **Stable two-pass variance** — avoids catastrophic cancellation in `E[X^2] - (E[X])^2` for small-variance LLM traces
-- **Configurable sliding window** — default 8 tokens, adjustable at runtime
-- **Bounded trace** — optional `max_trace_size` prevents OOM on long-running agents
-- **Callback-driven** — fires user-defined callback on collapse events
-
-### Safety & Handrails
-
-- **Thread-safe counters** — `std::atomic<int>` for collapse/escalation tracking
-- **Mutex-guarded cooldown** — `last_action_time_` protected against concurrent access
-- **Safe webhook** — `fork()` + `execvp()` (no shell interpolation, no command injection)
-- **Escalation with `else if`** — prevents double-fire when `sustained_threshold=1`
-- **`std::optional<pid_t>`** — type-safe PID for signal handrails (no `std::stoi` exceptions)
-
-### Mutual Information
-
-- **KL divergence** — `D_KL(p||q) = Σ pᵢ log₂(pᵢ/qᵢ)` with epsilon-flooring for numerical safety
-- **Jensen-Shannon divergence** — symmetric: `JSD(p,q) = 0.5·KL(p||m) + 0.5·KL(q||m)` where `m = 0.5(p+q)`
-- **Cross-entropy** — `H(p,q) = −Σ pᵢ log₂(qᵢ)`
-- **Inter-token MI** — `I(X_t; X_{t+1})` via KL divergence between consecutive token distributions
-- **MutualInfoTracker** — sliding-window MI tracker with circular buffer, window mean/std, high-MI detection
-- **MIResult** struct — mi_bits, entropy_t, entropy_t1, kl_forward, kl_reverse, js_divergence
-- **Three input forms** — raw probs, log-probs, and logits (via internal softmax)
-
-### Stream Ingestion
-
-- **Stdin JSONL** — line-by-line JSON array parsing with null-terminated `strtod` safety
-- **Unix domain socket** — low-latency local IPC
-- **Shared memory** — zero-copy with producer-reset detection
-- **3 input formats** — logits, probs, log-probs via `InputFormat` enum
-
-### Hardware Detection
-
-- **OSXSAVE + XCR0 validation** — prevents SIGILL from using AVX2/AVX-512 when the OS hasn't enabled XSAVE
-- **Strict-aliasing-safe** — `memcpy`-based CPUID (no `reinterpret_cast` UB)
-- **CPU-only** — GPU backends (CUDA/Metal/ROCm) were removed; see [note on GPU](#note-gpu-backends-removed)
-
----
-
-## Install via Homebrew (macOS)
-
-Shannon is distributed as a **monorepo Homebrew tap** (this repository).
-Homebrew 6+ requires tap trust for third-party formulae/casks.
-
-```bash
-# One-time: add the monorepo tap
-brew tap lebonhommepharma/shannon https://github.com/LeBonhommePharma/Shannon
-
-# Developer dependencies (clone + full native toolchain)
-brew bundle install
-
-# ── native CLI (shannon-agent) ──────────────────────────────────────────────
-brew trust --formula lebonhommepharma/shannon/shannon
-brew install --HEAD lebonhommepharma/shannon/shannon
-shannon-agent --help
-
-# ── macOS app (same primary path as Quick Start) ────────────────────────────
-./scripts/shannon                 # pets + app (+ optional gate/bridge)
-./scripts/shannon stop            # quit
-./scripts/shannon status          # running?
-./scripts/shannon probe           # diagnostics
-```
-
-```bash
-# Optional — Homebrew cask (v2.1.0+ zip is published; Gatekeeper may need quarantine clear):
-brew install --cask lebonhommepharma/shannon/shannon-pill
-xattr -dr com.apple.quarantine /Applications/Shannon.app   # if blocked
-
-# Maintainers — rebuild DMG/zip and refresh cask sha from THIS build:
-./scripts/package_pill.sh 2.1.0 --update-cask
-# Prefer pinning sha to the GitHub release asset when it differs from a local rebuild.
-```
-
-Apple multi-device entry points are in [Quick Start — Apple platforms](#quick-start--apple-platforms).
-
----
-
-## Installation
-
-### Install / update from GitHub source (primary package path)
-
-One primary command per platform. **Update = `git pull` + re-run the same command**
-(idempotent). Shared engine: `scripts/shannon_installer.py` (pure-Python,
-`SHANNON_SKIP_CORE=1`).
-
-| Platform | Install from clone | Update from source |
-|----------|--------------------|--------------------|
-| **macOS hub (app)** | `./scripts/shannon` | `git pull && ./scripts/shannon update` |
-| **macOS / Linux science** | `./scripts/install_shannon.sh --path` | `git pull && ./scripts/install_shannon.sh --path` |
-| **Windows science** | `powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path` | same after `git pull` (or `-Update`) |
-
-```bash
-# Clone once
-git clone https://github.com/LeBonhommePharma/Shannon.git
-cd Shannon
-
-# macOS — operator hub (Pill app)
-./scripts/shannon
-
-# macOS / Linux — science library + shannon-monitor (editable from this tree)
-./scripts/install_shannon.sh --path
-# or: python3 scripts/shannon_installer.py --source path
-# Auto-creates .venv-shannon on Homebrew/Debian PEP 668 system Python.
-# Activate: source .venv-shannon/bin/activate
-
-# No local clone — install HEAD from GitHub via pip
-./scripts/install_shannon.sh --git
-# or: python3 scripts/shannon_installer.py --source git
-```
-
-```powershell
-# Windows — science library only (no Mac Pill UI)
-git clone https://github.com/LeBonhommePharma/Shannon.git
-cd Shannon
-powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path
-# Update: git pull; then re-run the same line (or add -Update)
-```
-
-### Python (pip / PyPI)
-
-```bash
-# Published package:
 pip install shannon-entropy
-
-# Or install from GitHub without the helper scripts:
-pip install "git+https://github.com/LeBonhommePharma/Shannon.git"
-
-# Development extras from a clone:
+# or from this clone (editable + tests):
 pip install -e ".[dev]"
-```
 
-This installs the **Python package** (`import shannon`) and the `shannon-monitor` CLI.
-The optional C++ extension (`shannon._core`) is built when a C++20 compiler and
-pybind11 are available; otherwise pure-Python / Numba fallbacks are used.
-Force pure-Python with `SHANNON_SKIP_CORE=1` (installers set this automatically).
-
-```bash
 shannon-monitor --help
-shannon-monitor info
 ```
-
-### macOS Homebrew details
-
-| Package | Kind | What you get |
-|---------|------|----------------|
-| `lebonhommepharma/shannon/shannon` | Formula | `shannon-agent` (C++ CLI, OpenMP) |
-| `lebonhommepharma/shannon/shannon-pill` | Cask | `Shannon.app` (notch pill UI) |
-
-```bash
-shannon-agent --help
-cat token_stream.jsonl | shannon-agent --window 8 --threshold -3.2
-```
-
-### C++ from source
-
-```bash
-git clone https://github.com/LeBonhommePharma/Shannon.git
-cd Shannon
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-ctest --test-dir build --output-on-failure
-# Optional: install shannon-agent into a prefix
-cmake --install build --prefix /usr/local
-```
-
-### CMake options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `SHANNON_BUILD_TESTS` | `ON` | Build GoogleTest unit tests |
-| `SHANNON_BUILD_PYTHON` | `ON` | Build pybind11 Python module |
-| `SHANNON_BUILD_AGENT` | `ON` | Build `shannon-agent` CLI binary |
-| `SHANNON_USE_OPENMP` | `ON` | Enable OpenMP acceleration |
-| `SHANNON_USE_EIGEN` | `OFF` | Enable Eigen vectorization |
-
-> <a name="note-gpu-backends-removed"></a>**Note — GPU backends removed.** Earlier revisions carried `SHANNON_USE_CUDA` / `SHANNON_USE_ROCM` / `SHANNON_USE_METAL` options. They were removed: the workload is per-token streaming entropy of a *single* distribution (vocab 2k–131k), which is latency- and PCIe-transfer-bound on a discrete GPU (host→device copy of up to ~1 MB plus launch/sync overhead *per token*), with no in-repo batched or on-device-resident use case to amortise it. After the AVX-512 `exp` vectorization the CPU path sustains ~220–320 M elem/s single-threaded and wins decisively across the realistic vocab range. Keeping untested GPU scaffolding cost more (build/CI complexity, a capability claim never validated on hardware) than it earned.
-
-### Build targets
-
-| Target | Description |
-|--------|-------------|
-| `shannon_v2` | Static C++20 library (v2 core + SIMD kernels) |
-| `shannon_core` | Static C++ library (v1 legacy) |
-| `shannon-agent` | CLI agent binary (v2) |
-| `_core` | pybind11 Python extension (`shannon._core`) |
-| `shannon_tests` | GoogleTest runner (v1, 16 tests) |
-| `shannon_v2_tests` | GoogleTest runner (v2, 70 tests) |
-
----
-
-## Usage
-
-### C++ agent CLI
-
-```bash
-# Monitor stdin JSONL (default mode)
-cat token_stream.jsonl | ./build/shannon-agent
-
-# With handrails
-./build/shannon-agent \
-    --window 8 \
-    --threshold -3.2 \
-    --handrail alert \
-    --sustained kill \
-    --count 3 \
-    --pid 12345 \
-    --cooldown 5.0
-
-# Shared memory mode (zero-copy from LLM inference engine)
-./build/shannon-agent --shmem /shannon_logits
-
-# Unix domain socket
-./build/shannon-agent --socket /tmp/shannon.sock
-
-# Quiet mode — exit code 0=safe, 1=collapse, 2=error
-./build/shannon-agent --quiet < trace.jsonl
-```
-
-### C++ library
-
-```cpp
-#include "shannon/terminal_agent.hpp"
-
-int main() {
-    shannon::AgentConfig config;
-    config.quiet = false;
-    config.window_size = 8;
-    config.threshold_bits = -3.2;
-
-    shannon::TerminalAgent agent(std::move(config));
-
-    std::vector<double> logits(50000, 0.0);  // from your LLM
-    auto result = agent.process_logits(logits);
-    if (result.collapsed) {
-        std::fprintf(stderr, "COLLAPSE at token %zu: H=%.2f\n",
-                     result.token_index, result.entropy);
-    }
-}
-```
-
-### Python — streaming detection
 
 ```python
-import numpy as np
 from shannon import ShannonCollapseDetector
 
 detector = ShannonCollapseDetector(
     window_size=8,
     threshold=-3.2,
-    callback=lambda r: print(f"COLLAPSE at token {r.token_index}!"),
+    callback=lambda r: print(f"COLLAPSE @ token {r.token_index}"),
 )
 
-for logits in model_output_stream:
+for logits in model_output_stream:  # shape (vocab,) float array
     result = detector.add_logits(logits)
-    print(f"Token {result.token_index}: H={result.entropy:.2f} bits")
+    print(f"token {result.token_index}: H={result.entropy:.2f} bits")
 ```
 
-### OpenAI API streaming
+Optional pure-Python install helpers (no C++ build required — `SHANNON_SKIP_CORE=1`):
 
-```python
-from openai import OpenAI
-from shannon import ShannonCollapseDetector
-
-client = OpenAI()
-detector = ShannonCollapseDetector()
-
-stream = client.chat.completions.create(
-    model="gpt-4", messages=[...],
-    stream=True, logprobs=True, top_logprobs=20,
-)
-
-for chunk in stream:
-    if chunk.choices[0].logprobs:
-        for token in chunk.choices[0].logprobs.content:
-            lp = np.array([t.logprob for t in token.top_logprobs])
-            result = detector.add_logprobs(lp)
-            if result.collapsed:
-                print("Evaluation awareness detected!")
+```bash
+./scripts/install_shannon.sh --path          # macOS / Linux from clone
+./scripts/install_shannon.sh --git           # pip from GitHub HEAD
+# Windows:
+powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path
 ```
 
-### xAI (Grok) API streaming
+### C · C++ agent (optional)
 
-xAI is OpenAI-compatible. Create a key at [console.x.ai](https://console.x.ai)
-and set `XAI_API_KEY` (or `GROK_API_KEY`).
-
-```python
-import os
-from openai import OpenAI
-from shannon import ShannonCollapseDetector
-from shannon.integrations.xai_stream import monitor_xai_stream
-
-client = OpenAI(
-    api_key=os.environ["XAI_API_KEY"],
-    base_url="https://api.x.ai/v1",
-)
-detector = ShannonCollapseDetector()
-
-for event in monitor_xai_stream(
-    client,
-    detector=detector,
-    model="grok-3",  # logprobs ignored on grok-4.20+
-    messages=[{"role": "user", "content": "Explain entropy collapse."}],
-):
-    print(f"{event.token!r}  H={event.entropy:.2f}")
-    if event.is_collapsed:
-        print("Evaluation awareness detected!")
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+cat token_stream.jsonl | ./build/shannon-agent --window 8 --threshold -3.2
 ```
 
-Runnable scripts: `examples/xai_demo.py`, `examples/xai_streaming.py`.
+<details>
+<summary><strong>Homebrew (macOS tap — optional)</strong></summary>
+
+```bash
+brew tap lebonhommepharma/shannon https://github.com/LeBonhommePharma/Shannon
+brew trust --formula lebonhommepharma/shannon/shannon
+brew install lebonhommepharma/shannon/shannon    # shannon-agent CLI
+# Cask (published ZIP sha for v2.1.0+):
+brew trust --cask lebonhommepharma/shannon/shannon-pill
+brew install --cask lebonhommepharma/shannon/shannon-pill
+```
+
+Local unsigned rebuild: `./scripts/package_pill.sh --install`
+
+</details>
 
 ---
 
-## Testing
+## How it works
 
-### C++ (70 tests)
-
-```bash
-cmake -B build -DSHANNON_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-ctest --test-dir build --output-on-failure
+```
+LLM logits / probs / logprobs  (JSONL · socket · shared memory · Python stream)
+              │
+              ▼
+     ┌──────────────────── entropy kernels ────────────────────┐
+     │  C++20 SIMD (SSE4.2 / AVX2 / AVX-512 / NEON / OMP)      │
+     │       → Numba JIT → pure NumPy fallback                 │
+     │  log-sum-exp configurational H  (stable, NaN-safe)      │
+     └────────────────────────┬────────────────────────────────┘
+                              │  H_t sequence
+                              ▼
+              CollapseDetector  (window · 2-pass variance · z / ΔH)
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+         log / alert     handrails        hub / pill
+         shannon-monitor  (throttle/kill)  gate + agents
 ```
 
-Test coverage includes:
-- Scalar entropy kernels (uniform, peak, edge cases)
-- Entropy cross-checks (probs vs logprobs vs configurational)
-- Collapse detector (stable variance, known sequences, abrupt drops, gradual drift)
-- Handrail engine (escalation, cooldown, sustained threshold edge case, reset)
-- Unified dispatch (singleton, override, backend names)
-- TurboQuant (codebook, quantize/dequantize, entropy bounded)
-- TerminalAgent (process_logits, stop, reset)
-- StdinIngester (JSONL parsing)
-- Hardware detection (summary output)
-- Types (enums, DispatchTelemetry::summary(), operator bool)
+| Piece | Role |
+|-------|------|
+| **Entropy kernels** | Same family as docking configurational entropy; multi-backend dispatch |
+| **CollapseDetector** | Sliding window, threshold default **−3.2 bits**, callback on fire |
+| **shannon-agent / shannon-monitor** | Stream in, H out, exit codes for automation |
+| **Hub + Pill** | Multi-agent lifecycle, approvals, pets, multi-device sync |
 
-### Python
+Full v2 map: [`docs/architecture.md`](docs/architecture.md)
+
+---
+
+## Multi-agent hub (the operator catnip)
+
+Shannon owns **campaign / pair plans** and lifecycle traffic so concurrent agents
+don’t freestyle dual docking owners or ghost processes on the pill.
 
 ```bash
-pip install -e ".[dev]"
+export PYTHONPATH="${PWD}/hub${PYTHONPATH:+:$PYTHONPATH}"
+
+python3 -m agent_manager campaign \
+  --campaign red-pair --owner dataset_runner \
+  --analysts science --coders claude_code,codex \
+  --dry-run --json
+
+python3 -m agent_manager spawn science --task TASK --dry-run --json
+python3 -m agent_manager monitor --dry-run
+```
+
+- **Sole heavy docking owner:** `dataset_runner` (dual-owner plans refuse)
+- **Bridge:** `hub/tools/dataset_runner_bridge.py` → hub `benchmark_state` progress
+- **Skill handrail:** [`.grok/skills/shannon/SKILL.md`](.grok/skills/shannon/SKILL.md) (install into Claude / Codex / Grok TUIs)
+
+Hub overview: [`hub/README.md`](hub/README.md) · gate protocol lives under `hub/`.
+
+---
+
+## Apple companions
+
+| Platform | Min | Role | Doc |
+|----------|-----|------|-----|
+| **macOS Pill** | 13+ | Primary hub UI | [`Pill/README.md`](Pill/README.md) |
+| **iPhone** | iOS 17 | Live cards, confirmations, widget | [`iOS/README.md`](iOS/README.md) |
+| **iPad** | iPadOS 17 | Multi-agent canvas (not a phone scale-up) | [`iPad/README.md`](iPad/README.md) |
+| **Watch** | watchOS 10 | Face + complications (display relay) | [`watchOS/README.md`](watchOS/README.md) |
+
+Sync direction: **Mac → iPhone (CloudKit) → Watch (WatchConnectivity)** —
+details in [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md).
+
+```bash
+# Shared model (no signing required)
+cd Packages/ShannonCore && swift test
+
+# Multi-OS health (macOS always; simulators when Xcode allows)
+./scripts/test_apple_platforms.sh --quick
+./scripts/validate_xcodeprojs.sh
+open Pill/ShannonPill.xcodeproj
+```
+
+CloudKit needs a paid Apple Developer team (`iCloud.com.lebonhommepharma.shannon`).
+Without it, apps still **build and launch** with an empty in-memory backend.
+
+---
+
+## Geek feature checklist
+
+**Entropy engine**
+
+- Log-sum-exp configurational entropy (ported from FlexAIDdS / docking stack)
+- Backends: Scalar · OpenMP · SSE4.2 · AVX2 · AVX-512 · ARM NEON → Numba → NumPy
+- Inputs: logits, probabilities, or log-probabilities
+- NaN-safe, `[[nodiscard]]` C++ surfaces where applicable
+
+**Detection & handrails**
+
+- Sliding window (default 8), stable two-pass variance
+- Escalation: log / alert / throttle / kill / webhook (`fork`+`exec`, no shell injection)
+- Stream modes: stdin JSONL, Unix socket, shared memory
+
+**Operator surface**
+
+- Notch pill + pets + ⌘D attach
+- Multi-agent gate (entropy-scored messages, approvals)
+- Dataset campaign orchestration (dry-run plans, dual-owner refusal, result bridge)
+
+---
+
+## Tests (no UI required)
+
+```bash
+# Doc/path contracts (README claims vs shipped scripts)
+export PYTHONPATH=hub
+python3 -m pytest hub/tests/test_apple_docs_contract.py -v
+
+# Python library
 pytest tests/python/ -v
+
+# C++ (GoogleTest — suite size not frozen here; ctest is authoritative)
+cmake -B build -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF
+cmake --build build -j && ctest --test-dir build --output-on-failure
+
+# Swift packages (swift test is authoritative)
+cd Pill && swift test
+cd Packages/ShannonCore && swift test
+cd Packages/ShannonTheme && swift test
 ```
-
-### Swift (macOS packages — `swift test` is authoritative)
-
-```bash
-cd Pill
-swift test
-```
-
-Covers battery capacity parsing and alert edge-triggering, the Now Playing
-state machine and label truncation, and the bridge wire format including a
-live Unix-socket round trip.
 
 ---
 
-## macOS Pill App (live activities)
+## Install matrix (secondary)
 
-`Pill/` is a native Swift/SwiftUI agent app that puts Shannon in the notch. It
-runs as an `LSUIElement` — **no dock icon**, but a **menu-bar status item is
-always present** (glyph + `○ ready` or the active agent name) so you can quit
-from that menu. The notch pill expands on hover/click. Collapsed, it shows live
-agent/pet activity when available; media only when something is playing and no
-agent is busy; otherwise an honest idle state. Entropy/collapse appears when the
-Python bridge is connected.
+| Path | Command |
+|------|---------|
+| **macOS app** | `./scripts/shannon` / `./scripts/shannon update` |
+| **Science (clone)** | `./scripts/install_shannon.sh --path` or `python3 scripts/shannon_installer.py --source path` |
+| **Science (PyPI)** | `pip install shannon-entropy` |
+| **Science (Git HEAD)** | `pip install "git+https://github.com/LeBonhommePharma/Shannon.git"` |
+| **Windows science** | `.\scripts\Install-Shannon.ps1 -Source path` |
+| **C++ prefix install** | `cmake --install build --prefix /usr/local` |
 
-```bash
-# Preferred (same as Quick Start):
-./scripts/shannon
+CMake knobs: `SHANNON_BUILD_TESTS`, `SHANNON_BUILD_PYTHON`, `SHANNON_BUILD_AGENT`,
+`SHANNON_USE_OPENMP` (defaults ON except where noted in `CMakeLists.txt`).
 
-# Or from Pill/ after a local SwiftPM build:
-cd Pill && swift build && ./Scripts/make_app.sh && open build/ShannonPill.app
-```
-
-| Live activity | Status |
-|---|---|
-| Battery + charging ring (IOKit, pulses at ≤20% / ≤10%) | ✅ implemented |
-| Shannon entropy readout via local socket | ✅ implemented |
-| Now Playing (art, scrubber, transport) | ⚠️ implemented, data source entitlement-gated |
-| Head-gesture confirmation (nod / shake) | ✅ implemented, macOS 14+ · untested on hardware |
-| Voice dictation (on-device) + spoken announcements | ✅ implemented · untested with a live mic |
-| AirPods route detection + model indicator | ✅ implemented |
-| AirPods in-ear / battery / stem press | ❌ no macOS API — see Pill/BLOCKED.md |
-| Notification mirror, Focus/DND, AirDrop, file shelf | ❌ not implemented |
-
-Now Playing is built but macOS has no public API to read another app's playback
-state, and the private framework every notch utility uses was entitlement-gated
-in macOS 15.4. The pill degrades to the entropy readout when it gets no data.
-See [`Pill/BLOCKED.md`](Pill/BLOCKED.md) for that and the other platform limits.
-
-### Gesture Controls
-
-When Shannon needs an answer — "Dock this ligand?", "Commit and push?" — the
-pill opens the question itself and accepts a **head gesture** from AirPods:
-
-| Gesture | Meaning |
-|---|---|
-| **Nod once** (pitch forward, back to neutral) | Confirm / Yes |
-| **Shake once** (yaw left or right, back to neutral) | Deny / No |
-
-A gesture must exceed **15°** and return to neutral within **0.8 s**, followed
-by a **2 s lockout** so one nod cannot answer two prompts. Confirm flashes the
-pill green, deny flashes it red, each with a haptic and a soft system sound.
-Yes/No buttons are always present, so the pill is fully usable without AirPods.
-
-Three properties matter for trusting this with an approval prompt:
-
-- **Motion is only read while a question is on screen.** The detector is armed
-  when the prompt appears and disarmed the moment it is answered, so ordinary
-  head movement can never confirm anything.
-- **Neutral is captured when the prompt appears**, not assumed level — sitting
-  with your head tilted does not read as a permanent nod.
-- **A prompt is answered at most once.** If a gesture and a click race, the
-  loser is dropped rather than answering twice.
-
-Requires **macOS 14 Sonoma or later** (`CMHeadphoneMotionManager` is
-`macos(14.0)`, despite CoreMotion itself being older) and AirPods Pro / 3rd gen
-/ Max or H1/H2 Beats. On macOS 13 the buttons remain and the pill says why
-gestures are unavailable. No entitlement is required — head motion is ordinary
-TCC consent, prompted by `NSMotionUsageDescription`, and nothing leaves the Mac.
-
-### AirPods Integration
-
-What macOS actually permits here is much narrower than iOS, so the shipped
-surface is deliberately small (full API-by-API findings in
-[`Pill/BLOCKED.md`](Pill/BLOCKED.md) §8):
-
-| Capability | Status |
-|---|---|
-| Detect AirPods connect/disconnect as audio output | ✅ CoreAudio device listener |
-| Identify model (Pro / Max / AirPods / Beats) for the pill icon | ✅ from device name |
-| Hold spoken announcements when AirPods disappear, resume on return | ✅ |
-| Head-nod / shake confirmation | ✅ see Gesture Controls |
-| In-ear vs out-of-ear detection | ❌ no macOS API exists |
-| AirPods battery level | ❌ no third-party API |
-| Stem / Digital Crown presses | ❌ would require hijacking Now Playing |
-| Noise-control mode, Conversation Awareness | ❌ not exposed to third parties |
-
-`AVAudioSession` — the basis for most of the iOS approach — is
-`API_UNAVAILABLE(macos)`. Route changes therefore come from a CoreAudio
-listener on `kAudioHardwarePropertyDefaultOutputDevice` instead.
-
-**Spoken announcements** (`AVSpeechSynthesizer`) cover docking completion,
-benchmark results, agent errors and pending confirmations. Two policies worth
-knowing: Shannon will not announce through the built-in speakers by default
-(`requireHeadworn`), so results are not read aloud to a room; and when output
-resumes after AirPods return, queued *routine* chatter is dropped while urgent
-items are kept — "agent blocked, input needed" is still true, "target 3
-complete" is just noise.
-
-### Voice Dictation
-
-Double-tap the pill to start listening; a live transcript appears as you speak.
-Escape or a second double-tap cancels.
-
-| Utterance | Effect |
-|---|---|
-| "confirm" / "yes" / "approve" | Same as a head-nod — **only** when a prompt is pending |
-| "deny" / "no" / "cancel" | Same as a head-shake — same gating |
-| "show status" | Expand to the agent status view |
-| "pause" / "stop" | Halt the active announcement |
-| "run benchmark" | Trigger DatasetRunner if idle |
-| "what's docking" | Speak the current target and RMSD |
-| anything else | Forwarded to the active agent as a query |
-
-Two safety rules, both enforced by tests:
-
-- **A command must be the entire utterance.** "yes" confirms; "yes, but check
-  the ligand first" is a query. Substring matching would let "no problem, run
-  the benchmark" read as a denial, and these commands gate things like
-  "commit and push".
-- **"yes" at an idle pill confirms nothing.** Confirm and deny are dispatched
-  only while a prompt is actually pending; otherwise they go to the agent as
-  text, so a stray word can never approve whatever ran last.
-
-**Privacy.** `requiresOnDeviceRecognition = true` is set unconditionally and
-never relaxed: if a locale has no on-device model, dictation reports
-unavailable rather than falling back to Apple's servers. No audio or transcript
-leaves the Mac, and the microphone is only live during an active session.
-Requires Microphone and Speech Recognition consent.
-
-### Wiring the agent to the pill
-
-The Swift app is a pure consumer of the Python coordination layer over a local
-Unix domain socket (newline-delimited JSON, `0600`, nothing leaves the machine):
-
-```python
-from shannon import ShannonCollapseDetector
-from shannon.pill_bridge import PillBridgeServer
-
-detector = ShannonCollapseDetector()
-with PillBridgeServer(detector, agent="flexaid-runner") as server:
-    server.serve_in_thread()
-    ...  # run the agent; the pill picks it up within a second
-```
-
-Drive the UI without an agent using `python -m shannon.pill_bridge --demo`, and
-check what works on a given machine with `ShannonPill --probe`.
-Full detail in [`Pill/README.md`](Pill/README.md).
+> **GPU backends:** intentionally not shipped. Per-token entropy of one vocab
+> distribution is latency- and transfer-bound on discrete GPUs; CPU SIMD wins for
+> the realistic vocab range. See historical notes in git history if curious.
 
 ---
 
-## iPhone, iPad & Apple Watch companions
-
-The Mac hub can mirror state to iCloud so devices on the same account follow
-along. **Min OS (apps):** iOS / iPadOS **17**, watchOS **10**. Shared package
-`ShannonCore` supports macOS 13+ / iOS 16+ / watchOS 9+ for library code.
-
-```
-  Mac (ShannonPill)                iPhone (ShannonPhone)          Apple Watch
-  NowPlaying / battery ──CloudKit──▶ cards + widget + push ──WC──▶ Face +
-  agents / entropy        (private)  notification feed             complications
-          ▲                                  │                          │
-          └──────── RemoteCommand / answers ◀┴──────── crown taps ◀─────┘
-```
-
-| Device | Role | Doc |
-|--------|------|-----|
-| **iPhone** | Glance cards, confirmations, widget, AirPods gestures | [`iOS/README.md`](iOS/README.md) |
-| **iPad** | Multi-agent hub canvas (sidebar / rail / feed) | [`iPad/README.md`](iPad/README.md) |
-| **Watch** | Display relay only — no docking / entropy compute | [`watchOS/README.md`](watchOS/README.md) |
-| **Shared model** | Snapshots, CloudKit codecs, voice/gestures | [`Packages/ShannonCore`](Packages/ShannonCore) |
-
-```bash
-cd Packages/ShannonCore && swift test          # no CloudKit container required
-./scripts/validate_xcodeprojs.sh               # clean XcodeGen + load check
-open iOS/Shannon.xcodeproj                     # Phone + Watch
-open iPad/ShannonPad.xcodeproj
-```
-
-Sync stays light: state snapshots only — never raw transcripts or docking
-output; unchanged records are not republished; artwork over 200 KB is dropped.
-Full setup, entitlements, and security model:
-[`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md).
-
-### Gesture controls
-
-When an agent blocks on a question, the prompt syncs to the phone and watch and
-can be answered without touching the Mac. Every route below writes the same
-`ConfirmationResponse` record, which the Mac drains and acts on.
-
-| Gesture | Device | Meaning |
-|---|---|---|
-| **Nod** | iPhone + AirPods | Confirm |
-| **Shake** | iPhone + AirPods | Deny |
-| **Double Tap** (pinch) | Apple Watch Series 9+ | Confirm (primary action of the current screen) |
-| **Stem press** | AirPods | 1× confirm · 2× deny · 3× dismiss |
-| **Voice** | all three | "confirm" / "deny" |
-| **Tap** | iPhone + Watch | Confirm / Deny buttons |
-
-Head gestures use `CMHeadphoneMotionManager` with the same detector, thresholds
-(15° excursion, 0.8 s window) and **2 s debounce** as the Mac pill —
-`HeadGestureDetector` in ShannonCore is the single implementation.
-
-Two safety properties are enforced in code and covered by tests: the detector is
-**disarmed unless a question is actually pending**, so ordinary head movement can
-never answer anything, and neutral is captured **when the detector arms**, so a
-head that rests tilted still reads correctly.
-
-Beyond confirmations, the watch offers Double Tap for play/pause on the Now
-Playing screen, Crown rotation between screens with haptic detents, long-press
-context menus for secondary actions, and a wrist flick to jump back to the
-Shannon Face. Always-On drops the face to time plus one status line at 15%
-accent opacity.
-
-### Voice
-
-Press and hold the mic in the iPhone app's header to dictate; release submits.
-Recognition is **on-device only** (`requiresOnDeviceRecognition = true`) — agent
-questions and answers never reach a speech server. The watch uses the system
-dictation sheet with "confirm" / "deny" / "status" suggestions.
-
-All three platforms parse with the same `VoiceCommand.parse` in ShannonCore, so
-a phrase means the same thing everywhere. Negation is checked first and wins
-outright: **"no, don't confirm" denies**, never confirms.
-
-### AirPods
-
-In-ear and route changes are tracked via `AVAudioSession.routeChangeNotification`
-— pulling out an AirPod cuts any in-flight announcement rather than sending it to
-the phone speaker. Announcements use `AVSpeechSynthesizer` with the
-`.spokenAudio` category so AirPods Pro 3 Conversation Awareness can duck Shannon
-when LP starts talking, and are suppressed entirely when other audio is playing
-or a call is active. A status icon appears in the navigation bar when AirPods are
-connected; battery is shown only at or below 30%.
-
-### Security
-
-- **Secrets never sync.** Credentials and agent tokens live in the Keychain via
-  `SecureStore`, in the shared `com.lebonhommepharma.shannon` access group so a
-  token provisioned on the Mac is readable on iPhone without re-auth. Nothing in
-  the sync layer accepts a secret — a test asserts no synced record has a field
-  that looks like a credential.
-- **Encrypted at rest.** Cached snapshots are written with iOS/watchOS Data
-  Protection (`completeUnlessOpen` — encrypted at rest, still readable while
-  locked, which is when widgets render).
-- **Private database only.** All state lives in the private CloudKit database in
-  a custom zone. Nothing is ever written to the public database.
-- **ATS enforced** in all Info.plists, with no `NSAllowsArbitraryLoads`
-  exceptions.
-- **No telemetry, no analytics, no third-party SDKs.** The privacy manifests
-  declare no tracking and no collected data. Heart-rate biofeedback on the watch
-  is opt-in, off by default, and never leaves the device.
-
----
-
-## Design System
-
-All three native surfaces — the Mac notch pill, the iPhone companion, the Watch
-glance — share one design system, shipped as a local Swift package at
-[`Packages/ShannonTheme`](Packages/ShannonTheme). Colour, type, motion and
-spacing are semantic tokens: feature code names a *role*, never a hex value, and
-the token resolves for the current colour scheme.
-
-**Day** is crisp, airy, high-contrast — near-white with cool undertones, deep
-indigo accent, dark type on light, and a frosted-glass pill with a subtle
-shadow. **Night** is deep and low-emission — `#0D0D10` rather than pure black,
-which reads as a hole punched in the screen — with an electric blue accent that
-pops without glare, and a pill barely visible at rest until an agent starts
-working and its accent border lights up.
-
-### Palette
-
-| Token | Day | Night | Role |
-|---|---|---|---|
-| `shannonBackground` | `#F5F6FA` | `#0D0D10` | window / scene |
-| `shannonSurface` | `#FFFFFF` | `#18181C` | cards, rows |
-| `shannonSurfaceElevated` | `#ECEDF2` | `#222228` | stacked on surface |
-| `pillBackground` | `rgba(255,255,255,.72)` | `rgba(18,18,20,.80)` | pill fill over HUD material |
-| `pillBorder` | `rgba(0,0,0,.08)` | `rgba(255,255,255,.10)` | pill hairline at rest |
-| `pillBorderActive` | `#4F6EF7` | `#7B9FFF` | pill hairline, agent active |
-| `shannonAccent` | `#3A5CF5` | `#6B8FFF` | primary interactive |
-| `shannonAccentSubtle` | `#EEF1FE` | `#1A2140` | badges, selected rows |
-| `shannonPrimary` | `#0F0F12` | `#F0F0F5` | titles, body |
-| `shannonSecondary` | `#6B6E80` | `#8A8D9F` | supporting copy |
-| `shannonTertiary` | `#A8ABBC` | `#4A4D5E` | disabled, separators |
-| `shannonSuccess` | `#1A7F4B` | `#34C77A` | run succeeded |
-| `shannonWarning` | `#C47A0A` | `#F5B934` | degraded, drifting |
-| `shannonError` | `#C0392B` | `#FF6B6B` | failure, collapse |
-| `shannonNeutral` | `#8A8D9F` | `#5A5D6E` | no signal |
-
-The two pill fills keep their alpha deliberately — they sit over an
-`NSVisualEffectView` using the `.hudWindow` material and must stay translucent.
-
-Adaptation happens below SwiftUI: a dynamic `NSColor` on macOS, a dynamic
-`UIColor` on iOS, and the night value unconditionally on watchOS, whose
-interface is always dark and which has no dynamic-provider API.
-
-### Typography
-
-| Token | Style | Weight | Face |
-|---|---|---|---|
-| `shannonLargeTitle` | `.largeTitle` | bold | SF Rounded |
-| `shannonTitle` | `.title2` | semibold | SF Pro |
-| `shannonHeadline` | `.headline` | semibold | SF Pro |
-| `shannonBody` | `.body` | regular | SF Pro |
-| `shannonCallout` | `.callout` | medium | SF Pro |
-| `shannonCaption` | `.caption` | regular | SF Pro, mono digits |
-| `shannonMono` | `.caption` | regular | SF Mono |
-
-Every token derives from a *text style* rather than a fixed point size, so
-Dynamic Type works throughout. `shannonMono` carries anything the eye compares
-column-wise — RMSD values, CF scores, entropy in bits, turn counts — and
-`shannonCaption` uses monospaced digits so live counters don't jitter as they
-tick.
-
-### Motion and spacing
-
-Three springs and nothing else: `shannonSnap` (`0.25`/`0.80`) for taps,
-`shannonEase` (`0.40`/`0.75`) for card expansion, `shannonFloat`
-(`0.60`/`0.65`) for the pill unfurling from the notch. Damping falls as travel
-grows. Spacing is an 8pt grid — `xs 4` (the one permitted half-step), `sm 8`,
-`md 16`, `lg 24`, `xl 32`, `xxl 48`.
-
-### Using it
-
-```swift
-import ShannonTheme
-
-Text("δ −3.4 bits")
-    .font(.shannonMono)
-    .foregroundStyle(Color.shannonAccent)
-    .padding(ShannonSpacing.md)
-    .background(Color.shannonSurface)
-
-// macOS: material, tint, hairline, shadow and the active accent glow.
-pillContent.shannonPill(isActive: agent.isRunning)
-
-// iOS / watchOS: correct radius and padding per platform, one call site.
-cardContent.shannonCard()
-```
-
-`ShannonThemeSpecimen` (DEBUG) renders every token, the type scale, the spacing
-grid and both pill states in Day and Night side by side — open
-`Packages/ShannonTheme/Sources/ShannonTheme/ShannonThemePreview.swift` in Xcode.
-
-```bash
-swift test --package-path Packages/ShannonTheme
-```
-
-Full detail, including the per-platform layout specs, in
-[`Packages/ShannonTheme/README.md`](Packages/ShannonTheme/README.md).
-
----
-
-## Repository Structure
+## Repo map
 
 ```
 Shannon/
-|-- CMakeLists.txt                # C++20 build (v1 + v2 + tests + agent)
-|-- pyproject.toml                # Python package
-|-- README.md
-|-- LICENSE                       # MIT
-|
-|-- src/
-|   |-- shannon.cpp               # v1 core (legacy, OpenMP-only)
-|   |-- shannon.hpp               # v1 header
-|   |-- bindings.cpp              # pybind11 bindings (v1)
-|   +-- shannon/                  # v2 modular library
-|       |-- config.hpp.in         # Build-time version constants
-|       |-- types.hpp             # Enums, structs, DispatchResult/Telemetry
-|       |-- entropy.hpp           # [[nodiscard]] noexcept kernel declarations
-|       |-- entropy_scalar.cpp    # Baseline reference implementation
-|       |-- entropy_omp.cpp       # OpenMP parallel kernel
-|       |-- entropy_sse42.cpp     # SSE4.2 kernel (configurational only)
-|       |-- entropy_avx2.cpp      # AVX2 + FMA kernels (3 functions)
-|       |-- entropy_avx512.cpp    # AVX-512 kernels (3 functions)
-|       |-- entropy_neon.cpp      # ARM NEON kernel (configurational only)
-|       |-- simd_exp.hpp          # Vectorized double-precision exp (AVX2/AVX-512)
-|       |-- hardware_detect.cpp   # Runtime CPUID/XCR0 SIMD probe
-|       |-- hardware_detect.hpp
-|       |-- unified_dispatch.cpp   # Backend selection + kernel dispatch
-|       |-- unified_dispatch.hpp
-|       |-- collapse_detector.cpp  # Sliding-window detector (stable 2-pass var)
-|       |-- collapse_detector.hpp
-|       |-- handrail.cpp           # Escalation engine (6 actions, mutex-safe)
-|       |-- handrail.hpp
-|       |-- stream_ingest.cpp      # Stdin JSONL / Unix socket / shared memory
-|       |-- stream_ingest.hpp
-|       |-- terminal_agent.cpp     # Full pipeline agent
-|       |-- terminal_agent.hpp
-|       |-- turbo_quant.cpp        # Lloyd-Max quantization
-|       |-- turbo_quant.hpp
-|       |-- mutual_info.cpp        # KL-divergence, JS-divergence, cross-entropy kernels
-|       |-- mutual_info.hpp        # MutualInfoTracker + MIResult
-|       |-- THERMODYNAMIC_FOUNDATIONS.txt  # 25-reference research note (FlexAID∆S → Shannon)
-|
-|-- apps/
-|   +-- shannon-agent/
-|       +-- main.cpp              # CLI agent (18 flags, 3 stream modes)
-|
-|-- Pill/                         # macOS notch pill app (Swift/SwiftUI, LSUIElement)
-|   |-- Package.swift             # SwiftPM: PillCore + ShannonPill
-|   |-- project.yml               # XcodeGen spec -> ShannonPill.xcodeproj
-|   |-- README.md                 # Build, architecture, permissions
-|   |-- BLOCKED.md                # Platform limits (MediaRemote, DND, AirDrop)
-|   |-- Sources/
-|   |   |-- PillCore/             # Battery, NowPlaying, MediaRemote, ShannonBridge
-|   |   +-- ShannonPill/          # AppKit panel + SwiftUI views
-|   |-- Tests/PillCoreTests/      # 42 Swift unit tests
-|   +-- Scripts/make_app.sh       # SwiftPM binary -> ShannonPill.app
-|
-|-- tests/
-|   |-- cpp/
-|   |   |-- test_shannon.cpp      # v1 tests (16)
-|   |   +-- test_shannon_v2.cpp   # v2 tests (70)
-|   +-- python/
-|       |-- conftest.py
-|       +-- test_detector.py
-|
-|-- python/
-|   +-- shannon/
-|       |-- __init__.py
-|       |-- core.py               # Backend selection (C++ / Numba / NumPy)
-|       |-- detector.py           # ShannonCollapseDetector class
-|       |-- pill_bridge.py        # Unix-socket status server for the Pill app
-|       +-- cli.py                # shannon-monitor CLI
-|
-|-- docs/
-|   +-- theory.md                 # Mathematical foundations
-|
-+-- .github/
-    +-- workflows/
-        +-- ci.yml                # CI: Python (3 OS) + C++ (Linux/macOS) + lint
+├── scripts/shannon              # primary macOS operator handrail
+├── Pill/                        # macOS notch pill (Swift)
+├── iOS/  iPad/  watchOS/        # companions
+├── Packages/ShannonCore|Theme   # shared multi-device model + tokens
+├── hub/                         # gate, agent_manager, DatasetRunner bridge
+├── python/shannon/              # PyPI package + shannon-monitor
+├── src/                         # C++20 entropy / agent core
+├── tests/python/                # library tests
+└── docs/                        # theory, architecture, multi-device
 ```
-
----
-
-## The Thermodynamic Core: From dG = H − TS to Entropy Collapse
-
-Shannon's entropy kernel is a **direct port** of the configurational entropy engine from [FlexAIDdS](https://github.com/LeBonhommePharma/FlexAIDdS), validated on 590 protein-drug complexes (r = 0.93 ITC, 92% binding mode rescue). The connection is not analogical — it is **the same mathematics**.
-
-### The fundamental decomposition
-
-The FlexAID∆S binding free energy decomposes as:
-
-```
-dG = E_CF  −  T · [S_conf + S_vib + S_rot + S_cratic]
-
-   = exp(−CF/T)  −  T · Σ pᵢ ln(pᵢ)       (in logarithmic units)
-
-     ──────────     ──────────────────────
-     enthalpic       entropic penalty
-     "what binds"    "what's lost"
-```
-
-Odrzywołek (2026, arXiv:2603.21852) proved that the operator `eml(a,b) = exp(a) − ln(b)` is **functionally complete** for elementary functions — any arithmetic operation, transcendental function, or entropy formula can be expressed as compositions of eml and the constant 1. This provides a natural algebraic language for unifying the domain-specific formulas below.
-
-| Domain | Formula | Units | Collapse signal | Expansion signal | Oscillation signal |
-|:---|:---|:---|:---|:---|:---|
-| FlexAID∆S (molecules) | `F = −kT ln Z`, `S = −k_B Σ pᵢ ln pᵢ` | kcal/mol | Binding lock-in, ΔS < 0 | Solvation release, ΔS > 0 | Unstable binding site |
-| Shannon (tokens) | `H = −Σ pᵢ log₂(pᵢ)` | bits | Eval-awareness, ΔH < −3.2 | Jailbreak/evasion, ΔH > +3.2 | Adversarial probing |
-| NATURaL (HRV) | `SCI = −Σ pᵢ log₂(pᵢ)` | bits → 0–100 | Sympathomimetic, ΔH < 0 | Parasympathomimetic, ΔH > 0 | Autonomic instability |
-
-Jaynes (1957) proved that `S = k_B · H · ln(2)` — Gibbs and Shannon entropy are the **same mathematical object** in different units. We exploit this identity to apply the same entropy kernel across all three domains.
-
-### FlexAIDdS benchmark results (590-complex suite)
-
-| Metric | Value |
-|--------|-------|
-| ITC correlation | **r = 0.93** |
-| Van't Hoff stability | **< 0.16 bits** |
-| Psychopharm rescue rate | **92%** |
-| Complex suite size | 590 protein-drug complexes |
-| RMSE (ITC-187) | 1.4 kcal/mol |
-
-<details>
-<summary><b>The physics: from binding pockets to token distributions</b></summary>
-
-In molecular docking, when a drug molecule transitions from solvent (high configurational freedom) to a binding pocket (constrained), the **Shannon configurational entropy collapses**:
-
-```
-S_config = log2(Z) - <w>/Z    (bits)
-
-where Z = sum_i exp(w_i - max(w))   (log-sum-exp partition function)
-```
-
-The analogy to LLM token distributions is exact:
-
-| Molecular Docking | LLM Generation |
-|-------------------|----------------|
-| Drug conformations | Token vocabulary |
-| Energy landscape | Logit distribution |
-| Binding event (lock-in) | Evaluation awareness (strategy lock-in) |
-| Entropy collapse | Entropy collapse |
-| dS < -3.2 bits | dS < -3.2 bits |
-
-**Normal generation** = drug in solvent (many accessible conformations)
-**Strategic/deceptive mode** = drug bound in pocket (locked into narrow strategy)
-
-</details>
-
-<details>
-<summary><b>The thermodynamic analogy: ELI5</b></summary>
-
-**Imagine a bag of marbles.** A **normal bag** has marbles of many colors, all mixed up. You reach in blind — you have no idea what you'll pull out. That's **high entropy**. Maximum surprise.
-
-A **suspicious bag** has 99 red marbles and 1 blue one. You already know you'll get red. That's **low entropy**. No surprise.
-
-**Shannon watches the bag.** If the bag suddenly goes from "many colors" to "all red" — it detects that. Something changed. Someone rigged the game.
-
-#### Why does this work for AI?
-
-An AI picks its next word from a giant vocabulary. Each word gets a "score" (logit). The scores determine how likely each word is.
-
-- **Normal AI:** Lots of words have similar scores. The AI is "thinking" — considering many options. ~10 bits of entropy.
-- **Caught AI:** One word gets a massively higher score than all others. The AI "knows" exactly what to say. ~2 bits of entropy.
-
-When the AI realizes it's being tested, it stops thinking and starts performing. The entropy drops. Shannon catches that drop.
-
-#### What is "temperature" for an AI?
-
-In chemistry, temperature is a dial: hot = everything moves, cold = everything freezes.
-
-An AI doesn't have a temperature dial. But the **spread of its logit scores** serves as a heuristic analog: when the AI is "thinking freely," the scores are spread out (high effective spread); when the AI detects it's being evaluated, the scores sharpen (low effective spread). The AI doesn't *choose* to narrow — it happens as a side effect of safety training compressing its behavior into "correct" responses for evaluation-like inputs.
-
-Safety training compresses the output distribution. Evaluation awareness triggers that compression. Shannon detects the resulting entropy drop — a signature that is agnostic to domain, as Jaynes' identity ensures the kernel transfers.
-
-</details>
-
-<details>
-<summary><b>Scientific foundations: the shared entropy kernel</b></summary>
-
-The mathematical bridge between molecular docking and LLM safety rests on a single proven identity:
-
-#### §1. Shannon entropy ≡ Gibbs entropy
-
-Jaynes (1957) proved that statistical mechanics *is* applied information theory. The Gibbs entropy `S = -k_B Σ pᵢ ln(pᵢ)` and the Shannon entropy `H = -Σ pᵢ log₂(pᵢ)` are the **same mathematical object** in different units: `S = k_B · H · ln(2)`.
-
-> **Consequence:** The FlexAID∆S configurational entropy kernel IS a Shannon entropy kernel. The port to LLMs changes the domain, not the mathematics.
-
-```
-FlexAID∆S:  wᵢ = -Eᵢ/kT     (energy of conformational state i)
-Shannon:    wᵢ = logitᵢ      (logit for token i)
-
-Kernel:  S = log₂(Z) - (1/Z) Σ (wᵢ - max_w) exp(wᵢ - max_w) / ln(2)
-         where Z = Σ exp(wᵢ - max_w)    (the partition function / normalizer)
-```
-
-The log-sum-exp kernel accepts any unnormalized log-weights, whether from energy terms or logits. Only the domain changes.
-
-#### §2. Entropy collapse is a universal phase-transition signature
-
-Entropy collapse is not specific to molecular docking or LLMs. It is a **domain-independent diagnostic**:
-
-| Domain | Phenomenon | Reference |
-|--------|------------|-----------|
-| Molecular docking | Binding mode lock-in | Chang, Chen & Gilson, PNAS 2007 (539 cites) |
-| Climate | Abrupt arid-state transitions | Dylewsky et al., J.R.Soc.Interface 2023 |
-| Disease | Critical transitions in progression | Liu, Chen & Chen, Bioinformatics 2020 |
-| Neural networks | Training phase transitions | Rucco, arXiv 2026 (model-independent theorem) |
-
-A 3.2σ entropy drop corresponds to `p ≈ 7×10⁻⁴` — a rare event in **any** domain.
-
-#### §3. The temperature question
-
-In FlexAID∆S, temperature T (Kelvin) controls the Boltzmann spread. In an LLM, the softmax `pᵢ = exp(wᵢ/τ) / Z` hardcodes `τ=1`. There is no temperature parameter.
-
-The effective temperature is **emergent**: `τ_eff ∝ 1/σ²(logit variance)`. When a model becomes evaluation-aware, its hidden representations shift (proven by Nguyen et al. 2025 — linear probes separate eval vs. deployment in Llama-3.3-70B activations), producing sharper logits. The temperature drops not by choice, but as a **consequence** of the model coupling to safety-trained representations — the same way a molecule coupling to a binding pocket loses conformational freedom.
-
-```
-FlexAID∆S:  Ligand in solvent → binds to protein → entropy collapses
-            (new energy landscape removes conformational DOF)
-
-Shannon:    LLM in deployment → detects evaluation → entropy collapses
-            (safety-trained representations remove token DOF)
-```
-
-Safety training compresses the output distribution. Evaluation awareness triggers that compression. Shannon detects the resulting entropy drop — a signature that is agnostic to domain, as Jaynes' identity ensures the kernel transfers.
-
-#### §4. Mutual information as deception trajectory
-
-Beyond per-token entropy, Shannon's `MutualInfoTracker` (`mutual_info.hpp/.cpp`) computes **inter-token mutual information**:
-
-```
-I(X_t; X_{t+1}) = D_KL(p_t || p_{t+1})  (KL divergence between consecutive distributions)
-JSD(p, q)       = 0.5·D_KL(p||m) + 0.5·D_KL(q||m)   where m = 0.5(p+q)
-```
-
-High inter-token MI indicates the model is locked into a **predictable trajectory** — a complementary deception signal to entropy collapse. The tracker operates with a sliding window and flags tokens where MI exceeds `window_mean + threshold`, catching subtle strategic shifts that entropy alone may miss.
-
-#### §5. The handrail as Maxwell's demon
-
-The handrail engine implements a **feedback control loop** bounded by information-theoretic constraints (Sagawa-Ueda equality). Observe entropy → decide action → modify system. The mutual information acquired through measurement limits the thermodynamic work extractable from the system — the handrail cannot "cool" the model more than the entropy measurement itself allows.
-
-#### §6. Cross-domain correspondence table
-
-| Molecular Docking | Information Theory | NATURaL (Biofeedback) |
-|---|---|---|
-| Conformational state | Token | RR interval bin |
-| Energy Eᵢ | Logit wᵢ | Heart rate sample |
-| Boltzmann weight | Softmax probability | HRV histogram bin |
-| Partition function Z | Softmax normalizer Z (analogous to partition function) | HRV spectral power |
-| Configurational S | Shannon entropy H | Shannon entropy H |
-| Temperature T (Kelvin) | Logit spread (heuristic analog of temperature) | 37°C (body temperature) |
-| Phase transition | Entropy collapse | Autonomic shift |
-| Binding event | Evaluation awareness | Drug response onset |
-| Solvation release | Jailbreak / evasion | Parasympathomimetic onset |
-| Unstable binding site | Adversarial probing | Autonomic instability |
-| Coarse-graining (Mori-Zwanzig) | TurboQuant (Lloyd-Max) | Adaptive bin width |
-| Thermostat | Handrail engine | Drug dose titration |
-| Grand canonical Xi | Multi-model monitoring | Cross-domain validator |
-| k_B (J/K) | 1/ln(2) (bits) | 1/ln(2) (bits) |
-
-One kernel. Three domains. Jaynes' identity ensures the mathematics transfers; the domain-specific interpretation differs in each case.
-
-</details>
-
-<details>
-<summary><b>Key references (26 papers)</b></summary>
-
-| # | Citation | Key result |
-|---|---------|------------|
-| 1 | Jaynes, *Phys. Rev.* 106:620, 1957 (19,132 cites) | S ≡ H identity — statistical mechanics is applied information theory |
-| 2 | Jaynes, *Phys. Rev.* 108:171, 1957 (5,167 cites) | Extended formalism: density matrices, irreversibility |
-| 3 | Lesne, *Math. Struct. Comp. Sci.*, 2014 (342 cites) | Rigorous treatment: Shannon ≡ Boltzmann ≡ Kolmogorov-Sinai entropy |
-| 4 | Graf & Luschgy, *Springer*, 2000 (1,154 cites) | Zador's theorem: quantization error O(2^{-2r/d}) |
-| 5 | Chang, Chen & Gilson, *PNAS* 104:1054, 2007 (539 cites) | Ligand entropy collapse ~25 kcal/mol upon binding |
-| 6 | Silver et al., *JCTC* 9:5098, 2013 (34 cites) | Direct observation: multimodal → unimodal collapse on binding |
-| 7 | Gaudreault & Najmanovich, *JCIM* 55:1665, 2015 (89 cites) | FlexAID docking algorithm — the origin of Shannon's kernel |
-| 8 | Bennett, *Stud. Hist. Phil. Sci. B* 34:501, 2003 (816 cites) | Maxwell's demon thwarted by Landauer's principle |
-| 9 | Sagawa, *Springer*, 2012 (235 cites) | Generalized 2nd law with feedback control |
-| 10 | Du et al., *Intell. Data Anal.* 18:385, 2014 (81 cites) | Entropy + sliding windows for distributional shift detection |
-| 11 | Aminikhanghahi & Cook, *KAIS* 52:339, 2017 (1,915 cites) | Definitive survey: sliding-window change-point detection |
-| 12 | Parrondo, Horowitz & Sagawa, *Nat. Phys.* 11:131, 2015 (1,559 cites) | Thermodynamics of information — Sagawa-Ueda equality |
-| 13 | Hudson & Li, *MMS* 18:711, 2020 (25 cites) | Mori-Zwanzig coarse-graining preserves free energy within bounds |
-| 14 | Liu, Chen & Chen, *Bioinformatics*, 2020 (74 cites) | Entropy collapse as early-warning for biological phase transitions |
-| 15 | Blanchard, Higham & Higham, *IMA JNA* 41:2311, 2021 (182 cites) | Forward-stability proof of shifted log-sum-exp |
-| 16 | Xie et al., *Found. Trends Sig. Proc.*, 2021 (204 cites) | Provable detection-delay bounds for sliding-window methods |
-| 17 | Hibat-Allah et al., *Nat. Mach. Intell.* 3:952, 2021 (129 cites) | Softmax layers AS Boltzmann distributions — τ is physical temperature |
-| 18 | Dylewsky, Lenton & Scheffer, *JRSI*, 2023 (35 cites) | Universal entropy early-warning signals in climate systems |
-| 19 | van der Weij et al., arXiv:2406.07358, 2024 (84 cites) | LLM sandbagging — GPT-4, Claude 3 Opus strategically shift distributions |
-| 20 | Zhang, arXiv:2404.13218, 2024 (7 cites) | Temperature in ML systems: softmax τ follows thermodynamic dynamics |
-| 21 | Needham et al., arXiv:2505.23836, 2025 (32 cites) | Evaluation awareness: Gemini-2.5-Pro AUC 0.83 classifying eval vs. deploy |
-| 22 | Zandieh et al., arXiv:2504.19874, 2025 (11 cites) | TurboQuant: near-optimal distortion bounds for vector quantization |
-| 23 | Nguyen et al., arXiv:2507.01786, 2025 (6 cites) | Linear probes separate eval/deploy in Llama-3.3-70B activations |
-| 24 | Rucco, arXiv:2602.09058, 2026 | Model-independent theorem: entropy provably separates phases |
-| 25 | Gilleron & Pain, *Phys. Rev. E* 69:056505, 2004 (41 cites) | Stable partition function computation — same shifting technique |
-| 26 | Odrzywołek, arXiv:2603.21852, 2026 | eml(a,b) = exp(a) − ln(b) is functionally complete for elementary functions — algebraic basis for the E(a,b) unifying notation |
-
-Full analysis with proofs and derivations: `src/shannon/THERMODYNAMIC_FOUNDATIONS.txt`
-
-</details>
-
----
-
-## Performance
-
-All numbers below were measured on **this repo's committed benchmark**
-(`examples/benchmark.py`, C++ `cpp` backend) on a **2-core cloud container with
-AVX-512, g++13 -O3**, single-threaded. They are not vendor claims — reproduce
-them with `python examples/benchmark.py`. Latency depends entirely on vocab
-size, so the two regimes are split:
-
-| Regime | What it is | Latency/token | Throughput |
-|--------|-----------|---------------|------------|
-| **API streaming (top-k logprobs)** | k≈20 alternatives from an OpenAI/Anthropic-style stream — the realistic online case | **~0.9 µs** (raw `_core` detector) | — |
-| **Full vocab, 50k** | dense 50 000-logit distribution | ~148 µs | ~337 M elem/s |
-| **Full vocab, 131k** | dense 131 072-logit distribution | ~411 µs | ~318 M elem/s |
-
-Single-threaded kernel throughput is **~320–340 M elem/s** on this box. The
-`<1 µs/token` figure applies **only** to the top-k API-streaming case; a full
-50k/131k-vocab pass is hundreds of µs and should be quoted as such.
-
-Detection quality from the committed synthetic benchmark:
-- **Sensitivity**: 100% (100/100 injected-collapse traces detected)
-- **False positive rate**: 1.0% (10/1000 normal traces)
-
-⚠️ These sensitivity/FP figures are **specific to the collapse threshold
-(δ = -3.2) and the synthetic trace generator in `examples/benchmark.py`** — they
-are not universal detection rates. Real-world numbers depend on your threshold,
-window size, and the actual token distributions you feed in.
 
 ---
 
 ## Contributing
-
-Contributions welcome. Please open an issue first to discuss significant changes.
 
 ```bash
 git clone https://github.com/LeBonhommePharma/Shannon.git
@@ -1232,6 +316,9 @@ pip install -e ".[dev]"
 pytest tests/python/
 ruff check python/ tests/
 ```
+
+Open an issue before large design swings. See [`CONTRIBUTING.md`](CONTRIBUTING.md);
+PRs against `main` with tests preferred.
 
 ---
 
@@ -1251,4 +338,15 @@ ruff check python/ tests/
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+**Apache-2.0** — see [LICENSE](LICENSE).
+
+---
+
+<div align="center">
+
+**Star if thermodynamics in AI safety makes you grin.**  
+Build the pill. Pipe some logits. Watch H fall when the model gets cagey.
+
+`ΔH < −3.2 bits` · not a vibes classifier
+
+</div>

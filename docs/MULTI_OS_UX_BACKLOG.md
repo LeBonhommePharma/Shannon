@@ -545,12 +545,13 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Priority:** P3
 - **Parity:** AgentPeek board (candidate G4)
 
-### - [ ] UX-058: Mac floating glance widget for fleet/usage (parity G6)
+### - [x] UX-058: Mac floating glance widget for fleet/usage (parity G6)
 
 - **Why:** AgentPeek floating widgets keep todos/usage/transcripts visible; Shannon has iOS/watch widgets and desktop pet, but no Mac floating glance for fleet/usage.
 - **Platforms:** macOS
 - **Area:** Desktop companion / optional NSPanel glance, `AgentListSkim` / usage presenters
 - **First slice:** Pref-gated floating panel showing fleet skim + usage when sourced; pure wiring; fail-closed empty.
+- **Done:** `FloatingGlance` + `FloatingGlancePresentation` in ShannonCore (fleet line via `AgentListSkim` multi-agent caption / single-agent attention tokens; optional usage label; honest empty); PillCore `MacFloatingGlance` from live activity + primary usage chip only; `FloatingGlanceWindowPolicy` + pref `showFloatingGlance` **default off**; Settings toggle; ShannonPill `FloatingGlanceWindowController` NSPanel (always-on-top, fleet/usage card, throttled session usage scan — never invents quotas); pure + window tests.
 - **Priority:** P3
 - **Parity:** AgentPeek widgets (candidate G6)
 
@@ -558,6 +559,7 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 
 ## Investigation notes
 
+- **2026-07-26 (UX-058):** Closed Mac floating fleet/usage glance (parity G6). Core pure presenter + pref-gated NSPanel; usage only via real session tokens / primary chip. Multi-OS UX queue empty after UX-058; open ENH-026…032 remain on enhancement backlog.
 - **2026-07-26 (AgentNotch/Peek/Callout parity):** Inventory of https://www.agentnotch.app · https://agentpeek.app/ · https://agentcallout.com/ vs Shannon. User approved G1–G4,G6–G10 (excluded G5 chat, G11 OTEL). Enqueued **UX-057/058** + ENH-026…032. Counts: present 17 / partial 8 / missing 5 (C1–C30). Evidence in goal scratch `parity_inventory.md`.
 - **2026-07-26 (UX-056):** Closed pad Collecting samples dual via Core `EntropyEmptyTraceCopy`; PresentationTests green.
 - **2026-07-26 (loop 33):** `--quick` all PASS. Backlog empty after UX-054. Residual multi-OS dual: phone/Mac fleet `"agents need a glance"` → **UX-055** (claim). Filed **UX-056** pad Collecting samples dual (P3). Considered: pad “No matches” / “Nothing from the Mac yet.” (surface-specific leave); phone status TTS “N agents running” (different metric than fleet glance — leave); HubScanLine FlexAIDdS offline (domain leave); configurationDisplayName catalog (leave).

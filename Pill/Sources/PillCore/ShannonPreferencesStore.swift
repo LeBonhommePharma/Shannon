@@ -51,6 +51,15 @@ public final class ShannonPreferencesStore: ObservableObject {
         }
     }
 
+    /// UX-058: floating fleet/usage glance panel (default off).
+    @Published public var showFloatingGlance: Bool {
+        didSet {
+            guard showFloatingGlance != oldValue else { return }
+            ShannonPreferences.setShowFloatingGlance(showFloatingGlance, defaults: defaults)
+            onShowFloatingGlanceChanged?(showFloatingGlance)
+        }
+    }
+
     @Published public private(set) var firstRunDone: Bool
 
     /// Optional sink so KeepAwakeMonitor stays in sync without polling.
@@ -59,6 +68,8 @@ public final class ShannonPreferencesStore: ObservableObject {
     public var onDesktopPetIdChanged: ((String) -> Void)?
     /// Optional sink so the floating desktop companion show/hide tracks Settings/menu.
     public var onShowDesktopCompanionChanged: ((Bool) -> Void)?
+    /// Optional sink so the floating fleet/usage glance show/hide tracks Settings.
+    public var onShowFloatingGlanceChanged: ((Bool) -> Void)?
 
     private let defaults: UserDefaults
 
@@ -70,6 +81,7 @@ public final class ShannonPreferencesStore: ObservableObject {
         self.startWithMonitoringPaused = snap.startWithMonitoringPaused
         self.desktopPetId = snap.desktopPetId
         self.showDesktopCompanion = snap.showDesktopCompanion
+        self.showFloatingGlance = snap.showFloatingGlance
         self.firstRunDone = snap.firstRunDone
     }
 
@@ -80,6 +92,7 @@ public final class ShannonPreferencesStore: ObservableObject {
         startWithMonitoringPaused = snap.startWithMonitoringPaused
         desktopPetId = snap.desktopPetId
         showDesktopCompanion = snap.showDesktopCompanion
+        showFloatingGlance = snap.showFloatingGlance
         firstRunDone = snap.firstRunDone
     }
 
@@ -101,7 +114,8 @@ public final class ShannonPreferencesStore: ObservableObject {
             expandPillOnLaunch: expandPillOnLaunch,
             startWithMonitoringPaused: startWithMonitoringPaused,
             showDesktopCompanion: showDesktopCompanion,
-            desktopPetId: desktopPetId
+            desktopPetId: desktopPetId,
+            showFloatingGlance: showFloatingGlance
         )
     }
 }

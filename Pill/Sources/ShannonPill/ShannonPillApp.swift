@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var processLock: ProcessGuard.LockHandle?
     private var controller: PillWindowController?
     private var desktopCompanion: DesktopCompanionWindowController?
+    private var floatingGlance: FloatingGlanceWindowController?
     private var menuBar: MenuBarController?
     private var nowPlaying: NowPlayingModel?
     private var battery: BatteryMonitor?
@@ -117,6 +118,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             desk?.setPackagePetId(id)
         }
 
+        // UX-058: pref-gated floating fleet/usage glance (default off).
+        let glance = FloatingGlanceWindowController(activity: activityMon)
+        glance.onActivate = { [weak ctl] in
+            ctl?.expand()
+        }
+        if prefs.showFloatingGlance {
+            glance.show()
+        }
+        prefs.onShowFloatingGlanceChanged = { [weak glance] visible in
+            if visible { glance?.show() } else { glance?.hide() }
+        }
+
         let settings = SettingsWindowController(
             store: prefs,
             onOpenShannonHome: { NSWorkspace.shared.open(PetBootstrap.shannonHome) },
@@ -174,7 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cloud = cloudPub; confirmation = confirm; resources = sysRes
         keepAwake = keep; focusMode = focus
         preferencesStore = prefs; settingsWindow = settings
-        controller = ctl; desktopCompanion = desk; menuBar = menu
+        controller = ctl; desktopCompanion = desk; floatingGlance = glance
+        menuBar = menu
 
         // Pets bootstrap + secret scrub + hub ensure: all off MainActor so
         // launch does not hitch on disk walks or a gate spawn (macOS 27 glass

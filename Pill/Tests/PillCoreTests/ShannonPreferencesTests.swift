@@ -33,6 +33,9 @@ final class ShannonPreferencesTests: XCTestCase {
         // E1: desktop pet package defaults to shannon.
         XCTAssertEqual(snap.desktopPetId, PetPackageResolver.defaultPetId)
         XCTAssertEqual(ShannonPreferences.desktopPetId(defaults: defaults), "shannon")
+        // UX-058: floating glance is opt-in (default off).
+        XCTAssertFalse(snap.showFloatingGlance)
+        XCTAssertFalse(ShannonPreferences.showFloatingGlance(defaults: defaults))
     }
 
     func testRoundTripSaveLoad() {
@@ -43,6 +46,7 @@ final class ShannonPreferencesTests: XCTestCase {
         snap.firstRunDone = true
         snap.showDesktopCompanion = false
         snap.desktopPetId = "firebear"
+        snap.showFloatingGlance = true
         ShannonPreferences.save(snap, defaults: defaults)
         let loaded = ShannonPreferences.load(defaults: defaults)
         XCTAssertEqual(loaded, snap)
@@ -51,6 +55,7 @@ final class ShannonPreferencesTests: XCTestCase {
         XCTAssertFalse(ShannonPreferences.expandPillOnLaunch(defaults: defaults))
         XCTAssertTrue(ShannonPreferences.firstRunDone(defaults: defaults))
         XCTAssertFalse(ShannonPreferences.showDesktopCompanion(defaults: defaults))
+        XCTAssertTrue(ShannonPreferences.showFloatingGlance(defaults: defaults))
     }
 
     /// E2: hide desktop companion persists; missing key still defaults to shown.
@@ -158,6 +163,34 @@ final class ShannonPreferencesTests: XCTestCase {
         XCTAssertTrue(FirstRunCoach.shouldShow(defaults: defaults))
     }
 
+    /// UX-058: floating glance default off; toggle persists.
+    func testShowFloatingGlanceDefaultAndToggle() {
+        XCTAssertFalse(ShannonPreferences.showFloatingGlance(defaults: defaults))
+        XCTAssertNil(defaults.object(forKey: ShannonPreferences.Key.showFloatingGlance.rawValue))
+
+        ShannonPreferences.setShowFloatingGlance(true, defaults: defaults)
+        XCTAssertNotNil(defaults.object(forKey: ShannonPreferences.Key.showFloatingGlance.rawValue))
+        XCTAssertTrue(ShannonPreferences.showFloatingGlance(defaults: defaults))
+
+        ShannonPreferences.setShowFloatingGlance(false, defaults: defaults)
+        XCTAssertFalse(ShannonPreferences.showFloatingGlance(defaults: defaults))
+    }
+
+    @MainActor
+    func testStorePersistsShowFloatingGlanceToggle() {
+        let store = ShannonPreferencesStore(defaults: defaults)
+        XCTAssertFalse(store.showFloatingGlance)
+        var callbackValues: [Bool] = []
+        store.onShowFloatingGlanceChanged = { callbackValues.append($0) }
+        store.showFloatingGlance = true
+        XCTAssertTrue(ShannonPreferences.showFloatingGlance(defaults: defaults))
+        XCTAssertEqual(callbackValues, [true])
+        let store2 = ShannonPreferencesStore(defaults: defaults)
+        XCTAssertTrue(store2.showFloatingGlance)
+        store2.showFloatingGlance = false
+        XCTAssertFalse(ShannonPreferences.showFloatingGlance(defaults: defaults))
+    }
+
     /// Keys the Settings UI claims are the keys the pure store actually writes.
     func testSettingsKeysAreHonoredKeys() {
         let keys = Set(ShannonPreferences.Key.allCases.map(\.rawValue))
@@ -167,6 +200,7 @@ final class ShannonPreferencesTests: XCTestCase {
         XCTAssertTrue(keys.contains("shannon.prefs.startWithMonitoringPaused"))
         XCTAssertTrue(keys.contains("shannon.prefs.showDesktopCompanion"))
         XCTAssertTrue(keys.contains("shannon.prefs.desktopPetId"))
-        XCTAssertEqual(keys.count, 6)
+        XCTAssertTrue(keys.contains("shannon.prefs.showFloatingGlance"))
+        XCTAssertEqual(keys.count, 7)
     }
 }

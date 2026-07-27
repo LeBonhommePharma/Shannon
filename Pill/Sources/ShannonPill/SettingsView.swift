@@ -13,7 +13,8 @@ struct SettingsView: View {
 
     /// Fixed size — matches popover anti-pop discipline.
     static let chromeWidth: CGFloat = 360
-    static let chromeHeight: CGFloat = 420
+    /// Room for desktop glance toggle (UX-058) without scroll thrash.
+    static let chromeHeight: CGFloat = 460
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -23,6 +24,7 @@ struct SettingsView: View {
                     keepAwakeSection
                     pillSection
                     desktopSection
+                    floatingGlanceSection
                     desktopPetSection
                     agentsSection
                     tipsSection
@@ -123,6 +125,23 @@ struct SettingsView: View {
         }
     }
 
+    /// UX-058: opt-in floating fleet/usage glance (default off).
+    private var floatingGlanceSection: some View {
+        settingsCard(title: "Floating glance") {
+            Toggle(isOn: $store.showFloatingGlance) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Show fleet / usage glance")
+                        .font(.shannonMenuBody)
+                        .foregroundStyle(Color.shannonPrimary)
+                    Text("Compact always-on-top card; usage only when sourced")
+                        .font(.shannonMenuFootnote)
+                        .foregroundStyle(Color.shannonTertiary)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+    }
 
     /// Package picker for the floating desktop companion (E1).
     private var desktopPetSection: some View {

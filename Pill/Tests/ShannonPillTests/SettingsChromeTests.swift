@@ -5,7 +5,8 @@ import XCTest
 final class SettingsChromeTests: XCTestCase {
     func testSettingsChromeIsFixedAndUsable() {
         XCTAssertEqual(SettingsView.chromeWidth, 360)
-        XCTAssertEqual(SettingsView.chromeHeight, 420)
+        // UX-058: room for floating glance toggle.
+        XCTAssertEqual(SettingsView.chromeHeight, 460)
         XCTAssertGreaterThan(SettingsView.chromeWidth, 300)
         XCTAssertGreaterThan(SettingsView.chromeHeight, 360)
     }

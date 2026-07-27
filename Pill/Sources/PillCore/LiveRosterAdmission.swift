@@ -159,4 +159,76 @@ public enum LiveRosterAdmission: Sendable {
             )
         }
     }
+
+    // MARK: - Post-⌘D surface honesty
+
+    /// Whether a just-captured agent will appear on menu-bar / pill / HUD boards.
+    ///
+    /// Pure preview of ``shouldList`` with process-attach presence inferred from
+    /// capture evidence (live pid and/or allow-listed host bundle). Used so the
+    /// status-item flash does not claim a green “+agent” when admission will
+    /// hide a bare shell container.
+    public static func willSurfaceCapture(
+        agentID: String,
+        displayName: String? = nil,
+        lastTask: String = "",
+        attachPid: Int32? = nil,
+        attachBundle: String? = nil,
+        source: String = "process"
+    ) -> Bool {
+        let id = agentID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return false }
+        let presence = ProcessAttach.presence(
+            attachPid: attachPid,
+            attachBundle: attachBundle,
+            // Capture just happened: treat the host as running when we know it.
+            runningBundleIDs: attachBundle.map { Set([$0.lowercased()]) }
+        )
+        let snap = AgentActivitySnapshot(
+            id: id,
+            displayName: (displayName?.isEmpty == false ? displayName! : id),
+            status: .idle,
+            lastTask: lastTask,
+            source: source,
+            updatedAt: Date(),
+            resumable: true,
+            historyCount: 0,
+            presence: presence,
+            attachPid: (attachPid ?? 0) > 0 ? attachPid : nil,
+            attachBundle: attachBundle
+        )
+        return shouldList(agent: snap)
+    }
+
+    /// Status-item flash line after a capture attempt (honest vs board).
+    public static func captureFlash(
+        agentID: String?,
+        displayName: String?,
+        lastTask: String = "",
+        attachPid: Int32? = nil,
+        attachBundle: String? = nil,
+        refusalLabel: String? = nil
+    ) -> CaptureFlash {
+        guard let agentID, !agentID.isEmpty else {
+            return .notice(refusalLabel.map { "not an agent · \($0)" } ?? "not an agent")
+        }
+        let name = (displayName?.isEmpty == false ? displayName! : agentID)
+        if willSurfaceCapture(
+            agentID: agentID,
+            displayName: name,
+            lastTask: lastTask,
+            attachPid: attachPid,
+            attachBundle: attachBundle
+        ) {
+            return .success("+\(name)")
+        }
+        // Pet written but admission hides generic containers (empty shell).
+        return .notice("shell only · open Claude/Cursor")
+    }
+
+    /// Menu-bar flash kind after ⌘D.
+    public enum CaptureFlash: Sendable, Equatable {
+        case success(String)
+        case notice(String)
+    }
 }

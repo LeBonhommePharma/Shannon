@@ -975,6 +975,10 @@ public final class AgentActivityMonitor: ObservableObject {
     private let interval: TimeInterval
     /// One poll in flight at a time — a slow disk must not queue up work.
     private var refreshing = false
+    /// ⌘D / capture wrote pets — next poll must walk pets+registry even if the
+    /// full-scan interval has not elapsed (otherwise the new agent is invisible
+    /// for up to `fullScanInterval` seconds on gate-only ticks).
+    private var pendingForceFullScan = false
     /// Running-app bundle ids, refreshed lazily: NSWorkspace enumeration is far
     /// more expensive than the file reads and rarely changes between polls.
     private var runningBundleIDs: Set<String> = []
@@ -1043,13 +1047,18 @@ public final class AgentActivityMonitor: ObservableObject {
     ///   process-attach re-check.
     /// - **DB mtime change:** force a full scan so asks appear immediately when
     ///   the gate writes, without waiting for the pets interval.
+    /// - **`forceFullScan`:** ⌘D capture just wrote pets/registry — must re-walk
+    ///   disk now or the new agent stays missing until the next full interval.
     ///
     /// NSWorkspace running-app enumeration and SQLite / pets I/O run on a
     /// utility detached task — never on the MainActor timer callback — so the
     /// menu bar / notch stay responsive under load.
     ///
     /// Assignments stay equality-gated so SwiftUI does not thrash on identical data.
-    public func refresh() {
+    public func refresh(forceFullScan: Bool = false) {
+        if forceFullScan { pendingForceFullScan = true }
+        // If a poll is already in flight, remember the force flag and re-enter
+        // from `apply` when it finishes — never drop a post-⌘D pets scan.
         guard !isPaused, !refreshing else { return }
         refreshing = true
 
@@ -1060,14 +1069,19 @@ public final class AgentActivityMonitor: ObservableObject {
         let mtimeChanged = mtime != nil && mtime != lastDBMtime
         if let mtime { lastDBMtime = mtime }
 
+        let force = pendingForceFullScan
+        pendingForceFullScan = false
         let dueFull = now.timeIntervalSince(lastFullScanAt) >= Self.fullScanInterval
-        let doFull = dueFull || mtimeChanged || lastFullScanAt == .distantPast
+        let doFull = dueFull || mtimeChanged || lastFullScanAt == .distantPast || force
         if doFull { lastFullScanAt = now }
 
         let skipPets = !doFull
         let previous = skipPets ? summary.agents : nil
         let cachedBundles = runningBundleIDs
-        let needBundleRefresh = now.timeIntervalSince(runningBundleIDsAt) > runningBundleTTL
+        // Always re-sample running apps after a forced full scan (⌘D) so attach
+        // presence for the new host is not stale.
+        let needBundleRefresh = force
+            || now.timeIntervalSince(runningBundleIDsAt) > runningBundleTTL
             || runningBundleIDs.isEmpty
 
         Task.detached(priority: .utility) {
@@ -1209,6 +1223,12 @@ public final class AgentActivityMonitor: ObservableObject {
                     onVoiceSpeak?(line)
                 }
             }
+        }
+
+        // ⌘D may have landed while this poll was in flight — re-enter so pets
+        // disk is walked; never drop a forced full scan.
+        if pendingForceFullScan {
+            refresh(forceFullScan: true)
         }
     }
 

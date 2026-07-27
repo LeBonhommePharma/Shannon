@@ -289,6 +289,79 @@ final class LiveRosterAdmissionTests: XCTestCase {
         XCTAssertTrue(filtered.isEmpty)
     }
 
+    // MARK: - Post-⌘D surface honesty
+
+    func testWillSurfaceCaptureNamedCLIAgent() {
+        XCTAssertTrue(
+            LiveRosterAdmission.willSurfaceCapture(
+                agentID: "claude_code",
+                displayName: "Claude Code",
+                lastTask: "Working in Ghostty",
+                attachPid: 42_001,
+                attachBundle: "com.mitchellh.ghostty"
+            )
+        )
+    }
+
+    func testWillSurfaceCaptureCursorHostBundle() {
+        XCTAssertTrue(
+            LiveRosterAdmission.willSurfaceCapture(
+                agentID: "cursor",
+                displayName: "Cursor",
+                attachPid: nil,
+                attachBundle: "com.todesktop.230313mzl4w4u92"
+            )
+        )
+    }
+
+    func testWillNotSurfaceBareTerminalShell() {
+        // Empty Ghostty shell → generic "terminal" pet must not light the board.
+        XCTAssertFalse(
+            LiveRosterAdmission.willSurfaceCapture(
+                agentID: "terminal",
+                displayName: "Ghostty",
+                lastTask: "Working in Ghostty",
+                attachPid: 99,
+                attachBundle: "com.mitchellh.ghostty"
+            )
+        )
+    }
+
+    func testCaptureFlashSuccessForNamedAgent() {
+        XCTAssertEqual(
+            LiveRosterAdmission.captureFlash(
+                agentID: "cursor",
+                displayName: "Cursor",
+                attachBundle: "com.todesktop.230313mzl4w4u92"
+            ),
+            .success("+Cursor")
+        )
+    }
+
+    func testCaptureFlashNoticeForBareShell() {
+        XCTAssertEqual(
+            LiveRosterAdmission.captureFlash(
+                agentID: "terminal",
+                displayName: "Ghostty",
+                lastTask: "Working in Ghostty",
+                attachPid: 1,
+                attachBundle: "com.mitchellh.ghostty"
+            ),
+            .notice("shell only · open Claude/Cursor")
+        )
+    }
+
+    func testCaptureFlashNoticeForRefusal() {
+        XCTAssertEqual(
+            LiveRosterAdmission.captureFlash(
+                agentID: nil,
+                displayName: nil,
+                refusalLabel: "WindowManager"
+            ),
+            .notice("not an agent · WindowManager")
+        )
+    }
+
     func testPreferredRowReadingPrefersMeasuredLiveOverStaleMemory() {
         let bridge = ShannonStatus(
             entropy: 7.25,

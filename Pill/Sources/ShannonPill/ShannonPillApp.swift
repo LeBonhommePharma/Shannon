@@ -312,23 +312,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// A frontmost app that is not an agent at all (WindowManager, the Dock, a
     /// menu-bar meter) is *refused*: the menu bar says so instead of flashing a
     /// green checkmark for a capture that never happened.
+    ///
+    /// After a write, **force a full pets/registry scan** — gate-only ticks
+    /// otherwise skip disk for up to `fullScanInterval` and the new agent never
+    /// appears on the menu bar / pill until that timer fires.
     private func addAgentFromFrontApp() {
         guard let ingest else { return }
         let result = ingest.captureFromFrontApp()
-        activity?.refresh()
-        if let agent = result.agent {
-            menuBar?.flashSuccess("+\(agent.id)")
+        // Always force full scan after capture attempt that wrote a pet, so
+        // identity + attach evidence hit AgentActivity immediately.
+        if result.captured {
+            activity?.refresh(forceFullScan: true)
         } else {
-            menuBar?.flashNotice(result.refusal.map { "not an agent · \($0.label)" }
-                ?? "not an agent")
+            activity?.refresh()
+        }
+        // Honest flash: green only when admission will list the agent on boards.
+        switch LiveRosterAdmission.captureFlash(
+            agentID: result.agent?.id,
+            displayName: result.agent?.displayName,
+            lastTask: result.taskSummary,
+            attachPid: result.attachPid,
+            attachBundle: result.attachBundle ?? result.agent?.bundleHint,
+            refusalLabel: result.refusal?.label
+        ) {
+        case .success(let text):
+            menuBar?.flashSuccess(text)
+        case .notice(let text):
+            menuBar?.flashNotice(text)
         }
         controller?.reassertVisibility()
-        controller?.expand()
-        desktopCompanion?.reassertVisibility()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
-            guard self?.confirmation?.isAwaitingConfirmation != true else { return }
-            self?.controller?.presentation.isExpanded = false
+        // Expand notch only when the agent will actually appear on the board.
+        if result.willSurfaceOnRoster {
+            controller?.expand()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+                guard self?.confirmation?.isAwaitingConfirmation != true else { return }
+                self?.controller?.presentation.isExpanded = false
+            }
         }
+        desktopCompanion?.reassertVisibility()
         fputs("Shannon ingest: \(result.message) ← \(result.sourceApp)\n", stderr)
     }
 

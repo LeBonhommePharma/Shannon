@@ -202,4 +202,73 @@ final class ProcessAttachTests: XCTestCase {
         )
         XCTAssertEqual(live.agents.first?.presence, .live)
     }
+
+    /// ⌘D regression: a gate-only tick after capture does **not** see a brand-new
+    /// pet (previousAgents empty / pre-capture roster). Only a full pets scan
+    /// admits the agent onto menu bar / pill. This is why refresh(forceFullScan:)
+    /// must run after captureFromFrontApp.
+    func testPostCaptureGateOnlyMissesNewPetUntilFullScan() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("process-cmd-d-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pets = root.appendingPathComponent("pets", isDirectory: true)
+        let reg = root.appendingPathComponent("agents.json")
+        let agentDir = pets.appendingPathComponent("cursor", isDirectory: true)
+        try FileManager.default.createDirectory(at: agentDir, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: [
+            "status": "observed", "source": "process",
+            "last_task": "editing", "updated_at": Date().timeIntervalSince1970,
+            "attach_pid": 55_001, "attach_bundle": "com.todesktop.230313mzl4w4u92",
+            "resumable": true, "history_count": 1,
+        ] as [String: Any]).write(to: agentDir.appendingPathComponent("state.json"))
+        try JSONSerialization.data(withJSONObject: [
+            ["id": "cursor", "display_name": "Cursor", "source": "ide",
+             "last_task": "editing", "updated_at": Date().timeIntervalSince1970,
+             "bundle": "com.todesktop.230313mzl4w4u92"],
+        ] as [[String: Any]]).write(to: reg)
+
+        let hostRunning: Set<String> = ["com.todesktop.230313mzl4w4u92"]
+
+        // Gate-only with empty previous (as if capture just wrote disk but
+        // monitor still has pre-capture summary) → agent missing.
+        let gateOnly = AgentActivityReader.load(
+            petsRoot: pets,
+            registryURL: reg,
+            gateDB: nil,
+            runningBundleIDs: hostRunning,
+            skipPetsScan: true,
+            previousAgents: []
+        )
+        XCTAssertTrue(
+            gateOnly.agents.filter { $0.id == "cursor" }.isEmpty,
+            "skipPetsScan must not invent the new capture from empty previous"
+        )
+
+        // Full pets scan → live + admitted on roster surfaces.
+        let full = AgentActivityReader.load(
+            petsRoot: pets,
+            registryURL: reg,
+            gateDB: nil,
+            runningBundleIDs: hostRunning,
+            skipPetsScan: false
+        )
+        guard let cursor = full.agents.first(where: { $0.id == "cursor" }) else {
+            return XCTFail("full pets scan must load ⌘D-written cursor pet")
+        }
+        XCTAssertEqual(cursor.presence, .live)
+        XCTAssertEqual(cursor.attachBundle, "com.todesktop.230313mzl4w4u92")
+        let listed = LiveRosterAdmission.filterListed(agents: full.agents)
+        XCTAssertTrue(
+            listed.contains(where: { $0.id == "cursor" }),
+            "named IDE attach must surface on menu bar / pill after full scan"
+        )
+        XCTAssertTrue(
+            LiveRosterAdmission.willSurfaceCapture(
+                agentID: "cursor",
+                displayName: "Cursor",
+                attachPid: 55_001,
+                attachBundle: "com.todesktop.230313mzl4w4u92"
+            )
+        )
+    }
 }

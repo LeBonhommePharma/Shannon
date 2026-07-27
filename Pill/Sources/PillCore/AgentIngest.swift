@@ -119,6 +119,34 @@ public struct AgentIngestResult: Sendable, Equatable {
     public var gateStatus: GateNotifyStatus
     public var sourceApp: String
     public var message: String
+    /// Process id written for process-attach (CLI or host). Nil when unknown.
+    public var attachPid: Int32?
+    /// Host app bundle id written for process-attach stickiness.
+    public var attachBundle: String?
+
+    public init(
+        agent: AgentKind?,
+        refusal: NonAgentApp?,
+        taskSummary: String,
+        petPath: String,
+        createdPet: Bool,
+        gateStatus: GateNotifyStatus,
+        sourceApp: String,
+        message: String,
+        attachPid: Int32? = nil,
+        attachBundle: String? = nil
+    ) {
+        self.agent = agent
+        self.refusal = refusal
+        self.taskSummary = taskSummary
+        self.petPath = petPath
+        self.createdPet = createdPet
+        self.gateStatus = gateStatus
+        self.sourceApp = sourceApp
+        self.message = message
+        self.attachPid = (attachPid ?? 0) > 0 ? attachPid : nil
+        self.attachBundle = attachBundle.flatMap { $0.isEmpty ? nil : $0 }
+    }
 
     /// True only once the gate has *confirmed* it took the message. `.pending`
     /// is deliberately false: a capture whose POST has not answered yet must
@@ -127,6 +155,19 @@ public struct AgentIngestResult: Sendable, Equatable {
 
     /// True only when a pet was actually written for a real agent.
     public var captured: Bool { agent != nil }
+
+    /// Whether menu bar / pill admission will list this capture (pure policy).
+    public var willSurfaceOnRoster: Bool {
+        guard let agent else { return false }
+        return LiveRosterAdmission.willSurfaceCapture(
+            agentID: agent.id,
+            displayName: agent.displayName,
+            lastTask: taskSummary,
+            attachPid: attachPid,
+            attachBundle: attachBundle ?? agent.bundleHint,
+            source: agent.source
+        )
+    }
 
     /// What the pill shows. The `+name` claims the *capture* (pet written,
     /// registry updated) — that part is confirmed synchronously and is not
@@ -1042,7 +1083,9 @@ public final class AgentIngestService: ObservableObject {
                 sourceApp: sourceApp,
                 message: created
                     ? "New pet for \(kind.displayName) · \(kind.id)"
-                    : "Updated \(kind.displayName) · \(kind.id)"
+                    : "Updated \(kind.displayName) · \(kind.id)",
+                attachPid: attachPid,
+                attachBundle: bid
             )
         } catch {
             // Absolute failsafe: still return a result so UI can show the error.
@@ -1054,7 +1097,9 @@ public final class AgentIngestService: ObservableObject {
                 createdPet: false,
                 gateStatus: .notAttempted,
                 sourceApp: sourceApp,
-                message: "Failed to write pet: \(error.localizedDescription)"
+                message: "Failed to write pet: \(error.localizedDescription)",
+                attachPid: hostPid,
+                attachBundle: bid
             )
         }
 

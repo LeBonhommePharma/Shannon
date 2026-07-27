@@ -499,10 +499,28 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **First slice:** Use displayTaskTitle; extend presentation path check if desired.
 - **Priority:** P3
 
+### - [x] UX-053: Pad answer status toast uses GateAskActionCopy.outcomeLabel
+
+- **Why:** Phone TTS (UX-044) + pad Gate Activity (UX-034) use `outcomeLabel` (`approved`/`denied`); `AgentHubViewModel.answerPendingConfirmation` still posts hard-coded `"Confirmed"` / `"Denied"` — third dual on answer-path chrome.
+- **Platforms:** iPadOS (iOS/phone reference)
+- **Area:** `AgentHubViewModel.answerPendingConfirmation`, `GateAskActionCopy`
+- **First slice:** `post("\(GateAskActionCopy.outcomeLabel(approved:)) · …")`; wiring test forbids pad `"Confirmed"`/`"Denied"` status duals.
+- **Done:** answerPendingConfirmation posts outcomeLabel; GateAskActionCopyTests forbid Confirmed/Denied duals on pad hub.
+- **Priority:** P2
+
+### - [ ] UX-054: Pad unanswerable posts share promptUnanswerable family
+
+- **Why:** Offline/fail paths already surface `affordance.statusMessage` (Core), but store-reject / missing-pending still hard-code `"That approval is no longer open."` / `"Nothing is waiting…"` next to Core `promptUnanswerable` — optional status-toast family polish.
+- **Platforms:** iPadOS
+- **Area:** `AgentHubViewModel.answer` / `answerPendingConfirmation`, `GateAskActionCopy`
+- **First slice:** Prefer Core tokens where meaning matches; keep surface-specific empty-pending prose if no token fits; wiring test.
+- **Priority:** P3
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 32):** `--quick` all PASS. Multi-OS backlog empty after parallel wave closed UX-042…052. Residual pad answer toast dual Confirmed/Denied vs outcomeLabel → **UX-053** (claim). Also filed **UX-054** (pad unanswerable post family, P3). Considered: HubScanLine FlexAIDdS offline (domain-specific leave); pad palette “No matches” (surface leave); widget Idle residual (rg clean).
 - **2026-07-26 (P2/P3 parallel wave):** Five agents closed **UX-042…052**, **ENH-024/025**, PET **E6/E7**. ShannonCore 275 green; apple --quick on commit path.
 - **2026-07-26 (loop 31):** `--quick` all PASS (ran=4). No open P0/P1 (swarm closed UX-035…041). Claimed **UX-042** (P2): post-tap socketUnavailable → `macGateOffline`. Considered already-queued: UX-043 roster gateAvailable; UX-044 AirPods Confirmed/Denied; UX-050 watch “No notifications”; pad “No matches” surface-specific (leave). **No additional UX-0xx**.
 - **2026-07-26 (P0/P1 parallel agents):** Implemented **UX-035…041** + **ENH-023** via five background agents (phone WidgetKit/gesture/offline, Mac clearAsk, GateInlineCard, pad offline chip, watch gate count + complication). ShannonCore 261 + Pill CloudPublisher/SessionUIWiring green; apple --quick re-run on commit path.

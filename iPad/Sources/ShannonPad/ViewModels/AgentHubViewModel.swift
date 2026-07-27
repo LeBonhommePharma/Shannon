@@ -279,7 +279,9 @@ final class AgentHubViewModel: ObservableObject {
             return
         }
         didAnswer(answered, approved: approved)
-        post("\(approved ? "Confirmed" : "Denied") · \(answered.question)")
+        // UX-053: status toast shares GateAskActionCopy.outcomeLabel with Gate Activity
+        // (UX-034) and phone AirPods TTS (UX-044) — not dual Confirmed/Denied.
+        post("\(GateAskActionCopy.outcomeLabel(approved: approved)) · \(answered.question)")
     }
 
     func answer(

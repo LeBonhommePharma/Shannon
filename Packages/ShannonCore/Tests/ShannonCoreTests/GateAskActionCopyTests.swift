@@ -596,6 +596,36 @@ final class GateAskActionCopyTests: XCTestCase {
         )
     }
 
+    /// UX-053: pad answer status toast shares outcomeLabel (not Confirmed/Denied dual).
+    func testPadAnswerToastUsesOutcomeLabelNotConfirmedDenied() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let hub = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iPad/Sources/ShannonPad/ViewModels/AgentHubViewModel.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertFalse(hub.isEmpty, "AgentHubViewModel.swift must be readable")
+        XCTAssertTrue(
+            hub.contains("GateAskActionCopy.outcomeLabel"),
+            "answerPendingConfirmation must post via GateAskActionCopy.outcomeLabel (UX-053)"
+        )
+        XCTAssertFalse(
+            hub.contains("\"Confirmed\""),
+            "pad must not hard-code Confirmed status toast"
+        )
+        XCTAssertFalse(
+            hub.contains("\"Denied\""),
+            "pad must not hard-code Denied status toast"
+        )
+    }
+
     /// UX-021: pad detail + notification panel disable when hub offline (not GateCard only).
     func testPadDetailAndNotificationWireCompanionAffordance() {
         let root = URL(fileURLWithPath: #filePath)

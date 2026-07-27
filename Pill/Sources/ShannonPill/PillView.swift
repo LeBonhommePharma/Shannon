@@ -125,6 +125,10 @@ struct PillView: View {
     @State private var askPulse       = false
     /// Subtle Liquid Glass hover lift on the collapsed island (no expand yet).
     @State private var hoverLift      = false
+    /// Last Handrail command dispatched (visible feedback; no invented outcomes).
+    @State private var lastHandrailCommand: String? = nil
+    /// Matched geometry: glyph / rail / chips morph across expand↔collapse.
+    @Namespace private var islandNS
     /// Reduce Motion: never forever-pulse borders (P2.4).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -534,7 +538,7 @@ struct PillView: View {
         .onChange(of: pendingAsk?.interactionId) { _ in
             armGateAskIfNeeded()
         }
-        // Start / stop the entropy-collapse pulse border.
+        // Start / stop the entropy-collapse pulse border + auto-expand island.
         .onChange(of: collapseAlarm) { collapsed in
             if collapsed {
                 if PillChromePolicy.allowsForeverPulse(reduceMotion: reduceMotion) {
@@ -542,6 +546,7 @@ struct PillView: View {
                         collapsePulse = true
                     }
                 } else {
+                    // Solid red attention — never forever-pulse under Reduce Motion.
                     collapsePulse = true
                 }
                 // Measured collapse only (collapseAlarm is provenance-gated).
@@ -549,8 +554,22 @@ struct PillView: View {
                     bits: fleetReading.currentBits,
                     source: fleetReading.measurement?.source.label ?? "bridge"
                 )
+                // Thermodynamic referee: auto-expand on measured collapse.
+                if collapseDecision.shouldAutoExpand {
+                    withAnimation(.shannon(.shannonFloat, reduceMotion: reduceMotion)) {
+                        isExpanded = true
+                    }
+                }
             } else {
                 withAnimation(reduceMotion ? nil : .default) { collapsePulse = false }
+            }
+        }
+        // Push path: significant bridge events (collapse / ΔH) without 1 Hz lag.
+        .onChange(of: bridge.pushGeneration) { _ in
+            if collapseDecision.shouldAutoExpand {
+                withAnimation(.shannon(.shannonFloat, reduceMotion: reduceMotion)) {
+                    isExpanded = true
+                }
             }
         }
         .accessibilityElement(children: .combine)
@@ -608,6 +627,7 @@ struct PillView: View {
             // Source-aware status indicator (agent tint / activity glyph).
             statusGlyph
                 .frame(width: 16, height: 16)
+                .matchedGeometryEffect(id: "statusGlyph", in: islandNS)
 
             // Short activity label; recessive quiet drops filler copy.
             if !isRecessive {
@@ -622,6 +642,18 @@ struct PillView: View {
 
             Spacer(minLength: 2)
 
+            // Mini entropy chip morphs into expanded thermodynamic rail.
+            if fleetReading.isMeasured, let bits = fleetReading.currentBits {
+                Text(String(format: "H %.1f", bits))
+                    .font(.shannonMenuSection)
+                    .foregroundStyle(entropyTint(for: fleetReading))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule(style: .continuous).fill(Color.shannonSurfaceElevated.opacity(0.7)))
+                    .matchedGeometryEffect(id: "entropyRail", in: islandNS)
+                    .help("Measured token entropy")
+            }
+
             // Trailing chips: prefer one fleet/usage metric, not a dense stack.
             // Usage when measured; else multi-agent count when fleet > 1.
             if let usage = collapsedUsageChip {
@@ -630,7 +662,8 @@ struct PillView: View {
                     .foregroundStyle(Color.shannonTertiary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(Capsule().fill(Color.shannonSurfaceElevated.opacity(0.7)))
+                    .background(Capsule(style: .continuous).fill(Color.shannonSurfaceElevated.opacity(0.7)))
+                    .matchedGeometryEffect(id: "agentChip", in: islandNS)
                     .help("Usage from local session telemetry")
             } else if collapsedActiveCount > 1 {
                 Text("\(collapsedActiveCount)")
@@ -638,7 +671,8 @@ struct PillView: View {
                     .foregroundStyle(Color.shannonAccent)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(Capsule().fill(Color.shannonAccentSubtle))
+                    .background(Capsule(style: .continuous).fill(Color.shannonAccentSubtle))
+                    .matchedGeometryEffect(id: "agentChip", in: islandNS)
                     .help(
                         AgentListSkim.multiAgentAccessibilityLabel(
                             activeCount: collapsedActiveCount
@@ -759,6 +793,15 @@ struct PillView: View {
     /// Only `.measured` collapse from `EntropyProvenance.resolve` can alarm —
     /// synthetic backends and absent detectors never raise the red border.
     private var collapseAlarm: Bool { fleetReading.collapsed == true }
+
+    /// Pure referee decision (auto-expand + Handrail) — measured collapse only.
+    private var collapseDecision: CollapseAttentionDecision {
+        CollapseAttentionLogic.decide(
+            reading: fleetReading,
+            status: bridge.status,
+            tokenSnippet: bridge.status?.tokenSnippet
+        )
+    }
 
     /// Continuous multi-stop gradient over measured H — not discrete RYG.
     private func entropyTint(for reading: EntropyReading) -> Color {
@@ -896,6 +939,15 @@ struct PillView: View {
                     .accessibilityLabel(PillChromePolicy.statusLegend)
             }
 
+            // Live thermodynamic surface — first-class H / ΔH / z rail.
+            thermodynamicRefereeSurface
+                .matchedGeometryEffect(id: "entropyRail", in: islandNS)
+
+            // Measured collapse island: agent + metrics + Handrail one-taps.
+            if collapseDecision.state == .alarm {
+                collapseHandrailIsland
+            }
+
             if showMedia {
                 mediaBlock
             } else if !busy.isEmpty || primary != nil {
@@ -914,6 +966,170 @@ struct PillView: View {
             footer
         }
         .padding(12)
+    }
+
+    /// Sliding-window H + ΔH (+ z when present) with cool→warm→red lock-in map.
+    @ViewBuilder
+    private var thermodynamicRefereeSurface: some View {
+        let decision = collapseDecision
+        let series = bridge.hHistory
+        let points = EntropyRailLogic.points(
+            hSeries: series,
+            isCurrent: fleetReading.isMeasured
+        )
+        let label = EntropyRailLogic.summaryLabel(
+            h: decision.entropy ?? fleetReading.currentBits ?? bridge.status?.entropy,
+            deltaH: decision.deltaH ?? fleetReading.measurement?.deltaH ?? bridge.status?.deltaH,
+            zScore: decision.zScore ?? bridge.status?.zScore
+        )
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("ENTROPY")
+                    .font(.shannonMenuSection)
+                    .foregroundStyle(Color.shannonTertiary)
+                    .tracking(0.5)
+                Spacer(minLength: 4)
+                if let label {
+                    Text(label)
+                        .font(.shannonPillMono)
+                        .foregroundStyle(
+                            fleetReading.isMeasured
+                                ? entropyTint(for: fleetReading)
+                                : Color.shannonNeutral
+                        )
+                        .contentTransition(.identity)
+                        .accessibilityLabel(label)
+                } else {
+                    Text(fleetReading.isMeasured ? "…" : "no detector")
+                        .font(.shannonPillMono)
+                        .foregroundStyle(Color.shannonNeutral)
+                }
+            }
+            if points.count >= 2 {
+                ThermodynamicSparkline(points: points)
+                    .frame(height: 28)
+                    .accessibilityLabel("Entropy history rail")
+            } else {
+                FluidEntropyRail(
+                    display: fleetReading.display(at: Date()),
+                    agentAttached: hasAttachedAgent || bridge.connected,
+                    reduceMotion: reduceMotion
+                )
+                .frame(height: 8)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.shannonSurfaceSunken.opacity(0.9))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(
+                    collapseAlarm
+                        ? Color.shannonError.opacity(0.55)
+                        : Color.shannonSeparator,
+                    lineWidth: 1
+                )
+        )
+    }
+
+    /// Dedicated collapse island: identity, metrics, Handrail (measured only).
+    @ViewBuilder
+    private var collapseHandrailIsland: some View {
+        let d = collapseDecision
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Color.shannonError)
+                    .matchedGeometryEffect(id: "statusGlyph", in: islandNS)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Measured collapse")
+                        .font(.shannonMenuBody)
+                        .foregroundStyle(Color.shannonError)
+                    if let agent = d.agentLabel, !agent.isEmpty {
+                        Text(agent)
+                            .font(.shannonMenuFootnote)
+                            .foregroundStyle(Color.shannonPrimary)
+                            .lineLimit(1)
+                    }
+                    if let snippet = d.tokenSnippet {
+                        Text(snippet)
+                            .font(.shannonPillMono)
+                            .foregroundStyle(Color.shannonSecondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 4)
+                if let label = EntropyRailLogic.summaryLabel(
+                    h: d.entropy, deltaH: d.deltaH, zScore: d.zScore
+                ) {
+                    Text(label)
+                        .font(.shannonPillMono)
+                        .foregroundStyle(Color.shannonError)
+                }
+            }
+            // Handrail one-taps — only when pure logic says measured alarm.
+            HStack(spacing: 6) {
+                ForEach(d.handrailActions) { action in
+                    Button {
+                        dispatchHandrail(action)
+                    } label: {
+                        Label(action.rawValue, systemImage: action.systemImage)
+                            .font(.shannonMenuSection)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(action == .kill ? Color.shannonError : Color.shannonAccent)
+                    .accessibilityLabel(action.accessibilityLabel)
+                }
+            }
+            if let cmd = lastHandrailCommand {
+                Text(cmd)
+                    .font(.shannonMenuMono)
+                    .foregroundStyle(Color.shannonTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.shannonError.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.shannonError.opacity(0.45), lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Entropy collapse handrail")
+    }
+
+    private func dispatchHandrail(_ action: HandrailAction) {
+        let d = collapseDecision
+        guard HandrailDispatch.isAllowed(action: action, decision: d) else { return }
+        let cmd = HandrailDispatch.command(
+            action: action,
+            agentId: d.agentLabel,
+            entropy: d.entropy,
+            deltaH: d.deltaH
+        )
+        lastHandrailCommand = cmd
+        // ALERT reuses the local notifier (measured path only).
+        if action == .alert {
+            ShannonNotifier.notifyCollapse(bits: d.entropy, source: d.agentLabel ?? "handrail")
+        }
+        // LOG / THROTTLE / KILL / WEBHOOK are command strings for hub consumers;
+        // posting a notification keeps the action observable without inventing
+        // process control when the gate is offline.
+        if action != .alert {
+            ShannonNotifier.notifyCollapse(
+                bits: d.entropy,
+                source: "handrail.\(action.rawValue.lowercased())"
+            )
+        }
     }
 
     /// Honest FlexAIDdS hub surface on the expanded notch board.
@@ -1756,6 +1972,65 @@ private struct EntropySeriesSparkline: View {
     }
 
     private static func points(values: [Double], in size: CGSize) -> [CGPoint] {
+        guard values.count >= 2 else { return [] }
+        let lo = values.min() ?? 0
+        let hi = values.max() ?? 1
+        let span = max(hi - lo, 1e-6)
+        let n = values.count
+        return values.enumerated().map { i, v in
+            let x = CGFloat(i) / CGFloat(n - 1) * size.width
+            let y = size.height - CGFloat((v - lo) / span) * size.height
+            return CGPoint(x: x, y: y)
+        }
+    }
+}
+
+// MARK: - Thermodynamic sparkline (cool → warm → red lock-in)
+
+/// Sliding-window H path colored by the last sample's thermodynamic map.
+/// Pure points come from ``EntropyRailLogic`` — no invented series.
+private struct ThermodynamicSparkline: View {
+    let points: [EntropyRailPoint]
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = max(geo.size.width, 1)
+            let h = max(geo.size.height, 1)
+            let values = points.map(\.h)
+            let pts = sparkPoints(values: values, in: CGSize(width: w, height: h))
+            let tint = points.last.map {
+                Color(red: $0.color.r, green: $0.color.g, blue: $0.color.b)
+            } ?? Color.shannonNeutral
+            ZStack(alignment: .bottomLeading) {
+                // Soft fill under the curve
+                Path { path in
+                    guard let first = pts.first else { return }
+                    path.move(to: CGPoint(x: first.x, y: h))
+                    path.addLine(to: first)
+                    for p in pts.dropFirst() { path.addLine(to: p) }
+                    if let last = pts.last {
+                        path.addLine(to: CGPoint(x: last.x, y: h))
+                    }
+                    path.closeSubpath()
+                }
+                .fill(tint.opacity(0.18))
+                Path { path in
+                    guard let first = pts.first else { return }
+                    path.move(to: first)
+                    for p in pts.dropFirst() { path.addLine(to: p) }
+                }
+                .stroke(
+                    tint.opacity(0.95),
+                    style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
+                )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        }
+        .drawingGroup()
+        .accessibilityHidden(true)
+    }
+
+    private func sparkPoints(values: [Double], in size: CGSize) -> [CGPoint] {
         guard values.count >= 2 else { return [] }
         let lo = values.min() ?? 0
         let hi = values.max() ?? 1

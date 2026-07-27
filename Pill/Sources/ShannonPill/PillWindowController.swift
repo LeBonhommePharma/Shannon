@@ -3,6 +3,7 @@ import Combine
 import SwiftUI
 import PillCore
 import QuartzCore
+import ShannonTheme
 
 /// Shared expand/collapse state between the SwiftUI view and the window.
 @MainActor
@@ -221,12 +222,9 @@ final class PillWindowController {
         // Higher hysteresis: telemetry text reflow must not micro-morph the panel.
         guard delta > 14.0 || originDelta > 4.0 else { return }
         if delta > 32 || originDelta > 16 {
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = ShannonMotion.panelMorphDuration
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                ctx.allowsImplicitAnimation = true
-                panel.animator().setFrame(frame, display: true)
-            }
+            // Same spring vocabulary as SwiftUI `.shannonFloat` — response 0.48 /
+            // damping 0.86 — so panel resize and content morph stay in phase.
+            animatePanelFrame(panel, to: frame)
         } else {
             // Silent snap — no Core Animation implicit actions on the frame.
             CATransaction.begin()
@@ -257,9 +255,23 @@ final class PillWindowController {
                 && abs(frame.origin.x - panel.frame.origin.x) < 1
             if same { return }
         }
+        animatePanelFrame(panel, to: frame)
+    }
+
+    /// AppKit frame morph locked to `ShannonSpring.float` (matches SwiftUI).
+    private func animatePanelFrame(_ panel: PillPanel, to frame: CGRect) {
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let spring = ShannonMotion.islandSpring(reduceMotion: reduce)
+        if reduce || spring.response <= 0.01 {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            panel.setFrame(frame, display: true)
+            CATransaction.commit()
+            return
+        }
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = ShannonMotion.panelMorphDuration
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ctx.duration = spring.panelDuration
+            ctx.timingFunction = ShannonMotion.timingFunction(for: spring)
             ctx.allowsImplicitAnimation = true
             panel.animator().setFrame(frame, display: true)
         }

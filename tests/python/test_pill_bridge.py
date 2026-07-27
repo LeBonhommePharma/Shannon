@@ -22,6 +22,7 @@ from shannon.pill_bridge import (
     PillBridgeServer,
     default_socket_path,
     encode_frame,
+    is_significant_event,
     status_payload,
 )
 
@@ -71,8 +72,29 @@ def test_status_payload_uses_snake_case_schema():
         "collapsed": False,
         "token_count": 1024,
         "backend": "cpp",
+        "kind": "status",
         "agent": "flexaid-runner",
     }
+
+
+def test_status_payload_includes_optional_z_score():
+    payload = status_payload(FakeDetector(z_score=-3.2), kind="event")
+    assert payload["z_score"] == pytest.approx(-3.2)
+    assert payload["kind"] == "event"
+
+
+def test_is_significant_event_fail_closed_for_demo():
+    cur = status_payload(FakeDetector(backend="demo", is_collapsed=True, delta_h=-5.0))
+    assert is_significant_event(None, cur) is False
+
+
+def test_is_significant_event_on_measured_collapse():
+    prev = status_payload(FakeDetector(is_collapsed=False, delta_h=-0.1))
+    cur = status_payload(
+        FakeDetector(is_collapsed=True, delta_h=-4.0, current_entropy=2.0),
+        kind="event",
+    )
+    assert is_significant_event(prev, cur) is True
 
 
 def test_agent_field_omitted_when_unset():

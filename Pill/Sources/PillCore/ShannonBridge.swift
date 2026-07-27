@@ -11,6 +11,12 @@ public struct ShannonStatus: Codable, Sendable, Equatable {
     public var tokenCount: Int
     public var backend: String
     public var agent: String?
+    /// Optional sliding-window z-score from the detector (collapse threshold ~ −3.2).
+    public var zScore: Double?
+    /// Optional short token/context snippet — never required; blank → nil.
+    public var tokenSnippet: String?
+    /// Wire kind: `"status"` (poll reply) or `"event"` (push). Default status.
+    public var kind: String?
 
     enum CodingKeys: String, CodingKey {
         case entropy
@@ -19,6 +25,9 @@ public struct ShannonStatus: Codable, Sendable, Equatable {
         case tokenCount = "token_count"
         case backend
         case agent
+        case zScore = "z_score"
+        case tokenSnippet = "token_snippet"
+        case kind
     }
 
     public init(
@@ -27,7 +36,10 @@ public struct ShannonStatus: Codable, Sendable, Equatable {
         collapsed: Bool,
         tokenCount: Int,
         backend: String,
-        agent: String? = nil
+        agent: String? = nil,
+        zScore: Double? = nil,
+        tokenSnippet: String? = nil,
+        kind: String? = nil
     ) {
         self.entropy = entropy
         self.deltaH = deltaH
@@ -35,6 +47,9 @@ public struct ShannonStatus: Codable, Sendable, Equatable {
         self.tokenCount = tokenCount
         self.backend = backend
         self.agent = agent
+        self.zScore = zScore
+        self.tokenSnippet = tokenSnippet
+        self.kind = kind
     }
 
     /// Collapse as a tri-state: `nil` when the producer of this status does not
@@ -53,6 +68,11 @@ public struct ShannonStatus: Codable, Sendable, Equatable {
         let h = String(format: "%.1f", entropy)
         guard deltaH < 0 else { return "H \(h)" }
         return "H \(h) ▽\(String(format: "%.1f", abs(deltaH)))"
+    }
+
+    /// Thermodynamic badge including optional z-score.
+    public var refereeLabel: String? {
+        EntropyRailLogic.summaryLabel(h: entropy, deltaH: deltaH, zScore: zScore)
     }
 }
 
@@ -266,14 +286,27 @@ public final class UnixSocketClient {
 /// A missing socket is normal (agent not running) and shows as `connected == false`
 /// rather than an error banner.
 ///
+/// **Transport:**
+/// - Heartbeat poll (default cadence) remains as fallback.
+/// - Push path: `subscribe` keeps a second socket open; the producer emits
+///   NDJSON status frames on significant ΔH / collapse. UI applies them via
+///   ``applyPush(_:)`` without waiting for the next poll tick.
+///
 /// Connection is reused across polls when the peer stays up (connect once, request
 /// repeatedly). On MainActor, `status` / `connected` are only reassigned when the
 /// value actually changes — equality-gated so SwiftUI does not thrash on identical
-/// frames.
+/// frames. The entropy engine never waits on the UI (socket I/O is off-main).
 @MainActor
 public final class ShannonBridge: ObservableObject {
     @Published public private(set) var status: ShannonStatus?
     @Published public private(set) var connected = false
+    /// Sliding-window H samples from push + poll (oldest → newest). Decorative
+    /// rails read this; never invents samples when disconnected.
+    @Published public private(set) var hHistory: [Double] = []
+    /// True when the last status arrived via push (not the poll heartbeat).
+    @Published public private(set) var lastUpdateWasPush = false
+    /// Monotonic generation for significant push events (UI can react without 1 Hz lag).
+    @Published public private(set) var pushGeneration: UInt64 = 0
 
     public let socketPath: String
     private let interval: TimeInterval
@@ -284,6 +317,9 @@ public final class ShannonBridge: ObservableObject {
     /// `@unchecked Sendable` box: only ever touched on `queue`.
     private final class ClientBox: @unchecked Sendable {
         var client = UnixSocketClient()
+        /// Long-lived subscribe socket (push). Separate from poll client.
+        var pushClient = UnixSocketClient()
+        var pushRunning = false
     }
     private let clientBox = ClientBox()
 
@@ -307,6 +343,7 @@ public final class ShannonBridge: ObservableObject {
 
     public func start() {
         poll()
+        startPushListener()
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.poll() }
         }
@@ -319,7 +356,9 @@ public final class ShannonBridge: ObservableObject {
         timer = nil
         let box = clientBox
         queue.async {
+            box.pushRunning = false
             box.client.close()
+            box.pushClient.close()
         }
     }
 
@@ -341,11 +380,74 @@ public final class ShannonBridge: ObservableObject {
             }()
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                // Equality-gated publish: avoid SwiftUI churn when quiet.
-                let up = (result != nil)
-                if self.connected != up { self.connected = up }
-                if self.status != result { self.status = result }
+                self.applyStatus(result, fromPush: false)
             }
         }
+    }
+
+    /// Apply a decoded status from any path (poll heartbeat or push event).
+    ///
+    /// Pure-side effects are limited to published properties; never blocks the
+    /// producer socket (caller already decoded off-main).
+    public func applyStatus(_ result: ShannonStatus?, fromPush: Bool) {
+        let up = (result != nil)
+        if connected != up { connected = up }
+        let previous = status
+        if BridgePushLogic.shouldPublishStatus(previous: previous, next: result) {
+            status = result
+        }
+        if let result, !result.isSynthetic {
+            hHistory = EntropyRailLogic.append(history: hHistory, entropy: result.entropy)
+            if fromPush, BridgePushLogic.isSignificantEvent(previous: previous, next: result) {
+                lastUpdateWasPush = true
+                pushGeneration &+= 1
+            } else if !fromPush {
+                lastUpdateWasPush = false
+            }
+        }
+    }
+
+    /// Test / pure-entry apply of a push NDJSON frame (no socket).
+    public func applyPush(_ line: Data) throws {
+        let status = try BridgeCodec.decodeStatus(line)
+        applyStatus(status, fromPush: true)
+    }
+
+    // MARK: - Push listener
+
+    /// Open a long-lived `subscribe` connection; read NDJSON events as they land.
+    private func startPushListener() {
+        let path = socketPath
+        let box = clientBox
+        queue.async { [weak self] in
+            guard let self else { return }
+            if box.pushRunning { return }
+            box.pushRunning = true
+            self.runPushLoop(path: path, box: box)
+        }
+    }
+
+    private nonisolated func runPushLoop(path: String, box: ClientBox) {
+        while box.pushRunning {
+            do {
+                if !box.pushClient.isConnected {
+                    try box.pushClient.connect(to: path, timeout: 2.0)
+                    try box.pushClient.send(try BridgeCodec.encode(BridgeRequest(command: "subscribe")))
+                }
+                // Read unsolicited frames until disconnect.
+                let line = try box.pushClient.readLine()
+                let decoded = try BridgeCodec.decodeStatus(line)
+                Task { @MainActor [weak self] in
+                    self?.applyStatus(decoded, fromPush: true)
+                }
+            } catch {
+                box.pushClient.close()
+                // Back off briefly; poll heartbeat covers the gap.
+                if box.pushRunning {
+                    Thread.sleep(forTimeInterval: 0.4)
+                }
+            }
+        }
+        box.pushClient.close()
     }
 }

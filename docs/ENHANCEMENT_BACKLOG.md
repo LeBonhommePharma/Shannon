@@ -295,13 +295,14 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Parity:** AgentCallout diff review (candidate G9)
 - **Done:** `GateAskChangePaths` pure extract/present (real keys only: `paths`/`files`/scalars + `change_summary` family; clip + overflow; never invent from prose). `PendingAsk.changePaths`/`changeSummary` + `changePathsPresentation`; GateDBReader attributes from matching `agent_messages.payload_json` only (interaction_id match; fail-closed empty). Mac `GateAskCard` + `GateInlineCard` show clipped block under prompt when present. Pure + DB + SessionUIWiring tests. No fake diffs.
 
-### - [ ] ENH-032: Always Allow only when hub policy supports sticky approve (parity G10)
+### - [x] ENH-032: Always Allow only when hub policy supports sticky approve (parity G10)
 
 - **Why:** AgentPeek offers Always Allow when supported; Shannon is Approve/Deny only — may be intentional safety, but gap is real if gate protocol already has sticky modes.
 - **Area:** hub gate protocol, `GateApprovalClient`, Mac gate cards
 - **First slice:** Audit protocol for sticky approve; if present, wire opt-in UI + tests; if absent, document fail-closed “not supported” and close as N/A.
 - **Priority:** P3
 - **Parity:** AgentPeek Always Allow (candidate G10)
+- **Done (Branch B — fail-closed N/A):** Audit: hub `approval_response` + `resolve_interaction(id, approved: bool)` are binary only; no sticky/always/session scope on wire or DB. `GateStickyApprovePolicy` pure helper (`hubProtocolSupportsStickyApprove = false`; `showsAlwaysAllow` requires hub support **and** explicit offer; never invents from prose). UI remains Approve/Deny only — Mac `GateAskCard`/`GateInlineCard` must not hard-code Always Allow. `GateApprovalClient.approvalPayload` stays binary (tests forbid sticky keys). Pure + structural + client shape tests. Re-open as Branch A only when hub grows a sticking sticky mode.
 
 ---
 

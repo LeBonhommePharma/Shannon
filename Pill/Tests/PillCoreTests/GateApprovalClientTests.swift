@@ -55,6 +55,28 @@ final class GateApprovalClientTests: XCTestCase {
         XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: p))
     }
 
+    /// ENH-032 Branch B: hub cannot stick Always Allow — response must stay binary.
+    func testApprovalPayloadDoesNotInventStickyFields() {
+        let p = GateApprovalClient.approvalPayload(
+            interactionId: "ask-sticky", agentId: "science", approved: true
+        )
+        let inner = p["payload"] as? [String: Any] ?? [:]
+        for key in [
+            "always_allow", "alwaysAllow", "sticky", "sticky_approve",
+            "stickyApprove", "allow_always", "remember", "scope",
+        ] {
+            XCTAssertNil(
+                inner[key],
+                "approval payload must not invent sticky key \(key) (ENH-032)"
+            )
+        }
+        // Binary approve only.
+        XCTAssertEqual(inner["approved"] as? Bool, true)
+        XCTAssertEqual(Set(inner.keys).subtracting([
+            "target_agent", "approved", "interaction_id", "source", "kind",
+        ]), Set(), "unexpected keys on binary approval wire: \(inner.keys)")
+    }
+
     func testResolveFailsCleanlyWhenNoSocketExists() {
         // A missing gate must surface an error, never look like a success —
         // otherwise the pill would clear an ask nobody answered.

@@ -137,6 +137,10 @@ public enum GateApprovalClient {
     /// off message_type plus either an "approved" field or kind ==
     /// "approval_response"; this payload carries both so it cannot be mistaken
     /// for an ordinary broadcast.
+    ///
+    /// **ENH-032 / Branch B:** hub sticky approve is unsupported. Payload is
+    /// binary `approved: Bool` only — never invent `always_allow` / sticky
+    /// fields that the gate would ignore (fake Always Allow is forbidden).
     public static func approvalPayload(
         interactionId: String,
         agentId: String,

@@ -84,11 +84,12 @@ cd Packages/ShannonCore && swift test
 ./scripts/test_apple_platforms.sh --quick    # packages + unsigned app builds
 # Guide: docs/APPLE_PLATFORM_TESTING.md · UX backlog: docs/MULTI_OS_UX_BACKLOG.md
 
-# iPhone + Watch (XcodeGen → open project)
-cd iOS && xcodegen generate && open Shannon.xcodeproj
-
-# iPad dashboard
-cd iPad && xcodegen generate && open ShannonPad.xcodeproj
+# Clean-generate + prove .xcodeproj loadable under active Xcode / Xcode-beta
+./scripts/validate_xcodeprojs.sh
+# Then open (never open a bloated/stale package — validate wipes first):
+open Pill/ShannonPill.xcodeproj   # macOS Pill
+open iOS/Shannon.xcodeproj        # iPhone + Watch schemes
+open iPad/ShannonPad.xcodeproj    # iPad hub
 ```
 
 CloudKit sync needs a paid Apple Developer team (container `iCloud.com.lebonhommepharma.shannon`). Without it, apps still **build and launch** with an empty in-memory backend — they simply do not sync. Steps: [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md#what-lp-needs-to-configure-in-xcode).
@@ -664,8 +665,9 @@ along. **Min OS (apps):** iOS / iPadOS **17**, watchOS **10**. Shared package
 
 ```bash
 cd Packages/ShannonCore && swift test          # no CloudKit container required
-cd iOS && xcodegen generate && open Shannon.xcodeproj
-cd iPad && xcodegen generate && open ShannonPad.xcodeproj
+./scripts/validate_xcodeprojs.sh               # clean XcodeGen + load check
+open iOS/Shannon.xcodeproj                     # Phone + Watch
+open iPad/ShannonPad.xcodeproj
 ```
 
 Sync stays light: state snapshots only — never raw transcripts or docking

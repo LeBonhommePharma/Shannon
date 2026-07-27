@@ -66,17 +66,33 @@ pip install -e ".[dev]" -q
 success "Python environment ready."
 
 # ─── Step 5 · Generate Xcode projects ──────────────────────────────────────────
-info "Generating Xcode projects with XcodeGen..."
+# Full wipe before generate: XcodeGen rewrites project.pbxproj but leaves extra
+# dirs inside an existing .xcodeproj. A clang module cache once landed as
+# iOS/Shannon.xcodeproj/-Xcc/ and made Xcode-beta hang on first open.
+info "Generating Xcode projects with XcodeGen (clean)..."
 
 for target_dir in Pill iOS iPad; do
   proj_yml="$REPO_ROOT/$target_dir/project.yml"
   if [[ ! -f "$proj_yml" ]]; then
     die "$proj_yml not found. Is this a complete Shannon clone?"
   fi
+  # Remove every .xcodeproj in the target dir (names: ShannonPill / Shannon / ShannonPad).
+  for stale in "$REPO_ROOT/$target_dir"/*.xcodeproj; do
+    [[ -e "$stale" ]] || continue
+    info "  removing stale $(basename "$stale")"
+    rm -rf "$stale"
+  done
   info "  xcodegen generate — $target_dir/"
   (cd "$REPO_ROOT/$target_dir" && xcodegen generate --spec project.yml)
   success "  $target_dir/.xcodeproj generated."
 done
+
+# Prove projects parse under the active Xcode (including Xcode-beta / macOS 27).
+if [[ -x "$REPO_ROOT/scripts/validate_xcodeprojs.sh" ]]; then
+  info "Validating .xcodeproj loadability (no GUI)..."
+  "$REPO_ROOT/scripts/validate_xcodeprojs.sh" --no-gen
+  success "Xcode projects are loadable."
+fi
 
 # ─── Step 6 · Swift package resolve ───────────────────────────────────────────
 info "Resolving Swift package dependencies..."

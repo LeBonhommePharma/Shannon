@@ -12,6 +12,8 @@
 #   ./scripts/test_apple_platforms.sh ios ipad watch
 #   ./scripts/test_apple_platforms.sh --quick      # packages + generic builds only
 #   ./scripts/test_apple_platforms.sh --list       # print destinations / runtimes
+#   ./scripts/validate_xcodeprojs.sh               # clean generate + load-safe check
+#                                                  # (run before opening in Xcode-beta)
 #
 # Exit: 0 if every selected platform that *could* run succeeded; 1 if any
 # selected runnable step failed. Skips do not fail the run.
@@ -223,6 +225,22 @@ build_core_generic() {
         build)
 }
 
+# ── clean XcodeGen (wipe package so junk like -Xcc cannot survive) ──────────
+# XcodeGen rewrites pbxproj but does not delete sibling dirs inside an existing
+# .xcodeproj. Stale clang module caches under the package hang Xcode-beta on open.
+clean_xcodegen() {
+  # $1 = directory under repo root (Pill | iOS | iPad)
+  local dir="$1"
+  local abs="$ROOT/$dir"
+  local stale
+  for stale in "$abs"/*.xcodeproj; do
+    [[ -e "$stale" ]] || continue
+    log "removing stale $(basename "$stale") before xcodegen"
+    rm -rf "$stale"
+  done
+  (cd "$abs" && xcodegen generate --spec project.yml)
+}
+
 # ── iOS phone app ───────────────────────────────────────────────────────────
 run_ios() {
   if ! have xcodegen; then
@@ -231,7 +249,7 @@ run_ios() {
     return 0
   fi
   log "iOS — generate + build ShannonPhone"
-  (cd "$ROOT/iOS" && xcodegen generate) || {
+  clean_xcodegen iOS || {
     fail "iOS xcodegen generate failed"
     record FAIL ios "xcodegen"
     return 0
@@ -275,7 +293,7 @@ run_ipad() {
     return 0
   fi
   log "iPadOS — generate + build ShannonPad"
-  (cd "$ROOT/iPad" && xcodegen generate) || {
+  clean_xcodegen iPad || {
     fail "iPad xcodegen generate failed"
     record FAIL ipad "xcodegen"
     return 0
@@ -313,15 +331,14 @@ run_watch() {
     record SKIP watch "no xcodegen"
     return 0
   fi
-  # Watch scheme lives in the iOS project
-  if [[ ! -f "$ROOT/iOS/Shannon.xcodeproj/project.pbxproj" ]]; then
-    log "generating iOS project for ShannonWatch scheme"
-    (cd "$ROOT/iOS" && xcodegen generate) || {
-      fail "watchOS: iOS xcodegen failed"
-      record FAIL watch "xcodegen"
-      return 0
-    }
-  fi
+  # Watch scheme lives in the iOS project — always clean-regenerate so a prior
+  # run cannot leave cache junk under the package for a later GUI open.
+  log "generating iOS project for ShannonWatch scheme (clean)"
+  clean_xcodegen iOS || {
+    fail "watchOS: iOS xcodegen failed"
+    record FAIL watch "xcodegen"
+    return 0
+  }
 
   log "watchOS — build ShannonWatch"
   local udid dest

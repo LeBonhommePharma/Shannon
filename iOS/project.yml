@@ -1,7 +1,11 @@
 # XcodeGen spec for the Shannon iPhone app, its widget, and the paired
 # Apple Watch app.
 #
-#     cd iOS && xcodegen generate && open Shannon.xcodeproj
+#     ./scripts/validate_xcodeprojs.sh          # clean generate + load check
+#     open iOS/Shannon.xcodeproj                # only after validate is green
+#
+# Or manually (always rm first — XcodeGen does not wipe sibling junk dirs):
+#     rm -rf Shannon.xcodeproj && xcodegen generate && open Shannon.xcodeproj
 #
 # Regenerate after adding source files; the .xcodeproj is not checked in.
 #

@@ -41,6 +41,10 @@ watchOS/Resources/*.entitlements
 iPad/ShannonPad.xcodeproj/
 iPad/Resources/Generated*.plist
 iPad/Resources/*.entitlements
+# Never commit clang/module caches if they ever land inside a package
+**/.xcodeproj/-Xcc/
+**/.xcodeproj/**/ModuleCache*
+**/.xcodeproj/**/Index.noindex/
 
 # Xcode build products (xcodebuild -derivedDataPath)
 DerivedData/

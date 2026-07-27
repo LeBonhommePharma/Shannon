@@ -7,14 +7,18 @@ answers "what are all of them doing, and which one needs me?" on one canvas.
 | Item | Value |
 |------|--------|
 | **Min OS** | iPadOS **17.0** (`@Observable` / ShannonStore) |
-| **Build** | `cd iPad && xcodegen generate && open ShannonPad.xcodeproj` |
+| **Build** | `./scripts/validate_xcodeprojs.sh` then `open iPad/ShannonPad.xcodeproj` |
 | **Sync** | Same CloudKit zone as iPhone — see [docs/MULTI_DEVICE.md](../docs/MULTI_DEVICE.md) |
 
 ```bash
-cd iPad && xcodegen generate && open ShannonPad.xcodeproj
+# From repo root — clean generate + load check (safe on Xcode-beta / macOS 27)
+./scripts/validate_xcodeprojs.sh
+open iPad/ShannonPad.xcodeproj
 ```
 
-Regenerate after adding sources (`project.yml` is authoritative).
+Or: `rm -rf ShannonPad.xcodeproj && xcodegen generate` from `iPad/`
+(always wipe first). Regenerate after adding sources (`project.yml` is
+authoritative).
 
 ## Layout
 

@@ -1,6 +1,10 @@
 # XcodeGen spec for the Shannon iPad agent hub.
 #
-#     cd iPad && xcodegen generate && open ShannonPad.xcodeproj
+#     ./scripts/validate_xcodeprojs.sh          # clean generate + load check
+#     open iPad/ShannonPad.xcodeproj            # only after validate is green
+#
+# Or manually (always rm first — XcodeGen does not wipe sibling junk dirs):
+#     rm -rf ShannonPad.xcodeproj && xcodegen generate && open ShannonPad.xcodeproj
 #
 # Regenerate after adding source files; the .xcodeproj is not checked in.
 #

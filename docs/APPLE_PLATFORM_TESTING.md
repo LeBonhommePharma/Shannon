@@ -9,6 +9,12 @@ simulator UI proof.
 From repo root (macOS + Xcode):
 
 ```bash
+# Prove generated .xcodeproj files are loadable (clean generate, no GUI).
+# Run this before opening projects in Xcode / Xcode-beta — especially on
+# macOS 27 + Xcode 27 beta — so a stale package cannot hang first-load.
+./scripts/validate_xcodeprojs.sh
+
+# Multi-platform build/test health
 ./scripts/test_apple_platforms.sh
 ```
 
@@ -24,6 +30,34 @@ Exit **1** if a selected step that actually ran failed.
 
 Optional: `SHANNON_XCODE_TIMEOUT=900` (seconds) caps each xcodebuild/swift step
 when `timeout`/`gtimeout` is on `PATH`.
+
+### Xcode project hygiene (local + Xcode-beta)
+
+`.xcodeproj` trees are **generated** (gitignored) from `project.yml` via
+XcodeGen. They are **not** checked in.
+
+| Project | Spec | Open after validate |
+|---|---|---|
+| `Pill/ShannonPill.xcodeproj` | `Pill/project.yml` | `open Pill/ShannonPill.xcodeproj` |
+| `iOS/Shannon.xcodeproj` | `iOS/project.yml` | `open iOS/Shannon.xcodeproj` |
+| `iPad/ShannonPad.xcodeproj` | `iPad/project.yml` | `open iPad/ShannonPad.xcodeproj` |
+
+**Always clean-regenerate** (delete the whole `.xcodeproj`, then `xcodegen
+generate`). XcodeGen rewrites `project.pbxproj` but leaves extra directories
+already inside the package. A clang module cache once landed as
+`iOS/Shannon.xcodeproj/-Xcc/` (~30 MB of `.pcm`); opening that in Xcode-beta
+can hang indexing or make first-load look broken.
+
+```bash
+# Preferred — wipe + generate + xcodebuild -list / -showBuildSettings
+./scripts/validate_xcodeprojs.sh
+
+# Opt-in GUI open only after the above is green
+./scripts/validate_xcodeprojs.sh --open
+```
+
+`setup.sh` and `test_apple_platforms.sh` both wipe before generate. Do **not**
+point `MODULE_CACHE_PATH` / clang caches at a path inside any `.xcodeproj`.
 
 ## What runs where
 
@@ -60,19 +94,21 @@ cd Packages/ShannonCore && swift test
 cd Packages/ShannonTheme && swift test
 cd Pill && swift build && swift test
 
+# Clean generate (rm first — never accumulate junk inside .xcodeproj)
+rm -rf iOS/Shannon.xcodeproj && cd iOS && xcodegen generate && cd ..
+rm -rf iPad/ShannonPad.xcodeproj && cd iPad && xcodegen generate && cd ..
+rm -rf Pill/ShannonPill.xcodeproj && cd Pill && xcodegen generate && cd ..
+
 # iPhone
-cd iOS && xcodegen generate
-xcodebuild -project Shannon.xcodeproj -scheme ShannonPhone \
+xcodebuild -project iOS/Shannon.xcodeproj -scheme ShannonPhone \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 
 # iPad
-cd iPad && xcodegen generate
-xcodebuild -project ShannonPad.xcodeproj -scheme ShannonPad \
+xcodebuild -project iPad/ShannonPad.xcodeproj -scheme ShannonPad \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 
 # Watch (scheme is in the iOS project)
-cd iOS && xcodegen generate
-xcodebuild -project Shannon.xcodeproj -scheme ShannonWatch \
+xcodebuild -project iOS/Shannon.xcodeproj -scheme ShannonWatch \
   -destination 'generic/platform=watchOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 

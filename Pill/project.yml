@@ -3,7 +3,11 @@
 # The canonical build is SwiftPM (`swift build` / `swift test`) — this spec
 # exists so the app can be opened, run and signed from Xcode:
 #
-#     cd Pill && xcodegen generate && open ShannonPill.xcodeproj
+#     ./scripts/validate_xcodeprojs.sh          # clean generate + load check
+#     open Pill/ShannonPill.xcodeproj           # only after validate is green
+#
+# Or manually (always rm first — XcodeGen does not wipe sibling junk dirs):
+#     rm -rf ShannonPill.xcodeproj && xcodegen generate && open ShannonPill.xcodeproj
 #
 # Regenerate after adding source files; the .xcodeproj is not checked in.
 

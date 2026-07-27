@@ -24,17 +24,26 @@ What it does **not** do: run `shannon-agent`, write `~/.shannon/pets`, or comput
 ## Build
 
 ```bash
-# From repo root
+# From repo root — preferred (wipes stale package, proves Xcode can load it)
+./scripts/validate_xcodeprojs.sh
+open iOS/Shannon.xcodeproj        # set Team if deploying to a device
+```
+
+Or manually (always `rm` first — XcodeGen does not delete sibling junk dirs
+inside an existing `.xcodeproj`, which can hang Xcode-beta on first open):
+
+```bash
 cd iOS
+rm -rf Shannon.xcodeproj
 xcodegen generate                 # writes Shannon.xcodeproj from project.yml
-open Shannon.xcodeproj            # set Team if deploying to a device
+open Shannon.xcodeproj
 ```
 
 Simulator (unsigned):
 
 ```bash
 cd iOS
-xcodegen generate
+rm -rf Shannon.xcodeproj && xcodegen generate
 xcodebuild -project Shannon.xcodeproj -scheme ShannonPhone \
   -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO build

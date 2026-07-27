@@ -15,6 +15,45 @@ final class PresentationTests: XCTestCase {
         XCTAssertFalse(empty.isComplete)
     }
 
+    /// UX-032: widget empty docking chrome shares emptyGlance (not brand quietFace).
+    func testDockingEmptyGlanceToken() {
+        XCTAssertEqual(DockingProgress.emptyGlance, "Idle")
+        XCTAssertNotEqual(
+            DockingProgress.emptyGlance,
+            CompanionFocusCopy.quietFace,
+            "docking empty is not quiet brand face"
+        )
+        XCTAssertNotEqual(
+            DockingProgress.emptyGlance,
+            CompanionFocusCopy.quietShort,
+            "docking empty is not quiet brand short"
+        )
+    }
+
+    func testWidgetWiresDockingEmptyGlance() {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let widget = (try? String(
+            contentsOf: root.appendingPathComponent(
+                "iOS/Sources/ShannonWidget/ShannonWidget.swift"
+            ),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            widget.contains("DockingProgress.emptyGlance"),
+            "widget empty docking must use DockingProgress.emptyGlance"
+        )
+        XCTAssertFalse(
+            widget.contains("Text(\"Idle\")"),
+            "widget must not hard-code dual Idle docking empty string"
+        )
+    }
+
     func testDockingFractionClampsOvershoot() {
         let over = DockingProgress(id: "b", benchmarkName: "B",
                                    targetsComplete: 90, targetsTotal: 85)

@@ -309,10 +309,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** Desktop companion a11y action/hint; CompanionFocusCopyTests.
 - **Priority:** P2
 
+### - [x] UX-032: Widget empty docking uses DockingProgress.emptyGlance
+
+- **Why:** Small widget hard-coded `"Idle"` when no docking run — residual empty-benchmark chrome (distinct from quiet brand face). Deferred across prior loops.
+- **Platforms:** iOS widget (Core token for multi-OS reuse)
+- **Area:** `DockingProgress`, `ShannonWidget`
+- **First slice:** Core `emptyGlance`; wire widget; pure wiring test forbids dual `Text("Idle")`.
+- **Done:** `DockingProgress.emptyGlance`; widget wired; PresentationTests.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 27):** `--quick` all PASS. Backlog empty after UX-031. Residual widget docking empty `"Idle"` (deferred many loops). Claimed **UX-032**. Considered: watch `"No notifications"` / `"iPhone away"` (surface-specific); pad palette `"No matches"`; gate activity lowercase approved/denied (audit narrative, not primary verbs); `configurationDisplayName` catalog (leave). **No additional UX-0xx**.
 - **2026-07-26 (loop 26):** `--quick` all PASS. Backlog empty after UX-030. Residual desktop companion dual brand a11y. Claimed **UX-031**. Considered: widget docking `"Idle"` (leave); watch `"No notifications"` / `"iPhone away"` (surface-specific); pad `"No matches"` palette (surface-specific). **No additional UX-0xx**.
 - **2026-07-26 (loop 25):** `--quick` all PASS. Backlog empty after UX-029. Residual pad dual `"No task"` on card + detail. Claimed **UX-030**. Considered: widget docking `"Idle"` (leave); desktop `"Open in Shannon"` a11y brand (optional); watch `"No notifications"` / `"iPhone away"` (surface-specific). **No additional UX-0xx**.
 - **2026-07-26 (loop 24):** `--quick` all PASS. Backlog empty after UX-028. Residual pad/watch dual `"Nothing playing"`. Claimed **UX-029**. Considered: widget docking `"Idle"` (leave); desktop `"Open in Shannon"` a11y brand (optional); watch `"No notifications"` / `"iPhone away"` (surface-specific). **No additional UX-0xx**.

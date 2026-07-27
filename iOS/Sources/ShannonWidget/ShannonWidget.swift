@@ -138,7 +138,8 @@ struct ShannonWidgetView: View {
                         .lineLimit(1)
                 } else {
                     Spacer()
-                    Text("Idle")
+                    // UX-032: empty docking chrome shares DockingProgress.emptyGlance.
+                    Text(DockingProgress.emptyGlance)
                         .font(.shannonCaption)
                         .foregroundStyle(Color.shannonTertiary)
                 }

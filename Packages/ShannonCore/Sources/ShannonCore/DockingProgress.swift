@@ -54,6 +54,11 @@ public struct DockingProgress: CloudSyncable, Codable, Identifiable, Hashable {
 
     public var isComplete: Bool { targetsTotal > 0 && targetsComplete >= targetsTotal }
 
+    /// Widget / glance when no docking run is present (UX-032).
+    /// Distinct from agent quiet face (`CompanionFocusCopy.quietFace`) — this is
+    /// empty *benchmark* chrome, not brand idle.
+    public static let emptyGlance = "Idle"
+
     /// "34/85"
     public var countLabel: String { "\(targetsComplete)/\(targetsTotal)" }
 

@@ -17,6 +17,18 @@ public enum GateAskActionCopy: Sendable {
     public static let approve = "Approve"
     public static let deny = "Deny"
 
+    /// Past-tense audit/activity row when an ask was approved (UX-034).
+    /// Distinct from primary button `approve` — density/history chrome.
+    public static let outcomeApproved = "approved"
+
+    /// Past-tense audit/activity row when an ask was denied (UX-034).
+    public static let outcomeDenied = "denied"
+
+    /// Audit line token for one resolved gate event.
+    public static func outcomeLabel(approved: Bool) -> String {
+        approved ? outcomeApproved : outcomeDenied
+    }
+
     /// Capsule over the ask (Mac gate cards). Distinct from badge "needs you".
     public static let needsApproval = "needs approval"
 

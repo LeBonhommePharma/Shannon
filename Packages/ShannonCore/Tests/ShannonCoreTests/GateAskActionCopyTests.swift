@@ -22,6 +22,16 @@ final class GateAskActionCopyTests: XCTestCase {
         XCTAssertEqual(GateAskActionCopy.approve, "Approve")
         XCTAssertEqual(GateAskActionCopy.deny, "Deny")
         XCTAssertEqual(GateAskActionCopy.needsApproval, "needs approval")
+        // UX-034: past-tense audit outcomes (pad Gate Activity) share verb roots.
+        XCTAssertEqual(GateAskActionCopy.outcomeApproved, "approved")
+        XCTAssertEqual(GateAskActionCopy.outcomeDenied, "denied")
+        XCTAssertEqual(GateAskActionCopy.outcomeLabel(approved: true), "approved")
+        XCTAssertEqual(GateAskActionCopy.outcomeLabel(approved: false), "denied")
+        // Verb roots (case-insensitive prefix family — not full substring of Deny/denied).
+        XCTAssertTrue(GateAskActionCopy.outcomeApproved.hasPrefix("approv"))
+        XCTAssertTrue(GateAskActionCopy.outcomeDenied.hasPrefix("den"))
+        XCTAssertNotEqual(GateAskActionCopy.outcomeApproved, GateAskActionCopy.approve)
+        XCTAssertNotEqual(GateAskActionCopy.outcomeDenied, GateAskActionCopy.deny)
         // UX-023: delivery chrome tokens (watch face + gate status).
         XCTAssertEqual(GateAskActionCopy.sending, "Sending…")
         XCTAssertEqual(GateAskActionCopy.sent, "Sent ✓")
@@ -334,6 +344,15 @@ final class GateAskActionCopyTests: XCTestCase {
         XCTAssertTrue(
             card.contains("companionAffordance"),
             "GateCardView must use companionAffordance"
+        )
+        // UX-034: Gate Activity past-tense outcomes share Core tokens.
+        XCTAssertTrue(
+            card.contains("GateAskActionCopy.outcomeLabel"),
+            "Gate Activity must use GateAskActionCopy.outcomeLabel"
+        )
+        XCTAssertFalse(
+            card.contains("? \"approved\" : \"denied\""),
+            "Gate Activity must not hard-code dual approved/denied ternary"
         )
         XCTAssertTrue(
             card.contains("lastError") || card.contains("hub.store.lastError"),

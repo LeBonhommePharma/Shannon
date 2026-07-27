@@ -327,10 +327,20 @@ Each item is one pickable unit. Prefer **shared pure presenters** over copy-past
 - **Done:** `GateAskActionCopy.phoneAwayChip`; watch gate wired; GateAskActionCopyTests.
 - **Priority:** P2
 
+### - [x] UX-034: Pad Gate Activity past-tense outcomes use GateAskActionCopy
+
+- **Why:** Gate Activity rows hard-coded `"approved"` / `"denied"` while primary buttons use Approve/Deny — dual verb-family tokens.
+- **Platforms:** iPadOS (Core token for multi-OS audit chrome)
+- **Area:** `GateAskActionCopy`, `GateCardView.GateActivitySection`
+- **First slice:** Core `outcomeApproved` / `outcomeDenied` / `outcomeLabel(approved:)`; wire activity row; pure wiring test.
+- **Done:** Outcome tokens + `outcomeLabel`; GateActivitySection wired; GateAskActionCopyTests.
+- **Priority:** P2
+
 ---
 
 ## Investigation notes
 
+- **2026-07-26 (loop 29):** `--quick` all PASS. Backlog empty after UX-033. Residual pad Gate Activity dual approved/denied past tense. Claimed **UX-034**. Considered: watch `"No notifications"` empty (surface-specific); watch crown coaching prose (gesture narrative); pad `"No matches"`; `configurationDisplayName` catalog (leave). **No additional UX-0xx**.
 - **2026-07-26 (loop 28):** `--quick` all PASS. Backlog empty after UX-032. Residual watch gate dual `"iPhone away"` vs `queuedForPhone` family. Claimed **UX-033**. Considered: watch `"No notifications"` empty (surface-specific); pad gate activity approved/denied past tense (optional); pad `"No matches"`; `configurationDisplayName` catalog (leave). **No additional UX-0xx**.
 - **2026-07-26 (loop 27):** `--quick` all PASS. Backlog empty after UX-031. Residual widget docking empty `"Idle"` (deferred many loops). Claimed **UX-032**. Considered: watch `"No notifications"` / `"iPhone away"` (surface-specific); pad palette `"No matches"`; gate activity lowercase approved/denied (audit narrative, not primary verbs); `configurationDisplayName` catalog (leave). **No additional UX-0xx**.
 - **2026-07-26 (loop 26):** `--quick` all PASS. Backlog empty after UX-030. Residual desktop companion dual brand a11y. Claimed **UX-031**. Considered: widget docking `"Idle"` (leave); watch `"No notifications"` / `"iPhone away"` (surface-specific); pad `"No matches"` palette (surface-specific). **No additional UX-0xx**.

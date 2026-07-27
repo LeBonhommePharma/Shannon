@@ -168,7 +168,10 @@ struct GateActivitySection: View {
                             Text(event.question)
                                 .shannonText(.shannonCaption)
                                 .lineLimit(1)
-                            Text("\(event.agentName ?? CompanionFocusCopy.quietShort) · \(event.approved ? "approved" : "denied")")
+                            // UX-034: past-tense outcome shares GateAskActionCopy verb family.
+                            Text(
+                                "\(event.agentName ?? CompanionFocusCopy.quietShort) · \(GateAskActionCopy.outcomeLabel(approved: event.approved))"
+                            )
                                 .shannonNumeric(color: .shannonTertiary)
                                 .lineLimit(1)
                         }

@@ -72,12 +72,15 @@ struct MenuBarPopoverView: View {
 
     /// Independent H per listed agent — never a single anonymous number.
     private var agentReadings: [String: EntropyReading] {
-        EntropyProvenance.resolveAll(
-            agentIds: (busy.isEmpty ? summary.agents : busy).map(\.id),
+        let pool = busy.isEmpty ? summary.agents : busy
+        let liveIds = Set(pool.filter { $0.presence == .live }.map(\.id))
+        return EntropyProvenance.resolveAll(
+            agentIds: pool.map(\.id),
             bridgeConnected: bridge.connected,
             bridgeStatus: bridge.status,
             gate: activity.agentEntropy,
-            gateDBAvailable: activity.gateDBAvailable
+            gateDBAvailable: activity.gateDBAvailable,
+            liveAgentIds: liveIds
         )
     }
 

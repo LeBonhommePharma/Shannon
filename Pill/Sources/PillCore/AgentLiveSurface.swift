@@ -412,7 +412,8 @@ public enum AgentLiveSurfaceLogic {
             return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
                 == .orderedAscending
         }
-        // Fleet-useful first (same filter as `fleet`).
+        let pendingIDs = Set(pendingAsks.map(\.agentId))
+        // Fleet-useful first (same filter as `fleet`), then admission-gated.
         let useful = rankedSurfaces.filter {
             $0.attention != .unknown || $0.needsYou || !$0.activityLine.isEmpty
         }
@@ -420,15 +421,25 @@ public enum AgentLiveSurfaceLogic {
         var seen = Set<String>()
         for s in useful {
             guard let a = byId[s.agentId], !seen.contains(a.id) else { continue }
+            guard LiveRosterAdmission.shouldList(
+                agent: a,
+                surface: s,
+                hasPendingAsk: pendingIDs.contains(a.id) || s.needsYou
+            ) else { continue }
             ordered.append((a, s))
             seen.insert(a.id)
         }
-        // Quiet / unknown remainder keep first-seen input order.
+        // Quiet remainder only if admission still allows (never pad with offline
+        // / bare-observed / non-agent host spam just to fill the board).
         for id in firstSeenOrder where !seen.contains(id) {
-            if let a = byId[id], let s = surfaceById[id] {
-                ordered.append((a, s))
-                seen.insert(id)
-            }
+            guard let a = byId[id], let s = surfaceById[id] else { continue }
+            guard LiveRosterAdmission.shouldList(
+                agent: a,
+                surface: s,
+                hasPendingAsk: pendingIDs.contains(a.id) || s.needsYou
+            ) else { continue }
+            ordered.append((a, s))
+            seen.insert(id)
         }
         return Array(ordered.prefix(max(0, limit)))
     }

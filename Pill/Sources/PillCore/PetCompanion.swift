@@ -568,18 +568,26 @@ public enum CompanionRoster {
         let inferred = activity.isEmpty
             ? lastOutcomes
             : mergeOutcomes(explicit: lastOutcomes, activity: activity, now: now)
+        // Admit only production live-roster agents (same policy as pill board).
+        let admitted = LiveRosterAdmission.filterListed(
+            agents: summary.agents,
+            pendingAgentIDs: askAgents
+        )
+        let liveAdmittedCount = admitted.filter { $0.presence == .live }.count
         // Last state wins for a duplicate id (tests may stress-map presence × status).
         var byId: [String: CompanionState] = [:]
-        byId.reserveCapacity(summary.agents.count)
+        byId.reserveCapacity(admitted.count)
         var statesInInputOrder: [CompanionState] = []
-        statesInInputOrder.reserveCapacity(summary.agents.count)
-        for agent in summary.agents {
+        statesInInputOrder.reserveCapacity(admitted.count)
+        for agent in admitted {
             let perAgent = entropyDeltas[agent.id]
             let shared = entropyDelta
             let delta: Double? = {
                 guard agent.presence == .live else { return nil }
                 if let perAgent { return perAgent }
-                return shared
+                // Shared fleet delta only when this is the sole live admitted pet.
+                if liveAdmittedCount == 1 { return shared }
+                return nil
             }()
             let state = CompanionState(
                 agent: agent,
@@ -594,11 +602,11 @@ public enum CompanionRoster {
         }
         // Same glance order as PillView.listedAgents / status rows.
         let ranked = AgentLiveSurfaceLogic.rankedAgents(
-            agents: summary.agents,
+            agents: admitted,
             pendingAsks: pendingAsks,
             activity: activity,
             now: now,
-            limit: max(summary.agents.count, 1)
+            limit: max(admitted.count, 1)
         )
         var ordered: [CompanionState] = []
         var seen = Set<String>()
@@ -608,8 +616,7 @@ public enum CompanionRoster {
             ordered.append(state)
             seen.insert(agent.id)
         }
-        // Defensive: any agent missing from rank output keeps stable input order.
-        // When ids collide, only one companion row is kept (byId last-write).
+        // Defensive: any admitted agent missing from rank keeps stable input order.
         for state in statesInInputOrder where !seen.contains(state.id) {
             ordered.append(state)
             seen.insert(state.id)

@@ -188,23 +188,28 @@ struct PillView: View {
 
     /// Independent per-agent readings for every listed agent id.
     private var agentReadings: [String: EntropyReading] {
-        EntropyProvenance.resolveAll(
-            agentIds: listedAgents.map(\.id),
+        let listed = listedAgents
+        let liveIds = Set(listed.filter { $0.presence == .live }.map(\.id))
+        return EntropyProvenance.resolveAll(
+            agentIds: listed.map(\.id),
             bridgeConnected: bridge.connected,
             bridgeStatus: bridge.status,
             gate: activity.agentEntropy,
-            gateDBAvailable: activity.gateDBAvailable
+            gateDBAvailable: activity.gateDBAvailable,
+            liveAgentIds: liveIds
         )
     }
 
     /// Per-agent companion deltas (measured only).
     private var agentCompanionDeltas: [String: Double] {
-        EntropyProvenance.companionDeltas(
+        let liveIds = Set(summary.agents.filter { $0.presence == .live }.map(\.id))
+        return EntropyProvenance.companionDeltas(
             agentIds: summary.agents.map(\.id),
             bridgeConnected: bridge.connected,
             bridgeStatus: bridge.status,
             gate: activity.agentEntropy,
-            gateDBAvailable: activity.gateDBAvailable
+            gateDBAvailable: activity.gateDBAvailable,
+            liveAgentIds: liveIds
         )
     }
 

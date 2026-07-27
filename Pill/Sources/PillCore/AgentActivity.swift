@@ -95,7 +95,16 @@ public enum ProcessAttach: Sendable {
         let bundle = attachBundle?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let hasBundle = !(bundle ?? "").isEmpty
         if let running = runningBundleIDs, let bundle, hasBundle {
-            if running.contains(bundle) { return .live }
+            // Bundle still running only keeps attach **live** for agent/terminal
+            // hosts. A non-agent host (Finder, WindowManager, Dock, …) that was
+            // mis-captured must not stay on the roster solely because the app runs.
+            if running.contains(bundle) {
+                if LiveRosterAdmission.isAllowedAgentHostBundle(bundle) {
+                    return .live
+                }
+                // Host running but not an agent host → not live attach evidence.
+                return pidLive == false ? .offline : .observed
+            }
             // Host quit (and pid dead or unknown) → offline.
             return .offline
         }

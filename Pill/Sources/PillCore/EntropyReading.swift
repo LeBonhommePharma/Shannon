@@ -890,6 +890,42 @@ extension EntropyProvenance {
     ///
     /// Fail-closed: synthetic bridge backends never produce `.measured` for any
     /// agent; zero/default scores never construct an `EntropyMeasurement`.
+    /// Canonical agent identity for provenance matching (claude ↔ claude_code).
+    public static func agentIdentityKey(_ raw: String) -> String {
+        let s = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+        switch s {
+        case "claude", "claudecode", "claude_code", "anthropic_claude":
+            return "claude_code"
+        case "cursor", "cursor_agent", "cursoragent", "cursor_cli":
+            return "cursor"
+        case "codex", "openai_codex", "openai-codex":
+            return "codex"
+        case "kimi", "kimi_code", "moonshot":
+            return "kimi"
+        case "opencode", "open_code", "oc":
+            return "opencode"
+        case "gemini", "gemini_cli", "google_gemini":
+            return "gemini"
+        case "science", "claude_science", "operon":
+            return "science"
+        case "grok", "grok_build", "supergrok":
+            return "grok_build"
+        default:
+            return s
+        }
+    }
+
+    /// True when bridge `status.agent` refers to `agentId` (aliases allowed).
+    public static func bridgeNamesAgent(_ status: ShannonStatus, agentId: String) -> Bool {
+        let named = (status.agent ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !named.isEmpty else { return false }
+        return agentIdentityKey(named) == agentIdentityKey(agentId)
+    }
+
     public static func resolveForAgent(
         agentId: String,
         bridgeConnected: Bool,
@@ -897,18 +933,24 @@ extension EntropyProvenance {
         gate: [EntropyMeasurement] = [],
         gateDBAvailable: Bool = true,
         now: Date = Date(),
-        policy: EntropyPolicy = .current
+        policy: EntropyPolicy = .current,
+        /// When true, an **unnamed** measured fleet bridge may attribute to this
+        /// agent (sole live attach). Never invents H — bridge must already be
+        /// measured non-synthetic. Multi-agent fleets leave this false.
+        applyUnnamedFleetBridge: Bool = false
     ) -> EntropyReading {
         let id = agentId.trimmingCharacters(in: .whitespaces)
         guard !id.isEmpty else {
             return .absent(gateDBAvailable ? .noDetector : .gateUnavailable)
         }
 
-        // Bridge only attaches when it names this agent. An unnamed or
-        // differently-named stream is fleet-level and must not paint every row.
+        // Bridge attaches when it names this agent (alias-aware), or when the
+        // caller asserts sole-live fleet attribution for an unnamed stream.
         if bridgeConnected, let status = bridgeStatus {
             let named = (status.agent ?? "").trimmingCharacters(in: .whitespaces)
-            if named == id {
+            let namedMatch = bridgeNamesAgent(status, agentId: id)
+            let soleUnnamed = applyUnnamedFleetBridge && named.isEmpty
+            if namedMatch || soleUnnamed {
                 let source = EntropySource.bridge(backend: status.backend)
                 if source.canBeCurrent {
                     // Integrity: only non-synthetic bridge backends may mint a
@@ -939,7 +981,7 @@ extension EntropyProvenance {
         let forAgent = gate.filter { measurement in
             guard EntropyIntegrity.isTrustedSource(measurement.source) else { return false }
             guard let mid = measurement.source.agentId else { return false }
-            return mid == id
+            return agentIdentityKey(mid) == agentIdentityKey(id)
         }.sorted(by: Self.precedes)
 
         if let best = forAgent.first {
@@ -952,8 +994,7 @@ extension EntropyProvenance {
 
         // Named synthetic bridge for this agent with no gate score → honest absence.
         if bridgeConnected, let status = bridgeStatus {
-            let named = (status.agent ?? "").trimmingCharacters(in: .whitespaces)
-            if named == id {
+            if bridgeNamesAgent(status, agentId: id) {
                 let source = EntropySource.bridge(backend: status.backend)
                 if !source.canBeCurrent {
                     return .absent(.syntheticSource(
@@ -970,6 +1011,10 @@ extension EntropyProvenance {
     ///
     /// Order of `agentIds` is preserved in the returned array of pairs; the map
     /// form is for O(1) lookup by id when binding UI rows.
+    ///
+    /// - Parameter liveAgentIds: agents currently **live** (gate or process
+    ///   attach). When the bridge stream is measured but **unnamed**, and exactly
+    ///   one listed id is live, that sole attach receives the fleet bridge H.
     public static func resolveAll(
         agentIds: [String],
         bridgeConnected: Bool,
@@ -977,13 +1022,22 @@ extension EntropyProvenance {
         gate: [EntropyMeasurement] = [],
         gateDBAvailable: Bool = true,
         now: Date = Date(),
-        policy: EntropyPolicy = .current
+        policy: EntropyPolicy = .current,
+        liveAgentIds: Set<String> = []
     ) -> [String: EntropyReading] {
+        let liveKeys = Set(liveAgentIds.map { agentIdentityKey($0) })
+        var soleLiveListed: String?
+        if liveKeys.count == 1 {
+            let key = liveKeys.first!
+            soleLiveListed = agentIds.first { agentIdentityKey($0) == key }
+        }
+
         var out: [String: EntropyReading] = [:]
         out.reserveCapacity(agentIds.count)
         for raw in agentIds {
             let id = raw.trimmingCharacters(in: .whitespaces)
             guard !id.isEmpty, out[id] == nil else { continue }
+            let applyFleet = soleLiveListed.map { agentIdentityKey($0) == agentIdentityKey(id) } ?? false
             out[id] = resolveForAgent(
                 agentId: id,
                 bridgeConnected: bridgeConnected,
@@ -991,7 +1045,8 @@ extension EntropyProvenance {
                 gate: gate,
                 gateDBAvailable: gateDBAvailable,
                 now: now,
-                policy: policy
+                policy: policy,
+                applyUnnamedFleetBridge: applyFleet
             )
         }
         return out
@@ -1039,7 +1094,8 @@ extension EntropyProvenance {
         gate: [EntropyMeasurement] = [],
         gateDBAvailable: Bool = true,
         now: Date = Date(),
-        policy: EntropyPolicy = .current
+        policy: EntropyPolicy = .current,
+        applyUnnamedFleetBridge: Bool = false
     ) -> Double? {
         let reading = resolveForAgent(
             agentId: agentId,
@@ -1048,7 +1104,8 @@ extension EntropyProvenance {
             gate: gate,
             gateDBAvailable: gateDBAvailable,
             now: now,
-            policy: policy
+            policy: policy,
+            applyUnnamedFleetBridge: applyUnnamedFleetBridge
         )
         guard case .measured(let m) = reading else { return nil }
         if let d = m.deltaH, d.isFinite { return d }
@@ -1065,22 +1122,26 @@ extension EntropyProvenance {
         gate: [EntropyMeasurement] = [],
         gateDBAvailable: Bool = true,
         now: Date = Date(),
-        policy: EntropyPolicy = .current
+        policy: EntropyPolicy = .current,
+        liveAgentIds: Set<String> = []
     ) -> [String: Double] {
+        let map = resolveAll(
+            agentIds: agentIds,
+            bridgeConnected: bridgeConnected,
+            bridgeStatus: bridgeStatus,
+            gate: gate,
+            gateDBAvailable: gateDBAvailable,
+            now: now,
+            policy: policy,
+            liveAgentIds: liveAgentIds
+        )
         var out: [String: Double] = [:]
-        for raw in agentIds {
-            let id = raw.trimmingCharacters(in: .whitespaces)
-            guard !id.isEmpty, out[id] == nil else { continue }
-            if let d = companionDeltaForAgent(
-                agentId: id,
-                bridgeConnected: bridgeConnected,
-                bridgeStatus: bridgeStatus,
-                gate: gate,
-                gateDBAvailable: gateDBAvailable,
-                now: now,
-                policy: policy
-            ) {
+        for (id, reading) in map {
+            guard case .measured(let m) = reading else { continue }
+            if let d = m.deltaH, d.isFinite {
                 out[id] = d
+            } else if m.collapsed == true {
+                out[id] = -4.0
             }
         }
         return out

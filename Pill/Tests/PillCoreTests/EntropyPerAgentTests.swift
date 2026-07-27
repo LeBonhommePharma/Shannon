@@ -336,7 +336,9 @@ final class EntropyPerAgentTests: XCTestCase {
                 resumable: false, historyCount: 0, presence: .live
             ),
         ], scannedAt: now)
-        // Shared legacy delta would alarm both; per-agent map only alarms "b".
+        // Shared legacy delta must not alarm every live pet when multi-agent:
+        // only sole-live gets the fleet fallback (production attach path).
+        // Per-agent map still alarms "b" independently.
         let roster = CompanionRoster.build(
             from: summary,
             now: now,
@@ -344,8 +346,7 @@ final class EntropyPerAgentTests: XCTestCase {
             entropyDelta: -9.0
         )
         let byId = Dictionary(uniqueKeysWithValues: roster.map { ($0.agent.id, $0.mood) })
-        // "a" gets the shared fallback; "b" gets its own map entry.
-        XCTAssertEqual(byId["a"], CompanionMood.wary)
+        XCTAssertNotEqual(byId["a"], CompanionMood.wary, "shared fleet delta must not multi-alarm")
         XCTAssertEqual(byId["b"], CompanionMood.wary)
     }
 

@@ -515,9 +515,9 @@ final class CompanionRosterTests: XCTestCase {
         ], scannedAt: now)
 
         let roster = CompanionRoster.build(from: summary, now: now)
-        // ENH-016: matches rankedAgents — working first, then idle by displayName.
-        // ChatGPT < Codex < Cursor among idle catalog names.
-        XCTAssertEqual(roster.map(\.id), ["science", "chatgpt", "codex", "cursor"])
+        // Live-roster admission: observed chatgpt/cursor drop; live science + codex remain.
+        // Working (science) ranks before idle live (codex).
+        XCTAssertEqual(roster.map(\.id), ["science", "codex"])
         XCTAssertEqual(roster[0].mood, .alert)
         XCTAssertEqual(roster[1].mood, .idle)
         let ranked = AgentLiveSurfaceLogic.rankedAgents(
@@ -568,9 +568,10 @@ final class CompanionRosterTests: XCTestCase {
 
         let roster = CompanionRoster.build(from: summary, now: now, entropyDelta: -6.0)
         let byID = Dictionary(uniqueKeysWithValues: roster.map { ($0.id, $0.mood) })
+        // Observed/offline pets are not listed; sole live science gets fleet delta.
         XCTAssertEqual(byID["science"], .wary)
-        XCTAssertEqual(byID["cursor"], .idle)
-        XCTAssertEqual(byID["codex"], .sleepy)
+        XCTAssertNil(byID["cursor"], "observed must not appear on companion board")
+        XCTAssertNil(byID["codex"], "offline must not appear on companion board")
     }
 
     func testApprovalsAreAppliedPerAgent() {

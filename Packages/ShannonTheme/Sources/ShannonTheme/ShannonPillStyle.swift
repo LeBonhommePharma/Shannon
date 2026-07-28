@@ -157,16 +157,19 @@ public struct PillStyle: ViewModifier {
     /// Notch island uses opaque pure-black so the hardware camera cutout and
     /// the software hang read as one silhouette against wallpaper (Liquid Glass
     /// greys a translucent fill and looks like “only the camera”).
-    private var notchIslandFill: Color {
-        Color(red: 0.0, green: 0.0, blue: 0.0)
-    }
+    /// Single-sourced via ``AgentNotchChrome/islandFill`` (no one-off hex).
+    private var notchIslandFill: Color { Color.notchIslandFill }
 
     /// Collapsed notch chrome never uses the "working" border/glow — those
     /// float the strip off the hardware cutout. Expanded may still light up.
     private var showActiveChrome: Bool { isActive && !isCollapsed }
 
     private var borderWidth: CGFloat {
-        if isCollapsed { return isQuiet ? 0.5 : 0.65 }
+        if isCollapsed {
+            return isQuiet
+                ? AgentNotchChrome.islandHairlineWidthQuiet
+                : AgentNotchChrome.islandHairlineWidthRest
+        }
         if showActiveChrome { return 1.5 }
         return isQuiet ? 0.75 : 1.25
     }
@@ -174,7 +177,10 @@ public struct PillStyle: ViewModifier {
     private var borderColor: Color {
         if isCollapsed {
             // Hairline only — never pillBorderActive electric blue on the island.
-            return Color.pillBorder.opacity(isQuiet ? 0.35 : 0.5)
+            let op = isQuiet
+                ? AgentNotchChrome.islandHairlineQuiet
+                : AgentNotchChrome.islandHairlineRest
+            return Color.pillBorder.opacity(op)
         }
         return showActiveChrome ? Color.pillBorderActive : Color.pillBorder
     }
@@ -194,7 +200,7 @@ public struct PillStyle: ViewModifier {
                     } else if notchIsland {
                         // Expanded island morph: still black shell; glass lives
                         // in board content sections, not the outer silhouette.
-                        notchIslandFill.opacity(0.92)
+                        notchIslandFill.opacity(AgentNotchChrome.islandExpandedFillOpacity)
                         PillMaterial(kind: .sheet)
                         Color.pillBackground.opacity(fillOpacity * 0.85)
                         Color.pillScrim.opacity(isQuiet ? 0.45 : 0.75)
@@ -245,6 +251,7 @@ public struct PillStyle: ViewModifier {
             // Animate only expand/collapse of the island. isActive/isQuiet flip
             // on live telemetry and used to chrome-animate every resource tick
             // (looked like the notch pill popping in and out while refreshing).
+            // Spring = AgentNotchChrome.islandSpring == ShannonSpring.float.
             .animation(.shannonFloat, value: isCollapsed)
     }
 

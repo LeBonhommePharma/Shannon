@@ -200,6 +200,7 @@ public enum ShannonColorCatalogue {
         .init("pillBorder", .pillBorder, group: "Pill"),
         .init("pillBorderActive", .pillBorderActive, group: "Pill"),
         .init("pillScrim", .pillScrim, group: "Pill"),
+        .init("notchIslandFill", .notchIslandFill, group: "Pill"),
     ]
 
     public static let accent: [ShannonColorToken] = [

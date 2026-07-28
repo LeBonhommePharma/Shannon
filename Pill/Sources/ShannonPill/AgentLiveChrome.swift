@@ -22,16 +22,27 @@ enum AgentLiveChrome {
     }
 
     /// Capsule ink color for the given attention state.
+    ///
+    /// Delegates to ``AgentNotchChrome`` so notch + menu-bar attention ink
+    /// cannot drift from theme roles (AgentNotch-class dark HUD).
     static func attentionColor(
         surface: AgentLiveSurface,
         styleInk: Color
     ) -> Color {
+        let role: AgentNotchChrome.AttentionRole
         switch surface.attention {
-        case .needsYou: return .shannonWarning
-        case .working: return styleInk
-        case .finished: return .shannonSuccess
-        case .idle, .unknown: return styleInk
+        case .needsYou: role = .needsYou
+        case .working: role = .working
+        case .finished: role = .finished
+        case .idle: role = .idle
+        case .unknown: role = .unknown
         }
+        return AgentNotchChrome.ink(for: role, styleInk: styleInk)
+    }
+
+    /// Collapse alarm ink (Shannon differentiator — only when measured).
+    static var collapseInk: Color {
+        AgentNotchChrome.ink(for: .collapse)
     }
 
     /// Resolve the surface used by badge + detail lines (same inputs both HUDs use).

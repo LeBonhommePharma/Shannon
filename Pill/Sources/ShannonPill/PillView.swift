@@ -967,19 +967,24 @@ struct PillView: View {
     }
 
     /// Sliding-window H + ΔH (+ z when present) with cool→warm→red lock-in map.
+    /// Synthetic bridge (`demo`) never paints measured-looking H (fail-closed).
     @ViewBuilder
     private var thermodynamicRefereeSurface: some View {
-        let decision = collapseDecision
+        let now = Date()
+        let measuredLabel = EntropyStripPresentation.summaryLabel(
+            reading: fleetReading,
+            bridgeStatus: bridge.status,
+            now: now
+        )
+        let watermark = EntropyStripPresentation.syntheticWatermark(
+            bridgeConnected: bridge.connected,
+            bridgeStatus: bridge.status
+        )
+        let showRail = EntropyStripPresentation.showsRail(reading: fleetReading, now: now)
         let series = bridge.hHistory
-        let points = EntropyRailLogic.points(
-            hSeries: series,
-            isCurrent: fleetReading.isMeasured
-        )
-        let label = EntropyRailLogic.summaryLabel(
-            h: decision.entropy ?? fleetReading.currentBits ?? bridge.status?.entropy,
-            deltaH: decision.deltaH ?? fleetReading.measurement?.deltaH ?? bridge.status?.deltaH,
-            zScore: decision.zScore ?? bridge.status?.zScore
-        )
+        let points = showRail
+            ? EntropyRailLogic.points(hSeries: series, isCurrent: fleetReading.isMeasured)
+            : []
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text("ENTROPY")
@@ -987,33 +992,36 @@ struct PillView: View {
                     .foregroundStyle(Color.shannonTertiary)
                     .tracking(0.5)
                 Spacer(minLength: 4)
-                if let label {
-                    Text(label)
+                if let measuredLabel {
+                    Text(measuredLabel)
                         .font(.shannonPillMono)
-                        .foregroundStyle(
-                            fleetReading.isMeasured
-                                ? entropyTint(for: fleetReading)
-                                : Color.shannonNeutral
-                        )
+                        .foregroundStyle(entropyTint(for: fleetReading))
                         .contentTransition(.identity)
-                        .accessibilityLabel(label)
+                        .accessibilityLabel(measuredLabel)
+                } else if let watermark {
+                    Text(watermark)
+                        .font(.shannonMenuSection)
+                        .foregroundStyle(Color.shannonNeutral)
+                        .accessibilityLabel(watermark)
                 } else {
-                    Text(fleetReading.isMeasured ? "…" : "no detector")
+                    Text("no detector")
                         .font(.shannonPillMono)
                         .foregroundStyle(Color.shannonNeutral)
                 }
             }
-            if points.count >= 2 {
-                ThermodynamicSparkline(points: points)
-                    .frame(height: 28)
-                    .accessibilityLabel("Entropy history rail")
-            } else {
-                FluidEntropyRail(
-                    display: fleetReading.display(at: Date()),
-                    agentAttached: hasAttachedAgent || bridge.connected,
-                    reduceMotion: reduceMotion
-                )
-                .frame(height: 8)
+            if showRail {
+                if points.count >= 2 {
+                    ThermodynamicSparkline(points: points)
+                        .frame(height: 28)
+                        .accessibilityLabel("Entropy history rail")
+                } else if let display = fleetReading.display(at: now) {
+                    FluidEntropyRail(
+                        display: display,
+                        agentAttached: hasAttachedAgent || bridge.connected,
+                        reduceMotion: reduceMotion
+                    )
+                    .frame(height: 8)
+                }
             }
         }
         .padding(8)
@@ -1223,7 +1231,14 @@ struct PillView: View {
             if let snap = battery.snapshot {
                 VStack(spacing: 2) {
                     BatteryRing(snapshot: snap, diameter: 28)
-                    Text(snap.timeLabel)
+                    // Calm label when hub is idle — avoid stuck "Calculating…"
+                    // that reads as agent progress (BatteryChromePolicy).
+                    Text(
+                        BatteryChromePolicy.timeLabel(
+                            snapshot: snap,
+                            busyCount: busy.count
+                        )
+                    )
                         .font(.shannonMenuFootnote)
                         .foregroundStyle(Color.shannonTertiary)
                         .lineLimit(1)
@@ -1302,10 +1317,12 @@ struct PillView: View {
             // must not look alarmed about a number the rest of the pill is, at
             // that same instant, labelling "simulated" — and connectivity alone
             // does not establish provenance: `--demo` opens a real socket.
+            let companionVisible: Bool = {
+                if #available(macOS 14, *) { return true }
+                return false
+            }()
             if #available(macOS 14, *) {
                 // Same density as listedAgentSurfaces / agentRow (meta + usage).
-                // Without this, the live macOS 14+ board would stay pet-status-only
-                // while the #else agentRow path showed project/branch/model/tokens.
                 CompanionBoardView(
                     summary: summary,
                     entropyDeltas: agentCompanionDeltas,
@@ -1316,7 +1333,6 @@ struct PillView: View {
                     densityByAgent: SessionContentPresenter.companionBoardDensity(
                         from: listedAgentSurfaces
                     ),
-                    // ENH-028: session cwd for jump-to-host folder fallback.
                     cwdByAgent: Dictionary(
                         uniqueKeysWithValues: sessionsByAgent.compactMap { id, s in
                             guard let cwd = s.cwd, !cwd.isEmpty else { return nil }
@@ -1325,16 +1341,20 @@ struct PillView: View {
                     )
                 )
             } else {
-                // The companions are Canvas-drawn and need macOS 14; the package
-                // still deploys to 13. Falling back to the plain rows loses only
-                // the artwork, never information — the companion restates status,
-                // it is not the only place status appears.
                 ForEach(listedAgentSurfaces, id: \.agent.id) { pair in
                     agentRow(pair.agent, surface: pair.surface, metaLine: pair.metaLine)
                 }
             }
-            // Per-agent entropy rails — each listed agent owns its own H.
-            entropyStrip
+            // Per-agent entropy rails only when they add measured H — not a
+            // second "no H" clone of the companion roster (AgentNotch density).
+            if ExpandedBoardDensity.showPerAgentEntropyStrip(
+                companionBoardVisible: companionVisible,
+                anyListedAgentHasMeasuredH: ExpandedBoardDensity.anyDisplayableH(
+                    readings: agentReadings
+                )
+            ) {
+                entropyStrip
+            }
         }
     }
 

@@ -47,11 +47,17 @@ cmake -B build -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 
-# Apple platforms (macOS Pill + packages; iOS / iPadOS / watchOS when Xcode allows)
+# Local multi-platform swarm (true-parallel Core/Theme/Pill/Python, then Apple + installer)
+./scripts/platform_swarm.sh              # full swarm where runnable
+./scripts/platform_swarm.sh --quick      # Pill build-only + Apple --quick
+# SHANNON_SWARM_LOG_DIR=/tmp/swarm-logs ./scripts/platform_swarm.sh --quick
+
+# Apple platforms only (macOS Pill + packages; iOS / iPadOS / watchOS when Xcode allows)
 ./scripts/test_apple_platforms.sh              # all available
 ./scripts/test_apple_platforms.sh --quick      # packages + generic app builds
 ./scripts/test_apple_platforms.sh ios ipad watch
 # Details: docs/APPLE_PLATFORM_TESTING.md
+# Honest SKIP is allowed (missing sims/xcodegen); inventing green is not.
 ```
 
 ## Linting & Formatting
@@ -111,4 +117,14 @@ S = log2(Z) - (1/Z) Σ (w_i - max_w) exp(w_i - max_w) / ln(2)
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`): Python tests on Linux/macOS/Windows × Python 3.10/3.11/3.12, C++ tests on Linux/macOS, lint with ruff on Python 3.12.
+GitHub Actions (`.github/workflows/ci.yml`):
+
+| Job | Coverage |
+|-----|----------|
+| `cpp` | Ubuntu + macOS (`ctest`; some AVX suites filtered on hosted runners) |
+| `python` | Ubuntu/macOS × 3.10–3.13; Windows pure-Python at 3.12 only (`SHANNON_SKIP_CORE=1`) |
+| `python-fallback` / packaging | Pure install paths + wheel checks |
+| `apple-platforms` | `./scripts/test_apple_platforms.sh --quick` on macos (SKIP if no Simulator runtimes) |
+| `benchmarks` | Ubuntu, needs cpp + python |
+
+**Not in CI (yet):** `ruff` — still a **local** CONTRIBUTING gate; pre-existing debt would fail a blanket CI job. Desktop multi-OS fan-out is the **CI matrix** (`fail-fast: false`). Local coordinated health is **`./scripts/platform_swarm.sh`** (not a second CI matrix). Windows never builds the optional C++ core in CI.

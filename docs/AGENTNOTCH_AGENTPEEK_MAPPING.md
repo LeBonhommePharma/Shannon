@@ -30,11 +30,12 @@ Category parity (defining mechanics), not pixel clones. All fields fail-closed.
 
 | UI | Presenter |
 |---|---|
-| Collapsed pill | `primaryFocus` / `collapsedStatusLine` / usage + count chips via `usageByAgent` from `parity.sessionsByAgent` |
+| Collapsed pill | `primaryFocus` / `collapsedStatusLine` / `CollapsedIslandPeek` (quiet + ranked peeks) / measured H via `FleetGlancePresenter` / usage + count chips when sourced |
 | Expanded board | `SessionContentPresenter.listedSurfaces` (same session merge as menu bar) + meta line + usage badge + companions + entropy rails |
-| Menu-bar roster | `SessionContentPresenter.cardsFromAgents` + badges/meta/usage |
+| Menu-bar roster | `SessionContentPresenter.cardsFromAgents` + `AgentNotchBadge` via `CollapsedIslandPeek.chromeRole` |
 | Pulled sessions | `SessionContentPresenter.cards` (artifact; live agents de-duped) |
 | Approvals | GateAskCard (expand) / GateInlineCard (popover) |
+| Entropy (SSOT) | `FleetGlancePresenter` one resolve/tick; synthetic never measured H |
 
 ## Explicit non-parity (by design)
 

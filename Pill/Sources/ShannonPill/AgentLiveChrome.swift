@@ -23,21 +23,24 @@ enum AgentLiveChrome {
 
     /// Capsule ink color for the given attention state.
     ///
-    /// Delegates to ``AgentNotchChrome`` so notch + menu-bar attention ink
-    /// cannot drift from theme roles (AgentNotch-class dark HUD).
+    /// Delegates to ``CollapsedIslandPeek.chromeRole`` + ``AgentNotchChrome`` so
+    /// notch + menu-bar attention ink cannot drift (AgentNotch-class dark HUD).
     static func attentionColor(
         surface: AgentLiveSurface,
         styleInk: Color
     ) -> Color {
-        let role: AgentNotchChrome.AttentionRole
-        switch surface.attention {
-        case .needsYou: role = .needsYou
-        case .working: role = .working
-        case .finished: role = .finished
-        case .idle: role = .idle
-        case .unknown: role = .unknown
-        }
+        let role = CollapsedIslandPeek.chromeRole(for: surface.attention)
         return AgentNotchChrome.ink(for: role, styleInk: styleInk)
+    }
+
+    /// Shared dual-HUD badge role for a live surface (roster + island chips).
+    static func badgeRole(for surface: AgentLiveSurface) -> AgentNotchChrome.AttentionRole {
+        CollapsedIslandPeek.chromeRole(for: surface.attention)
+    }
+
+    /// Shared dual-HUD badge role for a session card attention value.
+    static func badgeRole(for attention: AgentLiveAttention) -> AgentNotchChrome.AttentionRole {
+        CollapsedIslandPeek.chromeRole(for: attention)
     }
 
     /// Collapse alarm ink (Shannon differentiator — only when measured).

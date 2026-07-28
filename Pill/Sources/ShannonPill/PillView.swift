@@ -645,9 +645,10 @@ struct PillView: View {
 
             Spacer(minLength: 2)
 
-            // Mini entropy chip: measured only; prefers primary agent H
-            // (FleetGlancePresenter), then fleet — never synthetic.
-            if let label = fleetGlance.collapsedEntropyLabel {
+            // Mini entropy chip: measured only (FleetGlancePresenter fail-closed).
+            if CollapsedIslandPeek.showsMeasuredEntropyChip(
+                label: fleetGlance.collapsedEntropyLabel
+            ), let label = fleetGlance.collapsedEntropyLabel {
                 Text(label)
                     .font(.shannonPillMono)
                     .foregroundStyle(entropyTint(for: fleetReading))
@@ -661,12 +662,17 @@ struct PillView: View {
                     .help("Measured token entropy (per-agent when available)")
             }
 
-            // Trailing chips: prefer one fleet/usage metric, not a dense stack.
+            // Trailing chips: one fleet/usage metric max (AgentNotch density).
             if let usage = collapsedUsageChip {
                 AgentNotchBadge(text: usage, role: .idle, styleInk: Color.white.opacity(0.75))
                     .matchedGeometryEffect(id: "agentChip", in: islandNS)
                     .help("Usage from local session telemetry")
-            } else if collapsedActiveCount > 1 {
+            } else if CollapsedIslandPeek.showsMultiAgentCountChip(
+                activeCount: collapsedActiveCount,
+                collapseAlarm: collapseAlarm,
+                pendingAsk: hasPendingAsk,
+                hasUsageChip: false
+            ) {
                 AgentNotchBadge(
                     text: "\(collapsedActiveCount)",
                     role: .working,
@@ -680,6 +686,7 @@ struct PillView: View {
                 )
             }
 
+            // Ranked peeks: needs-you / collapse glyphs only (not full board).
             if hasPendingAsk {
                 Image(systemName: "questionmark.circle.fill")
                     .font(.system(size: 11, weight: .semibold))

@@ -75,17 +75,8 @@ struct MenuBarAgentRoster: View {
         // Map-only from FleetGlancePresenter.rowReadings (preferred live+memory).
         // No ad-hoc resolveForAgent — dual-HUD SSOT for this tick.
         let agentReading = agentReadings[card.agentId] ?? .absent(.noDetector)
-        // Attention chrome from card.attention → badgeRole → AgentNotchBadge
-        // (no intermediate AgentLiveSurface; that binding was unused dead weight).
-        let badgeRole: AgentNotchChrome.AttentionRole = {
-            switch card.attention {
-            case .needsYou: return .needsYou
-            case .working: return .working
-            case .finished: return .finished
-            case .idle: return .idle
-            case .unknown: return .unknown
-            }
-        }()
+        // Dual-HUD SSOT: same chrome role map as the collapsed island.
+        let badgeRole = AgentLiveChrome.badgeRole(for: card.attention)
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 7) {
                 Text(style.emoji).font(.shannonMenuBody)

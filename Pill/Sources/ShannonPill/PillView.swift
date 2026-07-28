@@ -154,16 +154,6 @@ struct PillView: View {
     private var primary: AgentActivitySnapshot? { summary.primary }
     private var busy: [AgentActivitySnapshot] { summary.busy }
 
-    /// Fleet-level reading (worst/freshest) for collapse border and collapsed badge.
-    private var fleetReading: EntropyReading {
-        EntropyProvenance.resolve(
-            bridgeConnected: bridge.connected,
-            bridgeStatus: bridge.status,
-            gate: activity.agentEntropy,
-            gateDBAvailable: activity.gateDBAvailable
-        )
-    }
-
     /// Best session per agent (project / branch / model / tokens) — menu-bar parity.
     private var sessionsByAgent: [String: AgentSession] { parity.sessionsByAgent }
 
@@ -222,39 +212,50 @@ struct PillView: View {
         listedAgentSurfaces.map(\.agent)
     }
 
-    /// Independent per-agent readings for every listed agent id.
-    private var agentReadings: [String: EntropyReading] {
-        let listed = listedAgents
-        // Sole-live fleet bridge only among **admitted** live rows (not every
-        // sticky Cursor host still open in the full summary).
-        let liveIds = Set(listed.filter { $0.presence == .live }.map(\.id))
-        return EntropyProvenance.resolveAll(
-            agentIds: listed.map(\.id),
+    /// One entropy resolve per tick for dual-HUD (fleet + per-agent + companions).
+    private var fleetGlance: FleetGlanceSnapshot {
+        let pendingIDs = Set(activity.pendingAsks.map(\.agentId))
+        let listedIds = listedAgents.map(\.id)
+        let scope: FleetGlancePresenter.ResolveScope =
+            listedIds.isEmpty
+            ? .admittedPreferBusy(limit: busy.isEmpty ? 3 : 4)
+            : .listed(listedIds)
+        // Memory map for preferredRowReading — only agents we resolve this tick.
+        var memory: [String: EntropyReading] = [:]
+        let resolveIds = FleetGlancePresenter.resolveAgentIds(
+            agents: summary.agents,
+            pendingAgentIDs: pendingIDs,
+            scope: scope
+        )
+        for id in resolveIds {
+            if activity.entropyMemory.latest(for: id) != nil {
+                memory[id] = activity.entropyMemory.reading(
+                    for: id,
+                    gateDBAvailable: activity.gateDBAvailable
+                )
+            }
+        }
+        let companionVisible: Bool = {
+            if #available(macOS 14, *) { return true }
+            return false
+        }()
+        return FleetGlancePresenter.snapshot(
+            agents: summary.agents,
+            pendingAgentIDs: pendingIDs,
             bridgeConnected: bridge.connected,
             bridgeStatus: bridge.status,
             gate: activity.agentEntropy,
             gateDBAvailable: activity.gateDBAvailable,
-            liveAgentIds: liveIds
+            scope: scope,
+            memoryByAgent: memory,
+            primaryAgentId: busy.first?.id ?? primary?.id,
+            companionBoardVisible: companionVisible
         )
     }
 
-    /// Per-agent companion deltas (measured only) — admitted live set only.
-    private var agentCompanionDeltas: [String: Double] {
-        let pendingIDs = Set(activity.pendingAsks.map(\.agentId))
-        let admitted = LiveRosterAdmission.filterListed(
-            agents: summary.agents,
-            pendingAgentIDs: pendingIDs
-        )
-        let liveIds = Set(admitted.filter { $0.presence == .live }.map(\.id))
-        return EntropyProvenance.companionDeltas(
-            agentIds: admitted.map(\.id),
-            bridgeConnected: bridge.connected,
-            bridgeStatus: bridge.status,
-            gate: activity.agentEntropy,
-            gateDBAvailable: activity.gateDBAvailable,
-            liveAgentIds: liveIds
-        )
-    }
+    private var fleetReading: EntropyReading { fleetGlance.fleetReading }
+    private var agentReadings: [String: EntropyReading] { fleetGlance.rowReadings }
+    private var agentCompanionDeltas: [String: Double] { fleetGlance.companionDeltas }
 
     /// True when a real track is loaded *and* no agent is busy — never show
     /// media chrome for an empty/unavailable session (P2.3 / UX half-dead chrome).
@@ -644,9 +645,10 @@ struct PillView: View {
 
             Spacer(minLength: 2)
 
-            // Mini entropy chip morphs into expanded thermodynamic rail.
-            if fleetReading.isMeasured, let bits = fleetReading.currentBits {
-                Text(String(format: "H %.1f", bits))
+            // Mini entropy chip: measured only; prefers primary agent H
+            // (FleetGlancePresenter), then fleet — never synthetic.
+            if let label = fleetGlance.collapsedEntropyLabel {
+                Text(label)
                     .font(.shannonPillMono)
                     .foregroundStyle(entropyTint(for: fleetReading))
                     .padding(.horizontal, AgentNotchChrome.badgeHorizontalPadding)
@@ -656,7 +658,7 @@ struct PillView: View {
                             .fill(Color.white.opacity(0.10))
                     )
                     .matchedGeometryEffect(id: "entropyRail", in: islandNS)
-                    .help("Measured token entropy")
+                    .help("Measured token entropy (per-agent when available)")
             }
 
             // Trailing chips: prefer one fleet/usage metric, not a dense stack.
@@ -1317,10 +1319,6 @@ struct PillView: View {
             // must not look alarmed about a number the rest of the pill is, at
             // that same instant, labelling "simulated" — and connectivity alone
             // does not establish provenance: `--demo` opens a real socket.
-            let companionVisible: Bool = {
-                if #available(macOS 14, *) { return true }
-                return false
-            }()
             if #available(macOS 14, *) {
                 // Same density as listedAgentSurfaces / agentRow (meta + usage).
                 CompanionBoardView(
@@ -1345,14 +1343,9 @@ struct PillView: View {
                     agentRow(pair.agent, surface: pair.surface, metaLine: pair.metaLine)
                 }
             }
-            // Per-agent entropy rails only when they add measured H — not a
-            // second "no H" clone of the companion roster (AgentNotch density).
-            if ExpandedBoardDensity.showPerAgentEntropyStrip(
-                companionBoardVisible: companionVisible,
-                anyListedAgentHasMeasuredH: ExpandedBoardDensity.anyDisplayableH(
-                    readings: agentReadings
-                )
-            ) {
+            // Per-agent entropy rails only when they add measured H — density
+            // decision is part of fleetGlance (single tick SSOT).
+            if fleetGlance.showPerAgentEntropyStrip {
                 entropyStrip
             }
         }
@@ -1363,14 +1356,8 @@ struct PillView: View {
         surface: AgentLiveSurface,
         metaLine: String? = nil
     ) -> some View {
-        let reading = agentReadings[a.id]
-            ?? EntropyProvenance.resolveForAgent(
-                agentId: a.id,
-                bridgeConnected: bridge.connected,
-                bridgeStatus: bridge.status,
-                gate: activity.agentEntropy,
-                gateDBAvailable: activity.gateDBAvailable
-            )
+        // Map-only — FleetGlancePresenter already preferred live + memory.
+        let reading = fleetGlance.reading(for: a.id)
         return HStack(spacing: 8) {
             // Status dot: 8 pt in dark mode for better visibility
             Circle()
@@ -1535,14 +1522,8 @@ struct PillView: View {
                 fleetEntropyRow(fleetReading)
             } else {
                 ForEach(pairs, id: \.agent.id) { pair in
-                    let reading = agentReadings[pair.agent.id]
-                        ?? EntropyProvenance.resolveForAgent(
-                            agentId: pair.agent.id,
-                            bridgeConnected: bridge.connected,
-                            bridgeStatus: bridge.status,
-                            gate: activity.agentEntropy,
-                            gateDBAvailable: activity.gateDBAvailable
-                        )
+                    // Map-only — no second resolveForAgent path.
+                    let reading = fleetGlance.reading(for: pair.agent.id)
                     agentEntropyRow(agent: pair.agent, reading: reading, surface: pair.surface)
                 }
             }

@@ -72,26 +72,9 @@ struct MenuBarAgentRoster: View {
 
     private func agentCardRow(_ card: SessionContentCard) -> some View {
         let style = AgentStyleCatalog.style(for: card.agentId)
-        // Prefer measured resolveAll (sole-live / alias bridge) over stale memory
-        // that would show "—" under enforce while attach H is measured.
-        let resolved = agentReadings[card.agentId]
-            ?? EntropyProvenance.resolveForAgent(
-                agentId: card.agentId,
-                bridgeConnected: bridge.connected,
-                bridgeStatus: bridge.status,
-                gate: activity.agentEntropy,
-                gateDBAvailable: activity.gateDBAvailable
-            )
-        let mem: EntropyReading? = activity.entropyMemory.latest(for: card.agentId) != nil
-            ? activity.entropyMemory.reading(
-                for: card.agentId,
-                gateDBAvailable: activity.gateDBAvailable
-            )
-            : nil
-        let agentReading = EntropyProvenance.preferredRowReading(
-            live: resolved,
-            memory: mem
-        )
+        // Map-only from FleetGlancePresenter.rowReadings (preferred live+memory).
+        // No ad-hoc resolveForAgent — dual-HUD SSOT for this tick.
+        let agentReading = agentReadings[card.agentId] ?? .absent(.noDetector)
         // Attention chrome from card.attention → badgeRole → AgentNotchBadge
         // (no intermediate AgentLiveSurface; that binding was unused dead weight).
         let badgeRole: AgentNotchChrome.AttentionRole = {

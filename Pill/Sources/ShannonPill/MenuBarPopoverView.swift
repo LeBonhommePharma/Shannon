@@ -68,37 +68,43 @@ struct MenuBarPopoverView: View {
     var onOpenSettings: () -> Void
     var onQuit: () -> Void
 
-    /// Fleet-level reading (worst/freshest) for the header collapse line and
-    /// footer summary. Per-agent gauges use `agentReadings`.
-    private var reading: EntropyReading {
-        EntropyProvenance.resolve(
-            bridgeConnected: bridge.connected,
-            bridgeStatus: bridge.status,
-            gate: activity.agentEntropy,
-            gateDBAvailable: activity.gateDBAvailable
-        )
-    }
-
-    /// Independent H per listed agent — never a single anonymous number.
-    private var agentReadings: [String: EntropyReading] {
+    /// One entropy resolve per tick — shared with the notch pill
+    /// (`FleetGlancePresenter`). Per-agent H never copies fleet H onto every row.
+    private var fleetGlance: FleetGlanceSnapshot {
         let pendingIDs = Set(activity.pendingAsks.map(\.agentId))
-        let admitted = LiveRosterAdmission.filterListed(
+        var memory: [String: EntropyReading] = [:]
+        let ids = FleetGlancePresenter.resolveAgentIds(
             agents: summary.agents,
-            pendingAgentIDs: pendingIDs
+            pendingAgentIDs: pendingIDs,
+            scope: .admittedPreferBusy(limit: nil)
         )
-        // Prefer busy among admitted; sole-live only among admitted live rows.
-        let pool = admitted.filter { $0.status.isBusy }
-        let use = pool.isEmpty ? admitted : pool
-        let liveIds = Set(admitted.filter { $0.presence == .live }.map(\.id))
-        return EntropyProvenance.resolveAll(
-            agentIds: use.map(\.id),
+        for id in ids {
+            if activity.entropyMemory.latest(for: id) != nil {
+                memory[id] = activity.entropyMemory.reading(
+                    for: id,
+                    gateDBAvailable: activity.gateDBAvailable
+                )
+            }
+        }
+        return FleetGlancePresenter.snapshot(
+            agents: summary.agents,
+            pendingAgentIDs: pendingIDs,
             bridgeConnected: bridge.connected,
             bridgeStatus: bridge.status,
             gate: activity.agentEntropy,
             gateDBAvailable: activity.gateDBAvailable,
-            liveAgentIds: liveIds
+            scope: .admittedPreferBusy(limit: nil),
+            memoryByAgent: memory,
+            primaryAgentId: busy.first?.id,
+            companionBoardVisible: false
         )
     }
+
+    /// Fleet-level reading (header collapse + footer) from the shared tick.
+    private var reading: EntropyReading { fleetGlance.fleetReading }
+
+    /// Independent H per listed agent — map from shared resolve (no second path).
+    private var agentReadings: [String: EntropyReading] { fleetGlance.rowReadings }
 
     /// Only alarm on a collapse something actually measured. Unknown is not
     /// false, and it is not a collapse either.

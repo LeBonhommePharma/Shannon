@@ -92,16 +92,8 @@ struct MenuBarAgentRoster: View {
             live: resolved,
             memory: mem
         )
-        // Synthetic surface for shared attention color (badge already on card).
-        let surface = AgentLiveSurface(
-            agentId: card.agentId,
-            displayName: card.displayName,
-            attention: card.attention,
-            activityLine: card.activityLine,
-            usage: card.usage,
-            needsYou: card.needsYou,
-            isFinished: card.isFinished
-        )
+        // Attention chrome from card.attention → badgeRole → AgentNotchBadge
+        // (no intermediate AgentLiveSurface; that binding was unused dead weight).
         let badgeRole: AgentNotchChrome.AttentionRole = {
             switch card.attention {
             case .needsYou: return .needsYou

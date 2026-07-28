@@ -38,31 +38,31 @@ public extension Font {
     /// `.caption` · regular · SF Mono
     static let shannonMono = Font.system(.caption, design: .monospaced, weight: .regular)
 
-    // MARK: Menubar + notch chrome (native macOS)
+    // MARK: Menubar + notch chrome (AgentNotch density on macOS 27)
 
-    /// Popover / pill section headers — SF Pro default (system UI face).
-    static let shannonMenuSection = Font.system(.caption2, design: .default, weight: .semibold)
+    /// Popover / pill section headers — 10pt semibold, uppercase tracking in views.
+    static let shannonMenuSection = Font.system(size: 10, weight: .semibold, design: .default)
 
-    /// Primary menubar popover title (e.g. "Shannon").
-    static let shannonMenuTitle = Font.system(.subheadline, design: .default, weight: .semibold)
+    /// Primary menubar popover title (e.g. "Shannon") — AgentNotch-class HUD title.
+    static let shannonMenuTitle = Font.system(size: 13, weight: .semibold, design: .default)
 
     /// Secondary line under titles.
-    static let shannonMenuSubtitle = Font.system(.caption2, design: .default, weight: .regular)
+    static let shannonMenuSubtitle = Font.system(size: 11, weight: .regular, design: .default)
 
     /// Body rows in the status popover (agent names, tips).
-    static let shannonMenuBody = Font.system(.caption, design: .default, weight: .semibold)
+    static let shannonMenuBody = Font.system(size: 12, weight: .semibold, design: .default)
 
     /// Supporting popover copy.
-    static let shannonMenuFootnote = Font.system(.caption2, design: .default, weight: .regular)
+    static let shannonMenuFootnote = Font.system(size: 11, weight: .regular, design: .default)
 
     /// Telemetry numbers in the menubar (H, %, RMSD) — SF Mono.
-    static let shannonMenuMono = Font.system(.caption2, design: .monospaced, weight: .semibold)
+    static let shannonMenuMono = Font.system(size: 11, weight: .semibold, design: .monospaced)
 
-    /// Collapsed notch label — SF Pro default (matches menu bar text).
-    static let shannonPillLabel = Font.system(.caption, design: .default, weight: .semibold)
+    /// Collapsed notch focus line — scannable at island density.
+    static let shannonPillLabel = Font.system(size: 12, weight: .semibold, design: .default)
 
-    /// Collapsed notch numeric H — SF Mono.
-    static let shannonPillMono = Font.system(.caption, design: .monospaced, weight: .semibold)
+    /// Collapsed notch numeric H — SF Mono, same optical size as pill label.
+    static let shannonPillMono = Font.system(size: 12, weight: .semibold, design: .monospaced)
 }
 
 // MARK: - Text style modifiers
@@ -107,13 +107,13 @@ public enum ShannonTypeCatalogue {
         .init("shannonCallout", .shannonCallout, usage: "callout · medium · SF Pro"),
         .init("shannonCaption", .shannonCaption, usage: "caption · regular · SF Pro"),
         .init("shannonMono", .shannonMono, usage: "caption · regular · SF Mono"),
-        .init("shannonMenuSection", .shannonMenuSection, usage: "caption2 · semibold · SF Pro"),
-        .init("shannonMenuTitle", .shannonMenuTitle, usage: "subheadline · semibold · SF Pro"),
-        .init("shannonMenuSubtitle", .shannonMenuSubtitle, usage: "caption2 · regular · SF Pro"),
-        .init("shannonMenuBody", .shannonMenuBody, usage: "caption · semibold · SF Pro"),
-        .init("shannonMenuFootnote", .shannonMenuFootnote, usage: "caption2 · regular · SF Pro"),
-        .init("shannonMenuMono", .shannonMenuMono, usage: "caption2 · semibold · SF Mono"),
-        .init("shannonPillLabel", .shannonPillLabel, usage: "caption · semibold · SF Pro"),
-        .init("shannonPillMono", .shannonPillMono, usage: "caption · semibold · SF Mono"),
+        .init("shannonMenuSection", .shannonMenuSection, usage: "10pt · semibold · SF Pro · HUD section"),
+        .init("shannonMenuTitle", .shannonMenuTitle, usage: "13pt · semibold · SF Pro · HUD title"),
+        .init("shannonMenuSubtitle", .shannonMenuSubtitle, usage: "11pt · regular · SF Pro"),
+        .init("shannonMenuBody", .shannonMenuBody, usage: "12pt · semibold · SF Pro · roster"),
+        .init("shannonMenuFootnote", .shannonMenuFootnote, usage: "11pt · regular · SF Pro"),
+        .init("shannonMenuMono", .shannonMenuMono, usage: "11pt · semibold · SF Mono"),
+        .init("shannonPillLabel", .shannonPillLabel, usage: "12pt · semibold · SF Pro · island focus"),
+        .init("shannonPillMono", .shannonPillMono, usage: "12pt · semibold · SF Mono · island H"),
     ]
 }

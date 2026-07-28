@@ -5,11 +5,11 @@ import SwiftUI
 final class ShannonMotionSpringTests: XCTestCase {
 
     func testFloatSpringMatchesLegacyConstants() {
-        XCTAssertEqual(ShannonSpring.float.response, 0.48, accuracy: 1e-12)
-        XCTAssertEqual(ShannonSpring.float.dampingFraction, 0.86, accuracy: 1e-12)
+        XCTAssertEqual(ShannonSpring.float.response, 0.40, accuracy: 1e-12)
+        XCTAssertEqual(ShannonSpring.float.dampingFraction, 0.88, accuracy: 1e-12)
         // AppKit panel morph duration must equal float response (in-phase).
         XCTAssertEqual(ShannonMotion.panelMorphDuration, ShannonSpring.float.response, accuracy: 1e-12)
-        XCTAssertEqual(ShannonMotion.panelMorphDuration, 0.48, accuracy: 1e-12)
+        XCTAssertEqual(ShannonMotion.panelMorphDuration, 0.40, accuracy: 1e-12)
     }
 
     func testReduceMotionScalesToInstant() {
@@ -27,7 +27,7 @@ final class ShannonMotionSpringTests: XCTestCase {
 
     func testAnimationSpeedScalesResponse() {
         let fast = ShannonSpring.float.scaled(reduceMotion: false, animationSpeed: 2.0)
-        XCTAssertEqual(fast.response, 0.24, accuracy: 1e-9)
+        XCTAssertEqual(fast.response, 0.20, accuracy: 1e-9)
         XCTAssertEqual(fast.dampingFraction, ShannonSpring.float.dampingFraction, accuracy: 1e-12)
     }
 

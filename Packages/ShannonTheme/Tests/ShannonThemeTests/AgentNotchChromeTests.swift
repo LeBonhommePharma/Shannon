@@ -19,8 +19,9 @@ final class AgentNotchChromeTests: XCTestCase {
 
     func testIslandSpringSingleSourcesFloat() {
         XCTAssertEqual(AgentNotchChrome.islandSpring, ShannonSpring.float)
-        XCTAssertEqual(AgentNotchChrome.islandSpring.response, 0.48, accuracy: 1e-12)
-        XCTAssertEqual(AgentNotchChrome.islandSpring.dampingFraction, 0.86, accuracy: 1e-12)
+        // AgentNotch-class DI morph: snappier than a sheet (0.40 / 0.88).
+        XCTAssertEqual(AgentNotchChrome.islandSpring.response, 0.40, accuracy: 1e-12)
+        XCTAssertEqual(AgentNotchChrome.islandSpring.dampingFraction, 0.88, accuracy: 1e-12)
         // AppKit panel morph duration == float response (in-phase with SwiftUI).
         XCTAssertEqual(
             AgentNotchChrome.panelMorphDuration,
@@ -41,8 +42,11 @@ final class AgentNotchChromeTests: XCTestCase {
             String(describing: Color.notchIslandFill),
             String(describing: AgentNotchChrome.islandFill)
         )
-        XCTAssertEqual(AgentNotchChrome.islandExpandedFillOpacity, 0.92, accuracy: 1e-9)
+        XCTAssertEqual(AgentNotchChrome.islandExpandedFillOpacity, 0.94, accuracy: 1e-9)
         XCTAssertLessThan(AgentNotchChrome.islandHairlineQuiet, AgentNotchChrome.islandHairlineRest)
+        XCTAssertGreaterThan(AgentNotchChrome.islandSpecularOpacity, 0)
+        XCTAssertEqual(AgentNotchChrome.statusItemTitlePointSize, 12, accuracy: 0.01)
+        XCTAssertGreaterThan(AgentNotchChrome.sectionHeaderTracking, 0.5)
     }
 
     func testAttentionInkRolesHighContrast() {
@@ -94,5 +98,18 @@ final class AgentNotchChromeTests: XCTestCase {
             ShannonSpring.float.dampingFraction,
             AgentNotchChrome.islandSpring.dampingFraction
         )
+    }
+
+    func testBadgeWashAndStatusItemDensity() {
+        // Needs-you wash is amber-tinted; collapse wash is red-tinted (not equal).
+        XCTAssertNotEqual(
+            String(describing: AgentNotchChrome.badgeWash(for: .needsYou)),
+            String(describing: AgentNotchChrome.badgeWash(for: .collapse))
+        )
+        XCTAssertEqual(AgentNotchChrome.badgeHorizontalPadding, 6, accuracy: 0.01)
+        XCTAssertGreaterThanOrEqual(AgentNotchChrome.statusItemTitlePointSize, 11)
+        let snap = AgentNotchChrome.policySnapshot
+        XCTAssertEqual(snap["statusItemTitlePointSize"], "12.0")
+        XCTAssertEqual(snap["islandSpringResponse"], "0.4")
     }
 }

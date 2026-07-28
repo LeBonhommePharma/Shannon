@@ -3,6 +3,8 @@ import AppKit
 import PillCore
 import DevServers
 import Routes
+import ShannonTheme
+import ShannonCore
 
 /// The menu-bar popover: everything LP needs at a glance without opening the
 /// notch pill — busy agents, the newest pending gate (answerable inline),
@@ -295,26 +297,31 @@ struct MenuBarPopoverView: View {
     // MARK: Header
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: collapseAlarm ? "exclamationmark.triangle.fill" : "waveform.path.ecg")
                 .font(.shannonMenuTitle)
-                .foregroundStyle(collapseAlarm ? Color.shannonError : Color.shannonAccent)
-            VStack(alignment: .leading, spacing: 1) {
+                .foregroundStyle(
+                    collapseAlarm
+                        ? AgentNotchChrome.ink(for: .collapse)
+                        : Color.shannonAccent
+                )
+                .symbolRenderingMode(.hierarchical)
+            VStack(alignment: .leading, spacing: 2) {
                 // UX-025: brand title shares Core quietShort (pill/watch parity).
                 Text(CompanionFocusCopy.quietShort)
                     .font(.shannonMenuTitle)
                     .foregroundStyle(Color.shannonPrimary)
                 Text(headerSubtitle)
-                    .font(.shannonMenuFootnote)
+                    .font(.shannonMenuSubtitle)
                     .foregroundStyle(Color.shannonSecondary)
                     .lineLimit(1)
                     // Fixed height so live subtitle swaps never shove the badge.
-                    .frame(height: 14, alignment: .leading)
+                    .frame(height: 15, alignment: .leading)
             }
             Spacer(minLength: 4)
             hubStatusBadge
         }
-        .frame(height: 36)
+        .frame(height: 40)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(CompanionFocusCopy.quietShort). \(headerSubtitle). \(hubStatusText)"
@@ -577,7 +584,7 @@ struct MenuBarPopoverView: View {
         Text(t.uppercased())
             .font(.shannonMenuSection)
             .foregroundStyle(Color.shannonSecondary)
-            .tracking(0.8)
+            .tracking(AgentNotchChrome.sectionHeaderTracking)
             .accessibilityAddTraits(.isHeader)
     }
 

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import PillCore
 import ShannonCore
+import ShannonTheme
 
 /// Menu-bar presence for Shannon.
 ///
@@ -184,7 +185,7 @@ final class MenuBarController: NSObject {
         button.image = Self.symbolImage(symbol, template: false)
         if forceGreen {
             let green = NSColor(srgbRed: 0.12, green: 0.55, blue: 0.28, alpha: 1)
-            let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+            let font = AgentNotchChrome.statusItemTitleFont
             button.attributedTitle = NSAttributedString(
                 string: " " + text,
                 attributes: [.font: font, .foregroundColor: green]
@@ -372,7 +373,8 @@ final class MenuBarController: NSObject {
             button.attributedTitle = NSAttributedString(string: "")
             return
         }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        // AgentNotchChrome single-source point size (not a one-off 11pt).
+        let font = AgentNotchChrome.statusItemTitleFont
         button.attributedTitle = NSAttributedString(
             string: text,
             attributes: [

@@ -620,22 +620,24 @@ struct PillView: View {
 
     // MARK: Collapsed
 
-    /// AgentNotch-minimal closed header: status tint + short label + optional chips.
+    /// AgentNotch-class closed header: glyph + glance label + scannable chips.
     /// Dense multi-metric stacks (CPU/H/battery) live on the expanded board.
     private var collapsed: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             // Source-aware status indicator (agent tint / activity glyph).
             statusGlyph
-                .frame(width: 16, height: 16)
+                .frame(width: 15, height: 15)
                 .matchedGeometryEffect(id: "statusGlyph", in: islandNS)
 
             // Short activity label; recessive quiet drops filler copy.
+            // White primary on pure-black island (AgentNotch contrast).
             if !isRecessive {
                 Text(collapsedText)
                     .font(.shannonPillLabel)
-                    .foregroundStyle(Color.shannonPrimary)
+                    .foregroundStyle(Color.white.opacity(0.94))
+                    .tracking(AgentNotchChrome.islandLabelTracking)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.82)
                     .truncationMode(.tail)
                     .contentTransition(.identity)
             }
@@ -645,56 +647,52 @@ struct PillView: View {
             // Mini entropy chip morphs into expanded thermodynamic rail.
             if fleetReading.isMeasured, let bits = fleetReading.currentBits {
                 Text(String(format: "H %.1f", bits))
-                    .font(.shannonMenuSection)
+                    .font(.shannonPillMono)
                     .foregroundStyle(entropyTint(for: fleetReading))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule(style: .continuous).fill(Color.shannonSurfaceElevated.opacity(0.7)))
+                    .padding(.horizontal, AgentNotchChrome.badgeHorizontalPadding)
+                    .padding(.vertical, AgentNotchChrome.badgeVerticalPadding)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.white.opacity(0.10))
+                    )
                     .matchedGeometryEffect(id: "entropyRail", in: islandNS)
                     .help("Measured token entropy")
             }
 
             // Trailing chips: prefer one fleet/usage metric, not a dense stack.
-            // Usage when measured; else multi-agent count when fleet > 1.
             if let usage = collapsedUsageChip {
-                Text(usage)
-                    .font(.shannonMenuSection)
-                    .foregroundStyle(Color.shannonTertiary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule(style: .continuous).fill(Color.shannonSurfaceElevated.opacity(0.7)))
+                AgentNotchBadge(text: usage, role: .idle, styleInk: Color.white.opacity(0.75))
                     .matchedGeometryEffect(id: "agentChip", in: islandNS)
                     .help("Usage from local session telemetry")
             } else if collapsedActiveCount > 1 {
-                Text("\(collapsedActiveCount)")
-                    .font(.shannonMenuSection)
-                    .foregroundStyle(Color.shannonAccent)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule(style: .continuous).fill(Color.shannonAccentSubtle))
-                    .matchedGeometryEffect(id: "agentChip", in: islandNS)
-                    .help(
-                        AgentListSkim.multiAgentAccessibilityLabel(
-                            activeCount: collapsedActiveCount
-                        ) ?? "\(collapsedActiveCount) \(AgentListSkim.multiAgentGlanceCaption)"
-                    )
+                AgentNotchBadge(
+                    text: "\(collapsedActiveCount)",
+                    role: .working,
+                    styleInk: Color.shannonAccent
+                )
+                .matchedGeometryEffect(id: "agentChip", in: islandNS)
+                .help(
+                    AgentListSkim.multiAgentAccessibilityLabel(
+                        activeCount: collapsedActiveCount
+                    ) ?? "\(collapsedActiveCount) \(AgentListSkim.multiAgentGlanceCaption)"
+                )
             }
 
             if hasPendingAsk {
                 Image(systemName: "questionmark.circle.fill")
-                    .font(.shannonMenuFootnote)
-                    .foregroundStyle(Color.shannonWarning)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AgentNotchChrome.ink(for: .needsYou))
                     .help("An agent is waiting for your approval — click to answer")
             }
 
             if collapseAlarm {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.shannonMenuFootnote)
-                    .foregroundStyle(Color.shannonError)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(AgentNotchChrome.ink(for: .collapse))
             }
         }
         // Physical notch: glyphs in the menu-bar band; overhang is black lip.
-        .padding(.horizontal, isPhysicalNotch ? (islandWings ? 18 : 14) : 12)
+        .padding(.horizontal, isPhysicalNotch ? (islandWings ? 16 : 12) : 11)
         .padding(.bottom, isPhysicalNotch ? ShannonLayout.Pill.physicalIslandOverhang : 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .frame(height: liveCollapsedHeight)

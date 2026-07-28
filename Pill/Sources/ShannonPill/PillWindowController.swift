@@ -222,7 +222,7 @@ final class PillWindowController {
         // Higher hysteresis: telemetry text reflow must not micro-morph the panel.
         guard delta > 14.0 || originDelta > 4.0 else { return }
         if delta > 32 || originDelta > 16 {
-            // Same spring vocabulary as SwiftUI `.shannonFloat` — response 0.48 /
+            // Same spring vocabulary as SwiftUI `.shannonFloat` / AgentNotchChrome.islandSpring —
             // damping 0.86 — so panel resize and content morph stay in phase.
             animatePanelFrame(panel, to: frame)
         } else {

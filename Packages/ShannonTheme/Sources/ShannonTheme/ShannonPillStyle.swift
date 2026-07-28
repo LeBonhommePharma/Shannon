@@ -197,6 +197,16 @@ public struct PillStyle: ViewModifier {
                     if isCollapsed {
                         // Opaque pure black island (AgentNotch) — no vibrancy/tint.
                         notchIslandFill
+                        // Soft top specular so the lip reads refractive, not flat.
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(AgentNotchChrome.islandSpecularOpacity),
+                                Color.white.opacity(AgentNotchChrome.islandSpecularOpacity * 0.25),
+                                Color.clear,
+                            ],
+                            startPoint: .top,
+                            endPoint: UnitPoint(x: 0.5, y: 0.55)
+                        )
                     } else if notchIsland {
                         // Expanded island morph: still black shell; glass lives
                         // in board content sections, not the outer silhouette.

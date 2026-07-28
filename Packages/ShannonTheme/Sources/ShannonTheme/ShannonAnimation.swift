@@ -32,8 +32,9 @@ public struct ShannonSpring: Sendable, Equatable {
     public static let snap = ShannonSpring(response: 0.25, dampingFraction: 0.82)
     /// Card / sheet — `shannonEase`.
     public static let ease = ShannonSpring(response: 0.38, dampingFraction: 0.82)
-    /// Island expand/collapse — `shannonFloat` (signature morph).
-    public static let float = ShannonSpring(response: 0.48, dampingFraction: 0.86)
+    /// Island expand/collapse — `shannonFloat` (signature Dynamic Island morph).
+    /// Snappier than a generic sheet spring so ProMotion reads as DI, not a window resize.
+    public static let float = ShannonSpring(response: 0.40, dampingFraction: 0.88)
     /// Gauge / numeric — `shannonLiquid`.
     public static let liquid = ShannonSpring(response: 0.26, dampingFraction: 0.93)
     /// Chrome glow — `shannonChrome`.
@@ -78,9 +79,7 @@ public extension Animation {
     )
 
     /// Pill expand/collapse — signature notch morph (macOS 27 Liquid Glass).
-    /// Slightly snappier + more damped than the original float so the island
-    /// settles cleanly without a rubber-band aftertaste on 120 Hz panels.
-    /// `spring(response: 0.48, dampingFraction: 0.86)`
+    /// Signature notch morph — response/damping from `ShannonSpring.float`.
     static let shannonFloat = Animation.spring(
         response: ShannonSpring.float.response,
         dampingFraction: ShannonSpring.float.dampingFraction
@@ -162,8 +161,8 @@ public enum ShannonMotion {
     /// Approximate a critically-ish damped ease (control points tuned so the
     /// panel settle tracks SwiftUI spring settle length).
     public static var floatTimingFunction: CAMediaTimingFunction {
-        // Damping 0.86 → slightly soft ease-in-out (not linear, not bouncy).
-        CAMediaTimingFunction(controlPoints: 0.22, 0.90, 0.36, 1.0)
+        // Damping ~0.88 → soft ease-in-out (not linear, not bouncy).
+        CAMediaTimingFunction(controlPoints: 0.20, 0.92, 0.32, 1.0)
     }
 
     public static func timingFunction(for spring: ShannonSpring) -> CAMediaTimingFunction {

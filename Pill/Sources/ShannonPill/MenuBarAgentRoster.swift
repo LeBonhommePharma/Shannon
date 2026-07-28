@@ -2,6 +2,7 @@ import SwiftUI
 import PillCore
 import Routes
 import ShannonCore
+import ShannonTheme
 
 // MARK: - Menu-bar popover agent roster (extracted)
 
@@ -40,11 +41,11 @@ struct MenuBarAgentRoster: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             Text((hasActionable ? "Active now" : "Agents").uppercased())
                 .font(.shannonMenuSection)
                 .foregroundStyle(Color.shannonSecondary)
-                .tracking(0.8)
+                .tracking(AgentNotchChrome.sectionHeaderTracking)
                 .accessibilityAddTraits(.isHeader)
             if summary.agents.isEmpty {
                 // UX-015: idle title matches Core / companions; Mac-only attach hint stays local.
@@ -101,25 +102,28 @@ struct MenuBarAgentRoster: View {
             needsYou: card.needsYou,
             isFinished: card.isFinished
         )
-        return VStack(alignment: .leading, spacing: 2) {
+        let badgeRole: AgentNotchChrome.AttentionRole = {
+            switch card.attention {
+            case .needsYou: return .needsYou
+            case .working: return .working
+            case .finished: return .finished
+            case .idle: return .idle
+            case .unknown: return .unknown
+            }
+        }()
+        return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 7) {
                 Text(style.emoji).font(.shannonMenuBody)
                 Text(card.displayName)
                     .font(.shannonMenuBody)
                     .foregroundStyle(style.palette.ink)
                     .lineLimit(1)
-                Text(card.badgeLabel)
-                    .font(.shannonMenuSection)
-                    .foregroundStyle(
-                        AgentLiveChrome.attentionColor(
-                            surface: surface,
-                            styleInk: style.palette.ink
-                        )
-                    )
-                    .lineLimit(1)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(style.palette.wash))
+                // Dual-HUD badge: same AgentNotchBadge as collapsed island chips.
+                AgentNotchBadge(
+                    text: card.badgeLabel,
+                    role: badgeRole,
+                    styleInk: style.palette.ink
+                )
                 Spacer(minLength: 4)
                 if let usage = card.usageLabel {
                     Text(usage)

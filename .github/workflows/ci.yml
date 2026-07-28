@@ -260,6 +260,9 @@ jobs:
           SHANNON_XCODE_TIMEOUT: "900"
 
   # ── Benchmarks ──────────────────────────────────────────────────────────
+  # Note: ruff is required locally (CONTRIBUTING) but not yet a CI job —
+  # the tree still has substantial pre-existing ruff debt. Do not claim
+  # green lint in CI until a scoped package path is clean.
   benchmarks:
     runs-on: ubuntu-latest
     needs: [cpp, python]

@@ -117,27 +117,48 @@ elif [[ "${INSTALLER_ONLY}" -eq 1 ]]; then
   run_installer
 else
   # Parallel package + python lanes; apple platforms sequential after (Xcode heavy).
+  # When SHANNON_SWARM_LOG_DIR is set, each parallel lane also gets a log file
+  # (same naming as run_lane: platform_swarm_<name>.log) and tails on failure.
+  # IMPORTANT: background with `cmd &; pid=$!` in *this* shell — never
+  # `pid=$(fn …)` which reparents the job into a subshell and breaks wait.
+  if [[ -n "${LOG_DIR}" ]]; then
+    mkdir -p "${LOG_DIR}"
+    info "parallel lane logs → ${LOG_DIR}"
+  fi
   info "spawning parallel lanes: core theme pill python"
-  (
-    cd Packages/ShannonCore && swift test
-  ) &
-  pid_core=$!
-  (
-    cd Packages/ShannonTheme && swift test
-  ) &
-  pid_theme=$!
-  (
+
+  if [[ -n "${LOG_DIR}" ]]; then
+    ( cd Packages/ShannonCore && swift test ) \
+      >"${LOG_DIR}/platform_swarm_core.log" 2>&1 &
+    pid_core=$!
+    ( cd Packages/ShannonTheme && swift test ) \
+      >"${LOG_DIR}/platform_swarm_theme.log" 2>&1 &
+    pid_theme=$!
     if [[ "${QUICK}" -eq 1 ]]; then
-      cd Pill && swift build
+      ( cd Pill && swift build ) \
+        >"${LOG_DIR}/platform_swarm_pill.log" 2>&1 &
     else
-      cd Pill && swift test
+      ( cd Pill && swift test ) \
+        >"${LOG_DIR}/platform_swarm_pill.log" 2>&1 &
     fi
-  ) &
-  pid_pill=$!
-  (
-    python3 -m pytest tests/python/ -q --tb=line
-  ) &
-  pid_py=$!
+    pid_pill=$!
+    ( python3 -m pytest tests/python/ -q --tb=line ) \
+      >"${LOG_DIR}/platform_swarm_python.log" 2>&1 &
+    pid_py=$!
+  else
+    ( cd Packages/ShannonCore && swift test ) &
+    pid_core=$!
+    ( cd Packages/ShannonTheme && swift test ) &
+    pid_theme=$!
+    if [[ "${QUICK}" -eq 1 ]]; then
+      ( cd Pill && swift build ) &
+    else
+      ( cd Pill && swift test ) &
+    fi
+    pid_pill=$!
+    ( python3 -m pytest tests/python/ -q --tb=line ) &
+    pid_py=$!
+  fi
 
   set +e
   wait ${pid_core}; rc_core=$?
@@ -155,6 +176,9 @@ else
     else
       fail "${name} (exit ${rc})"
       failed=$((failed + 1))
+      if [[ -n "${LOG_DIR}" && -f "${LOG_DIR}/platform_swarm_${name}.log" ]]; then
+        tail -40 "${LOG_DIR}/platform_swarm_${name}.log" >&2 || true
+      fi
     fi
   done
 

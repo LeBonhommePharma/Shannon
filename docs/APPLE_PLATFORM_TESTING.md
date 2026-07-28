@@ -22,8 +22,19 @@ From repo root (macOS + Xcode):
 ./scripts/platform_swarm.sh --quick          # faster Pill (build only)
 ./scripts/platform_swarm.sh --sync-only      # ShannonCore CloudKit codecs / security
 ./scripts/platform_swarm.sh --installer      # pure-Python install/update re-verify
-# Optional: SHANNON_SWARM_LOG_DIR=/path/to/logs ./scripts/platform_swarm.sh --quick
+# Optional: per-lane logs (parallel core/theme/pill/python + sequential run_lane steps)
+# SHANNON_SWARM_LOG_DIR=/path/to/logs ./scripts/platform_swarm.sh --quick
 ```
+
+### Multi-OS fan-out (who runs what)
+
+| Layer | Entry | Parallelism |
+|---|---|---|
+| **Desktop OS matrix** | GitHub Actions `ci.yml` (`cpp` / `python` / …) | Concurrent jobs, `fail-fast: false` (Ubuntu / macOS / Windows Python) |
+| **Local Mac swarm** | `./scripts/platform_swarm.sh` | True-parallel Core + Theme + Pill + Python; then sequential Apple + installer |
+| **Apple surfaces** | `./scripts/test_apple_platforms.sh` | Sequential macOS → iOS → iPad → watch (Xcode-heavy); honest **SKIP** when no sim |
+
+Do **not** invent a second harness that duplicates these. Windows C++ core is intentionally not in CI (pure-Python path only).
 
 | Flag / args | Meaning |
 |---|---|

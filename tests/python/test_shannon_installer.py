@@ -145,7 +145,18 @@ def test_cli_help_exits_zero():
 
 def test_unix_installer_script_exists_and_help():
     assert UNIX_SH.is_file()
-    assert os.access(UNIX_SH, os.X_OK), "install_shannon.sh must be executable"
+    # Executable bit is POSIX-only (Windows stores files without X_OK meaning).
+    if sys.platform != "win32":
+        assert os.access(UNIX_SH, os.X_OK), "install_shannon.sh must be executable"
+    # Always pin the shipped help surface from the script source (works on every OS).
+    text = UNIX_SH.read_text(encoding="utf-8")
+    assert "--path" in text
+    assert "update" in text.lower() or "--update" in text
+    # Live bash --help only where a real bash can execute the script. GitHub
+    # windows-latest ships a `bash` stub that launches WSL without a distro and
+    # returns exit 1 with a UTF-16 error — not a product failure.
+    if sys.platform == "win32":
+        return
     proc = subprocess.run(
         ["bash", str(UNIX_SH), "--help"],
         cwd=str(ROOT),
@@ -186,6 +197,10 @@ def test_macos_shannon_update_and_science_commands():
     assert "update|upgrade" in text or "install|i|update" in text
     assert "science" in text
     assert "install_shannon.sh" in text
+    # Structural surface is required on every OS. Live `bash scripts/shannon help`
+    # only where bash can run the script (see test_unix_installer_script_exists_and_help).
+    if sys.platform == "win32":
+        return
     proc = subprocess.run(
         ["bash", str(MAC_SHANNON), "help"],
         cwd=str(ROOT),
@@ -251,3 +266,19 @@ def test_run_entropy_smoke_against_installed_or_dev_tree(inst):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "entropy_smoke_ok" in proc.stdout
     assert "version=" in proc.stdout
+
+
+def test_installer_log_markers_are_cp1252_safe():
+    """Windows hosted runners default to cp1252; installer logs must not raise."""
+    import importlib.util
+    path = ROOT / "scripts" / "shannon_installer.py"
+    spec = importlib.util.spec_from_file_location("shannon_installer", path)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    for token in (mod._ARROW, mod._OK, mod._FAIL):
+        token.encode("cp1252")
+        assert token.isascii(), token
+    # Representative status line that previously used U+2192.
+    line = f"{mod._ARROW} pip install -e ."
+    line.encode("cp1252")

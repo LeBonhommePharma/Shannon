@@ -34,6 +34,15 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+# Windows hosted runners default to cp1252/charmap; force UTF-8 stdio so
+# installer logs never raise UnicodeEncodeError on non-ASCII status glyphs.
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 — best-effort; fall back to ASCII markers
+        pass
+
 # Default public monorepo (science package + docs live here).
 DEFAULT_GIT_URL = "git+https://github.com/LeBonhommePharma/Shannon.git"
 DEFAULT_PYPI_NAME = "shannon-entropy"
@@ -45,6 +54,11 @@ _SMOKE_TOL = 1e-9
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_VENV_DIRNAME = ".venv-shannon"
+
+# ASCII-safe log markers (Windows cp1252 cannot encode → / ✓ / ✗).
+_ARROW = "->"
+_OK = "[ok]"
+_FAIL = "[fail]"
 
 
 def resolve_source(
@@ -216,9 +230,9 @@ def ensure_venv(base_python: str, venv_dir: Path) -> str:
     """Create *venv_dir* if needed; return path to its python executable."""
     py = venv_python(venv_dir)
     if py.is_file():
-        print(f"→ reusing venv {venv_dir}", flush=True)
+        print(f"{_ARROW} reusing venv {venv_dir}", flush=True)
         return str(py)
-    print(f"→ creating venv at {venv_dir}", flush=True)
+    print(f"{_ARROW} creating venv at {venv_dir}", flush=True)
     subprocess.run([base_python, "-m", "venv", str(venv_dir)], check=True)
     if not py.is_file():
         raise RuntimeError(f"venv created but interpreter missing: {py}")
@@ -227,7 +241,7 @@ def ensure_venv(base_python: str, venv_dir: Path) -> str:
 
 def _pip_install(pip_args: Sequence[str], *, python: str) -> None:
     cmd = [python, "-m", "pip", "install", *pip_args]
-    print(f"→ {' '.join(cmd)}", flush=True)
+    print(f"{_ARROW} {' '.join(cmd)}", flush=True)
     subprocess.run(cmd, check=True)
 
 
@@ -302,13 +316,13 @@ def install(
     print(f"    pip args: {pip_args}", flush=True)
 
     if upgrade_pip:
-        print("→ upgrading pip/setuptools/wheel", flush=True)
+        print(f"{_ARROW} upgrading pip/setuptools/wheel", flush=True)
         _upgrade_pip(exe)
 
     _pip_install(pip_args, python=exe)
 
     if skip_tests:
-        print("✓ Install complete (tests skipped)", flush=True)
+        print(f"{_OK} Install complete (tests skipped)", flush=True)
         return {
             "skipped_tests": True,
             "source": kind,
@@ -317,18 +331,18 @@ def install(
             "venv": str(venv_used) if venv_used else None,
         }
 
-    print("→ smoke: import + entropy", flush=True)
+    print(f"{_ARROW} smoke: import + entropy", flush=True)
     smoke = run_entropy_smoke(python=exe)
     print(
-        f"✓ entropy_smoke_ok version={smoke['version']} H={smoke['entropy']} "
+        f"{_OK} entropy_smoke_ok version={smoke['version']} H={smoke['entropy']} "
         f"_HAS_CORE={smoke['has_core']}",
         flush=True,
     )
 
-    print("→ smoke: shannon-monitor / shannon.cli --help", flush=True)
+    print(f"{_ARROW} smoke: shannon-monitor / shannon.cli --help", flush=True)
     run_monitor_help(python=exe)
-    print("✓ monitor_help_ok", flush=True)
-    print(f"✓ Shannon pure-Python {action} smoke passed", flush=True)
+    print(f"{_OK} monitor_help_ok", flush=True)
+    print(f"{_OK} Shannon pure-Python {action} smoke passed", flush=True)
     if venv_used is not None:
         activate = (
             f"{venv_used}\\Scripts\\Activate.ps1"
@@ -463,7 +477,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             venv_dir=args.venv_dir,
         )
     except Exception as exc:  # noqa: BLE001 — CLI boundary
-        print(f"✗ {exc}", file=sys.stderr)
+        print(f"{_FAIL} {exc}", file=sys.stderr)
         return 1
     return 0
 

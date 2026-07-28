@@ -154,7 +154,9 @@ public enum ShannonMotion {
         return islandSpring(reduceMotion: reduceMotion, animationSpeed: animationSpeed).panelDuration
     }
 
-    #if canImport(QuartzCore)
+    // CAMediaTimingFunction is macOS/iOS/tvOS only — unavailable on watchOS even
+    // when QuartzCore imports. Keep AppKit panel morph helpers off the watch.
+    #if canImport(QuartzCore) && (os(macOS) || os(iOS) || os(tvOS))
     /// Core Animation timing function matched to `ShannonSpring.float` damping.
     ///
     /// Approximate a critically-ish damped ease (control points tuned so the

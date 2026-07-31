@@ -16,9 +16,9 @@ makes concurrent agent work observable and killable.
 [![PyPI](https://img.shields.io/badge/PyPI-shannon--entropy-blue.svg)](https://pypi.org/project/shannon-entropy/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
-[![macOS](https://img.shields.io/badge/macOS-13%2B-black.svg)](Pill/README.md)
-[![iOS](https://img.shields.io/badge/iOS-17%2B-lightgrey.svg)](iOS/README.md)
-[![watchOS](https://img.shields.io/badge/watchOS-10%2B-lightgrey.svg)](watchOS/README.md)
+[![macOS](https://img.shields.io/badge/macOS-13%2B-black.svg)](https://github.com/LeBonhommePharma/ShannonUI)
+[![iOS](https://img.shields.io/badge/iOS-17%2B-lightgrey.svg)](https://github.com/LeBonhommePharma/ShannonUI)
+[![watchOS](https://img.shields.io/badge/watchOS-10%2B-lightgrey.svg)](https://github.com/LeBonhommePharma/ShannonUI)
 
 ```
 Normal generation:    H ~ 8–12 bits   (broad, exploratory)
@@ -32,6 +32,12 @@ Evaluation-aware:     H ~ 2–4 bits    (narrow, strategic)
 </div>
 
 ---
+
+
+> **UI split:** Apple surfaces (Pill / iOS / iPad / watchOS / ShannonCore / ShannonTheme) live in
+> **[LeBonhommePharma/ShannonUI](https://github.com/LeBonhommePharma/ShannonUI)**.
+> This repo is the C++/Python entropy core, hub gate, CLI, science, and docs.
+> Details: [`docs/SHANNON_UI.md`](docs/SHANNON_UI.md).
 
 ## Why this is weird (and why geeks care)
 

@@ -1,3 +1,0 @@
-{"role":"user","message":{"content":[{"type":"text","text":"Wire the HUD spring"}]}}
-{"role":"assistant","message":{"content":[{"type":"text","text":"Tuning NotchHUD.swift"}]}}
-{"type":"turn_ended","status":"success"}

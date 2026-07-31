@@ -1,5 +1,0 @@
-{"type":"custom-title","customTitle":"DemoApp: fix navbar","sessionId":"sess-aaaa-1111"}
-{"type":"last-prompt","lastPrompt":"Fix the navbar overflow on mobile","sessionId":"sess-aaaa-1111"}
-{"type":"user","timestamp":"2026-07-20T12:00:00.000Z","sessionId":"sess-aaaa-1111","message":{"role":"user","content":"Fix the navbar overflow on mobile"}}
-{"type":"assistant","timestamp":"2026-07-20T12:01:00.000Z","sessionId":"sess-aaaa-1111","message":{"role":"assistant","content":[{"type":"text","text":"I'll inspect the CSS."}]}}
-{"type":"queue-operation","operation":"enqueue","timestamp":"2026-07-20T12:05:00.000Z","sessionId":"sess-aaaa-1111","content":"also check dark mode"}

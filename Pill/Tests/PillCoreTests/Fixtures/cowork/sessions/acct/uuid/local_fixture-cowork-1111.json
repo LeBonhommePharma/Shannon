@@ -1,1 +1,0 @@
-{"sessionId": "local_fixture-cowork-1111", "processName": "fixture-cowork", "cwd": "/Users/test/Invoices", "userSelectedFolders": ["/Users/test/Invoices"], "createdAt": 1721500000000, "lastActivityAt": 1721500100000, "model": "claude-opus-test", "isArchived": false, "title": "Sort invoice folder", "initialMessage": "Please sort the invoices by vendor"}

@@ -1,5 +1,0 @@
-{"timestamp":"2026-07-01T10:00:00.000Z","type":"session_meta","payload":{"id":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","timestamp":"2026-07-01T10:00:00.000Z","cwd":"/Users/test/DemoApp","originator":"Codex CLI","cli_version":"0.1.0","source":"cli","model_provider":"openai"}}
-{"timestamp":"2026-07-01T10:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}
-{"timestamp":"2026-07-01T10:00:05.000Z","type":"event_msg","payload":{"type":"agent_message","message":"Inspecting DemoApp routes"}}
-{"timestamp":"2026-07-01T10:01:00.000Z","type":"turn_context","payload":{"turn_id":"t1","cwd":"/Users/test/DemoApp","model":"gpt-5"}}
-{"timestamp":"2026-07-01T10:02:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"t1"}}

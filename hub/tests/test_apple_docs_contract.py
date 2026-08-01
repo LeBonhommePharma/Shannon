@@ -170,3 +170,24 @@ def test_ci_and_release_workflows_checkout_shannonui():
     assert "Pill/Scripts/make_app.sh" not in release or "_shannon_ui" in release
     # Hardcoded chmod of in-tree Pill without ShannonUI checkout is the old bug.
     assert "chmod +x scripts/package_pill.sh Pill/Scripts/make_app.sh" not in release
+
+
+def test_ci_and_release_wire_private_shannonui_token():
+    """ShannonUI is private — workflows must pass secrets.SHANNON_UI_CHECKOUT_TOKEN."""
+    ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    release = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    doc = SHANNON_UI_DOC.read_text(encoding="utf-8")
+    for body, name in ((ci, "ci.yml"), (release, "release.yml")):
+        assert "SHANNON_UI_CHECKOUT_TOKEN" in body, f"{name} missing secret name"
+        assert "secrets.SHANNON_UI_CHECKOUT_TOKEN" in body, f"{name} must reference secrets.*"
+        # token: must appear on the ShannonUI checkout (not only comments).
+        assert re.search(
+            r"token:\s*\$\{\{\s*secrets\.SHANNON_UI_CHECKOUT_TOKEN\s*\}\}",
+            body,
+        ), f"{name} must wire token: secrets.SHANNON_UI_CHECKOUT_TOKEN"
+    # Release must fail closed if the secret is missing (not soft-skip packaging).
+    assert "Require SHANNON_UI_CHECKOUT_TOKEN" in release or "is empty or unset" in release
+    # Docs must describe private clone + secret setup (not only public HTTPS).
+    assert "private" in doc.lower()
+    assert "SHANNON_UI_CHECKOUT_TOKEN" in doc
+    assert "git@github.com:LeBonhommePharma/ShannonUI" in doc or "gh repo clone" in doc

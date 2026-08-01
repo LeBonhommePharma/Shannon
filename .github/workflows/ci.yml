@@ -231,22 +231,26 @@ jobs:
             dist/*.tar.gz
           retention-days: 14
 
-  # ── Apple platforms (Shannon UI lives in LeBonhommePharma/ShannonUI) ──
-  # Checkout ShannonUI beside this CLI monorepo; scripts resolve via
-  # SHANNON_UI_ROOT. Hosted runners often lack Simulator runtimes; the script
-  # SKIPs those honestly. If ShannonUI checkout fails, script SKIPs all Apple
-  # lanes (exit 0) rather than inventing FAIL.
+  # ── Apple platforms (Shannon UI lives in private LeBonhommePharma/ShannonUI) ──
+  # ShannonUI is PRIVATE — default GITHUB_TOKEN cannot read it. Maintainers must
+  # set repository secret SHANNON_UI_CHECKOUT_TOKEN (PAT or fine-grained token
+  # with read access to LeBonhommePharma/ShannonUI). Without the secret, the
+  # checkout fails and Apple lanes SKIP honestly (exit 0). With the secret,
+  # real Pill/Core/Theme lanes run. See docs/SHANNON_UI.md.
   apple-platforms:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Checkout ShannonUI (Apple surfaces)
+      - name: Checkout ShannonUI (private — SHANNON_UI_CHECKOUT_TOKEN)
+        id: ui_checkout
+        continue-on-error: true
         uses: actions/checkout@v6
         with:
           repository: LeBonhommePharma/ShannonUI
           path: _shannon_ui
-        continue-on-error: true
+          # Required for private ShannonUI. Empty/missing secret → step fails → SKIP.
+          token: ${{ secrets.SHANNON_UI_CHECKOUT_TOKEN }}
 
       - name: Select Xcode
         run: |
@@ -266,8 +270,10 @@ jobs:
           if [[ -d _shannon_ui/Pill ]]; then
             export SHANNON_UI_ROOT="${GITHUB_WORKSPACE}/_shannon_ui"
             echo "SHANNON_UI_ROOT=${SHANNON_UI_ROOT}"
+            echo "ShannonUI checkout OK — running Apple lanes"
           else
-            echo "ShannonUI checkout missing — Apple lanes will SKIP honestly"
+            echo "ShannonUI checkout missing (private repo needs secrets.SHANNON_UI_CHECKOUT_TOKEN)"
+            echo "Apple lanes will SKIP honestly — see docs/SHANNON_UI.md"
           fi
           # Full Pill suite can be long on GHA; packages + app builds still run when UI present.
           ./scripts/test_apple_platforms.sh --quick

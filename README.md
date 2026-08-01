@@ -42,9 +42,9 @@ Evaluation-aware:     H ~ 2–4 bits    (narrow, strategic)
 
 
 > **UI split:** Apple surfaces (Pill / iOS / iPad / watchOS / ShannonCore / ShannonTheme) live in
-> **[LeBonhommePharma/ShannonUI](https://github.com/LeBonhommePharma/ShannonUI)**.
+> **[LeBonhommePharma/ShannonUI](https://github.com/LeBonhommePharma/ShannonUI)** (**private**).
 > This repo is the C++/Python entropy core, hub gate, CLI, science, and docs.
-> Details: [`docs/SHANNON_UI.md`](docs/SHANNON_UI.md).
+> Clone with SSH/`gh`; CI needs `SHANNON_UI_CHECKOUT_TOKEN`. Details: [`docs/SHANNON_UI.md`](docs/SHANNON_UI.md).
 
 ## Why this is weird (and why geeks care)
 
@@ -82,11 +82,13 @@ cd Shannon
 ./scripts/shannon                 # pets + optional gate; starts UI if already installed
 ./scripts/shannon help            # dual-product command map
 
-# Shannon UI sources (sibling checkout for local rebuilds)
-git clone https://github.com/LeBonhommePharma/ShannonUI ../ShannonUI
+# Shannon UI sources (private sibling — SSH or gh auth required)
+git clone git@github.com:LeBonhommePharma/ShannonUI.git ../ShannonUI
+# or: gh repo clone LeBonhommePharma/ShannonUI ../ShannonUI
 ./scripts/shannon app             # build/install /Applications/Shannon.app from ShannonUI
 # or published cask:
 # brew install --cask lebonhommepharma/shannon/shannon-pill
+# CI: secrets.SHANNON_UI_CHECKOUT_TOKEN — see docs/SHANNON_UI.md
 ```
 
 | Command | What it does |
@@ -241,7 +243,8 @@ details in [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md) (policy docs may remai
 implementation is in ShannonUI).
 
 ```bash
-git clone https://github.com/LeBonhommePharma/ShannonUI ../ShannonUI
+# private repo — SSH or gh auth (see docs/SHANNON_UI.md)
+git clone git@github.com:LeBonhommePharma/ShannonUI.git ../ShannonUI
 cd ../ShannonUI/Packages/ShannonCore && swift test
 cd ../ShannonUI/Pill && swift test
 # lifecycle from this (Shannon CLI) clone:

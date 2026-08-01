@@ -73,9 +73,11 @@ resolve_shannon_ui() {
 
 shannon_ui_missing_msg() {
   cat <<'EOF'
-Shannon UI source not found (extracted to LeBonhommePharma/ShannonUI).
-  Clone:  git clone https://github.com/LeBonhommePharma/ShannonUI ../ShannonUI
+Shannon UI source not found (extracted to private LeBonhommePharma/ShannonUI).
+  SSH:    git clone git@github.com:LeBonhommePharma/ShannonUI.git ../ShannonUI
+  gh:     gh repo clone LeBonhommePharma/ShannonUI ../ShannonUI
   Or set: export SHANNON_UI_ROOT=/path/to/ShannonUI
+  CI:     repository secret SHANNON_UI_CHECKOUT_TOKEN (PAT with read on ShannonUI)
   Docs:   docs/SHANNON_UI.md
 EOF
 }

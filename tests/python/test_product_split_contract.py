@@ -73,6 +73,13 @@ def test_shannon_ui_doc_present():
     assert SHANNON_UI_DOC.is_file()
     body = SHANNON_UI_DOC.read_text(encoding="utf-8")
     assert "Shannon UI" in body and "Shannon CLI" in body
+    # Private sibling — must not pretend anonymous HTTPS always works.
+    assert "private" in body.lower()
+    assert "SHANNON_UI_CHECKOUT_TOKEN" in body
+    assert (
+        "git@github.com:LeBonhommePharma/ShannonUI" in body
+        or "gh repo clone" in body
+    )
 
 
 def test_scripts_shannon_help_names_both_products():

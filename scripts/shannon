@@ -94,10 +94,12 @@ start_app() {
 
 build_and_install() {
   if [[ -z "${PILL}" ]]; then
-    die "Shannon UI source not found in this tree (extracted to ShannonUI).
-  Clone:  git clone ${SHANNON_UI_URL} ../ShannonUI
+    die "Shannon UI source not found (private LeBonhommePharma/ShannonUI).
+  SSH:    git clone git@github.com:LeBonhommePharma/ShannonUI.git ../ShannonUI
+  gh:     gh repo clone LeBonhommePharma/ShannonUI ../ShannonUI
   Or set: export SHANNON_UI_ROOT=/path/to/ShannonUI
-  Or install published UI: brew install --cask lebonhommepharma/shannon/shannon-pill
+  Or cask: brew install --cask lebonhommepharma/shannon/shannon-pill
+  CI:     secrets.SHANNON_UI_CHECKOUT_TOKEN — docs/SHANNON_UI.md
   Then:   ./scripts/shannon start"
   fi
   command -v swift >/dev/null || die "swift not found (install Xcode)"
@@ -421,11 +423,13 @@ PRIMARY (pets + optional gate; UI when ShannonUI checkout or app is present):
   ./scripts/shannon app             rebuild & install UI (needs ShannonUI tree)
   ./scripts/shannon update          rebuild UI from ShannonUI checkout if present
 
-Shannon UI source (not in this monorepo):
-  git clone https://github.com/LeBonhommePharma/ShannonUI ../ShannonUI
+Shannon UI source (private repo — not in this monorepo):
+  git clone git@github.com:LeBonhommePharma/ShannonUI.git ../ShannonUI
+  # or: gh repo clone LeBonhommePharma/ShannonUI ../ShannonUI
   export SHANNON_UI_ROOT=../ShannonUI   # optional; sibling path is auto-detected
   ./scripts/shannon app
   # or published cask: brew install --cask lebonhommepharma/shannon/shannon-pill
+  # CI: secrets.SHANNON_UI_CHECKOUT_TOKEN (see docs/SHANNON_UI.md)
 
 In Shannon UI:
   ⌘D   Capture the frontmost app as an agent + pet.

@@ -94,6 +94,10 @@ jobs:
             ${{ matrix.artifact_name }}.tar.gz
             ${{ matrix.artifact_name }}.sha256
 
+  # Shannon.app packaging needs private LeBonhommePharma/ShannonUI (Pill sources).
+  # Repository secret SHANNON_UI_CHECKOUT_TOKEN is REQUIRED (PAT with repo read on
+  # ShannonUI). Default GITHUB_TOKEN cannot fetch private sibling repos.
+  # Setup: docs/SHANNON_UI.md § CI / private clone.
   build-macos-app:
     name: Build Shannon.app DMG (macOS)
     runs-on: macos-latest
@@ -101,11 +105,25 @@ jobs:
       - name: Checkout repository (Shannon CLI)
         uses: actions/checkout@v6
 
-      - name: Checkout ShannonUI (Pill sources)
+      - name: Require SHANNON_UI_CHECKOUT_TOKEN
+        env:
+          TOKEN: ${{ secrets.SHANNON_UI_CHECKOUT_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TOKEN}" ]]; then
+            echo "error: secrets.SHANNON_UI_CHECKOUT_TOKEN is empty or unset." >&2
+            echo "ShannonUI is private — set a PAT (repo read) as repository secret" >&2
+            echo "SHANNON_UI_CHECKOUT_TOKEN. See docs/SHANNON_UI.md." >&2
+            exit 1
+          fi
+          echo "SHANNON_UI_CHECKOUT_TOKEN is set (value redacted)"
+
+      - name: Checkout ShannonUI (private Pill sources)
         uses: actions/checkout@v6
         with:
           repository: LeBonhommePharma/ShannonUI
           path: _shannon_ui
+          token: ${{ secrets.SHANNON_UI_CHECKOUT_TOKEN }}
 
       - name: Resolve version from tag
         id: ver
@@ -125,6 +143,7 @@ jobs:
           set -euo pipefail
           test -x scripts/package_pill.sh
           test -x scripts/lib_shannon_ui.sh
+          test -d "${SHANNON_UI_ROOT}/Pill"
           test -x "${SHANNON_UI_ROOT}/Pill/Scripts/make_app.sh"
           chmod +x scripts/package_pill.sh scripts/lib_shannon_ui.sh \
             "${SHANNON_UI_ROOT}/Pill/Scripts/make_app.sh"

@@ -16,7 +16,9 @@
 #   SHANNON_UI_ROOT     path to ShannonUI checkout (Pill lives there post-extract)
 #
 # Produces Shannon-<version>.dmg containing Shannon.app.
-# Shannon UI sources are in LeBonhommePharma/ShannonUI — not this CLI monorepo.
+# Shannon UI sources are in private LeBonhommePharma/ShannonUI — not this CLI
+# monorepo. Clone with SSH/gh auth; CI needs secrets.SHANNON_UI_CHECKOUT_TOKEN
+# (see docs/SHANNON_UI.md).
 
 set -euo pipefail
 

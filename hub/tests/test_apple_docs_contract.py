@@ -104,15 +104,48 @@ def test_cask_version_is_pinned_semver_not_placeholder():
     assert "Shannon UI" in cask
 
 
-def test_package_pill_script_exists_or_is_documented():
-    """Packaging may remain here as a helper; UI sources are in ShannonUI."""
+def test_package_pill_resolves_shannon_ui_not_hardcoded_local_pill():
+    """Packaging helper must resolve ShannonUI (lib) — not only REPO/Pill."""
     script = REPO / "scripts" / "package_pill.sh"
-    doc = SHANNON_UI_DOC.read_text(encoding="utf-8")
-    if script.is_file():
-        body = script.read_text(encoding="utf-8")
-        assert "--install" in body
-    else:
-        assert "ShannonUI" in doc
+    lib = REPO / "scripts" / "lib_shannon_ui.sh"
+    assert script.is_file(), script
+    assert lib.is_file(), lib
+    body = script.read_text(encoding="utf-8")
+    lib_body = lib.read_text(encoding="utf-8")
+    assert "--install" in body
+    assert "lib_shannon_ui.sh" in body or "resolve_shannon_ui" in body
+    assert "resolve_shannon_ui" in lib_body
+    assert "SHANNON_UI_ROOT" in lib_body
+    # Must not be the only resolve path (pre-extract bug).
+    assert 'PILL_DIR="${REPO_ROOT}/Pill"' not in body
+    assert "ShannonUI" in body or "SHANNON_UI_ROOT" in body
+
+
+def test_test_apple_platforms_skips_without_ui_checkout():
+    """Without ShannonUI, --quick must SKIP honestly (exit 0), not FAIL."""
+    script = REPO / "scripts" / "test_apple_platforms.sh"
+    assert script.is_file()
+    body = script.read_text(encoding="utf-8")
+    assert "lib_shannon_ui.sh" in body or "resolve_shannon_ui" in body
+    assert "require_ui_or_skip" in body or "SHANNON_UI_ROOT" in body
+    import os
+
+    env = os.environ.copy()
+    # Force no UI even if a sibling ShannonUI exists on the host.
+    env["SHANNON_UI_ROOT"] = "/nonexistent/shannon-ui-missing"
+    proc = subprocess.run(
+        ["bash", str(script), "--quick"],
+        cwd=str(REPO),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        env=env,
+    )
+    # When UI is missing, every platform SKIPs → exit 0.
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "SKIP" in out or "⊘" in out or "not in this tree" in out or "no ShannonUI" in out
 
 
 def test_apple_package_manifests_not_required_in_cli_repo():
@@ -124,3 +157,16 @@ def test_apple_package_manifests_not_required_in_cli_repo():
         "iOS/project.yml",
     ):
         assert not (REPO / rel).is_file(), f"{rel} should live in ShannonUI, not this repo"
+
+
+def test_ci_and_release_workflows_checkout_shannonui():
+    """CI/release must not assume in-tree Pill after the extract."""
+    ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    release = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "ShannonUI" in ci or "shannonui" in ci.lower()
+    assert "SHANNON_UI_ROOT" in ci
+    assert "ShannonUI" in release or "shannonui" in release.lower()
+    assert "SHANNON_UI_ROOT" in release
+    assert "Pill/Scripts/make_app.sh" not in release or "_shannon_ui" in release
+    # Hardcoded chmod of in-tree Pill without ShannonUI checkout is the old bug.
+    assert "chmod +x scripts/package_pill.sh Pill/Scripts/make_app.sh" not in release

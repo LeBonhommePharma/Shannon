@@ -231,13 +231,22 @@ jobs:
             dist/*.tar.gz
           retention-days: 14
 
-  # ── Apple platforms (macOS packages + optional iOS/iPad/watch builds) ──
-  # Hosted runners often lack Simulator runtimes; the script SKIPs those
-  # honestly and still runs ShannonCore/Theme/Pill on macOS.
+  # ── Apple platforms (Shannon UI lives in LeBonhommePharma/ShannonUI) ──
+  # Checkout ShannonUI beside this CLI monorepo; scripts resolve via
+  # SHANNON_UI_ROOT. Hosted runners often lack Simulator runtimes; the script
+  # SKIPs those honestly. If ShannonUI checkout fails, script SKIPs all Apple
+  # lanes (exit 0) rather than inventing FAIL.
   apple-platforms:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Checkout ShannonUI (Apple surfaces)
+        uses: actions/checkout@v6
+        with:
+          repository: LeBonhommePharma/ShannonUI
+          path: _shannon_ui
+        continue-on-error: true
 
       - name: Select Xcode
         run: |
@@ -253,8 +262,14 @@ jobs:
 
       - name: Multi-platform test script
         run: |
-          chmod +x scripts/test_apple_platforms.sh
-          # Full Pill suite can be long on GHA; packages + app builds still run.
+          chmod +x scripts/test_apple_platforms.sh scripts/lib_shannon_ui.sh
+          if [[ -d _shannon_ui/Pill ]]; then
+            export SHANNON_UI_ROOT="${GITHUB_WORKSPACE}/_shannon_ui"
+            echo "SHANNON_UI_ROOT=${SHANNON_UI_ROOT}"
+          else
+            echo "ShannonUI checkout missing — Apple lanes will SKIP honestly"
+          fi
+          # Full Pill suite can be long on GHA; packages + app builds still run when UI present.
           ./scripts/test_apple_platforms.sh --quick
         env:
           SHANNON_XCODE_TIMEOUT: "900"

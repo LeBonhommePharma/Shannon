@@ -44,7 +44,9 @@ hub/
 ```
 
 Archived (non-production): `archive/legacy_agent_hub_ui/` (former dual status-item
-Swift UI + Pet Canvas helpers). Production pet rendering is in `Pill/Sources/PillCore/`.
+Swift UI + Pet Canvas helpers). Production pet rendering lives in Shannon UI:
+[LeBonhommePharma/ShannonUI](https://github.com/LeBonhommePharma/ShannonUI)
+`Pill/Sources/PillCore/` (not this CLI monorepo).
 
 ## Run tests
 

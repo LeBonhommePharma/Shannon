@@ -155,6 +155,42 @@ def test_extracted_apple_ui_not_required_in_this_repo():
         assert not (REPO / rel).is_file(), f"{rel} should not be production here"
 
 
+def test_package_pill_and_swarm_resolve_or_skip_shannon_ui():
+    """Shipped packaging + swarm scripts must use lib_shannon_ui resolution."""
+    lib = (REPO / "scripts" / "lib_shannon_ui.sh").read_text(encoding="utf-8")
+    pkg = (REPO / "scripts" / "package_pill.sh").read_text(encoding="utf-8")
+    swarm = (REPO / "scripts" / "platform_swarm.sh").read_text(encoding="utf-8")
+    apple = (REPO / "scripts" / "test_apple_platforms.sh").read_text(encoding="utf-8")
+    assert "resolve_shannon_ui" in lib
+    assert "SHANNON_UI_ROOT" in lib
+    for body, name in ((pkg, "package_pill"), (swarm, "platform_swarm"), (apple, "test_apple_platforms")):
+        assert "lib_shannon_ui" in body or "resolve_shannon_ui" in body, name
+    assert 'PILL_DIR="${REPO_ROOT}/Pill"' not in pkg
+    # package_pill without UI must fail with a clear message (drive real script).
+    proc = _run(
+        "bash",
+        str(REPO / "scripts" / "package_pill.sh"),
+        "--help",
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    # Force missing UI for a real resolve failure (not --help).
+    env = os.environ.copy()
+    env["SHANNON_UI_ROOT"] = "/nonexistent/shannon-ui-missing-for-test"
+    # Unset accidental sibling by pointing REPO-local resolve only via env.
+    proc2 = subprocess.run(
+        ["bash", str(REPO / "scripts" / "package_pill.sh"), "9.9.9"],
+        cwd=str(REPO),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=env,
+    )
+    assert proc2.returncode != 0, "package_pill must fail when ShannonUI is missing"
+    err = proc2.stdout + proc2.stderr
+    assert "Shannon UI" in err or "ShannonUI" in err or "SHANNON_UI_ROOT" in err
+
+
 # ── Headless CLI status / probe (no GUI launch) ──────────────────────────────
 
 

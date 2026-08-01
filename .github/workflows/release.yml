@@ -98,8 +98,14 @@ jobs:
     name: Build Shannon.app DMG (macOS)
     runs-on: macos-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (Shannon CLI)
         uses: actions/checkout@v6
+
+      - name: Checkout ShannonUI (Pill sources)
+        uses: actions/checkout@v6
+        with:
+          repository: LeBonhommePharma/ShannonUI
+          path: _shannon_ui
 
       - name: Resolve version from tag
         id: ver
@@ -114,8 +120,14 @@ jobs:
       - name: Package ZIP + DMG (ad-hoc signed)
         env:
           SHANNON_BUILD_METHOD: swiftpm
+          SHANNON_UI_ROOT: ${{ github.workspace }}/_shannon_ui
         run: |
-          chmod +x scripts/package_pill.sh Pill/Scripts/make_app.sh
+          set -euo pipefail
+          test -x scripts/package_pill.sh
+          test -x scripts/lib_shannon_ui.sh
+          test -x "${SHANNON_UI_ROOT}/Pill/Scripts/make_app.sh"
+          chmod +x scripts/package_pill.sh scripts/lib_shannon_ui.sh \
+            "${SHANNON_UI_ROOT}/Pill/Scripts/make_app.sh"
           ./scripts/package_pill.sh "${{ steps.ver.outputs.version }}" --update-cask
           ls -la dist/
           shasum -a 256 "dist/Shannon-${{ steps.ver.outputs.version }}.zip" | tee dist/Shannon.zip.sha256

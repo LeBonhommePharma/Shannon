@@ -44,28 +44,12 @@ warn()  { printf '! %s\n' "$*" >&2; }
 
 is_running() { pgrep -x ShannonPill >/dev/null 2>&1; }
 
-# Resolve Shannon UI (Pill) checkout. Empty when only CLI/core is available.
-resolve_pill_root() {
-  local candidates=()
-  if [[ -n "${SHANNON_UI_ROOT:-}" ]]; then
-    candidates+=("${SHANNON_UI_ROOT}/Pill" "${SHANNON_UI_ROOT}")
-  fi
-  candidates+=(
-    "${REPO}/../ShannonUI/Pill"
-    "${HOME}/Projects/ShannonUI/Pill"
-    "${REPO}/Pill"
-  )
-  local c
-  for c in "${candidates[@]}"; do
-    if [[ -x "${c}/Scripts/make_app.sh" ]]; then
-      printf '%s\n' "$(cd "${c}" && pwd)"
-      return 0
-    fi
-  done
-  return 1
-}
-
-PILL="$(resolve_pill_root || true)"
+# shellcheck source=lib_shannon_ui.sh
+source "${REPO}/scripts/lib_shannon_ui.sh"
+PILL=""
+if resolve_shannon_ui; then
+  PILL="${PILL_DIR}"
+fi
 
 # ── App lifecycle ─────────────────────────────────────────────────────────────
 

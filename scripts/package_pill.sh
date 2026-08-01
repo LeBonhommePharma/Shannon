@@ -13,8 +13,10 @@
 #   NOTARY_PROFILE      notarytool keychain profile (optional notarization)
 #   SHANNON_DMG_DIR     output directory (default: <repo>/dist)
 #   SHANNON_BUILD_METHOD  auto|swiftpm|xcode  (default: auto = swiftpm then xcode)
+#   SHANNON_UI_ROOT     path to ShannonUI checkout (Pill lives there post-extract)
 #
 # Produces Shannon-<version>.dmg containing Shannon.app.
+# Shannon UI sources are in LeBonhommePharma/ShannonUI — not this CLI monorepo.
 
 set -euo pipefail
 
@@ -29,7 +31,7 @@ for arg in "$@"; do
     --install) DO_INSTALL=1 ;;
     --update-cask) DO_UPDATE_CASK=1 ;;
     --help|-h)
-      sed -n '2,20p' "$0"
+      sed -n '2,22p' "$0"
       exit 0
       ;;
     -*)
@@ -50,7 +52,14 @@ done
 # 1. Resolve paths / version
 # ---------------------------------------------------------------------------
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PILL_DIR="${REPO_ROOT}/Pill"
+REPO="${REPO_ROOT}"
+# shellcheck source=lib_shannon_ui.sh
+source "${REPO_ROOT}/scripts/lib_shannon_ui.sh"
+if ! resolve_shannon_ui; then
+  echo "error: Shannon UI (Pill) not found for packaging." >&2
+  shannon_ui_missing_msg >&2
+  exit 1
+fi
 DIST_DIR="${SHANNON_DMG_DIR:-${REPO_ROOT}/dist}"
 BUILD_METHOD="${SHANNON_BUILD_METHOD:-auto}"
 WORKDIR="${TMPDIR:-/tmp}/shannon-pill-package.$$"
@@ -71,8 +80,10 @@ if [[ ! "${VERSION}" =~ ^[0-9]+(\.[0-9]+){1,3}([.-][A-Za-z0-9.]+)?$ ]]; then
   exit 1
 fi
 
-echo "==> Packaging Shannon Pill ${VERSION}"
-echo "    repo:   ${REPO_ROOT}"
+echo "==> Packaging Shannon UI (Pill) ${VERSION}"
+echo "    cli:    ${REPO_ROOT}"
+echo "    ui:     ${SHANNON_UI_ROOT}"
+echo "    pill:   ${PILL_DIR}"
 echo "    method: ${BUILD_METHOD}"
 echo "    dist:   ${DIST_DIR}"
 

@@ -46,9 +46,15 @@ shannon-monitor --help
 
 # Shannon UI rebuild — needs a ShannonUI checkout (or cask install)
 git clone https://github.com/LeBonhommePharma/ShannonUI ../ShannonUI
+export SHANNON_UI_ROOT=../ShannonUI   # optional; sibling is auto-detected
 ./scripts/shannon app
-# override: export SHANNON_UI_ROOT=/path/to/ShannonUI
+./scripts/package_pill.sh --install   # same resolve (lib_shannon_ui.sh)
+./scripts/test_apple_platforms.sh --quick   # SKIP if UI missing; run if present
 ```
+
+Shared resolve helper: `scripts/lib_shannon_ui.sh` (`resolve_shannon_ui`,
+`SHANNON_UI_ROOT`, `PILL_DIR`). Packaging, swarm, and apple-platform scripts
+all source it.
 
 Legacy dual status-item Swift UI (`AgentHubApp`) is archived under
 `archive/legacy_agent_hub_ui/` and is **not** part of either production product.

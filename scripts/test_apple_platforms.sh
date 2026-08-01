@@ -2,6 +2,9 @@
 # test_apple_platforms.sh — agent-friendly multi-platform health check for Shannon.
 #
 # Platforms: macOS (Pill + packages), iOS (phone), iPadOS (pad), watchOS.
+# Shannon UI sources live in LeBonhommePharma/ShannonUI (post-extract). Resolve
+# via SHANNON_UI_ROOT / sibling ../ShannonUI; if missing, SKIP honestly (exit 0).
+#
 # When simulators exist (or can be created), runs builds against them.
 # When not, uses generic Simulator destinations (unsigned compile still proves
 # the target builds). Never invents green — reports SKIP with reason.
@@ -12,8 +15,7 @@
 #   ./scripts/test_apple_platforms.sh ios ipad watch
 #   ./scripts/test_apple_platforms.sh --quick      # packages + generic builds only
 #   ./scripts/test_apple_platforms.sh --list       # print destinations / runtimes
-#   ./scripts/validate_xcodeprojs.sh               # clean generate + load-safe check
-#                                                  # (run before opening in Xcode-beta)
+#   export SHANNON_UI_ROOT=/path/to/ShannonUI
 #
 # Exit: 0 if every selected platform that *could* run succeeded; 1 if any
 # selected runnable step failed. Skips do not fail the run.
@@ -22,6 +24,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+REPO="${ROOT}"
+# shellcheck source=lib_shannon_ui.sh
+source "${ROOT}/scripts/lib_shannon_ui.sh"
+UI_ROOT=""
+if resolve_shannon_ui; then
+  UI_ROOT="${SHANNON_UI_ROOT}"
+fi
 
 QUICK=0
 LIST_ONLY=0
@@ -34,6 +43,17 @@ skip() { printf '⊘ %s\n' "$*"; }
 fail() { printf '✗ %s\n' "$*" >&2; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+require_ui_or_skip() {
+  # $1 = platform name for record; rest = human reason suffix
+  local plat="$1"
+  if [[ -z "${UI_ROOT}" ]]; then
+    skip "${plat} — Shannon UI not in this tree (clone ShannonUI or set SHANNON_UI_ROOT)"
+    record SKIP "${plat}" "no ShannonUI checkout (see docs/SHANNON_UI.md)"
+    return 1
+  fi
+  return 0
+}
 
 run_timed() {
   # Usage: run_timed <label> <cmd...>
@@ -182,22 +202,25 @@ dest_for_watch_udid() {
   echo "platform=watchOS Simulator,id=$1"
 }
 
-# ── macOS: Pill + packages (always runnable on this host) ───────────────────
+# ── macOS: Pill + packages (Shannon UI tree) ────────────────────────────────
 run_macos() {
-  log "macOS — ShannonCore + ShannonTheme + Pill"
+  if ! require_ui_or_skip macos; then
+    return 0
+  fi
+  log "macOS — ShannonCore + ShannonTheme + Pill (from ${UI_ROOT})"
   local ok_all=1
   # --quick: build packages (swift test still for Core — pure, fast) + Pill build only.
-  if ! (cd "$ROOT/Packages/ShannonCore" && run_timed "ShannonCore swift test" swift test); then
+  if ! (cd "$UI_ROOT/Packages/ShannonCore" && run_timed "ShannonCore swift test" swift test); then
     ok_all=0
   fi
-  if ! (cd "$ROOT/Packages/ShannonTheme" && run_timed "ShannonTheme swift test" swift test); then
+  if ! (cd "$UI_ROOT/Packages/ShannonTheme" && run_timed "ShannonTheme swift test" swift test); then
     ok_all=0
   fi
-  if ! (cd "$ROOT/Pill" && run_timed "Pill swift build" swift build); then
+  if ! (cd "$UI_ROOT/Pill" && run_timed "Pill swift build" swift build); then
     ok_all=0
   fi
   if [[ "$QUICK" -eq 0 ]]; then
-    if ! (cd "$ROOT/Pill" && run_timed "Pill swift test" swift test); then
+    if ! (cd "$UI_ROOT/Pill" && run_timed "Pill swift test" swift test); then
       ok_all=0
     fi
   else
@@ -216,11 +239,11 @@ run_macos() {
 build_core_generic() {
   # $1 = platform string for -destination generic/platform=...
   local plat="$1"
-  (cd "$ROOT/Packages/ShannonCore" && \
+  (cd "$UI_ROOT/Packages/ShannonCore" && \
     run_timed "ShannonCore generic $plat" \
       xcodebuild -scheme ShannonCore \
         -destination "generic/platform=$plat" \
-        -derivedDataPath "$ROOT/Packages/ShannonCore/.derivedData-$plat" \
+        -derivedDataPath "$UI_ROOT/Packages/ShannonCore/.derivedData-$plat" \
         CODE_SIGNING_ALLOWED=NO \
         build)
 }
@@ -229,9 +252,9 @@ build_core_generic() {
 # XcodeGen rewrites pbxproj but does not delete sibling dirs inside an existing
 # .xcodeproj. Stale clang module caches under the package hang Xcode-beta on open.
 clean_xcodegen() {
-  # $1 = directory under repo root (Pill | iOS | iPad)
+  # $1 = directory under Shannon UI root (Pill | iOS | iPad)
   local dir="$1"
-  local abs="$ROOT/$dir"
+  local abs="$UI_ROOT/$dir"
   local stale
   for stale in "$abs"/*.xcodeproj; do
     [[ -e "$stale" ]] || continue
@@ -243,6 +266,9 @@ clean_xcodegen() {
 
 # ── iOS phone app ───────────────────────────────────────────────────────────
 run_ios() {
+  if ! require_ui_or_skip ios; then
+    return 0
+  fi
   if ! have xcodegen; then
     skip "iOS app — xcodegen not installed"
     record SKIP ios "no xcodegen"
@@ -265,10 +291,10 @@ run_ios() {
     skip "no iPhone simulator device — using generic destination (build only)"
   fi
 
-  if (cd "$ROOT/iOS" && run_timed "ShannonPhone build" \
+  if (cd "$UI_ROOT/iOS" && run_timed "ShannonPhone build" \
       xcodebuild -project Shannon.xcodeproj -scheme ShannonPhone \
         -destination "$dest" \
-        -derivedDataPath "$ROOT/iOS/.derivedData" \
+        -derivedDataPath "$UI_ROOT/iOS/.derivedData" \
         CODE_SIGNING_ALLOWED=NO \
         build); then
     # Shared pure logic always on Mac already; also prove Core for iOS SDK
@@ -287,6 +313,9 @@ run_ios() {
 
 # ── iPad ────────────────────────────────────────────────────────────────────
 run_ipad() {
+  if ! require_ui_or_skip ipad; then
+    return 0
+  fi
   if ! have xcodegen; then
     skip "iPad app — xcodegen not installed"
     record SKIP ipad "no xcodegen"
@@ -310,10 +339,10 @@ run_ipad() {
     skip "no iPad simulator device — using generic iOS Simulator destination"
   fi
 
-  if (cd "$ROOT/iPad" && run_timed "ShannonPad build" \
+  if (cd "$UI_ROOT/iPad" && run_timed "ShannonPad build" \
       xcodebuild -project ShannonPad.xcodeproj -scheme ShannonPad \
         -destination "$dest" \
-        -derivedDataPath "$ROOT/iPad/.derivedData" \
+        -derivedDataPath "$UI_ROOT/iPad/.derivedData" \
         CODE_SIGNING_ALLOWED=NO \
         build); then
     ok "iPadOS ShannonPad build ($dest)"
@@ -326,6 +355,9 @@ run_ipad() {
 
 # ── watchOS ─────────────────────────────────────────────────────────────────
 run_watch() {
+  if ! require_ui_or_skip watch; then
+    return 0
+  fi
   if ! have xcodegen; then
     skip "watchOS app — xcodegen not installed"
     record SKIP watch "no xcodegen"
@@ -351,10 +383,10 @@ run_watch() {
     skip "no Watch simulator device — using generic destination"
   fi
 
-  if (cd "$ROOT/iOS" && run_timed "ShannonWatch build" \
+  if (cd "$UI_ROOT/iOS" && run_timed "ShannonWatch build" \
       xcodebuild -project Shannon.xcodeproj -scheme ShannonWatch \
         -destination "$dest" \
-        -derivedDataPath "$ROOT/iOS/.derivedData-watch" \
+        -derivedDataPath "$UI_ROOT/iOS/.derivedData-watch" \
         CODE_SIGNING_ALLOWED=NO \
         build); then
     if build_core_generic "watchOS Simulator"; then

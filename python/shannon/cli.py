@@ -251,7 +251,15 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         prog="shannon-monitor",
-        description="Real-time Shannon entropy collapse detection for LLM streams",
+        description=(
+            "Shannon CLI — real-time Shannon entropy collapse detection for LLM streams "
+            "(headless; no GUI). For the macOS menu-bar HUD use Shannon UI "
+            "(./scripts/shannon / Pill)."
+        ),
+        epilog=(
+            "Product split: Shannon CLI = this tool + hub gate/agent tooling; "
+            "Shannon UI = Pill menu-bar / notch HUD only."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 

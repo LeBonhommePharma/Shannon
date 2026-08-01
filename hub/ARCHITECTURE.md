@@ -19,7 +19,7 @@ flowchart TD
         HTTP["HTTP endpoint\n127.0.0.1:8765\n(shannon_gate.py)"]
         GATE["⚛️  Shannon Gate Daemon\nshannon_gate.py\nUnix socket: /tmp/flexaidds_agent_hub.sock"]
         BRIDGE["⚙️  flexaidds_bridge.py\ndataset_runner agent"]
-        HUD["🏝️  macOS HUD\nAgentHubApp.swift\nMenu bar pill + popover"]
+        HUD["🏝️  Shannon UI (Pill)\nShannonPill / menu-bar + notch"]
     end
 
     subgraph FLEXAIDDS ["🧬  FlexAIDdS Engine"]

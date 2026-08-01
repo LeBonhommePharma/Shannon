@@ -409,7 +409,8 @@ def interaction_id_from_activity_output(
 ) -> str:
     """Extract gate interaction_id from agent_activity.event_output.
 
-    Mirrors HubAskPipeline.gateInteractionId in AgentHubApp.swift — the hub UI
+    Mirrors HubAskPipeline.gateInteractionId (historical AgentHubApp; production
+    HUD is Shannon UI / Pill GateApprovalClient) — the hub UI
     must use this id on Approve/Deny, never a freshly generated UUID.
     Gate writes bare ``ask.interaction_id`` into event_output for approval_needed.
     """
@@ -440,7 +441,7 @@ def hub_ui_resolve_payload(
     approved: bool,
     reply: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Wire payload AgentHubApp sendApproval / HubAskPipeline.resolvePayload emit.
+    """Wire payload Pill GateApprovalClient / historical HubAskPipeline.resolvePayload emit.
 
     The interaction_id field MUST be the gate row id (from agent_interactions or
     activity event_output), not a random UI UUID.

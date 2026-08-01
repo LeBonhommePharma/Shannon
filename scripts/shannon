@@ -1,23 +1,34 @@
 #!/usr/bin/env bash
-# shannon — one command to bootstrap the macOS Shannon experience
+# shannon — dual-product operator handrail for Shannon UI + Shannon CLI
 #
-#   ./scripts/shannon              # PRIMARY: pets + app (+ optional gate/bridge)
-#   ./scripts/shannon app          # rebuild/install/start app only
+# Two named products (not one mixed binary):
+#
+#   Shannon UI   — macOS menu-bar / notch HUD (repo: LeBonhommePharma/ShannonUI)
+#   Shannon CLI  — headless entropy, gate, agent, science tooling (this repo)
+#
+#   ./scripts/shannon              # pets + optional gate/bridge (+ UI if available)
+#   ./scripts/shannon app          # rebuild/install/start Shannon UI (needs ShannonUI tree)
 #   ./scripts/shannon start|stop|restart|status|probe
 #   ./scripts/shannon pets         # create default pets only
-#   ./scripts/shannon help
+#   ./scripts/shannon help         # dual-product command map (headless)
 #
-# Fast path: SwiftPM release → /Applications/Shannon.app. No DMG.
-# For signed release artifacts: scripts/package_pill.sh
+# Headless Shannon CLI (no AppKit / no ShannonPill launch):
+#   ./scripts/shannon status|probe|gate|agent|export|science|help
+#   shannon-monitor --help
+#   python3 -m agent_manager …
+#
+# Shannon UI source lives in ShannonUI (not this tree). Resolve order for builds:
+#   1) $SHANNON_UI_ROOT   2) sibling ../ShannonUI   3) legacy local Pill/ (if present)
+# Legacy dual status-item UI is archived under archive/legacy_agent_hub_ui/ — not shipped.
 
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PILL="${REPO}/Pill"
 HUB="${REPO}/hub"
 APP="/Applications/Shannon.app"
 BIN="${APP}/Contents/MacOS/ShannonPill"
 PETS_DIR="${HOME}/.shannon/pets"
+SHANNON_UI_URL="${SHANNON_UI_URL:-https://github.com/LeBonhommePharma/ShannonUI}"
 CMD="${1:-}"
 # Default with no args = full bootstrap (plan acceptance #1).
 if [[ -z "${CMD}" ]]; then
@@ -32,6 +43,29 @@ die()   { printf '✗ %s\n' "$*" >&2; exit 1; }
 warn()  { printf '! %s\n' "$*" >&2; }
 
 is_running() { pgrep -x ShannonPill >/dev/null 2>&1; }
+
+# Resolve Shannon UI (Pill) checkout. Empty when only CLI/core is available.
+resolve_pill_root() {
+  local candidates=()
+  if [[ -n "${SHANNON_UI_ROOT:-}" ]]; then
+    candidates+=("${SHANNON_UI_ROOT}/Pill" "${SHANNON_UI_ROOT}")
+  fi
+  candidates+=(
+    "${REPO}/../ShannonUI/Pill"
+    "${HOME}/Projects/ShannonUI/Pill"
+    "${REPO}/Pill"
+  )
+  local c
+  for c in "${candidates[@]}"; do
+    if [[ -x "${c}/Scripts/make_app.sh" ]]; then
+      printf '%s\n' "$(cd "${c}" && pwd)"
+      return 0
+    fi
+  done
+  return 1
+}
+
+PILL="$(resolve_pill_root || true)"
 
 # ── App lifecycle ─────────────────────────────────────────────────────────────
 
@@ -75,8 +109,15 @@ start_app() {
 }
 
 build_and_install() {
+  if [[ -z "${PILL}" ]]; then
+    die "Shannon UI source not found in this tree (extracted to ShannonUI).
+  Clone:  git clone ${SHANNON_UI_URL} ../ShannonUI
+  Or set: export SHANNON_UI_ROOT=/path/to/ShannonUI
+  Or install published UI: brew install --cask lebonhommepharma/shannon/shannon-pill
+  Then:   ./scripts/shannon start"
+  fi
   command -v swift >/dev/null || die "swift not found (install Xcode)"
-  info "Building release…"
+  info "Building Shannon UI release from ${PILL}…"
   (
     cd "${PILL}"
     if ! ./Scripts/make_app.sh release; then
@@ -95,15 +136,17 @@ build_and_install() {
   codesign --force --deep --sign - --timestamp=none "${APP}" 2>/dev/null \
     || warn "codesign warning (may still launch)"
   xattr -dr com.apple.quarantine "${APP}" 2>/dev/null || true
-  ok "Installed ${APP}"
+  ok "Installed Shannon UI at ${APP}"
 }
 
 status_app() {
+  # Headless Shannon CLI path — never launches Shannon UI / AppKit.
+  info "Shannon CLI status (headless; does not open Shannon UI)"
   doctor_hub
   if is_running; then
-    [[ -x "${BIN}" ]] && info "Binary: ${BIN}"
+    [[ -x "${BIN}" ]] && info "Shannon UI binary: ${BIN}"
   else
-    [[ -x "${BIN}" ]] && info "Installed at ${APP}" || info "Not installed — ./scripts/shannon app"
+    [[ -x "${BIN}" ]] && info "Shannon UI installed at ${APP}" || info "Shannon UI not installed — ./scripts/shannon app"
   fi
 }
 
@@ -169,17 +212,19 @@ probe_app() {
   doctor_hub
   echo
   if [[ -x "${BIN}" ]]; then
-    info "App --probe:"
+    info "Shannon UI --probe:"
     "${BIN}" --probe
     return $?
   fi
-  local local_bin="${PILL}/build/ShannonPill.app/Contents/MacOS/ShannonPill"
-  if [[ -x "${local_bin}" ]]; then
-    info "App --probe (local build):"
-    "${local_bin}" --probe
-    return $?
+  if [[ -n "${PILL}" ]]; then
+    local local_bin="${PILL}/build/ShannonPill.app/Contents/MacOS/ShannonPill"
+    if [[ -x "${local_bin}" ]]; then
+      info "Shannon UI --probe (local ShannonUI build):"
+      "${local_bin}" --probe
+      return $?
+    fi
   fi
-  warn "No ShannonPill binary for --probe. Run: ./scripts/shannon app"
+  warn "No Shannon UI binary for --probe. Install ShannonUI or: ./scripts/shannon app"
   return 0
 }
 
@@ -325,16 +370,17 @@ start_bridge_demo() {
 
 finish_banner() {
   echo
-  ok "Shannon is ready"
+  ok "Shannon UI is ready"
   echo
-  printf '  Next:\n'
+  printf '  Next (Shannon UI):\n'
   printf '    1. Look for the menu-bar Shannon glyph (○ ready / agent name)\n'
   printf '    2. Press ⌘D in Terminal, Claude, ChatGPT, Codex, or a browser\n'
   printf '       to attach that app as an agent + pet\n'
   printf '    Clipboard tip:  agent: science fix the CF floor\n'
   printf '    Pets:           ls ~/.shannon/pets\n'
-  printf '    Gate (live):    hub/shannon_gate.py — agents table feeds the pill\n'
-  printf '    Quit:           menu → Quit Shannon   or  ./scripts/shannon stop\n'
+  printf '    Gate (CLI):     ./scripts/shannon gate  (headless; feeds the pill)\n'
+  printf '    Quit UI:        menu → Quit Shannon   or  ./scripts/shannon stop\n'
+  printf '    CLI help:       ./scripts/shannon help  |  shannon-monitor --help\n'
   echo
 }
 
@@ -344,14 +390,25 @@ bootstrap_all() {
   # 2) Optional enhancements (never hard-fail bootstrap).
   start_gate || true
   start_bridge_demo || true
-  # 3) App: rebuild if missing or SHANNON_FORCE_BUILD=1.
+  # 3) Shannon UI: rebuild if missing or SHANNON_FORCE_BUILD=1 (needs ShannonUI tree).
   if [[ ! -x "${BIN}" || "${SHANNON_FORCE_BUILD:-0}" == "1" ]]; then
-    stop_app || true
-    build_and_install
+    if [[ -n "${PILL}" ]]; then
+      stop_app || true
+      build_and_install
+    else
+      warn "Shannon UI source not in this repo (see docs/SHANNON_UI.md / ${SHANNON_UI_URL})"
+      if [[ -x "${BIN}" ]]; then
+        ok "Shannon UI already installed at ${APP}"
+      else
+        warn "No Shannon UI app yet — CLI/hub still ready. Clone ShannonUI or use the cask."
+      fi
+    fi
   else
-    ok "App already installed (${APP})"
+    ok "Shannon UI already installed (${APP})"
   fi
-  start_app
+  if [[ -x "${BIN}" ]]; then
+    start_app
+  fi
   finish_banner
 }
 
@@ -365,42 +422,57 @@ app_only() {
 
 usage() {
   cat <<'EOF'
-shannon — simple macOS Shannon bootstrap
+shannon — Shannon UI + Shannon CLI operator handrail
 
-PRIMARY (first run / everyday — install from this GitHub clone):
-  ./scripts/shannon                 pets + app (+ optional gate/bridge)
-  git pull && ./scripts/shannon update   # refresh app from latest source
+This monorepo ships two named products (not one mixed binary):
 
-Also:
-  ./scripts/shannon app             rebuild & restart the app only
-  ./scripts/shannon update          same as install (idempotent re-run after pull)
-  ./scripts/shannon start|stop|restart|status|probe|doctor
+  Shannon UI   macOS menu-bar / notch operator HUD (Pill → Shannon.app)
+  Shannon CLI  headless entropy, gate, agent, and science tooling
+
+── Shannon UI (macOS HUD — separate repo LeBonhommePharma/ShannonUI) ─────────
+PRIMARY (pets + optional gate; UI when ShannonUI checkout or app is present):
+  ./scripts/shannon                 pets + optional gate/bridge (+ UI if available)
+  ./scripts/shannon start|stop|restart
   ./scripts/shannon pets            create default pet directories
-  ./scripts/shannon science         pure-Python library from this clone (update-safe)
-  ./scripts/shannon fleet           Bonhomme Fleet schedule snapshot (Mac hub)
-  ./scripts/shannon natural         NATURaL SCI/HRV entropy unit path
-  ./scripts/shannon gate            start agent gate daemon only
-  ./scripts/shannon agent-demo      live socket demo agent (needs gate)
-  ./scripts/shannon agent …         hub agent manager (spawn|control|monitor|kill|roster)
-  ./scripts/shannon skill-install   install Shannon skill into Claude/Codex/Grok/OpenCode
-  ./scripts/shannon export          session timeline JSONL
-  ./scripts/shannon help
+  ./scripts/shannon app             rebuild & install UI (needs ShannonUI tree)
+  ./scripts/shannon update          rebuild UI from ShannonUI checkout if present
 
-In the app:
+Shannon UI source (not in this monorepo):
+  git clone https://github.com/LeBonhommePharma/ShannonUI ../ShannonUI
+  export SHANNON_UI_ROOT=../ShannonUI   # optional; sibling path is auto-detected
+  ./scripts/shannon app
+  # or published cask: brew install --cask lebonhommepharma/shannon/shannon-pill
+
+In Shannon UI:
   ⌘D   Capture the frontmost app as an agent + pet.
-       In a browser, the active tab is classified:
-         Claude Science · SuperGrok · ChatGPT · Codex · Claude
-       (title + URL via AppleScript / window name — offline-safe).
        Clipboard:  agent: science my task summary
 
-Science library (all platforms):
+── Shannon CLI (this repo — headless, no AppKit / no ShannonPill launch) ─────
+  ./scripts/shannon status|probe|doctor   hub + install diagnostics (no GUI open)
+  ./scripts/shannon gate                  start agent gate daemon only
+  ./scripts/shannon agent …               hub agent manager (spawn|control|monitor|kill|roster)
+  ./scripts/shannon agent-demo            live socket demo agent (needs gate)
+  ./scripts/shannon export                session timeline JSONL
+  ./scripts/shannon science               pure-Python library from this clone
+  ./scripts/shannon skill-install         install Shannon skill into Claude/Codex/Grok/OpenCode
+  ./scripts/shannon help                  this dual-product map
+
+  shannon-monitor --help                  Python entropy collapse monitor (Shannon CLI)
+  python3 -m agent_manager --help         same agent manager as `./scripts/shannon agent`
+  hub/shannon_gate.py --help              Shannon Gate daemon flags
+  shannon-agent --help                    optional C++ stream referee (Homebrew formula)
+
+Science library (all platforms — Shannon CLI):
   ./scripts/install_shannon.sh --path          macOS/Linux from clone
   ./scripts/Install-Shannon.ps1 -Source path   Windows from clone
-  (re-run after git pull to update)
 
-Optional later:
-  ./setup.sh                        full dev toolchain (Xcode projects, etc.)
-  brew install --cask …/shannon-pill   signed release (when published)
+Optional:
+  brew install …/shannon               Shannon CLI (shannon-agent)
+  brew install --cask …/shannon-pill   Shannon UI signed release (when published)
+  docs/SHANNON_UI.md                   product boundary + ShannonUI clone map
+
+Legacy dual status-item hub UI is archived under archive/legacy_agent_hub_ui/
+and is not part of Shannon UI or Shannon CLI production paths.
 EOF
 }
 
@@ -412,42 +484,39 @@ case "${CMD}" in
     app_only
     ;;
   install|i|update|upgrade)
-    # install and update are the same path: rebuild from this clone and reinstall.
+    # Rebuild Shannon UI when ShannonUI checkout is available; else pets only.
     stop_app || true
-    build_and_install
+    if [[ -n "${PILL}" ]]; then
+      build_and_install
+    else
+      warn "No ShannonUI checkout — skipped app rebuild (docs/SHANNON_UI.md)"
+    fi
     bootstrap_pets
-    ok "Installed/updated from source. Start with: ./scripts/shannon start"
+    ok "Installed/updated. Start UI with: ./scripts/shannon start (if app present)"
     ;;
   science|lib|python-install)
     # Pure-Python science package from this monorepo (cross-platform helper).
     exec "${REPO}/scripts/install_shannon.sh" --path --update "$@"
     ;;
   fleet|bonhomme-fleet)
-    # Bonhomme Fleet (FlexAIDdS split + NATURaL presence) — pure Mac hub snapshot.
-    info "Bonhomme Fleet (native Shannon Mac path)"
-    (
-      cd "${REPO}/Packages/ShannonCore" && swift test --filter BonhommeFleetTests 2>&1 | tail -20
-    ) || true
+    # Bonhomme Fleet lives in ShannonUI (ShannonCore / PillCore).
+    info "Bonhomme Fleet (Shannon UI / ShannonCore — not in this CLI repo)"
     python3 - <<'PY'
-print("Fleet: demo Mac+iPhone+iPad schedule — run:")
-print("  cd Packages/ShannonCore && swift test --filter BonhommeFleetTests")
-print("  cd Pill && swift test --filter BonhommeFleetMacStatusTests")
-print("Shipped types: ShannonCore.BonhommeFleetHub / PillCore.BonhommeFleetMacStatus")
+print("Fleet tests live in LeBonhommePharma/ShannonUI:")
+print("  cd ../ShannonUI/Packages/ShannonCore && swift test --filter BonhommeFleetTests")
+print("  cd ../ShannonUI/Pill && swift test --filter BonhommeFleetMacStatusTests")
+print("See docs/SHANNON_UI.md")
 PY
-    ok "Fleet tests are the source of truth for membership + work split"
+    ok "Fleet tests are authoritative in ShannonUI"
     ;;
   natural|sci|hrv)
-    # NATURaL SCI / HRV fixed-domain entropy (300–1500 ms RR).
-    info "NATURaL SCI (native ShannonCore path)"
-    (
-      cd "${REPO}/Packages/ShannonCore" && swift test --filter NaturalSCITests 2>&1 | tail -25
-    ) || true
+    info "NATURaL SCI (Shannon UI / ShannonCore — not in this CLI repo)"
     python3 - <<'PY'
-print("NATURaL SCI: fixed RR domain 300–1500 ms → H bits → SCI score")
-print("  cd Packages/ShannonCore && swift test --filter NaturalSCITests")
-print("Shipped types: ShannonCore.NaturalSCI / NaturalEntropyCalculator")
+print("NATURaL SCI unit tests live in LeBonhommePharma/ShannonUI:")
+print("  cd ../ShannonUI/Packages/ShannonCore && swift test --filter NaturalSCITests")
+print("See docs/SHANNON_UI.md")
 PY
-    ok "SCI unit tests are the source of truth for HRV entropy"
+    ok "SCI unit tests are authoritative in ShannonUI"
     ;;
   start|open)
     start_app

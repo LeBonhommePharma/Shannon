@@ -11,8 +11,8 @@ cask "shannon-pill" do
   # ZIP is the cask asset (reproducible sha256). DMG is also published for humans.
   url "https://github.com/LeBonhommePharma/Shannon/releases/download/v#{version}/Shannon-#{version}.zip",
       verified: "github.com/LeBonhommePharma/Shannon/"
-  name "Shannon Pill"
-  desc "AI agent hub with notch pill interface and entropy collapse monitoring"
+  name "Shannon UI"
+  desc "Shannon UI — macOS menu-bar / notch operator HUD (ShannonPill)"
   homepage "https://github.com/LeBonhommePharma/Shannon"
 
   livecheck do
@@ -37,7 +37,9 @@ cask "shannon-pill" do
   ]
 
   caveats <<~EOS
-    Shannon Pill is an agent UI (LSUIElement): it does not show a Dock icon.
+    Shannon UI (this cask) is the sole shipped macOS operator HUD (LSUIElement):
+    it does not show a Dock icon. Headless entropy/gate/agent tools are Shannon CLI
+    (Homebrew formula `shannon`, pip `shannon-entropy`, hub/).
 
     First launch after brew install may be blocked by Gatekeeper for unsigned /
     ad-hoc-signed builds. If macOS says the app is damaged or cannot be opened:

@@ -3882,7 +3882,10 @@ class AgentHub:
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Shannon Gate — multi-agent entropy guardian"
+        description=(
+            "Shannon CLI — Shannon Gate multi-agent entropy guardian "
+            "(headless daemon; no GUI). Operator HUD is Shannon UI (Pill)."
+        ),
     )
     p.add_argument("--http-host", default=HTTP_HOST,
                    help="HTTP bind address (default: 127.0.0.1; use 0.0.0.0 for LAN)")

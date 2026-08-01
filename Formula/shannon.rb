@@ -59,9 +59,10 @@ class Shannon < Formula
 
   def caveats
     <<~EOS
-      This formula installs the native `shannon-agent` CLI only (C++ entropy referee).
+      This formula installs Shannon CLI native tooling only (`shannon-agent`,
+      C++ entropy referee). It does not install Shannon UI (the macOS HUD).
 
-      Python package (pure-Python works on Windows/Linux/macOS — no compiler):
+      Python Shannon CLI (pure-Python works on Windows/Linux/macOS — no compiler):
         pip install shannon-entropy
         # or from a clone:
         #   SHANNON_SKIP_CORE=1 pip install -e .
@@ -69,7 +70,7 @@ class Shannon < Formula
         #   Unix:     ./scripts/install_shannon.sh --path
         shannon-monitor --help
 
-      macOS Pill app (separate cask):
+      Shannon UI — macOS Pill HUD (separate cask, not this formula):
         brew trust --cask lebonhommepharma/shannon/shannon-pill
         brew install --cask lebonhommepharma/shannon/shannon-pill
 

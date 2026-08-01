@@ -1129,7 +1129,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     common.add_argument("--socket", default=SOCKET_PATH_DEFAULT)
     common.add_argument("--json", action="store_true", help="machine-readable output")
 
-    p = argparse.ArgumentParser(prog="shannon-hub", description="Shannon hub agent manager")
+    p = argparse.ArgumentParser(
+        prog="shannon-hub",
+        description=(
+            "Shannon CLI — hub agent manager (headless spawn/control/monitor/kill). "
+            "Part of Shannon CLI, not Shannon UI. For the macOS HUD use ./scripts/shannon (Pill)."
+        ),
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("spawn", parents=[common], help="Register agent and announce online")

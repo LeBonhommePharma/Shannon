@@ -1,20 +1,21 @@
-# Shannon Agent Hub
+# Shannon Agent Hub (Shannon CLI)
 
-Canonical multi-agent coordination layer for Shannon. **This `hub/` tree is the
-only production gate package.** The former `agent_hub/` snapshot has been
-removed (stale nested `python/` / `swift/` copies under `hub/` were also dropped).
+Canonical multi-agent coordination layer for **Shannon CLI**. **This `hub/` tree
+is the only production gate package** (Python). The former `agent_hub/` snapshot
+has been removed (stale nested `python/` / `swift/` copies under `hub/` were
+also dropped). The legacy dual status-item Swift UI was archived out of this
+tree to `archive/legacy_agent_hub_ui/` and is **not** part of Shannon UI or
+Shannon CLI production paths.
 
-| Item | Live path |
-|------|-----------|
-| Gate daemon | `hub/shannon_gate.py` |
-| Socket | `/tmp/shannon.sock` |
-| Audit DB | `~/.shannon/agent_hub.db` (filename only; not a second package) |
-| Tests | `hub/tests/` |
-| Identities | `hub/agent_identity.py` |
-| Menu-bar / notch HUD | `Pill/` → ShannonPill via `./scripts/shannon` |
-
-`hub/AgentHubApp.swift` is a **legacy** dual status-item Swift UI. Do not launch
-it alongside ShannonPill.
+| Item | Live path | Product |
+|------|-----------|---------|
+| Gate daemon | `hub/shannon_gate.py` | Shannon CLI |
+| Agent manager | `hub/agent_manager.py` (`./scripts/shannon agent`) | Shannon CLI |
+| Socket | `/tmp/shannon.sock` | Shannon CLI |
+| Audit DB | `~/.shannon/agent_hub.db` (filename only; not a second package) | Shannon CLI |
+| Tests | `hub/tests/` | Shannon CLI |
+| Identities | `hub/agent_identity.py` | Shannon CLI |
+| Menu-bar / notch HUD | [ShannonUI](https://github.com/LeBonhommePharma/ShannonUI) Pill → ShannonPill via `./scripts/shannon` | **Shannon UI** (only shipped HUD; separate repo) |
 
 ## What this package provides
 
@@ -35,14 +36,15 @@ hub/
 ├── README.md
 ├── ARCHITECTURE.md
 ├── docs/AGENT_HUB.md          — integration summary + auth hardening notes
-├── shannon_gate.py            — gate daemon
+├── shannon_gate.py            — Shannon CLI gate daemon
 ├── agent_*.py / pet_*.py / …
 ├── requirements.txt
 ├── tests/                     — pytest suite (canonical)
-├── tools/
-├── Pet/                       — pet animation helpers (Swift)
-└── AgentHubApp.swift          — legacy HUD (do not ship)
+└── tools/
 ```
+
+Archived (non-production): `archive/legacy_agent_hub_ui/` (former dual status-item
+Swift UI + Pet Canvas helpers). Production pet rendering is in `Pill/Sources/PillCore/`.
 
 ## Run tests
 
@@ -55,4 +57,5 @@ pytest hub/tests/ -v
 
 - Design / threat model: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Integration notes: [docs/AGENT_HUB.md](docs/AGENT_HUB.md)
-- macOS HUD: [../Pill/README.md](../Pill/README.md)
+- Shannon UI (macOS HUD): [LeBonhommePharma/ShannonUI](https://github.com/LeBonhommePharma/ShannonUI) · [docs/SHANNON_UI.md](../docs/SHANNON_UI.md)
+- Shannon CLI entropy monitor: `shannon-monitor --help`

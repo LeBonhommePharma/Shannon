@@ -3,7 +3,8 @@
 The hub popup's buttons must do real work — LP's constraint is that nothing in
 the UI may be a decoration. These tests drive a live gate over a Unix socket and
 assert that the exact JSON envelopes `GateSocketClient` emits in
-`hub/AgentHubApp.swift` actually reach another connected agent.
+the Shannon UI (Pill) approval path actually reach another connected agent.
+(Historical dual status-item UI is under archive/legacy_agent_hub_ui/.)
 
 The envelopes under test:
   * sendPing            → payload.kind == "ping"

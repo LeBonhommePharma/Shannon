@@ -83,8 +83,9 @@ def test_product_assets_still_tracked():
     }
     missing = sorted(required - tracked)
     assert not missing, f"product paths missing from index: {missing}"
-    # At least one source file under each primary tree
-    for prefix in ("src/", "python/", "Pill/", "hub/", "Packages/", "tests/"):
+    # At least one source file under each primary tree in this (Shannon CLI) repo.
+    # Apple UI trees (Pill/, Packages/, …) live in LeBonhommePharma/ShannonUI.
+    for prefix in ("src/", "python/", "hub/", "tests/", "archive/"):
         assert any(p.startswith(prefix) for p in tracked), f"no tracked files under {prefix}"
 
 

@@ -1,6 +1,7 @@
 """Hub UI ask path: gate interaction_id must ride Approve/Deny, never a random UUID.
 
-Tests the shipped helpers that AgentHubApp.swift HubAskPipeline mirrors:
+Tests the shipped helpers that Shannon UI (Pill GateApprovalClient) and the
+archived HubAskPipeline mirror:
 - interaction_id_from_activity_output (event_output → gate id)
 - hub_ui_resolve_payload (resolve envelope with that id)
 - AuditDB upsert + resolve using the same id (end-to-end DB contract)

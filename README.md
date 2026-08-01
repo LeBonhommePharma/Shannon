@@ -11,6 +11,13 @@ Shannon is a white-box, physics-grounded referee: real-time **entropy collapse**
 detection for frontier agents — plus a multi-agent **macOS notch pill** hub that
 makes concurrent agent work observable and killable.
 
+This stack ships **two named products** (not one mixed binary):
+
+| Product | What it is | Primary entry |
+|---------|------------|---------------|
+| **Shannon UI** | Sole shipped macOS menu-bar / notch operator HUD (+ iOS / iPad / watchOS) | [LeBonhommePharma/ShannonUI](https://github.com/LeBonhommePharma/ShannonUI) · cask `shannon-pill` · `./scripts/shannon` lifecycle |
+| **Shannon CLI** | Headless entropy, gate, agent, and science tooling (this repo) | `shannon-monitor`, `./scripts/shannon status\|gate\|agent…`, `hub/`, Formula `shannon` |
+
 [![CI](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml/badge.svg)](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![PyPI](https://img.shields.io/badge/PyPI-shannon--entropy-blue.svg)](https://pypi.org/project/shannon-entropy/)
@@ -62,39 +69,52 @@ gate — spawn / control / result / kill — not another chat tab.
 
 ## 30-second install
 
-### A · macOS hub (primary operator path)
+### A · Shannon UI — macOS HUD (separate repo)
+
+Apple HUD sources live in **[ShannonUI](https://github.com/LeBonhommePharma/ShannonUI)**
+(see [`docs/SHANNON_UI.md`](docs/SHANNON_UI.md)). This repo keeps the Shannon CLI
+handrail (`./scripts/shannon`) for pets, gate, and UI lifecycle.
 
 ```bash
+# Shannon CLI + hub (this repo)
 git clone https://github.com/LeBonhommePharma/Shannon
 cd Shannon
-./scripts/shannon                 # pets + install /Applications/Shannon.app + start
-# Later:
-git pull && ./scripts/shannon update
+./scripts/shannon                 # pets + optional gate; starts UI if already installed
+./scripts/shannon help            # dual-product command map
+
+# Shannon UI sources (sibling checkout for local rebuilds)
+git clone https://github.com/LeBonhommePharma/ShannonUI ../ShannonUI
+./scripts/shannon app             # build/install /Applications/Shannon.app from ShannonUI
+# or published cask:
+# brew install --cask lebonhommepharma/shannon/shannon-pill
 ```
 
 | Command | What it does |
 |---------|----------------|
-| `./scripts/shannon` | Bootstrap pets + app |
-| `./scripts/shannon update` | Rebuild + reinstall from this clone |
-| `./scripts/shannon stop` | Quit the pill |
-| `./scripts/shannon probe` | Diagnostics |
-| `./scripts/shannon status` | Running? gate? pets? |
-| `./scripts/shannon help` | Full command list |
+| `./scripts/shannon` | Bootstrap pets + optional gate (+ Shannon UI if available) |
+| `./scripts/shannon app` | Rebuild/install Shannon UI (needs ShannonUI checkout) |
+| `./scripts/shannon stop` | Quit Shannon UI |
+| `./scripts/shannon probe` | Diagnostics (headless; does not require a display) |
+| `./scripts/shannon status` | Shannon CLI status: running? gate? pets? (headless) |
+| `./scripts/shannon help` | Dual-product command map (Shannon UI + Shannon CLI) |
 
-On launch: **menu-bar** glyph (`○ ready` / agent name) · **notch pill** (or
-menu-bar capsule) · **⌘D** captures the frontmost app as an agent + pet.
+On launch: **menu-bar** glyph (`○ ready` / agent name) · **notch pill** · **⌘D**
+captures the frontmost app as an agent + pet.
 **Quit:** menu-bar → Quit Shannon, or `./scripts/shannon stop`.
 
-Pill deep-dive: [`Pill/README.md`](Pill/README.md) · honest gaps: [`Pill/BLOCKED.md`](Pill/BLOCKED.md)
+The former dual status-item hub UI is archived under `archive/legacy_agent_hub_ui/`
+and is **not** installed or bootstrapped.
 
-### B · Python library (any OS)
+### B · Shannon CLI — Python library + headless tools (any OS)
 
 ```bash
 pip install shannon-entropy
 # or from this clone (editable + tests):
 pip install -e ".[dev]"
 
-shannon-monitor --help
+shannon-monitor --help            # Shannon CLI entropy monitor
+./scripts/shannon help            # dual-product map (status/gate/agent are CLI)
+./scripts/shannon status          # headless hub diagnostics (no GUI launch)
 ```
 
 ```python
@@ -120,7 +140,7 @@ Optional pure-Python install helpers (no C++ build required — `SHANNON_SKIP_CO
 powershell -ExecutionPolicy Bypass -File .\scripts\Install-Shannon.ps1 -Source path
 ```
 
-### C · C++ agent (optional)
+### C · Shannon CLI — C++ agent (optional)
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
@@ -132,14 +152,16 @@ cat token_stream.jsonl | ./build/shannon-agent --window 8 --threshold -3.2
 
 ```bash
 brew tap lebonhommepharma/shannon https://github.com/LeBonhommePharma/Shannon
+# Shannon CLI (native shannon-agent only):
 brew trust --formula lebonhommepharma/shannon/shannon
-brew install lebonhommepharma/shannon/shannon    # shannon-agent CLI
-# Cask (published ZIP sha for v2.1.0+):
+brew install lebonhommepharma/shannon/shannon
+# Shannon UI (Pill app — separate cask; published ZIP sha for v2.1.0+):
 brew trust --cask lebonhommepharma/shannon/shannon-pill
 brew install --cask lebonhommepharma/shannon/shannon-pill
 ```
 
-Local unsigned rebuild: `./scripts/package_pill.sh --install`
+Local unsigned Shannon UI rebuild: clone [ShannonUI](https://github.com/LeBonhommePharma/ShannonUI)
+then `./scripts/shannon app` (or `scripts/package_pill.sh` when present beside ShannonUI).
 
 </details>
 
@@ -202,26 +224,28 @@ Hub overview: [`hub/README.md`](hub/README.md) · gate protocol lives under `hub
 
 ---
 
-## Apple companions
+## Apple companions (Shannon UI)
+
+Apple surfaces live in **[ShannonUI](https://github.com/LeBonhommePharma/ShannonUI)**
+— see [`docs/SHANNON_UI.md`](docs/SHANNON_UI.md).
 
 | Platform | Min | Role | Doc |
 |----------|-----|------|-----|
-| **macOS Pill** | 13+ | Primary hub UI | [`Pill/README.md`](Pill/README.md) |
-| **iPhone** | iOS 17 | Live cards, confirmations, widget | [`iOS/README.md`](iOS/README.md) |
-| **iPad** | iPadOS 17 | Multi-agent canvas (not a phone scale-up) | [`iPad/README.md`](iPad/README.md) |
-| **Watch** | watchOS 10 | Face + complications (display relay) | [`watchOS/README.md`](watchOS/README.md) |
+| **macOS Pill** | 13+ | Primary Shannon UI HUD | [ShannonUI](https://github.com/LeBonhommePharma/ShannonUI) |
+| **iPhone** | iOS 17 | Live cards, confirmations, widget | ShannonUI `iOS/` |
+| **iPad** | iPadOS 17 | Multi-agent canvas (not a phone scale-up) | ShannonUI `iPad/` |
+| **Watch** | watchOS 10 | Face + complications (display relay) | ShannonUI `watchOS/` |
 
 Sync direction: **Mac → iPhone (CloudKit) → Watch (WatchConnectivity)** —
-details in [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md).
+details in [`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md) (policy docs may remain here;
+implementation is in ShannonUI).
 
 ```bash
-# Shared model (no signing required)
-cd Packages/ShannonCore && swift test
-
-# Multi-OS health (macOS always; simulators when Xcode allows)
-./scripts/test_apple_platforms.sh --quick
-./scripts/validate_xcodeprojs.sh
-open Pill/ShannonPill.xcodeproj
+git clone https://github.com/LeBonhommePharma/ShannonUI ../ShannonUI
+cd ../ShannonUI/Packages/ShannonCore && swift test
+cd ../ShannonUI/Pill && swift test
+# lifecycle from this (Shannon CLI) clone:
+./scripts/shannon app
 ```
 
 CloudKit needs a paid Apple Developer team (`iCloud.com.lebonhommepharma.shannon`).
@@ -266,10 +290,9 @@ pytest tests/python/ -v
 cmake -B build -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF
 cmake --build build -j && ctest --test-dir build --output-on-failure
 
-# Swift packages (swift test is authoritative)
-cd Pill && swift test
-cd Packages/ShannonCore && swift test
-cd Packages/ShannonTheme && swift test
+# Shannon UI Swift packages (authoritative in ShannonUI repo)
+#   cd ../ShannonUI/Pill && swift test
+#   cd ../ShannonUI/Packages/ShannonCore && swift test
 ```
 
 ---
@@ -278,10 +301,10 @@ cd Packages/ShannonTheme && swift test
 
 | Path | Command |
 |------|---------|
-| **macOS app** | `./scripts/shannon` / `./scripts/shannon update` |
-| **Science (clone)** | `./scripts/install_shannon.sh --path` or `python3 scripts/shannon_installer.py --source path` |
-| **Science (PyPI)** | `pip install shannon-entropy` |
-| **Science (Git HEAD)** | `pip install "git+https://github.com/LeBonhommePharma/Shannon.git"` |
+| **Shannon UI (macOS app)** | `./scripts/shannon app` (needs ShannonUI checkout) or cask `shannon-pill` |
+| **Shannon CLI (science clone)** | `./scripts/install_shannon.sh --path` or `python3 scripts/shannon_installer.py --source path` |
+| **Shannon CLI (PyPI)** | `pip install shannon-entropy` |
+| **Shannon CLI (Git HEAD)** | `pip install "git+https://github.com/LeBonhommePharma/Shannon.git"` |
 | **Windows science** | `.\scripts\Install-Shannon.ps1 -Source path` |
 | **C++ prefix install** | `cmake --install build --prefix /usr/local` |
 
@@ -297,16 +320,19 @@ CMake knobs: `SHANNON_BUILD_TESTS`, `SHANNON_BUILD_PYTHON`, `SHANNON_BUILD_AGENT
 ## Repo map
 
 ```
-Shannon/
-├── scripts/shannon              # primary macOS operator handrail
-├── Pill/                        # macOS notch pill (Swift)
-├── iOS/  iPad/  watchOS/        # companions
-├── Packages/ShannonCore|Theme   # shared multi-device model + tokens
+Shannon/   (Shannon CLI + science — this repo)
+├── scripts/shannon              # dual-product operator handrail (CLI + UI lifecycle)
 ├── hub/                         # gate, agent_manager, DatasetRunner bridge
-├── python/shannon/              # PyPI package + shannon-monitor
+├── python/shannon/              # PyPI package + shannon-monitor (Shannon CLI)
 ├── src/                         # C++20 entropy / agent core
-├── tests/python/                # library tests
-└── docs/                        # theory, architecture, multi-device
+├── archive/legacy_agent_hub_ui/ # non-production dual status-item UI
+├── tests/python/                # library + product-split contract tests
+└── docs/                        # theory, architecture, SHANNON_UI.md
+
+ShannonUI/ (Shannon UI — separate repo)
+├── Pill/                        # macOS notch pill (sole shipped HUD)
+├── iOS/  iPad/  watchOS/        # companions
+└── Packages/ShannonCore|Theme   # shared multi-device model + tokens
 ```
 
 ---

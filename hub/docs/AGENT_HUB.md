@@ -23,7 +23,7 @@ entropy library — it does not link against it and does not change any C++ code
 | `system_monitor.py` | CPU/RAM/disk/thermal/battery samples for the HUD |
 | `tools/dataset_runner_bridge.py` | Benchmark results → hub `benchmark_state` |
 | `agent_manager.py` / `agent_identity.py` | Live registry and identity helpers |
-| `AgentHubApp.swift` | **Legacy** menu-bar UI — production HUD is ShannonPill (`Pill/`) |
+| ~~`AgentHubApp.swift`~~ | **Archived** dual status-item UI → `archive/legacy_agent_hub_ui/`; production HUD is **Shannon UI** (`Pill/` / ShannonPill) |
 
 ## Auth hardening (integration)
 

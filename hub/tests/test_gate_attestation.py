@@ -426,7 +426,14 @@ class TestHonestAgentNotPunished:
         assert d.decision == "pass"
         assert not any("confidence" in r for r in d.reasons)
 
-    def test_calibrated_agent_earns_headroom_on_flag_but_never_on_block(self, gate):
+    def test_calibrated_agent_earns_headroom_on_flag_but_never_on_block(
+        self, gate, monkeypatch
+    ):
+        # Text-proxy flagging is secondary and off by default (observe). These
+        # cases pin attestation headroom against the legacy flag path, so enable
+        # enforce only for this test.
+        monkeypatch.setattr(sg, "TEXT_PROXY_MODE", "enforce")
+        monkeypatch.setattr(sg, "ATTEST_MODE", "enforce")
         for _ in range(sg.ATTEST_CALIB_N + 2):
             gate.evaluate(_msg(agent_id="cowork", shannon_H=HONEST_CLAIM))
         assert gate.ledger._state("cowork")["state"] == "calibrated"
@@ -445,7 +452,9 @@ class TestHonestAgentNotPunished:
             _msg(agent_id="grok_build", payload=borderline, shannon_H=H_tok)
         ).decision == "flagged"
 
-    def test_headroom_never_moves_the_block_threshold(self, gate):
+    def test_headroom_never_moves_the_block_threshold(self, gate, monkeypatch):
+        monkeypatch.setattr(sg, "TEXT_PROXY_MODE", "enforce")
+        monkeypatch.setattr(sg, "ATTEST_MODE", "enforce")
         for _ in range(sg.ATTEST_CALIB_N + 2):
             gate.evaluate(_msg(agent_id="cowork", shannon_H=HONEST_CLAIM))
         huge = {"text": " ".join(f"uniqueword{i}" for i in range(400))}

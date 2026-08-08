@@ -6,9 +6,11 @@ description: >
   implement + cross-review), and delegates collaborative agents (Codex, Claude
   Code, Claude Science, Claude Cowork, Dispatch, Design, Grok Build, OpenCode,
   DatasetRunner) through the Shannon Gate regardless of which upstream model API
-  they use. Use for multi-agent FlexAIDdS ownership, pair/cross-review
-  plan/delegate, hub attach, gate status, approval asks, and when any agent must
-  report lifecycle/status/results to the Shannon pill.
+  they use. It also prepares resumable, evidence-complete handoffs to Claude
+  Code or Dispatch from an in-flight dirty checkout. Use for multi-agent
+  FlexAIDdS ownership, pair/cross-review, handoff/resume/transfer, plan/delegate,
+  hub attach, gate status, approval asks, and when any agent must report
+  lifecycle/status/results to the Shannon pill.
   Triggers: /shannon, "shannon hub", "attach agent", "spawn agent",
   "monitor agents", "kill agent", "campaign", "delegate", "pair",
   "cross-review", concurrent agentic benchmarking.
@@ -31,6 +33,7 @@ owners or dual reviewers.
 - **Owning** a FlexAIDdS / Astex / red-pair benchmark campaign (Shannon plans it)
 - **Pair work:** Claude Code ↔ Codex half-and-half implement, or cross-review
   (Codex reviews Claude’s slice and vice-versa)
+- Preparing or resuming a Claude Code / Dispatch handoff from active work
 - Delegating science / code / dispatch agents into campaign roles
 - Starting or joining a multi-agent session through the hub
 - Reporting progress, results, or approval needs to the human via the pill
@@ -195,6 +198,17 @@ Canonical detail: **`references/pair_work.md`** (part of this **SKILL**). Summar
   automatic file splits; host TUIs do the real work after `spawn`.
 - Plan JSON never invents review text or code (`fabricated_*` always null).
 
+## Resumable handoffs
+
+For a handoff of current work, read **`references/handoff.md`** and follow its
+freeze, receipt, artifact, and verification protocol. A request to *prepare* a
+handoff authorizes a handoff artifact and optional dry-run task plan; it does
+not authorize a live spawn, commit, push, merge, or destructive cleanup.
+
+Use `implement_only` when Claude Code becomes the sole implementer. Use a
+Dispatch prompt when Dispatch will coordinate disjoint worker lanes; Dispatch
+must not make multiple agents edit the same shared files concurrently.
+
 ## FlexAIDdS concurrent benchmarking
 
 See `references/flexaidds.md`. Summary:
@@ -226,4 +240,5 @@ See `references/flexaidds.md`. Summary:
 | macOS pill | `Pill/` |
 | This **SKILL** | `skills/shannon/SKILL.md` |
 | Pair reference | `skills/shannon/references/pair_work.md` |
+| Handoff reference | `skills/shannon/references/handoff.md` |
 | FlexAIDdS campaign reference | `skills/shannon/references/flexaidds.md` |

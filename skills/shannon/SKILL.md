@@ -7,10 +7,11 @@ description: >
   Code, Claude Science, Claude Cowork, Dispatch, Design, Grok Build, OpenCode,
   DatasetRunner) through the Shannon Gate regardless of which upstream model API
   they use. It also prepares resumable, evidence-complete handoffs to Claude
-  Code or Dispatch from an in-flight dirty checkout. Use for multi-agent
-  FlexAIDdS ownership, pair/cross-review, handoff/resume/transfer, plan/delegate,
-  hub attach, gate status, approval asks, and when any agent must report
-  lifecycle/status/results to the Shannon pill.
+  Code, Dispatch, or dependency-ordered Claude Science/Fable session packs from
+  an in-flight dirty checkout. Use for multi-agent FlexAIDdS ownership,
+  pair/cross-review, Fable multi-session handoff, handoff/resume/transfer,
+  plan/delegate, hub attach, gate status, approval asks, and when any agent must
+  report lifecycle/status/results to the Shannon pill.
   Triggers: /shannon, "shannon hub", "attach agent", "spawn agent",
   "monitor agents", "kill agent", "campaign", "delegate", "pair",
   "cross-review", concurrent agentic benchmarking.
@@ -34,6 +35,7 @@ owners or dual reviewers.
 - **Pair work:** Claude Code ↔ Codex half-and-half implement, or cross-review
   (Codex reviews Claude’s slice and vice-versa)
 - Preparing or resuming a Claude Code / Dispatch handoff from active work
+- Preparing dependency-ordered Claude Science / Fable multi-session handoffs
 - Delegating science / code / dispatch agents into campaign roles
 - Starting or joining a multi-agent session through the hub
 - Reporting progress, results, or approval needs to the human via the pill
@@ -209,6 +211,11 @@ Use `implement_only` when Claude Code becomes the sole implementer. Use a
 Dispatch prompt when Dispatch will coordinate disjoint worker lanes; Dispatch
 must not make multiple agents edit the same shared files concurrently.
 
+For two or more Claude Science/Fable sessions, read
+**`references/fable_handoffs.md`**. Do not register multiple live sessions under
+the single canonical `science` identity. Never interrupt an existing science
+experiment to make room for a code-remediation handoff.
+
 ## FlexAIDdS concurrent benchmarking
 
 See `references/flexaidds.md`. Summary:
@@ -241,4 +248,5 @@ See `references/flexaidds.md`. Summary:
 | This **SKILL** | `skills/shannon/SKILL.md` |
 | Pair reference | `skills/shannon/references/pair_work.md` |
 | Handoff reference | `skills/shannon/references/handoff.md` |
+| Fable session-pack reference | `skills/shannon/references/fable_handoffs.md` |
 | FlexAIDdS campaign reference | `skills/shannon/references/flexaidds.md` |

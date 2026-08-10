@@ -22,7 +22,7 @@ A request to **prepare** a handoff does not authorize a live agent launch.
 Generate a Shannon dry-run identity when useful:
 
 ```bash
-PYTHONPATH="$SHANNON_ROOT/hub" python3 -m agent_manager pair \
+PYTHONPATH="${SHANNON_ROOT:-.}/hub" python3 -m agent_manager pair \
   --pair-mode implement_only --task TASK_ID --summary "SUMMARY" \
   --dry-run --json
 ```

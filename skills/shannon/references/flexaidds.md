@@ -39,11 +39,12 @@ adds only the FlexAIDdS-specific role map and protocol.
    timeout 20 python3 -m agent_manager monitor --agent <your_id> --task "$TASK_ID" --json
    ```
 
-   > **WARNING — live `monitor` can hang forever.** The client sets no read
-   > timeout (`hub/agent_protocol.py:405`), so a gate that accepts the connection
-   > but never answers blocks the CLI indefinitely while `gate-status` still
-   > reports `gate_up: true`. Exit **124** means it hung. `monitor --dry-run` is
-   > **not** a fallback — it returns the query plan, not a roster.
+   > **Check `roster_known` before you believe an empty roster.** `connected: []`
+   > with `roster_known: true` means the hub is genuinely idle. Exit **4**
+   > (`roster_known: false`) or exit **124** means the gate never answered and
+   > connected state is **UNKNOWN** — which is not the same as idle, and is not
+   > a licence to spawn a heavy owner. `monitor --dry-run` is **not** a fallback;
+   > it returns the query plan, not a roster.
    >
    > Also: a bare `monitor` registers **as `dispatch`** and displaces a live
    > Dispatch connection. Always pass `--agent <your own id>`.

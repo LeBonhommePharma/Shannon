@@ -52,6 +52,7 @@ always probes the Unix socket; for HTTP liveness use
 | 1 | Live `Unknown agent_id` (raised client-side before connecting) |
 | 2 | `gate-status`: gate down or socket stale |
 | 3 | `campaign` / `delegate` dual-heavy-owner refusal (`refused: true`, `ok: false`) |
+| 4 | `monitor`: the gate did not answer — roster **UNKNOWN**, not empty |
 | 124 | Not ours — your `timeout` wrapper fired, almost always on `monitor` |
 
 ## What `--dry-run` does and does not do
@@ -154,10 +155,21 @@ set it honestly.
 
 ## `monitor`
 
-See the Known breakage section of `SKILL.md`. Two things to remember: it hangs
-against a live gate (no read timeout), and with no flags it registers *as
-`dispatch`*, displacing a real Dispatch connection. Always
-`--agent <your id> --task <your task id>`, always under `timeout`.
+Returns `connected` (list of agent ids), `roster_known` (bool), `recent`,
+`report`, `ok`, and — when the gate did not answer — `error`.
+
+**Branch on `roster_known`, never on `connected` alone.** `connected: []` with
+`roster_known: true` means the hub really is idle; `connected: []` with
+`roster_known: false` (exit 4) means the gate stayed silent and you know
+nothing. Only the first is safe to feed to `--connected`.
+
+The gate nests the roster under `data`; the manager unwraps it and also accepts
+a flat reply, so both socket and any unwrapping transport work.
+
+With no flags `monitor` registers *as `dispatch`*, displacing a real Dispatch
+connection — always pass `--agent <your id> --task <your task id>`. Keep it
+under `timeout` as well: a transport that does not bound its wait for a reply
+can still wedge, and exit 124 carries the same meaning as exit 4.
 
 ## `prefer-device`
 
@@ -169,10 +181,11 @@ python3 -m agent_manager prefer-device \
   --busy-threshold 85 --json
 ```
 
-⚠ The `--devices -` stdin form advertised by `--help` is **broken**, as is a
-bare `prefer-device` (its `--devices` default is `-`): both return
-`{"ok": false, "error": "cannot access local variable 'sys' …"}` — with **exit
-0**, so check `ok`, not the exit status.
+`--devices -` reads the array from stdin. Inline is the form that works on
+every tree, and a bare `prefer-device` with nothing on stdin is an error
+(`{"ok": false, …}`), not an empty result. **Check the `ok` field**, not just
+the exit status — this subcommand has historically returned failures with
+exit 0.
 
 ## Gate message types that are not CLI subcommands
 

@@ -42,27 +42,35 @@ owners or dual reviewers.
 - Listing who is online / detaching a stuck agent
 - Any host TUI (Claude Code, Codex, Grok Build, OpenCode, Cowork, Dispatch, Design)
 
-## ⚠ Known breakage — read before you plan
+## ⚠ Reading `monitor` correctly — do this before you plan
 
-**Live `monitor` hangs forever.** The client sets no read timeout
-(`hub/agent_protocol.py:405` `settimeout(None)`), so a gate that accepts the
-connection but never answers the `agent_list` query blocks the CLI indefinitely
-— while `gate-status` still cheerfully reports `gate_up: true`. Always wrap it:
+`monitor` is the precondition for hard rule 8, so the one value you must never
+misread is an **empty roster**: "nobody is online" is exactly the answer that
+green-lights spawning a heavy owner.
+
+**An empty roster is only trustworthy when `roster_known` is `true`.** The gate
+not answering used to decode to the same `[]` as an idle hub, reported as
+`ok: true`. It no longer does — but you still have to check:
 
 ```bash
 timeout 20 python3 -m agent_manager monitor --agent <your_id> --task <your_task> --json
 ```
 
-Exit **124** means it hung, and you therefore have **no roster**. Do not treat
-that as "nobody is online": treat connected state as **UNKNOWN**, do not spawn a
-heavy owner, and ask the human via the pill. `monitor --dry-run` is *not* a
-fallback — it echoes the query plan and returns no roster at all.
+| Outcome | Meaning | What to do |
+|---------|---------|------------|
+| exit 0, `roster_known: true` | The gate answered. `connected` is real, empty or not. | Act on it; pass it to `--connected`. |
+| exit **4**, `roster_known: false` | The gate never answered. Connected state is **UNKNOWN**. | Do **not** spawn a heavy owner. Ask the human via the pill. |
+| exit **124** (your `timeout` fired) | Blocked — an unbounded transport can still wedge here. | Same as exit 4: treat as UNKNOWN. |
+
+Keep the `timeout` wrapper regardless: it costs nothing and converts a wedge
+into a signal. `monitor --dry-run` is **not** a fallback — it echoes the query
+plan and returns no roster at all.
 
 **`monitor` is read-only on data but NOT passive on identity.** It opens a real
-gate session and registers. With no flags it registers as **`dispatch`**
-(`hub/agent_manager.py:1191`), and the gate *replaces* any existing connection
-for that id — a bare `monitor` can knock a live Dispatch off the pill. Always
-pass `--agent <your own id> --task <your task id>`.
+gate session and registers. With no flags it registers as **`dispatch`**, and
+the gate *replaces* any existing connection for that id — a bare `monitor` can
+knock a live Dispatch off the pill. Always pass `--agent <your own id> --task
+<your task id>`.
 
 ## Hard rules
 
@@ -191,8 +199,9 @@ python3 -m agent_manager pair --pair-mode cross_review \
 python3 -m agent_manager pair --pair-mode claude_implements \
   --task "$PAIR_TASK" --summary "Implement feature" --dry-run --json
 
-# Which Mac takes the next heavy arm? (pure planner; pass JSON INLINE —
-# the `--devices -` stdin form advertised by --help is currently broken)
+# Which Mac takes the next heavy arm? (pure planner). `--devices -` reads
+# stdin; passing JSON inline is the form that works on every tree. Check the
+# `ok` field, not just the exit status.
 python3 -m agent_manager prefer-device \
   --devices '[{"device_id":"mac1","cpu_percent":10},{"device_id":"mac2","cpu_percent":90}]' \
   --busy-threshold 85 --json
@@ -207,7 +216,7 @@ python3 -m agent_manager kill science --task "$TASK_ID" --dry-run
 python3 -m agent_manager spawn dataset_runner --task "$TASK_ID" --reason "campaign owner"
 python3 -m agent_manager spawn science --task "$TASK_ID"
 python3 -m agent_manager control dataset_runner "phase A started" --task "$TASK_ID"
-timeout 20 python3 -m agent_manager monitor --agent science --task "$TASK_ID"   # see Known breakage
+timeout 20 python3 -m agent_manager monitor --agent science --task "$TASK_ID"   # exit 4 = roster UNKNOWN
 python3 -m agent_manager ask science "Approve Softβ election?" --task "$TASK_ID"
 python3 -m agent_manager result dataset_runner --task "$TASK_ID" --confidence 0.75 \
   --payload '{"target_id":"1ACJ","cf_value":-3.21,"rmsd":1.4}'   # or --payload - for stdin
@@ -221,6 +230,7 @@ Or via the bootstrap script — use **`agent` / `agents` / `hub-agent`** only:
 ./scripts/shannon agent campaign --dry-run --json
 ./scripts/shannon agent pair --pair-mode implement_pair --task pair_t1 --dry-run --json
 ./scripts/shannon agent spawn science --dry-run
+./scripts/shannon agent monitor
 ./scripts/shannon agent control science "phase A" --task "$TASK_ID" --dry-run
 ./scripts/shannon agent kill science --task "$TASK_ID" --dry-run
 ```
@@ -335,7 +345,8 @@ See `references/flexaidds.md`. Summary:
 
 | Symptom | Action |
 |---------|--------|
-| `monitor` hangs, exit 124 under `timeout` | Client has no read timeout (`agent_protocol.py:405`). You have **no roster** — treat connected state as UNKNOWN, do not spawn a heavy owner, ask the human. `--dry-run` is not a fallback. |
+| `monitor` exit **4**, or exit 124 under `timeout` | The gate did not answer. You have **no roster** — treat connected state as UNKNOWN, do not spawn a heavy owner, ask the human. `--dry-run` is not a fallback. |
+| `monitor` shows `(none)` but an owner is running | Only believable with `roster_known: true`. If it says `connected: UNKNOWN`, that is the honest answer, not an idle hub. |
 | Dispatch vanished from the pill | Someone ran a bare `monitor`; it registers as `dispatch` and the gate replaces the existing connection. Always `monitor --agent <your id>`. |
 | `gate offline` / `gate-status` exit 2 | `gate-status` connects rather than stats, so a stale `/tmp/shannon.sock` from a dead gate reads down. `./scripts/shannon gate` removes a stale socket before relaunch — but only when no `shannon_gate.py` is alive. If it says "already running" while `gate-status` stays exit 2, the gate is wedged: `pkill -f shannon_gate.py`, then `./scripts/shannon gate`. If it cannot be brought up, hard rule 3 forbids heavy work. |
 | Typo'd / unknown agent id | The CLI does **not** reject it — `--dry-run` plans it and exits 0 with a generic ⚙️ label. Only a live call raises (`Unknown agent_id`, exit 1) — and that error prints the full 17-id valid set, which is the list to trust, not `roster`. Add genuinely new hosts to `IDENTITIES` in `hub/agent_identity.py` **and restart the gate**. |

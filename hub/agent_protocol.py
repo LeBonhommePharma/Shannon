@@ -53,6 +53,7 @@ import asyncio
 import json
 import math
 import os
+import queue
 import socket
 import subprocess
 import sys
@@ -365,6 +366,10 @@ class AgentClient:
         self._callbacks: list[Callable[[dict], None]] = []
         self._recv_thread: Optional[threading.Thread] = None
         self._recv_buf: bytes = b""
+        # Direct replies (gate_response / query_response / approval_ack /
+        # error frames) routed from the single reader thread to the sender.
+        # A None sentinel means the connection closed.
+        self._resp_queue: "queue.Queue[Optional[dict]]" = queue.Queue()
 
         # Async transport state (populated by async_connect)
         self._reader: Optional[asyncio.StreamReader] = None
@@ -793,29 +798,61 @@ class AgentClient:
 
     # ── Socket transport ──────────────────────────────────────────────────────
 
+    # How long a sender waits for the gate's direct reply. Matches the async
+    # and HTTP transports' 15 s.
+    _RESPONSE_TIMEOUT_S: float = 15.0
+
     def _send_socket(self, envelope: dict[str, Any]) -> dict[str, Any]:
+        """Send one envelope and wait for the gate's direct reply.
+
+        The background _recv_loop is the ONLY reader of the socket; it routes
+        direct replies into _resp_queue and broadcasts into callbacks. The old
+        implementation recv()'d here as a second reader on the same fd, so the
+        reply for a send could be swallowed by the loop (returning {}), or a
+        broadcast could be handed back as if it were the gate decision.
+        """
         if not self._connected or self._sock is None:
             raise RuntimeError(
                 "Not connected. Call connect() or use the context manager."
             )
+
+        # Drop stale replies left by a previous timed-out send so they cannot
+        # be mistaken for this send's decision.
+        while True:
+            try:
+                stale = self._resp_queue.get_nowait()
+            except queue.Empty:
+                break
+            if stale is None:
+                self._connected = False
+                raise RuntimeError("Connection closed by gate")
+
         data = (json.dumps(envelope) + "\n").encode()
         try:
             self._sock.sendall(data)
-            # Synchronous read of gate response
-            resp_raw = self._sock.recv(RECV_BUFFER)
-            if resp_raw:
-                # May contain multiple lines; parse the first complete JSON
-                for line in resp_raw.decode().splitlines():
-                    line = line.strip()
-                    if line:
-                        try:
-                            return json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-            return {}
         except OSError as exc:
             self._connected = False
             raise RuntimeError(f"Socket send failed: {exc}") from exc
+
+        deadline = time.monotonic() + self._RESPONSE_TIMEOUT_S
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return {}
+            try:
+                msg = self._resp_queue.get(timeout=remaining)
+            except queue.Empty:
+                return {}
+            if msg is None:
+                self._connected = False
+                raise RuntimeError("Connection closed by gate while awaiting response")
+            if (
+                msg.get("type") == "gate_response"
+                and "message_id" in msg
+                and msg["message_id"] != envelope["message_id"]
+            ):
+                continue  # stale gate_response from an earlier timed-out send
+            return msg
 
     # ── HTTP transport ────────────────────────────────────────────────────────
 
@@ -824,14 +861,19 @@ class AgentClient:
             raise ImportError(
                 "HTTP mode requires 'requests': pip install requests"
             )
-        endpoint = (
-            f"{self.http_url}/state"
-            if envelope["message_type"] == "query"
-               and envelope["payload"].get("query_type") == "benchmark_state"
-            else f"{self.http_url}/message"
+        is_state_query = (
+            envelope["message_type"] == "query"
+            and envelope["payload"].get("query_type") == "benchmark_state"
         )
         try:
-            resp = _requests.post(endpoint, json=envelope, timeout=15)
+            if is_state_query:
+                # The gate registers /state as GET-only; POSTing envelopes
+                # there returned 405 and broke HTTP-mode state queries.
+                endpoint = f"{self.http_url}/state"
+                resp = _requests.get(endpoint, timeout=15)
+            else:
+                endpoint = f"{self.http_url}/message"
+                resp = _requests.post(endpoint, json=envelope, timeout=15)
             resp.raise_for_status()
             return resp.json()
         except Exception as exc:
@@ -862,39 +904,53 @@ class AgentClient:
     # ── Background receive thread ─────────────────────────────────────────────
 
     def _recv_loop(self) -> None:
-        """
-        Continuously reads messages from the gate (broadcasts, ping, etc.)
-        and dispatches them to registered callbacks.
+        """Single reader for the gate socket.
+
+        Routes frames by type: broadcasts (``agent_message``) go to subscribe
+        callbacks, keepalives (``ping``/``pong``) are dropped, and everything
+        else — ``gate_response``, ``query_response``, ``approval_ack``, bare
+        ``{"error": ...}`` refusals — is a direct reply for the thread blocked
+        in _send_socket. Nothing else may recv() on this socket.
         """
         buf = b""
-        while self._connected and self._sock is not None:
-            try:
-                chunk = self._sock.recv(RECV_BUFFER)
-                if not chunk:
+        try:
+            while self._connected and self._sock is not None:
+                try:
+                    chunk = self._sock.recv(RECV_BUFFER)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while b"\n" in buf:
+                        line, buf = buf.split(b"\n", 1)
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            msg = json.loads(line.decode())
+                        except json.JSONDecodeError:
+                            continue
+                        if not isinstance(msg, dict):
+                            continue
+                        mtype = msg.get("type")
+                        if mtype == "agent_message":
+                            for cb in self._callbacks:
+                                try:
+                                    cb(msg)
+                                except Exception as exc:
+                                    print(
+                                        f"[agent_protocol] callback error: {exc}",
+                                        file=sys.stderr,
+                                    )
+                        elif mtype in ("ping", "pong"):
+                            continue
+                        else:
+                            self._resp_queue.put(msg)
+                except OSError:
                     break
-                buf += chunk
-                while b"\n" in buf:
-                    line, buf = buf.split(b"\n", 1)
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        msg = json.loads(line.decode())
-                    except json.JSONDecodeError:
-                        continue
-                    # Dispatch to callbacks (skip gate_response — already read synchronously)
-                    if msg.get("type") not in ("gate_response", "ping"):
-                        for cb in self._callbacks:
-                            try:
-                                cb(msg)
-                            except Exception as exc:
-                                print(
-                                    f"[agent_protocol] callback error: {exc}",
-                                    file=sys.stderr,
-                                )
-            except OSError:
-                break
-        self._connected = False
+        finally:
+            self._connected = False
+            # Wake any sender still waiting on a reply.
+            self._resp_queue.put(None)
 
     # ─────────────────────────────────────────────────────────────────────────
     # repr

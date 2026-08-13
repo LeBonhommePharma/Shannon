@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sys
 import time
 import uuid
@@ -124,7 +125,35 @@ def default_task_id(prefix: str = "session") -> str:
 
 
 def gate_socket_up(socket_path: str = SOCKET_PATH_DEFAULT) -> bool:
-    return os.path.exists(socket_path)
+    """True only when a listener actually ACCEPTS a connection on the socket.
+
+    An existence check is not sufficient: an AF_UNIX socket inode outlives the
+    process that bound it, so a crashed or killed gate leaves a stale .sock file
+    behind and `os.path.exists()` keeps reporting "up" indefinitely.  That makes
+    `gate-status` greenlight a spawn whose first real hub call then fails —
+    precisely the failure shape a precondition check exists to prevent.
+
+    Connect semantics:
+      * connect() succeeds        -> a listener is bound and accepting: UP
+      * ECONNREFUSED / ENOENT     -> stale or absent socket: DOWN
+      * any other OSError (EPERM  -> unreachable from this context (e.g. a
+        under a sandbox, EACCES)     sandbox that blocks AF_UNIX, or socket
+                                     permissions denying this uid): DOWN, since
+                                     the caller cannot use the gate either way.
+
+    The 0.5 s timeout keeps a hung listener from blocking a status query.
+    """
+    if not os.path.exists(socket_path):
+        return False
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(0.5)
+    try:
+        sock.connect(socket_path)
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
 
 
 def plan_spawn(

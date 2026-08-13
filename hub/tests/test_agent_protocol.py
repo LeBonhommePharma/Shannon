@@ -9,8 +9,12 @@ under $TMPDIR, never against `ap.SOCKET_PATH` (/tmp/shannon.sock), which may
 well have a real daemon on it.
 """
 
+import json
 import os
 import socket as _socket
+import threading
+import time
+import uuid
 from unittest.mock import MagicMock, patch
 
 import agent_protocol as ap
@@ -109,6 +113,131 @@ class TestAgentClientConstruction:
         client = ap.cloud_client("grok_build", "t1", http_url="http://x.test")
         assert client.agent_id == "grok_build"
         assert client.mode == "http"
+
+
+@pytest.mark.skipif(not hasattr(_socket, "AF_UNIX"), reason="AF_UNIX sockets are POSIX-only")
+class TestSocketResponseRouting:
+    """The recv loop is the socket's only reader and must route frames.
+
+    Regression for a two-reader race: _send_socket used to recv() directly
+    while _recv_loop also read the same fd, so the gate_response for a send
+    could be consumed and discarded by the loop (send returned {}), or a
+    broadcast could be handed back as if it were the gate decision. These
+    tests script a fake gate that interleaves frames deterministically.
+    """
+
+    @pytest.fixture
+    def gate_socket_path(self):
+        # /tmp + short uuid, not tmp_path: macOS pytest tmp dirs exceed the
+        # 104-byte sun_path limit for *bound* sockets.
+        path = f"/tmp/shannon-ap-test-{uuid.uuid4().hex[:8]}.sock"
+        yield path
+        if os.path.exists(path):
+            os.unlink(path)
+
+    @staticmethod
+    def _fake_gate(path, frames_before_response, wrong_id_first=False):
+        """Bind a scripted gate: welcome, then per-envelope interleaved frames."""
+        srv = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        srv.bind(path)
+        srv.listen(1)
+
+        def run():
+            conn, _ = srv.accept()
+            reader = conn.makefile("rb")
+            reg = json.loads(reader.readline())
+            conn.sendall(
+                json.dumps({"type": "welcome", "agent_id": reg["agent_id"]}).encode() + b"\n"
+            )
+            envelope = json.loads(reader.readline())
+            for frame in frames_before_response:
+                conn.sendall(json.dumps(frame).encode() + b"\n")
+            if wrong_id_first:
+                conn.sendall(
+                    json.dumps(
+                        {"type": "gate_response", "message_id": "stale_99", "decision": "blocked"}
+                    ).encode()
+                    + b"\n"
+                )
+            conn.sendall(
+                json.dumps(
+                    {
+                        "type": "gate_response",
+                        "message_id": envelope["message_id"],
+                        "decision": "pass",
+                    }
+                ).encode()
+                + b"\n"
+            )
+            # Keep the connection open until the client closes.
+            reader.read(1)
+            conn.close()
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        return srv, thread
+
+    def _connected_client(self, monkeypatch, path):
+        monkeypatch.setattr(ap, "SOCKET_PATH", path)
+        client = ap.AgentClient("science", "t_route")
+        client.connect()
+        return client
+
+    def test_broadcast_before_response_is_not_returned_as_decision(
+        self, gate_socket_path, monkeypatch
+    ):
+        broadcast = {
+            "type": "agent_message",
+            "from": "dataset_runner",
+            "message_type": "status",
+            "payload": {"message": "docking 1ACJ"},
+        }
+        srv, thread = self._fake_gate(gate_socket_path, [broadcast])
+        try:
+            client = self._connected_client(monkeypatch, gate_socket_path)
+            seen: list[dict] = []
+            client.subscribe(seen.append)
+
+            decision = client.send_status("phase A started")
+            assert decision.get("decision") == "pass", (
+                "the broadcast that arrived first must not be returned as the gate decision"
+            )
+
+            deadline = time.monotonic() + 5.0
+            while not seen and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert seen and seen[0]["type"] == "agent_message", (
+                "the interleaved broadcast must still reach subscribe callbacks"
+            )
+            client.close()
+            thread.join(timeout=5.0)
+        finally:
+            srv.close()
+
+    def test_stale_gate_response_for_other_message_is_skipped(
+        self, gate_socket_path, monkeypatch
+    ):
+        srv, thread = self._fake_gate(gate_socket_path, [], wrong_id_first=True)
+        try:
+            client = self._connected_client(monkeypatch, gate_socket_path)
+            decision = client.send_status("phase B0")
+            assert decision.get("decision") == "pass"
+            assert decision.get("message_id") != "stale_99"
+            client.close()
+            thread.join(timeout=5.0)
+        finally:
+            srv.close()
+
+    def test_ping_frames_are_dropped_not_returned(self, gate_socket_path, monkeypatch):
+        srv, thread = self._fake_gate(gate_socket_path, [{"type": "ping"}])
+        try:
+            client = self._connected_client(monkeypatch, gate_socket_path)
+            decision = client.send_status("phase B")
+            assert decision.get("decision") == "pass"
+            client.close()
+            thread.join(timeout=5.0)
+        finally:
+            srv.close()
 
 
 class TestTokenAndPayloadEntropy:

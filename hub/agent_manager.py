@@ -941,13 +941,59 @@ def plan_pair_work(
     )
 
 
+def _decode_agent_list(reply: Any) -> tuple[list[str], bool]:
+    """Extract the roster from an ``agent_list`` reply.
+
+    Returns ``(connected, roster_known)``. ``roster_known`` is the load-bearing
+    half: an empty roster means "no heavy owner is online", which is precisely
+    the answer that green-lights spawning one. It may only be trusted when the
+    gate actually answered.
+
+    The gate nests the roster (``{"type": "query_response", "data":
+    {"connected": [...]}}``); a send that times out yields ``{}``. Reading
+    ``connected`` off the top level collapsed both to ``[]``, so a live
+    ``dataset_runner`` and a dead gate were indistinguishable from an idle hub.
+    Flat replies are still accepted so an unwrapping transport keeps working.
+    """
+    if not isinstance(reply, dict):
+        return [], False
+
+    body: Any = reply
+    if "connected" not in reply and "agents" not in reply and "data" in reply:
+        body = reply.get("data")
+        if not isinstance(body, dict):
+            # data present but not a roster object (e.g. null on gate error).
+            return [], False
+
+    if "connected" in body:
+        raw = body.get("connected")
+    elif "agents" in body:
+        raw = body.get("agents")
+    else:
+        # No roster key anywhere: a timed-out send ({}) or an error frame.
+        return [], False
+
+    return [str(a) for a in (raw or [])], True
+
+
 def format_monitor_report(
     connected: list[str],
     recent: list[dict[str, Any]],
     *,
     limit: int = 12,
+    roster_known: bool = True,
 ) -> str:
-    lines = ["Shannon hub monitor", f"connected ({len(connected)}):"]
+    lines = ["Shannon hub monitor"]
+    if not roster_known:
+        lines.append("connected: UNKNOWN — the gate never answered agent_list.")
+        lines.append("  Treat this as 'a heavy owner may be online', not as an")
+        lines.append("  empty hub. Do not spawn dataset_runner on this result.")
+        lines.append(f"recent messages (≤{limit}):")
+        for msg in recent[:limit]:
+            aid = msg.get("agent_id") or msg.get("from") or "?"
+            lines.append(f"  [{aid}] {msg.get('message_type') or msg.get('type') or '?'}")
+        return "\n".join(lines)
+    lines.append(f"connected ({len(connected)}):")
     if not connected:
         lines.append("  (none)")
     else:
@@ -1080,17 +1126,25 @@ class AgentManager:
         with self._client(plan.agent_id, plan.task_id) as c:
             agents = c.query_agent_list()
             recent = c.query_recent_messages(limit=20)
-        connected = []
-        if isinstance(agents, dict):
-            connected = list(agents.get("connected") or agents.get("agents") or [])
-        report = format_monitor_report(connected, list(recent or []))
-        return {
+
+        connected, roster_known = _decode_agent_list(agents)
+        report = format_monitor_report(
+            connected, list(recent or []), roster_known=roster_known
+        )
+        result: dict[str, Any] = {
             "plan": plan.as_dict(),
             "connected": connected,
+            "roster_known": roster_known,
             "recent": recent,
             "report": report,
-            "ok": True,
+            "ok": roster_known,
         }
+        if not roster_known:
+            result["error"] = (
+                "gate did not answer the agent_list query — connected state is "
+                "UNKNOWN, not empty. Do not spawn a heavy owner on this result."
+            )
+        return result
 
     def list_roster(self) -> dict[str, Any]:
         return {
@@ -1350,8 +1404,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             if args.dry_run:
                 out(plan.as_dict())
                 return 0
-            out(mgr.monitor(args.agent, args.task))
-            return 0
+            report = mgr.monitor(args.agent, args.task)
+            out(report)
+            # Exit 4 = roster UNKNOWN. Hard rule 8 needs a roster; a caller that
+            # only checks for 0 must not read a silent [] as "hub is idle".
+            return 0 if report.get("roster_known", True) else 4
 
         if args.cmd == "ask":
             plan = plan_ask(args.agent, args.task, args.prompt, mode=args.mode)

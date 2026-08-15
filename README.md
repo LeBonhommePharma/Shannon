@@ -16,7 +16,7 @@ This stack ships **two named products** (not one mixed binary):
 | Product | What it is | Primary entry |
 |---------|------------|---------------|
 | **Shannon UI** | Sole shipped macOS menu-bar / notch operator HUD (+ iOS / iPad / watchOS) | [LeBonhommePharma/ShannonUI](https://github.com/LeBonhommePharma/ShannonUI) · cask `shannon-pill` · `./scripts/shannon` lifecycle |
-| **Shannon CLI** | Headless entropy, gate, agent, and science tooling (this repo) | `shannon-monitor`, `./scripts/shannon status\|gate\|agent…`, `hub/`, Formula `shannon` |
+| **Shannon CLI** | Headless entropy, gate, agent, and science tooling (this repo) | `shannon grok` / `shannon claude` / `shannon-monitor`, `./scripts/shannon status\|gate\|agent…`, `hub/`, Formula `shannon` |
 
 [![CI](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml/badge.svg)](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -114,9 +114,12 @@ pip install shannon-entropy
 # or from this clone (editable + tests):
 pip install -e ".[dev]"
 
-shannon-monitor --help            # Shannon CLI entropy monitor
+shannon grok                      # launch Grok Build with Shannon session tags
+shannon claude --help             # same instinct as `ori claude` — real CLI on PATH
+shannon-monitor --help            # Shannon CLI entropy monitor (alias of `shannon`)
 ./scripts/shannon help            # dual-product map (status/gate/agent are CLI)
 ./scripts/shannon status          # headless hub diagnostics (no GUI launch)
+./scripts/shannon grok --dry-run  # print the harness plan without launching
 ```
 
 ```python
@@ -194,6 +197,7 @@ LLM logits / probs / logprobs  (JSONL · socket · shared memory · Python strea
 |-------|------|
 | **Entropy kernels** | Same family as docking configurational entropy; multi-backend dispatch |
 | **CollapseDetector** | Sliding window, threshold default **−3.2 bits**, callback on fire |
+| **shannon grok / claude / codex** | Ori-style harness: real agent CLI on PATH, remaining argv passed through |
 | **shannon-agent / shannon-monitor** | Stream in, H out, exit codes for automation |
 | **Hub + Pill** | Multi-agent lifecycle, approvals, pets, multi-device sync |
 
@@ -326,7 +330,7 @@ CMake knobs: `SHANNON_BUILD_TESTS`, `SHANNON_BUILD_PYTHON`, `SHANNON_BUILD_AGENT
 Shannon/   (Shannon CLI + science — this repo)
 ├── scripts/shannon              # dual-product operator handrail (CLI + UI lifecycle)
 ├── hub/                         # gate, agent_manager, DatasetRunner bridge
-├── python/shannon/              # PyPI package + shannon-monitor (Shannon CLI)
+├── python/shannon/              # PyPI package + `shannon` harness / shannon-monitor
 ├── src/                         # C++20 entropy / agent core
 ├── archive/legacy_agent_hub_ui/ # non-production dual status-item UI
 ├── tests/python/                # library + product-split contract tests

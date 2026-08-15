@@ -12,7 +12,7 @@ cask "shannon-pill" do
   url "https://github.com/LeBonhommePharma/Shannon/releases/download/v#{version}/Shannon-#{version}.zip",
       verified: "github.com/LeBonhommePharma/Shannon/"
   name "Shannon UI"
-  desc "Shannon UI — macOS menu-bar / notch operator HUD (ShannonPill)"
+  desc "Shannon UI — menu-bar / notch operator HUD (ShannonPill)"
   homepage "https://github.com/LeBonhommePharma/Shannon"
 
   livecheck do

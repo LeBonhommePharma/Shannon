@@ -27,6 +27,14 @@ ARCHIVE_LEGACY = REPO / "archive" / "legacy_agent_hub_ui"
 README = REPO / "README.md"
 SHANNON_UI_DOC = REPO / "docs" / "SHANNON_UI.md"
 
+_UNIX_BASH = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "bash operator scripts; Windows GitHub runners expose a WSL stub "
+        "with no distro installed"
+    ),
+)
+
 # Install / bootstrap / probe scripts that must not require AgentHubApp.
 _OPERATOR_SCRIPTS = (
     SHANNON_SH,
@@ -82,6 +90,7 @@ def test_shannon_ui_doc_present():
     )
 
 
+@_UNIX_BASH
 def test_scripts_shannon_help_names_both_products():
     """Drive the real scripts/shannon help path (headless)."""
     proc = _run("bash", str(SHANNON_SH), "help")
@@ -92,6 +101,7 @@ def test_scripts_shannon_help_names_both_products():
     assert "headless" in out.lower() or "no AppKit" in out or "no GUI" in out.lower()
 
 
+@_UNIX_BASH
 def test_scripts_shannon_help_is_stable_across_two_runs():
     outs: list[str] = []
     for _ in range(2):
@@ -114,6 +124,14 @@ def test_hub_agent_manager_help_names_shannon_cli():
     proc = _run(sys.executable, "-m", "agent_manager", "--help", env=env)
     assert proc.returncode == 0, proc.stderr + proc.stdout
     assert "Shannon CLI" in (proc.stdout + proc.stderr)
+
+
+def test_hub_agent_manager_help_is_cp1252_encodable():
+    """Windows hosted runners default to cp1252; --help must not raise."""
+    env = {"PYTHONPATH": str(HUB) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+    proc = _run(sys.executable, "-m", "agent_manager", "--help", env=env)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    (proc.stdout + proc.stderr).encode("cp1252")
 
 
 def test_hub_readme_names_shannon_cli():
@@ -173,6 +191,11 @@ def test_package_pill_and_swarm_resolve_or_skip_shannon_ui():
     for body, name in ((pkg, "package_pill"), (swarm, "platform_swarm"), (apple, "test_apple_platforms")):
         assert "lib_shannon_ui" in body or "resolve_shannon_ui" in body, name
     assert 'PILL_DIR="${REPO_ROOT}/Pill"' not in pkg
+    if sys.platform == "win32":
+        pytest.skip(
+            "bash package_pill.sh; Windows GitHub runners expose a WSL stub "
+            "with no distro installed"
+        )
     # package_pill without UI must fail with a clear message (drive real script).
     proc = _run(
         "bash",
@@ -201,6 +224,7 @@ def test_package_pill_and_swarm_resolve_or_skip_shannon_ui():
 # ── Headless CLI status / probe (no GUI launch) ──────────────────────────────
 
 
+@_UNIX_BASH
 def test_scripts_shannon_status_is_headless():
     before = _pgrep_names()
     proc = _run("bash", str(SHANNON_SH), "status", timeout=60)
@@ -214,6 +238,7 @@ def test_scripts_shannon_status_is_headless():
         assert "ShannonPill" not in new
 
 
+@_UNIX_BASH
 def test_scripts_shannon_status_two_runs_consistent():
     for _ in range(2):
         proc = _run("bash", str(SHANNON_SH), "status", timeout=60)

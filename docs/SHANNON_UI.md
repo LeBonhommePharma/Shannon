@@ -68,6 +68,7 @@ export SHANNON_UI_ROOT=../ShannonUI   # optional; sibling path is auto-detected
 # Shannon CLI (this clone) — always headless-safe
 ./scripts/shannon help
 ./scripts/shannon status
+./scripts/shannon grok --dry-run
 shannon-monitor --help
 
 # Shannon UI rebuild — needs an authenticated ShannonUI checkout

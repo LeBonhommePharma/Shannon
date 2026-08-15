@@ -4,6 +4,15 @@ All notable changes to Shannon are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Ori-style agent harness** — `shannon grok`, `shannon claude`, `shannon codex`
+  (and `opencode`, `kimi`, `hermes`, `pi`, `cursor`, `prime-agent`) find the real
+  CLI already on `PATH`, tag the session (`SHANNON_AGENT_ID`, task, gate socket),
+  and pass remaining argv through untouched. Missing binaries print an install
+  hint instead of launching a Shannon-shaped fake. `shannon` is a console-script
+  alias of `shannon-monitor`; `./scripts/shannon grok` uses the same path.
+
 ## [2.1.0] — 2026-07-25
 
 ### Added

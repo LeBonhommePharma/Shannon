@@ -94,6 +94,17 @@ HARNESSES: tuple[AgentHarness, ...] = (
         docs_url="https://opencode.ai",
     ),
     AgentHarness(
+        keyword="deepseek",
+        aliases=("ds", "deepseek_tui"),
+        binary="deepseek",
+        agent_id="deepseek",
+        display_name="DeepSeek",
+        install_hint=(
+            "Install a DeepSeek CLI so `deepseek` is on PATH (e.g. npm install -g deepseek-tui)."
+        ),
+        docs_url="https://api-docs.deepseek.com",
+    ),
+    AgentHarness(
         keyword="kimi",
         aliases=(),
         binary="kimi",

@@ -262,7 +262,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     # computed. Guarded because stdout is not always a reconfigurable
     # TextIOWrapper (e.g. under pytest capture).
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(line_buffering=True)
+        sys.stdout.reconfigure(line_buffering=True, errors="replace")
 
     args_list = list(sys.argv[1:] if argv is None else argv)
     keyword = peek_keyword(args_list)

@@ -15,8 +15,10 @@ Unit tests cover pure planners without a running gate.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import sys
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -61,6 +63,18 @@ class LifecyclePlan:
         d["notes"] = list(self.notes)
         d["label"] = label_for(self.agent_id)
         return d
+
+
+def _stdio_replace_unencodable() -> None:
+    """Keep --help from crashing on Windows cp1252 consoles (U+2194 etc.)."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (OSError, ValueError, TypeError):
+            continue
 
 
 def normalize_agent_id(raw: str) -> str:
@@ -1174,7 +1188,7 @@ class AgentManager:
 
 def main(argv: Optional[list[str]] = None) -> int:
     """CLI: PYTHONPATH=hub python3 -m agent_manager <cmd> ..."""
-    import argparse
+    _stdio_replace_unencodable()
 
     # Shared flags on every subcommand so `cmd --json` works (not only pre-cmd).
     common = argparse.ArgumentParser(add_help=False)
@@ -1309,7 +1323,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     pr = sub.add_parser(
         "pair",
         parents=[common],
-        help="Plan Shannon-owned Claude Code ↔ Codex pair work (implement/review)",
+        help="Plan Shannon-owned Claude Code <-> Codex pair work (implement/review)",
     )
     pr.add_argument(
         "--pair-mode",
@@ -1421,8 +1435,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.cmd == "result":
             raw = args.payload
             if raw == "-":
-                import sys
-
                 raw = sys.stdin.read()
             payload = json.loads(raw)
             if not isinstance(payload, dict):

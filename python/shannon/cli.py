@@ -1,5 +1,5 @@
 # =============================================================================
-# shannon-monitor CLI — Real-time LLM entropy monitoring
+# shannon CLI — Ori-style agent harness + JSONL entropy monitor
 #
 # Copyright 2024-2026 Louis-Philippe Morency
 # Licensed under the Apache License, Version 2.0
@@ -10,12 +10,20 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
+from pathlib import Path
 from typing import TextIO
 
 import numpy as np
 
 from shannon.detector import CollapseResult, ShannonCollapseDetector
-
+from shannon.harness import (
+    MONITOR_COMMANDS,
+    execute_harness,
+    format_cli_help,
+    is_harness_keyword,
+    peek_keyword,
+)
 
 # ── Shared formatters ─────────────────────────────────────────────────────────
 
@@ -238,7 +246,14 @@ def cmd_info(args: argparse.Namespace) -> None:
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 
-def main() -> None:
+def _prog_name() -> str:
+    name = Path(sys.argv[0]).name
+    if name in {"shannon", "shannon-monitor"}:
+        return name
+    return "shannon"
+
+
+def main(argv: Sequence[str] | None = None) -> None:
     # shannon-monitor is a live monitor, and its output is normally piped
     # (`producer | shannon-monitor stdin`). Python block-buffers stdout when it
     # is not a TTY, so every per-token line — including the collapse alert —
@@ -249,13 +264,18 @@ def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(line_buffering=True)
 
+    args_list = list(sys.argv[1:] if argv is None else argv)
+    keyword = peek_keyword(args_list)
+    if keyword is not None and (
+        is_harness_keyword(keyword) or keyword not in MONITOR_COMMANDS
+    ):
+        raise SystemExit(execute_harness(args_list))
+
+    prog = _prog_name()
     parser = argparse.ArgumentParser(
-        prog="shannon-monitor",
-        description=(
-            "Shannon CLI — real-time Shannon entropy collapse detection for LLM streams "
-            "(headless; no GUI). For the macOS menu-bar HUD use Shannon UI "
-            "(./scripts/shannon / Pill)."
-        ),
+        prog=prog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=format_cli_help(prog),
         epilog=(
             "Product split: Shannon CLI = this tool + hub gate/agent tooling; "
             "Shannon UI = Pill menu-bar / notch HUD only."
@@ -292,7 +312,7 @@ def main() -> None:
         p.add_argument("--format", choices=["text", "json", "csv"], default="text",
                         help="Output format (default: text)")
 
-    args = parser.parse_args()
+    args = parser.parse_args(args_list)
 
     if args.command == "stdin":
         cmd_stdin(args)

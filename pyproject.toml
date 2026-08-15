@@ -62,6 +62,7 @@ dev = [
 ]
 
 [project.scripts]
+shannon = "shannon.cli:main"
 shannon-monitor = "shannon.cli:main"
 
 [project.urls]

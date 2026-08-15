@@ -14,7 +14,9 @@
 #
 # Headless Shannon CLI (no AppKit / no ShannonPill launch):
 #   ./scripts/shannon status|probe|gate|agent|export|science|help
+#   ./scripts/shannon grok|claude|codex …   # Ori-style harness
 #   shannon-monitor --help
+#   shannon grok --dry-run          # Ori-style harness (real grok/claude/codex on PATH)
 #   python3 -m agent_manager …
 #
 # Shannon UI source lives in ShannonUI (not this tree). Resolve order for builds:
@@ -443,9 +445,13 @@ In Shannon UI:
   ./scripts/shannon export                session timeline JSONL
   ./scripts/shannon science               pure-Python library from this clone
   ./scripts/shannon skill-install         install Shannon skill into Claude/Codex/Grok/OpenCode
+  ./scripts/shannon grok|claude|codex …   Ori-style harness (real CLI on PATH)
   ./scripts/shannon help                  this dual-product map
 
+  shannon grok | shannon claude | shannon codex
+                                          Ori-style agent harness (real CLI on PATH)
   shannon-monitor --help                  Python entropy collapse monitor (Shannon CLI)
+  python3 -m shannon grok --dry-run       same harness without the console script
   python3 -m agent_manager --help         same agent manager as `./scripts/shannon agent`
   hub/shannon_gate.py --help              Shannon Gate daemon flags
   shannon-agent --help                    optional C++ stream referee (Homebrew formula)
@@ -556,6 +562,11 @@ PY
     ;;
   help|-h|--help)
     usage
+    ;;
+  claude|claude_code|cc|claudecode|codex|openai_codex|grok|grok_build|xai|grokbuild|opencode|open_code|oc|kimi|hermes|pi|cursor|prime-agent|prime_agent|primeagent)
+    # Ori-style: ./scripts/shannon grok  →  python -m shannon.cli grok …
+    export PYTHONPATH="${REPO}/python:${HUB}${PYTHONPATH:+:$PYTHONPATH}"
+    exec python3 -m shannon.cli "${CMD}" "$@"
     ;;
   *)
     die "Unknown command: ${CMD}. Try: ./scripts/shannon help"

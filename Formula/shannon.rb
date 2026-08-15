@@ -68,6 +68,7 @@ class Shannon < Formula
         #   SHANNON_SKIP_CORE=1 pip install -e .
         #   Windows:  powershell -File scripts\\Install-Shannon.ps1 -Source path
         #   Unix:     ./scripts/install_shannon.sh --path
+        shannon grok --dry-run
         shannon-monitor --help
 
       Shannon UI — macOS Pill HUD (separate cask, not this formula):

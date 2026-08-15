@@ -563,7 +563,7 @@ PY
   help|-h|--help)
     usage
     ;;
-  claude|claude_code|cc|claudecode|codex|openai_codex|grok|grok_build|xai|grokbuild|opencode|open_code|oc|kimi|hermes|pi|cursor|prime-agent|prime_agent|primeagent)
+  claude|claude_code|cc|claudecode|codex|openai_codex|grok|grok_build|xai|grokbuild|opencode|open_code|oc|deepseek|ds|deepseek_tui|kimi|hermes|pi|cursor|prime-agent|prime_agent|primeagent)
     # Ori-style: ./scripts/shannon grok  →  python -m shannon.cli grok …
     export PYTHONPATH="${REPO}/python:${HUB}${PYTHONPATH:+:$PYTHONPATH}"
     exec python3 -m shannon.cli "${CMD}" "$@"

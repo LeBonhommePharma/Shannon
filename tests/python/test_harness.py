@@ -29,6 +29,29 @@ from shannon.harness import (
 REPO = Path(__file__).resolve().parents[2]
 SHANNON_SH = REPO / "scripts" / "shannon"
 
+# Majority of common agent CLIs the harness is expected to launch.
+# (keyword, binary, hub agent_id, display fragment)
+COMMON_AGENT_CLIS: tuple[tuple[str, str, str, str], ...] = (
+    ("claude", "claude", "claude_code", "Claude Code"),
+    ("codex", "codex", "codex", "Codex"),
+    ("grok", "grok", "grok_build", "Grok Build"),
+    ("deepseek", "deepseek", "deepseek", "DeepSeek"),
+    ("kimi", "kimi", "kimi", "Kimi"),
+    ("opencode", "opencode", "opencode", "OpenCode"),
+    ("cursor", "cursor", "cursor", "Cursor"),
+)
+
+COMMON_ALIASES: tuple[tuple[str, str, str], ...] = (
+    ("cc", "claude", "claude_code"),
+    ("claude_code", "claude", "claude_code"),
+    ("openai_codex", "codex", "codex"),
+    ("grok_build", "grok", "grok_build"),
+    ("xai", "grok", "grok_build"),
+    ("oc", "opencode", "opencode"),
+    ("ds", "deepseek", "deepseek"),
+    ("deepseek_tui", "deepseek", "deepseek"),
+)
+
 
 def _install_fake_agent(tmp_path: Path, name: str = "grok", exit_code: int = 0) -> Path:
     """Create a PATH directory with a fake agent CLI that echoes Shannon env."""
@@ -77,6 +100,190 @@ class TestCatalog:
         assert not is_harness_keyword("stdin")
         assert not is_harness_keyword("status")
         assert is_harness_keyword("grok")
+
+
+class TestCommonAgentCLIs:
+    """Round-trip the common agent CLIs (Claude Code, Codex, Grok Build, …)."""
+
+    @pytest.mark.parametrize(
+        "keyword,binary,agent_id,display",
+        COMMON_AGENT_CLIS,
+        ids=[row[0] for row in COMMON_AGENT_CLIS],
+    )
+    def test_catalog_maps_keyword_binary_and_hub_id(
+        self, keyword: str, binary: str, agent_id: str, display: str
+    ):
+        spec = resolve_harness(keyword)
+        assert spec is not None
+        assert spec.keyword == keyword
+        assert spec.binary == binary
+        assert spec.agent_id == agent_id
+        assert display in spec.display_name
+        assert is_harness_keyword(keyword)
+        assert keyword in all_primary_keywords()
+
+    @pytest.mark.parametrize(
+        "alias,keyword,agent_id",
+        COMMON_ALIASES,
+        ids=[row[0] for row in COMMON_ALIASES],
+    )
+    def test_aliases_resolve(self, alias: str, keyword: str, agent_id: str):
+        spec = resolve_harness(alias)
+        assert spec is not None
+        assert spec.keyword == keyword
+        assert spec.agent_id == agent_id
+
+    @pytest.mark.parametrize("keyword", [row[0] for row in COMMON_AGENT_CLIS])
+    def test_peek_and_parse_passthrough(self, keyword: str):
+        assert peek_keyword(["--dry-run", "--json", keyword, "--model", "x"]) == keyword
+        inv = parse_harness_invocation(
+            [keyword, "--task", f"t-{keyword}", "--model", "x", "-p", "hi"]
+        )
+        assert inv.keyword == keyword
+        assert inv.options.task_id == f"t-{keyword}"
+        assert inv.agent_argv == ("--model", "x", "-p", "hi")
+
+    @pytest.mark.parametrize(
+        "keyword,binary,agent_id,display",
+        COMMON_AGENT_CLIS,
+        ids=[row[0] for row in COMMON_AGENT_CLIS],
+    )
+    def test_missing_binary_is_honest(
+        self, tmp_path: Path, keyword: str, binary: str, agent_id: str, display: str
+    ):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        plan = plan_launch(keyword, path=str(empty), gate_socket_exists=False)
+        assert plan.binary_found is False
+        assert plan.agent_id == agent_id
+        assert plan.binary == binary
+        assert plan.argv == (binary,)
+        msg = missing_binary_message(plan)
+        assert f"`{binary}`" in msg
+        assert display in msg
+        assert f"shannon {keyword}" in msg
+
+    @pytest.mark.parametrize(
+        "keyword,binary,agent_id,_display",
+        COMMON_AGENT_CLIS,
+        ids=[row[0] for row in COMMON_AGENT_CLIS],
+    )
+    def test_found_binary_env_and_passthrough(
+        self, tmp_path: Path, keyword: str, binary: str, agent_id: str, _display: str
+    ):
+        bindir = _install_fake_agent(tmp_path, binary)
+        plan = plan_launch(
+            keyword,
+            ["--full-auto", "--model", "x"],
+            path=str(bindir),
+            task_id=f"task-{keyword}",
+            gate_socket_exists=True,
+        )
+        assert plan.binary_found is True
+        assert plan.binary_path is not None
+        assert plan.argv[0] == plan.binary_path
+        assert plan.argv[1:] == ("--full-auto", "--model", "x")
+        assert plan.extra_env["SHANNON_HARNESS"] == "1"
+        assert plan.extra_env["SHANNON_AGENT_ID"] == agent_id
+        assert plan.extra_env["SHANNON_HARNESS_KEYWORD"] == keyword
+        assert plan.extra_env["SHANNON_TASK_ID"] == f"task-{keyword}"
+        assert plan.gate_status == "attach"
+
+    @pytest.mark.parametrize(
+        "keyword,binary,agent_id,_display",
+        COMMON_AGENT_CLIS,
+        ids=[row[0] for row in COMMON_AGENT_CLIS],
+    )
+    def test_dry_run_json(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        keyword: str,
+        binary: str,
+        agent_id: str,
+        _display: str,
+    ):
+        bindir = _install_fake_agent(tmp_path, binary)
+        code = execute_harness(
+            [keyword, "--dry-run", "--json", "--task", f"t-{keyword}", "-p", "hello"],
+            path=str(bindir),
+            gate_socket_exists=False,
+        )
+        assert code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["keyword"] == keyword
+        assert payload["agent_id"] == agent_id
+        assert payload["binary"] == binary
+        assert payload["binary_found"] is True
+        assert payload["argv"][1:] == ["-p", "hello"]
+
+    @pytest.mark.parametrize(
+        "keyword,binary,agent_id,_display",
+        COMMON_AGENT_CLIS,
+        ids=[row[0] for row in COMMON_AGENT_CLIS],
+    )
+    def test_live_launch_injects_env(
+        self,
+        tmp_path: Path,
+        capfd: pytest.CaptureFixture[str],
+        keyword: str,
+        binary: str,
+        agent_id: str,
+        _display: str,
+    ):
+        bindir = _install_fake_agent(tmp_path, binary)
+        code = execute_harness(
+            [keyword, "--no-gate", "--task", f"live-{keyword}", "--full-auto"],
+            path=str(bindir),
+            gate_socket_exists=False,
+        )
+        assert code == 0
+        payload = json.loads(capfd.readouterr().out)
+        assert payload["argv"] == ["--full-auto"]
+        assert payload["env"]["SHANNON_HARNESS"] == "1"
+        assert payload["env"]["SHANNON_AGENT_ID"] == agent_id
+        assert payload["env"]["SHANNON_TASK_ID"] == f"live-{keyword}"
+        assert payload["env"]["SHANNON_GATE_ATTACH"] == "skipped"
+
+    @pytest.mark.parametrize(
+        "keyword,binary,agent_id,_display",
+        COMMON_AGENT_CLIS,
+        ids=[row[0] for row in COMMON_AGENT_CLIS],
+    )
+    def test_cli_module_dry_run(
+        self, tmp_path: Path, keyword: str, binary: str, agent_id: str, _display: str
+    ):
+        bindir = _install_fake_agent(tmp_path, binary)
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(REPO / "python")
+        env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "shannon.cli",
+                keyword,
+                "--dry-run",
+                "--json",
+                "--no-gate",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(REPO),
+            env=env,
+        )
+        assert proc.returncode == 0, proc.stderr
+        payload = json.loads(proc.stdout)
+        assert payload["keyword"] == keyword
+        assert payload["agent_id"] == agent_id
+        assert payload["binary_found"] is True
+
+    def test_help_lists_every_common_cli(self):
+        text = format_cli_help("shannon")
+        for keyword, _binary, _agent_id, display in COMMON_AGENT_CLIS:
+            assert keyword in text, keyword
+            assert display in text, display
 
 
 class TestArgv:
@@ -235,6 +442,10 @@ class TestCliMain:
         assert "grok" in out
         assert "codex" in out
         assert "claude" in out
+        assert "deepseek" in out
+        assert "kimi" in out
+        assert "opencode" in out
+        assert "cursor" in out
 
     def test_main_grok_dry_run_via_module(self, tmp_path):
         bindir = _install_fake_agent(tmp_path, "grok")
@@ -296,6 +507,32 @@ class TestOperatorScript:
         assert proc.returncode == 0, proc.stdout + proc.stderr
         payload = json.loads(proc.stdout)
         assert payload["agent_id"] == "grok_build"
+        assert payload["binary_found"] is True
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="bash operator script")
+    @pytest.mark.parametrize(
+        "keyword,binary,agent_id,_display",
+        COMMON_AGENT_CLIS,
+        ids=[row[0] for row in COMMON_AGENT_CLIS],
+    )
+    def test_scripts_shannon_common_cli_dry_run(
+        self, tmp_path: Path, keyword: str, binary: str, agent_id: str, _display: str
+    ):
+        bindir = _install_fake_agent(tmp_path, binary)
+        env = os.environ.copy()
+        env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+        proc = subprocess.run(
+            ["bash", str(SHANNON_SH), keyword, "--dry-run", "--json", "--no-gate"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(REPO),
+            env=env,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        payload = json.loads(proc.stdout)
+        assert payload["keyword"] == keyword
+        assert payload["agent_id"] == agent_id
         assert payload["binary_found"] is True
 
     @pytest.mark.skipif(sys.platform == "win32", reason="bash operator script")

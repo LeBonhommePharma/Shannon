@@ -17,9 +17,14 @@
 #include <cstdint>
 #include <cstring>
 
-#if defined(__has_include) && __has_include(<experimental/simd>)
+// libstdc++ Parallelism TS (`native_simd`, `element_aligned`, `rebind_simd_t`).
+// Do not include <experimental/simd> on libc++ / Apple: `__has_include` can
+// be true for a header that is not that API (macOS CI / Homebrew HEAD).
+#if defined(__GLIBCXX__) && defined(__has_include) && __has_include(<experimental/simd>)
 #include <experimental/simd>
+#if defined(__cpp_lib_experimental_parallel_simd)
 #define SHANNON_SIMD_GENERIC_EXPERIMENTAL 1
+#endif
 #endif
 
 #if defined(SHANNON_SIMD_GENERIC_EXPERIMENTAL)

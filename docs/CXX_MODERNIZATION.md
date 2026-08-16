@@ -49,7 +49,7 @@ written to beat.
    are frozen. `STD_SIMD=6` is additive (opt-in override; not AUTO).
 3. **Fat-binary / SIGILL policy.** Each ISA kernel lives in its own TU
    with targeted `-m` flags (`CMakeLists.txt`). Hosted CI already
-   filters AVX-512 tests (`-E 'Avx512|SimdLog2Avx2.MaxRelativeError'`).
+   filters AVX-512 tests (`-E 'Avx512|SimdLog2Avx2.MaxRelativeError|SimdExpGeneric|SimdLog2Generic'`).
    `std::simd` does **not** remove the need for per-ISA TUs or
    function multi-versioning.
 4. **Optional native core.** `setup.py` must keep compiling with a
@@ -156,9 +156,11 @@ This is a **traits swap**, not a seventh copy of the algorithm (Phase A).
    compiles a scalar stub. x86 compiles the TU with `-mavx2 -mfma`
    (same as AVX2). `Backend::STD_SIMD = 6` is override-only —
    `best_backend()` still prefers AVX-512 / AVX2.
-3. NEON: experimental simd is available on libstdc++ aarch64; Apple
-   libc++ typically lacks `<experimental/simd>` (stub +
-   `std_simd_kernels_built()==false`).
+3. NEON: experimental simd is available on libstdc++ aarch64. Apple
+   libc++ may `__has_include` a header that is **not** the Parallelism TS
+   (`native_simd` / `element_aligned`); `simd_generic.hpp` requires
+   `__GLIBCXX__` + `__cpp_lib_experimental_parallel_simd`, otherwise the
+   entropy TU is the scalar stub (`std_simd_kernels_built()==false`).
 4. Golden tests: `StdSimdKernels.*` vs scalar; `SimdExpGeneric` /
    `SimdLog2Generic` vs libm (1e-13 / 1e-12). Never claim bit-identical
    `exp` across ISAs.
@@ -219,7 +221,7 @@ cmake -B build -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF \
 # Default SHANNON_CXX_STANDARD=26 (g++-14 accepts it; g++-13 falls back to 23)
 cmake --build build -j
 ctest --test-dir build --output-on-failure \
-      -E 'Avx512|SimdLog2Avx2.MaxRelativeError'
+      -E 'Avx512|SimdLog2Avx2.MaxRelativeError|SimdExpGeneric|SimdLog2Generic'
 
 source .venv/bin/activate
 pytest tests/python/ tests/test_detector.py tests/test_train.py -q

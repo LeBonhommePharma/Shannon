@@ -18,6 +18,7 @@
 
 #include <cmath>
 #include <limits>
+#include <span>
 #include <string>
 #include <vector>
 #include <unistd.h>
@@ -41,6 +42,19 @@ TEST(ScalarEntropy, SingleElement) {
 TEST(ScalarEntropy, EmptyInput) {
     double h = kernels::configurational_entropy_scalar(nullptr, 0);
     EXPECT_DOUBLE_EQ(h, 0.0);
+}
+
+TEST(ScalarEntropy, NullptrNonzeroIsZero) {
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_scalar(nullptr, 8), 0.0);
+    EXPECT_DOUBLE_EQ(kernels::entropy_from_probs_scalar(nullptr, 8), 0.0);
+    EXPECT_DOUBLE_EQ(kernels::entropy_from_logprobs_scalar(nullptr, 4), 0.0);
+}
+
+TEST(ScalarEntropy, SpanOverload) {
+    std::vector<double> logits(16, 0.0);
+    std::span<const double> view{logits};
+    double h = kernels::configurational_entropy_scalar(view);
+    EXPECT_NEAR(h, std::log2(16.0), 1e-10);
 }
 
 TEST(ScalarEntropy, TwoElements) {
@@ -399,11 +413,40 @@ TEST(UnifiedDispatch, ComputeEntropy) {
 }
 
 TEST(UnifiedDispatch, BackendNames) {
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::SCALAR), "SCALAR");
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AVX2), "AVX2");
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AVX512), "AVX512");
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::NEON), "NEON");
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AUTO), "AUTO");
+    for (Backend b : kAllBackends) {
+        const char* name = backend_name(b);
+        ASSERT_NE(name, nullptr);
+        EXPECT_STRNE(name, "UNKNOWN") << "enumerant " << static_cast<int>(b);
+        EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(b), name);
+    }
+    EXPECT_STREQ(backend_name(Backend::SCALAR), "SCALAR");
+    EXPECT_STREQ(backend_name(Backend::OPENMP), "OPENMP");
+    EXPECT_STREQ(backend_name(Backend::SSE42), "SSE42");
+    EXPECT_STREQ(backend_name(Backend::AVX2), "AVX2");
+    EXPECT_STREQ(backend_name(Backend::AVX512), "AVX512");
+    EXPECT_STREQ(backend_name(Backend::NEON), "NEON");
+    EXPECT_STREQ(backend_name(Backend::AUTO), "AUTO");
+    EXPECT_STREQ(backend_name(static_cast<Backend>(99)), "UNKNOWN");
+}
+
+TEST(UnifiedDispatch, NullptrNonzeroIsInvalidArgs) {
+    auto& d = dispatch::UnifiedDispatch::instance();
+    d.detect();
+    double h = 42.0;
+    auto result = d.compute_configurational_entropy(nullptr, 16, h);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error, DispatchError::INVALID_ARGS);
+    EXPECT_DOUBLE_EQ(h, 0.0);
+
+    h = 42.0;
+    result = d.compute_entropy_from_probs(nullptr, 8, h);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error, DispatchError::INVALID_ARGS);
+
+    h = 42.0;
+    result = d.compute_entropy_from_logprobs(nullptr, 8, h);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error, DispatchError::INVALID_ARGS);
 }
 
 #if defined(SHANNON_USE_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))

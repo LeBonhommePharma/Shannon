@@ -14,7 +14,9 @@ namespace shannon::kernels {
 
 #if defined(SHANNON_USE_OPENMP)
 
-double configurational_entropy_omp(const double* w, std::size_t n) noexcept {
+double configurational_entropy_omp(std::span<const double> weights) noexcept {
+    const double* w = weights.data();
+    const std::size_t n = weights.size();
     if (n <= 1) return 0.0;
 
     double max_w = w[0];
@@ -37,7 +39,9 @@ double configurational_entropy_omp(const double* w, std::size_t n) noexcept {
     return std::fmax(0.0, std::log2(Z) - (ws / (Z * kLn2)));
 }
 
-double entropy_from_probs_omp(const double* p, std::size_t n) noexcept {
+double entropy_from_probs_omp(std::span<const double> probs) noexcept {
+    const double* p = probs.data();
+    const std::size_t n = probs.size();
     if (n == 0) return 0.0;
     if (n == 1) return 0.0;
     double h = 0.0;
@@ -48,7 +52,9 @@ double entropy_from_probs_omp(const double* p, std::size_t n) noexcept {
     return std::fmax(0.0, h);
 }
 
-double entropy_from_logprobs_omp(const double* lp, std::size_t n) noexcept {
+double entropy_from_logprobs_omp(std::span<const double> logprobs) noexcept {
+    const double* lp = logprobs.data();
+    const std::size_t n = logprobs.size();
     if (n == 0) return 0.0;
     if (n == 1) return 0.0;
     double h = 0.0;

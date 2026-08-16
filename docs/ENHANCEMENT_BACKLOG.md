@@ -312,21 +312,21 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **2026-07-26 (AgentNotch/Peek/Callout parity):** Sources https://www.agentnotch.app · https://agentpeek.app/ · https://agentcallout.com/. User approved G1–G4,G6–G10 (not G5 chat, not G11 OTEL). Enqueued **ENH-026…032** + UX-057/058. Inventory: `{SCRATCH}/parity_inventory.md`. Counts: present 17 / partial 8 / missing 5 (C1–C30).
 - **2026-07-26 (Grok 4.5 OS swarm):** macOS audit filed **ENH-023** (remote clearAsk fail-open). iOS filed **ENH-024** (stem dismiss no-op) and **ENH-025** (freeform dead). Cross-check: not ENH-018…022 (closed multi-device honesty). UI dual-copy/gate chrome → `docs/MULTI_OS_UX_BACKLOG.md` UX-035…052.
 
-### - [ ] ENH-033: C++20 constexpr Backend name table (no dialect bump)
+### - [x] ENH-033: C++20 constexpr Backend name table (no dialect bump)
 
 - **Why:** `DispatchTelemetry::summary` and `UnifiedDispatch::backend_name` hand-roll the same `switch (Backend)`. A new enumerant can silently print `"UNKNOWN"` / fall through. First slice of `docs/CXX_MODERNIZATION.md` Phase A — smallest C++ surface, no ISA files.
 - **Area:** `src/shannon/types.hpp`, `src/shannon/unified_dispatch.cpp`, `tests/cpp/test_shannon_v2.cpp`
 - **First slice:** `constexpr` name table covering `SCALAR`…`NEON`+`AUTO`; exhaustive switch with fail-closed default; unit test every enumerant. Do **not** change `Backend` integer values.
+- **Done:** `shannon::backend_name` constexpr exhaustive switch in `types.hpp`; `UnifiedDispatch::backend_name` delegates; `DispatchTelemetry::summary` uses `std::format`; `kAllBackends` / `kConcreteBackends` tables. GoogleTest covers every enumerant + corrupt `99 → UNKNOWN`. Integer values unchanged.
 - **Priority:** P2
-- **Plan:** `docs/CXX_MODERNIZATION.md` Phase A.3
 
-### - [ ] ENH-034: Span-primary entropy kernel ABI + nullptr guards
+### - [x] ENH-034: Span-primary entropy kernel ABI + nullptr guards
 
 - **Why:** Public kernels take `const double*, size_t`; `nullptr` with `n>0` is UB (audit). `std::span` overloads already exist as wrappers in the other direction.
 - **Area:** `src/shannon/entropy.hpp`, `src/shannon.hpp`, `unified_dispatch.cpp`, `tests/cpp/test_shannon_v2.cpp`
 - **First slice:** Span as the declared API; pointer+size becomes an inline span wrapper that rejects `nullptr && n>0`; GoogleTest for empty / null / n==1. No SIMD rewrite in this item.
+- **Done:** Span is the declared kernel ABI in `entropy.hpp` / v1 `shannon.hpp`; pointer+size is an inline wrapper via `detail::as_span` (never constructs a non-empty span from nullptr). Dispatch returns `INVALID_ARGS` for `nullptr && n > 0`. Tests: `ScalarEntropy.NullptrNonzeroIsZero`, `SpanOverload`, `UnifiedDispatch.NullptrNonzeroIsInvalidArgs`. ISA-traits rewrite remains ENH-035.
 - **Priority:** P2
-- **Plan:** `docs/CXX_MODERNIZATION.md` Phase A.1
 
 ### - [ ] ENH-035: ISA-traits log-sum-exp (one algorithm, thin ISA TUs)
 

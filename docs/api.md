@@ -114,21 +114,15 @@ All functions are `[[nodiscard]] noexcept`.
 ```cpp
 namespace shannon::kernels {
 
-// Configurational entropy from unnormalized log-weights (logits)
+// Canonical ABI is std::span. Pointer+size wrappers reject nullptr with n > 0
+// (defined H = 0, not UB).
+double configurational_entropy_scalar(std::span<const double> w) noexcept;
 double configurational_entropy_scalar(const double* w, std::size_t n) noexcept;
 
-// Shannon entropy from probability distribution
-double entropy_from_probs_scalar(const double* p, std::size_t n) noexcept;
+double entropy_from_probs_scalar(std::span<const double> p) noexcept;
+double entropy_from_logprobs_scalar(std::span<const double> lp) noexcept;
 
-// Shannon entropy from log-probabilities (must be normalized)
-double entropy_from_logprobs_scalar(const double* lp, std::size_t n) noexcept;
-
-// SIMD/GPU variants (conditionally compiled):
-// configurational_entropy_omp, configurational_entropy_sse42,
-// configurational_entropy_avx2, configurational_entropy_avx512,
-// configurational_entropy_neon
-// entropy_from_probs_omp, entropy_from_probs_avx2, entropy_from_probs_avx512
-// entropy_from_logprobs_omp, entropy_from_logprobs_avx2, entropy_from_logprobs_avx512
+// SIMD variants (conditionally compiled): omp / sse42 / avx2 / avx512 / neon
 }
 ```
 

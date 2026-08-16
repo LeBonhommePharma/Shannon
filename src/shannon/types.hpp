@@ -5,9 +5,10 @@
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #pragma once
 
-#include <chrono>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <optional>
 #include <span>
@@ -33,6 +34,33 @@ enum class Backend : uint8_t {
     AVX512  = 4,
     NEON    = 5,
     AUTO    = 255,
+};
+
+// Stable names for telemetry / pybind. Integer values above must not change.
+// Exhaustive switch: a new enumerant fails -Wswitch. Corrupt storage yields
+// "UNKNOWN" rather than UB (cannot std::abort in a constexpr path).
+[[nodiscard]] constexpr const char* backend_name(Backend b) noexcept {
+    switch (b) {
+    case Backend::SCALAR: return "SCALAR";
+    case Backend::OPENMP: return "OPENMP";
+    case Backend::SSE42:  return "SSE42";
+    case Backend::AVX2:   return "AVX2";
+    case Backend::AVX512: return "AVX512";
+    case Backend::NEON:   return "NEON";
+    case Backend::AUTO:   return "AUTO";
+    }
+    return "UNKNOWN";
+}
+
+// Named backends excluding AUTO (dispatch availability / hardware reports).
+inline constexpr std::array<Backend, 6> kConcreteBackends = {
+    Backend::SCALAR, Backend::OPENMP, Backend::SSE42,
+    Backend::AVX2, Backend::AVX512, Backend::NEON,
+};
+
+inline constexpr std::array<Backend, 7> kAllBackends = {
+    Backend::SCALAR, Backend::OPENMP, Backend::SSE42,
+    Backend::AVX2, Backend::AVX512, Backend::NEON, Backend::AUTO,
 };
 
 // ─── Kernel types ────────────────────────────────────────────────────────────
@@ -150,22 +178,10 @@ struct DispatchTelemetry {
     int64_t elements          = 0;
     double  throughput_meps   = 0.0;   // million elements per second
 
-    std::string summary() const {
-        const char* name = "UNKNOWN";
-        switch (backend) {
-        case Backend::SCALAR: name = "SCALAR"; break;
-        case Backend::OPENMP: name = "OPENMP"; break;
-        case Backend::SSE42:  name = "SSE42";  break;
-        case Backend::AVX2:   name = "AVX2";   break;
-        case Backend::AVX512: name = "AVX512"; break;
-        case Backend::NEON:   name = "NEON";   break;
-        case Backend::AUTO:   name = "AUTO";   break;
-        }
-        return std::string("DispatchTelemetry{backend=") + name
-            + ", wall_time_ms=" + std::to_string(wall_time_ms)
-            + ", elements=" + std::to_string(elements)
-            + ", throughput_meps=" + std::to_string(throughput_meps)
-            + "}";
+    [[nodiscard]] std::string summary() const {
+        return std::format(
+            "DispatchTelemetry{{backend={}, wall_time_ms={}, elements={}, throughput_meps={}}}",
+            backend_name(backend), wall_time_ms, elements, throughput_meps);
     }
 };
 

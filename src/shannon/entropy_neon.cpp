@@ -65,7 +65,9 @@ namespace {
 
 }  // namespace
 
-double configurational_entropy_neon(const double* w, std::size_t n) noexcept {
+double configurational_entropy_neon(std::span<const double> weights) noexcept {
+    const double* w = weights.data();
+    const std::size_t n = weights.size();
     if (n <= 1) return 0.0;
 
     const double max_w = neon_max(w, n);
@@ -110,7 +112,9 @@ double configurational_entropy_neon(const double* w, std::size_t n) noexcept {
     return std::fmax(0.0, std::log2(Z) - (ws / (Z * kLn2)));
 }
 
-double entropy_from_probs_neon(const double* p, std::size_t n) noexcept {
+double entropy_from_probs_neon(std::span<const double> probs) noexcept {
+    const double* p = probs.data();
+    const std::size_t n = probs.size();
     if (n <= 1) return 0.0;
 
     const float64x2_t v_eps  = vdupq_n_f64(kEpsilon);
@@ -145,7 +149,9 @@ double entropy_from_probs_neon(const double* p, std::size_t n) noexcept {
     return std::fmax(0.0, h);
 }
 
-double entropy_from_logprobs_neon(const double* lp, std::size_t n) noexcept {
+double entropy_from_logprobs_neon(std::span<const double> logprobs) noexcept {
+    const double* lp = logprobs.data();
+    const std::size_t n = logprobs.size();
     if (n <= 1) return 0.0;
 
     const float64x2_t v_log2e = vdupq_n_f64(kLog2E);

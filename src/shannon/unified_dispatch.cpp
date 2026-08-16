@@ -6,7 +6,7 @@
 #include "shannon/config.hpp"
 
 #include <algorithm>
-#include <sstream>
+#include <format>
 
 // OpenMP for threading
 #ifdef _OPENMP
@@ -113,26 +113,14 @@ bool UnifiedDispatch::has_kernel(Backend b, KernelType kernel) const noexcept {
 }
 
 const char* UnifiedDispatch::backend_name(Backend b) noexcept {
-    switch (b) {
-    case Backend::SCALAR: return "SCALAR";
-    case Backend::OPENMP: return "OPENMP";
-    case Backend::SSE42:  return "SSE42";
-    case Backend::AVX2:   return "AVX2";
-    case Backend::AVX512: return "AVX512";
-    case Backend::NEON:   return "NEON";
-    case Backend::AUTO:   return "AUTO";
-    }
-    return "UNKNOWN";
+    return shannon::backend_name(b);
 }
 
 std::vector<Backend> UnifiedDispatch::available_backends() const {
     ensure_detected();
-    static constexpr Backend kAllBackends[] = {
-        Backend::SCALAR, Backend::OPENMP, Backend::SSE42, Backend::AVX2,
-        Backend::AVX512, Backend::NEON
-    };
     std::vector<Backend> result;
-    for (Backend b : kAllBackends) {
+    result.reserve(kConcreteBackends.size());
+    for (Backend b : kConcreteBackends) {
         if (is_available(b)) result.push_back(b);
     }
     return result;
@@ -173,6 +161,27 @@ Backend UnifiedDispatch::best_backend(KernelType kernel, std::size_t n) const {
     return Backend::SCALAR;
 }
 
+namespace {
+
+// n == 0 is a valid empty distribution (H = 0). nullptr with n > 0 is not.
+[[nodiscard]] bool reject_invalid_buffer(const double* p, std::size_t n,
+                                         double& out_entropy,
+                                         DispatchResult& result) {
+    if (n == 0) {
+        return false;
+    }
+    if (p != nullptr) {
+        return false;
+    }
+    out_entropy = 0.0;
+    result.error = DispatchError::INVALID_ARGS;
+    result.detail = "null pointer with n > 0";
+    result.used_backend = Backend::SCALAR;
+    return true;
+}
+
+}  // namespace
+
 // ─── Dispatched entropy functions ────────────────────────────────────────────
 
 DispatchResult UnifiedDispatch::compute_configurational_entropy(
@@ -182,6 +191,9 @@ DispatchResult UnifiedDispatch::compute_configurational_entropy(
     ensure_detected();
 
     DispatchResult result;
+    if (reject_invalid_buffer(log_weights, n, out_entropy, result)) {
+        return result;
+    }
     result.used_backend = best_backend(KernelType::CONFIGURATIONAL_ENTROPY, n);
     if (backend != Backend::AUTO && is_available(backend) &&
         has_kernel(backend, KernelType::CONFIGURATIONAL_ENTROPY)) {
@@ -257,6 +269,9 @@ DispatchResult UnifiedDispatch::compute_entropy_from_probs(
     ensure_detected();
 
     DispatchResult result;
+    if (reject_invalid_buffer(probs, n, out_entropy, result)) {
+        return result;
+    }
     result.used_backend = best_backend(KernelType::SHANNON_ENTROPY, n);
     if (backend != Backend::AUTO && is_available(backend) &&
         has_kernel(backend, KernelType::SHANNON_ENTROPY)) {
@@ -322,6 +337,9 @@ DispatchResult UnifiedDispatch::compute_entropy_from_logprobs(
     ensure_detected();
 
     DispatchResult result;
+    if (reject_invalid_buffer(logprobs, n, out_entropy, result)) {
+        return result;
+    }
     result.used_backend = best_backend(KernelType::LOGPROB_ENTROPY, n);
     if (backend != Backend::AUTO && is_available(backend) &&
         has_kernel(backend, KernelType::LOGPROB_ENTROPY)) {
@@ -388,12 +406,28 @@ DispatchResult UnifiedDispatch::compute_configurational_entropy(
         log_weights.data(), log_weights.size(), out_entropy, backend);
 }
 
+DispatchResult UnifiedDispatch::compute_entropy_from_probs(
+    std::span<const double> probs, double& out_entropy,
+    Backend backend)
+{
+    return compute_entropy_from_probs(
+        probs.data(), probs.size(), out_entropy, backend);
+}
+
+DispatchResult UnifiedDispatch::compute_entropy_from_logprobs(
+    std::span<const double> logprobs, double& out_entropy,
+    Backend backend)
+{
+    return compute_entropy_from_logprobs(
+        logprobs.data(), logprobs.size(), out_entropy, backend);
+}
+
 DispatchReport UnifiedDispatch::get_dispatch_report() const {
     ensure_detected();
     Backend sel = best_backend(KernelType::CONFIGURATIONAL_ENTROPY);
     return DispatchReport{
-        .selected  = sel,
-        .reason    = std::string("Best available: ") + backend_name(sel),
+        .selected   = sel,
+        .reason     = std::format("Best available: {}", shannon::backend_name(sel)),
         .hw_summary = hw_.summary(),
     };
 }

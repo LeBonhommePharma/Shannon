@@ -23,7 +23,9 @@ static inline double hsum128_pd(__m128d v) noexcept {
     return _mm_cvtsd_f64(s);
 }
 
-double configurational_entropy_sse42(const double* w, std::size_t n) noexcept {
+double configurational_entropy_sse42(std::span<const double> weights) noexcept {
+    const double* w = weights.data();
+    const std::size_t n = weights.size();
     if (n <= 1) return 0.0;
 
     double max_w = w[0];

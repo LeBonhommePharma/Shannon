@@ -1,6 +1,8 @@
 # C++20 → C++26 modernization plan
 
-Status: **plan only** (no `CMAKE_CXX_STANDARD` bump in this document’s PR).
+Status: **Phase A (C++20 cleanup) in progress** — ENH-033 name table + ENH-034 span ABI
+landed in code (this tree). ENH-035 ISA traits and ENH-036 C++23 CI bump are **not**
+started. No `CMAKE_CXX_STANDARD` bump.
 Audience: follow-up implementers. Claim one ENH item at a time from
 `docs/ENHANCEMENT_BACKLOG.md` (`ENH-033` onward).
 

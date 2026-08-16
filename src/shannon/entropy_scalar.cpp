@@ -19,7 +19,9 @@ namespace shannon::kernels {
 //   H = log2(Z) - (1/Z) * Σ_i [ (w_i - max_w) * exp(w_i - max_w) ] / ln(2)
 // where Z = Σ_i exp(w_i - max_w)
 
-double configurational_entropy_scalar(const double* w, std::size_t n) noexcept {
+double configurational_entropy_scalar(std::span<const double> weights) noexcept {
+    const double* w = weights.data();
+    const std::size_t n = weights.size();
     if (n == 0) return 0.0;
     if (n == 1) return 0.0;
 
@@ -51,7 +53,9 @@ double configurational_entropy_scalar(const double* w, std::size_t n) noexcept {
 
 // ─── Shannon entropy from probabilities ───────────────────────────────────────
 
-double entropy_from_probs_scalar(const double* p, std::size_t n) noexcept {
+double entropy_from_probs_scalar(std::span<const double> probs) noexcept {
+    const double* p = probs.data();
+    const std::size_t n = probs.size();
     if (n == 0) return 0.0;
     if (n == 1) return 0.0;
 
@@ -66,7 +70,9 @@ double entropy_from_probs_scalar(const double* p, std::size_t n) noexcept {
 
 // ─── Shannon entropy from log-probabilities ───────────────────────────────────
 
-double entropy_from_logprobs_scalar(const double* lp, std::size_t n) noexcept {
+double entropy_from_logprobs_scalar(std::span<const double> logprobs) noexcept {
+    const double* lp = logprobs.data();
+    const std::size_t n = logprobs.size();
     if (n == 0) return 0.0;
     if (n == 1) return 0.0;
 

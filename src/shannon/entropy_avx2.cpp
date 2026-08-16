@@ -27,7 +27,9 @@ static inline double hsum256_pd(__m256d v) noexcept {
 
 #if defined(SHANNON_USE_AVX2)
 
-double configurational_entropy_avx2(const double* w, std::size_t n) noexcept {
+double configurational_entropy_avx2(std::span<const double> weights) noexcept {
+    const double* w = weights.data();
+    const std::size_t n = weights.size();
     if (n <= 1) return 0.0;
 
     double max_w = w[0];
@@ -62,7 +64,9 @@ double configurational_entropy_avx2(const double* w, std::size_t n) noexcept {
     return std::fmax(0.0, std::log2(Z) - (ws / (Z * kLn2)));
 }
 
-double entropy_from_probs_avx2(const double* p, std::size_t n) noexcept {
+double entropy_from_probs_avx2(std::span<const double> probs) noexcept {
+    const double* p = probs.data();
+    const std::size_t n = probs.size();
     if (n <= 1) return 0.0;
 
     __m256d acc = _mm256_setzero_pd();
@@ -84,7 +88,9 @@ double entropy_from_probs_avx2(const double* p, std::size_t n) noexcept {
     return std::fmax(0.0, h);
 }
 
-double entropy_from_logprobs_avx2(const double* lp, std::size_t n) noexcept {
+double entropy_from_logprobs_avx2(std::span<const double> logprobs) noexcept {
+    const double* lp = logprobs.data();
+    const std::size_t n = logprobs.size();
     if (n <= 1) return 0.0;
 
     __m256d acc = _mm256_setzero_pd();

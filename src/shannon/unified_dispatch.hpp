@@ -64,9 +64,16 @@ public:
         const double* logprobs, std::size_t n, double& out_entropy,
         Backend backend = Backend::AUTO);
 
-    // Convenience: vector overloads
     DispatchResult compute_configurational_entropy(
         std::span<const double> log_weights, double& out_entropy,
+        Backend backend = Backend::AUTO);
+
+    DispatchResult compute_entropy_from_probs(
+        std::span<const double> probs, double& out_entropy,
+        Backend backend = Backend::AUTO);
+
+    DispatchResult compute_entropy_from_logprobs(
+        std::span<const double> logprobs, double& out_entropy,
         Backend backend = Backend::AUTO);
 
     // Dispatch report for debugging

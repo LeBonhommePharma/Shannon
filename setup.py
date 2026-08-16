@@ -1,11 +1,13 @@
 """Build script for the shannon-entropy Python package.
 
 The accelerated ``shannon._core`` extension is **optional**:
-- Built when pybind11 + a C++23 compiler + sources are available and compile succeeds.
+- Built when pybind11 + a C++26 compiler + sources are available and compile succeeds.
 - Skipped cleanly (pure-Python / Numba fallback) when any of those are missing or
   the compile fails. ``pip install shannon-entropy`` must always succeed.
-- Override the dialect with ``SHANNON_CXX_STANDARD=20`` (C++20 escape hatch)
-  or ``SHANNON_CXX_STANDARD=23`` (default). Invalid values warn and fall back to 23.
+- Override the dialect with ``SHANNON_CXX_STANDARD=20`` (C++20 escape hatch),
+  ``SHANNON_CXX_STANDARD=23``, or ``SHANNON_CXX_STANDARD=26`` (default).
+  Invalid values warn and fall back to 26. Compilers that reject ``-std=c++26``
+  should set ``23`` explicitly.
 
 Set ``SHANNON_SKIP_CORE=1`` to force pure-Python packaging (used for the
 universal ``py3-none-any`` wheel on PyPI).
@@ -36,6 +38,7 @@ _CORE_SOURCES = [
     "src/shannon/hardware_detect.cpp",
     # entropy kernels (platform guards inside each file)
     "src/shannon/entropy_scalar.cpp",
+    "src/shannon/entropy_std_simd.cpp",
     "src/shannon/entropy_neon.cpp",
     "src/shannon/entropy_omp.cpp",
     "src/shannon/entropy_avx2.cpp",
@@ -61,17 +64,17 @@ def _core_sources_available() -> bool:
 
 
 def _cxx_std() -> str:
-    """Return ``20`` or ``23`` from ``SHANNON_CXX_STANDARD`` (default ``23``).
+    """Return ``20``, ``23``, or ``26`` from ``SHANNON_CXX_STANDARD`` (default ``26``).
 
-    Never fail the optional-core install on a bad value — warn and use 23.
+    Never fail the optional-core install on a bad value — warn and use 26.
     """
-    raw = os.environ.get("SHANNON_CXX_STANDARD", "23").strip()
-    if raw not in ("20", "23"):
+    raw = os.environ.get("SHANNON_CXX_STANDARD", "26").strip()
+    if raw not in ("20", "23", "26"):
         warnings.warn(
-            f"SHANNON_CXX_STANDARD={raw!r} is not 20 or 23; defaulting to 23.",
+            f"SHANNON_CXX_STANDARD={raw!r} is not 20, 23, or 26; defaulting to 26.",
             stacklevel=2,
         )
-        return "23"
+        return "26"
     return raw
 
 
@@ -122,8 +125,8 @@ class optional_build_ext(_build_ext):
             if any(getattr(e, "name", "") == "shannon._core" for e in requested):
                 warnings.warn(
                     "shannon._core was not built. Installing pure-Python fallback only. "
-                    "Install a C++23 compiler + pybind11 for the accelerated path "
-                    "(or set SHANNON_CXX_STANDARD=20 for the C++20 hatch).",
+                    "Install a C++26 compiler + pybind11 for the accelerated path "
+                    "(or set SHANNON_CXX_STANDARD=23 / 20 for a hatch).",
                     stacklevel=2,
                 )
 

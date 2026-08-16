@@ -11,6 +11,7 @@
 #pragma once
 
 #include "shannon/config.hpp"
+#include "shannon/cxx26.hpp"
 
 #include <cmath>
 #include <cstddef>
@@ -69,10 +70,12 @@ template <typename Traits>
     const double* w = weights.data();
     const std::size_t n = weights.size();
     if (n <= 1) return 0.0;
+    SHANNON_ASSUME(n > 1);
 
     const auto support = detail::scan_logit_support(weights);
     // +inf = delta (certain token). All-masked / all-NaN = empty support → H=0.
     if (support.any_pos_inf || !support.any_finite) return 0.0;
+    SHANNON_ASSUME(support.any_finite);
     const double max_w = support.max_finite;
 
     using vec = typename Traits::vec;
@@ -103,6 +106,7 @@ template <typename Traits>
     }
 
     if (Z <= 0.0) return 0.0;
+    SHANNON_ASSUME(Z > 0.0);
     return std::fmax(0.0, std::log2(Z) - (ws / (Z * kLn2)));
 }
 

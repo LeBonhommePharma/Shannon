@@ -1,21 +1,20 @@
 # C++20 → C++26 modernization plan
 
-Status: **Phase A complete. Phase B complete (ENH-036).** CI Linux is `g++-14`,
-CMake/`setup.py` default `-std=c++23`, packagers can force
-`SHANNON_CXX_STANDARD=20`. C++23 library types in headers are **feature-test
-guarded** (`__cpp_lib_expected`, `__cpp_lib_move_only_function`, …) so the
-hatch still compiles. Next: Phase C `std::simd` traits behind a flag. No C++26
-dialect bump.
+Status: **Phase A complete. Phase B complete (ENH-036). Phase C + dialect 26
+(ENH-037) in this tree.** CMake/`setup.py` default `-std=c++26` with a
+configure-time fallback to 23 if the compiler rejects 26 (g++-13, older Apple
+Clang). Portable SIMD kernel uses Parallelism TS `std::experimental::simd`
+(Horner `exp`/`log2`, not scalar-per-lane). P1928 `<simd>` / `[simd.math]` /
+contracts / reflection / `#embed` remain **unavailable on g++-14**.
 Audience: follow-up implementers. Claim one ENH item at a time from
 `docs/ENHANCEMENT_BACKLOG.md` (`ENH-033` onward).
 
-Shannon’s C++ core defaults to **C++23** (`CMakeLists.txt`
-`SHANNON_CXX_STANDARD` default 23, `setup.py` `-std=c++23` / `/std:c++23`).
-The v2 kernels (`src/shannon/entropy_*.cpp`, `simd_exp.hpp`,
-`unified_dispatch.cpp`) are the performance-critical path and still compile as
-C++20-compatible source. Flipping the dialect to C++26 in one shot is a
-**compiler-matrix change**, not a style change — CI today cannot build
-`-std=c++26`.
+Shannon’s C++ core defaults to **C++26** (`CMakeLists.txt`
+`SHANNON_CXX_STANDARD` default 26, `setup.py` `-std=c++26` / `/std:c++26`).
+Compilers that do not accept that flag fall back to C++23. The v2 kernels
+still compile as C++20-compatible source (`-DSHANNON_CXX_STANDARD=20`).
+Do **not** advertise C++26 in README badges until Linux **and** macOS CI
+both compile `-std=c++26` without falling back.
 
 ## What we measured (2026-08-16)
 
@@ -24,9 +23,10 @@ C++20-compatible source. Flipping the dialect to C++26 in one shot is a
 | Pre-ENH-036 CI Linux (`g++-13`) | `-std=c++20` | Production dialect before Phase B |
 | same | `-std=c++23` | Compiles. libstdc++ **has** `std::expected`, `std::move_only_function`, `std::unreachable`, `std::to_underlying`, `std::byteswap`, `std::format`. **Missing:** `std::print`, `std::mdspan`, `std::flat_map`, `std::generator`, `std::simd`, pack indexing, contracts, reflection |
 | same | `-std=c++26` / `-std=c++2c` | **Unrecognized** (`g++-13: error: unrecognized command-line option`) |
-| CI Linux after ENH-036 (`g++-14`) | `-std=c++23` (default) | Current production dialect. `<print>` exists on this compiler; Shannon does not use it yet |
+| CI Linux after ENH-036 (`g++-14`) | `-std=c++23` (default then) | Production dialect before ENH-037 |
+| This image `g++-14` 14.2.0 | `-std=c++26` | Flag accepted. `__cplusplus=202400L`. **Has:** `<print>`, `expected`, placeholder `_`, `[[assume]]`. **Missing:** `<simd>` (`__cpp_lib_simd`), `<mdspan>`, `#embed`, contracts, reflection, pack indexing, `function_ref`. **Has** `<experimental/simd>` (Parallelism TS; `native_simd<double>` width 4 with `-mavx2`) |
 | This image `clang++` 18.1.3 | `-std=c++26` | Flag accepted; standard library headers not wired for a libc++ C++26 build here |
-| CI macOS | Apple Clang from Xcode (unpinned) | C++23 is realistic; C++26 `std::simd` / reflection / contracts are **not** a 2026 CI default |
+| CI macOS | Apple Clang from Xcode (unpinned) | CMake falls back to C++23 if `-std=c++26` is rejected |
 | CI Windows | C++ core **not built** (`SHANNON_SKIP_CORE=1`) | Dialect bump must not assume MSVC C++26 |
 
 `std::simd` (P1928) is the only C++26 feature that would structurally
@@ -46,7 +46,7 @@ written to beat.
    stream (`TestBackendParityFuzz`). Language upgrades must not change
    Welford order, sample variance (`n-1`), or event-history chronology.
 2. **Stable `Backend` enumerants.** `SCALAR=0` … `NEON=5`, `AUTO=255`
-   are part of pybind/telemetry. Do not renumber.
+   are frozen. `STD_SIMD=6` is additive (opt-in override; not AUTO).
 3. **Fat-binary / SIGILL policy.** Each ISA kernel lives in its own TU
    with targeted `-m` flags (`CMakeLists.txt`). Hosted CI already
    filters AVX-512 tests (`-E 'Avx512|SimdLog2Avx2.MaxRelativeError'`).
@@ -87,8 +87,10 @@ Already in use, leave alone unless a later phase needs a touch-up:
 
 ## Phased plan (safest first)
 
-Each phase is a separate PR. Do not combine a compiler bump with a
-kernel rewrite.
+Each phase was a separate PR through Phase B. ENH-037 combines the C++26
+dialect default with the portable SIMD kernel because that is what was
+left after ENH-036; CMake still falls back to 23 if `-std=c++26` is
+rejected.
 
 ### Phase A — C++20 cleanup (no dialect change)  ← **done**
 
@@ -139,41 +141,45 @@ C++20 hatch still compiles:
 Do **not** enable C++ modules (`import std`) in this phase — pybind11
 + FetchContent GoogleTest + per-ISA TUs are a modules foot-gun.
 
-### Phase C — prepare for `std::simd` without requiring it
+### Phase C — `std::simd` traits  ← **done (experimental stand-in)**
 
-This is the real C++26 payoff, and it is a **traits swap**, not a
-rewrite, if Phase A is done.
+This is a **traits swap**, not a seventh copy of the algorithm (Phase A).
 
 1. Keep custom `shannon_exp` / `shannon_log2`. C++26 `[simd.math]` is
    not available in GCC 16’s `std::simd`. Re-expressing the Horner
-   polynomial on `std::simd<double>` is the end state; calling
+   polynomial on a generic SIMD type is the end state; calling
    `std::exp` per lane is a regression.
-2. Add a `SimdTraits` implementation backed by `std::simd<double>`
-   **behind** `#if defined(__cpp_lib_simd)` and a CMake option
-   `SHANNON_USE_STD_SIMD=OFF` default. Compile it in a TU with the
-   same `-mavx2`/`-mavx512*` flags as today.
-3. NEON: wait until libstdc++/libc++ `std::simd` is not x86-only, or
-   keep the NEON traits.
-4. Golden tests: scalar vs each ISA vs `std::simd` on shared random
-   vocabularies (relative error already in `test_simd_exp.cpp`).
-   Never claim bit-identical across ISAs for `exp`; keep the existing
-   1e-13 relative bound.
+2. **Done:** `src/shannon/simd_generic.hpp` + `entropy_std_simd.cpp`
+   instantiate `entropy_algorithm.hpp` over
+   `std::experimental::native_simd<double>` (libstdc++ Parallelism TS).
+   CMake `SHANNON_USE_STD_SIMD` defaults **ON**; `SHANNON_NO_STD_SIMD`
+   compiles a scalar stub. x86 compiles the TU with `-mavx2 -mfma`
+   (same as AVX2). `Backend::STD_SIMD = 6` is override-only —
+   `best_backend()` still prefers AVX-512 / AVX2.
+3. NEON: experimental simd is available on libstdc++ aarch64; Apple
+   libc++ typically lacks `<experimental/simd>` (stub +
+   `std_simd_kernels_built()==false`).
+4. Golden tests: `StdSimdKernels.*` vs scalar; `SimdExpGeneric` /
+   `SimdLog2Generic` vs libm (1e-13 / 1e-12). Never claim bit-identical
+   `exp` across ISAs.
+5. P1928 `<simd>` (`__cpp_lib_simd`) is still **undefined** on g++-14.
+   When GCC 16 CI exists, retarget `abi::native` without changing Horner.
 
-### Phase D — other C++26, opportunistic
+### Phase D — other C++26, opportunistic  ← **partial (what g++-14 has)**
 
-Only after Phase B’s compiler floor is GCC 15 / Clang 19 / Apple Clang
-with a real C++26 library.
-
-| Feature | Shannon use | Priority |
+| Feature | Shannon use | Status on g++-14 `-std=c++26` |
 |---|---|---|
-| `std::function_ref` | `TokenCallback` / ingest (no alloc, no ownership) | High once available |
-| Contracts (`pre` / `post`) | `entropy >= 0`, `n==0 \|\| ptr != nullptr` on kernels; maps today’s `assert` | Medium; `ignore` in Release |
-| `#embed` | `data/soft_contact_256.bin` (256 KB) into `SoftContactMatrix` | Medium; drop path search |
-| Static reflection | `enum_name(Backend)`, JSONL field names | Low; constexpr table is enough |
-| Pack indexing | Kernel dispatcher templates | Low |
+| Dialect `-std=c++26` | CMake/setup.py default | **Done** (fallback to 23) |
+| `[[assume]]` | `SHANNON_ASSUME` after kernel early-outs | **Done** (`cxx26.hpp`) |
+| Placeholder `_` | Available; not forced through existing code | Macro reported in `cxx26.hpp` |
+| `std::function_ref` | `TokenCallback` / ingest | **Blocked** |
+| Contracts (`pre` / `post`) | `entropy >= 0`, non-null kernels | **Blocked** |
+| `#embed` | `data/soft_contact_256.bin` | **Blocked** (path search stays) |
+| Static reflection | `enum_name(Backend)` | **Blocked** (constexpr table is enough) |
+| Pack indexing | Kernel dispatcher templates | **Blocked** |
+| `std::mdspan` | energy matrix | **Blocked** |
 | `std::inplace_vector` | Not a fit (vocab 32k–128k) | Skip |
 | `std::execution` | Not a fit for this reduction | Skip |
-| `std::mdspan` | `matrix_[256][256]` energy matrix | Nice-to-have, not a win |
 
 ## Suggested PR order (conflict-minimizing)
 
@@ -188,8 +194,9 @@ surface first**.
    This is the conflict magnet — do it **alone**.
 5. Phase A.4 `std::format` telemetry.
 6. Phase B compiler bump (workflow + CMake + setup.py only).  ← **done (PR #16)**
-7. Phase B `std::expected` façade.  ← **this PR**
-8. Phase C `std::simd` traits behind a flag.
+7. Phase B `std::expected` façade.  ← **done (PR #17)**
+8. Phase C portable SIMD traits + C++26 dialect default.  ← **this PR**
+9. P1928 `<simd>` retarget when `__cpp_lib_simd` exists on CI.
 
 ## Explicit non-goals
 
@@ -200,8 +207,8 @@ surface first**.
 - GPU backends (already removed; workload is transfer-bound).
 - Changing the −3.2 bit threshold, Welford formula, or Python detector
   arithmetic “because C++26”.
-- Advertising C++26 in README badges until CI actually compiles
-  `-std=c++26`.
+- Advertising C++26 in README badges until Linux **and** macOS CI compile
+  `-std=c++26` without the CMake fallback.
 
 ## Verification bar (every code PR)
 
@@ -209,6 +216,7 @@ surface first**.
 # Linux / this environment (CI pins g++-14; g++-13 still compiles -std=c++23)
 cmake -B build -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF \
       -DCMAKE_CXX_COMPILER=g++-14
+# Default SHANNON_CXX_STANDARD=26 (g++-14 accepts it; g++-13 falls back to 23)
 cmake --build build -j
 ctest --test-dir build --output-on-failure \
       -E 'Avx512|SimdLog2Avx2.MaxRelativeError'

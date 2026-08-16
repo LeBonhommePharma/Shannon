@@ -60,6 +60,12 @@ bool UnifiedDispatch::is_available(Backend b) const noexcept {
     case Backend::AVX2:   return hw_.has_avx2;
     case Backend::AVX512: return hw_.has_avx512;
     case Backend::NEON:   return hw_.has_neon;
+    case Backend::STD_SIMD:
+        return kernels::std_simd_kernels_built()
+#if defined(SHANNON_STD_SIMD_REQUIRES_AVX2)
+            && hw_.has_avx2
+#endif
+            ;
     case Backend::AUTO:   return true;
     }
     return false;
@@ -106,6 +112,11 @@ bool UnifiedDispatch::has_kernel(Backend b, KernelType kernel) const noexcept {
         (void)kernel;
         return false;
 #endif
+    case Backend::STD_SIMD:
+        return is_available(Backend::STD_SIMD) && (
+            kernel == KernelType::CONFIGURATIONAL_ENTROPY ||
+            kernel == KernelType::SHANNON_ENTROPY ||
+            kernel == KernelType::LOGPROB_ENTROPY);
     case Backend::AUTO:
         return true;
     }
@@ -141,7 +152,8 @@ Backend UnifiedDispatch::best_backend(KernelType kernel, std::size_t n) const {
         return ov;
     }
 
-    // x86 wide SIMD
+    // x86 wide SIMD. STD_SIMD is opt-in only (override) — do not prefer it
+    // over the hand-written AVX2/AVX-512 TUs for AUTO telemetry/perf.
     if (has_kernel(Backend::AVX512, kernel)) return Backend::AVX512;
     if (has_kernel(Backend::AVX2, kernel))   return Backend::AVX2;
 
@@ -205,6 +217,14 @@ DispatchResult UnifiedDispatch::compute_configurational_entropy(
     // Track whether a real kernel ran; fallthrough must not leave a stale backend.
     bool ran = false;
     switch (result.used_backend) {
+    case Backend::STD_SIMD:
+        if (kernels::std_simd_kernels_built()) {
+            out_entropy = kernels::configurational_entropy_std_simd(log_weights, n);
+            result.used_backend = Backend::STD_SIMD;
+            ran = true;
+            break;
+        }
+        break;
     case Backend::AVX512:
 #if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
         out_entropy = kernels::configurational_entropy_avx512(log_weights, n);
@@ -282,6 +302,14 @@ DispatchResult UnifiedDispatch::compute_entropy_from_probs(
 
     bool ran = false;
     switch (result.used_backend) {
+    case Backend::STD_SIMD:
+        if (kernels::std_simd_kernels_built()) {
+            out_entropy = kernels::entropy_from_probs_std_simd(probs, n);
+            result.used_backend = Backend::STD_SIMD;
+            ran = true;
+            break;
+        }
+        break;
     case Backend::AVX512:
 #if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
         out_entropy = kernels::entropy_from_probs_avx512(probs, n);
@@ -351,6 +379,14 @@ DispatchResult UnifiedDispatch::compute_entropy_from_logprobs(
 
     bool ran = false;
     switch (result.used_backend) {
+    case Backend::STD_SIMD:
+        if (kernels::std_simd_kernels_built()) {
+            out_entropy = kernels::entropy_from_logprobs_std_simd(logprobs, n);
+            result.used_backend = Backend::STD_SIMD;
+            ran = true;
+            break;
+        }
+        break;
     case Backend::AVX512:
 #if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
         out_entropy = kernels::entropy_from_logprobs_avx512(logprobs, n);

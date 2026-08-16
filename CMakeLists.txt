@@ -1,20 +1,55 @@
 cmake_minimum_required(VERSION 3.20)
 project(shannon VERSION 2.1.0 LANGUAGES CXX)
 
-# Default C++23 (ENH-036). Packagers can force the C++20 escape hatch:
-#   cmake -DSHANNON_CXX_STANDARD=20 ...
-# Do not add C++23-only APIs in headers until that hatch is retired.
-set(SHANNON_CXX_STANDARD 23 CACHE STRING "C++ dialect (20 or 23)")
-set_property(CACHE SHANNON_CXX_STANDARD PROPERTY STRINGS 20 23)
-if(NOT SHANNON_CXX_STANDARD STREQUAL "20" AND NOT SHANNON_CXX_STANDARD STREQUAL "23")
+# Default C++26 (ENH-037). Packagers can force a hatch:
+#   cmake -DSHANNON_CXX_STANDARD=23 ...   # or 20
+# Compilers that reject -std=c++26 (g++-13, older Apple Clang) fall back to 23
+# with a warning — do not fail configure.
+# CMAKE_CXX_STANDARD 26 needs CMake >= 3.25; older CMake injects the flag.
+set(SHANNON_CXX_STANDARD 26 CACHE STRING "C++ dialect (20, 23, or 26)")
+set_property(CACHE SHANNON_CXX_STANDARD PROPERTY STRINGS 20 23 26)
+if(NOT SHANNON_CXX_STANDARD STREQUAL "20"
+   AND NOT SHANNON_CXX_STANDARD STREQUAL "23"
+   AND NOT SHANNON_CXX_STANDARD STREQUAL "26")
     message(FATAL_ERROR
-        "SHANNON_CXX_STANDARD must be 20 or 23 (got '${SHANNON_CXX_STANDARD}')")
+        "SHANNON_CXX_STANDARD must be 20, 23, or 26 (got '${SHANNON_CXX_STANDARD}')")
 endif()
-set(CMAKE_CXX_STANDARD ${SHANNON_CXX_STANDARD})
+
+include(CheckCXXCompilerFlag)
+set(_shannon_effective_std "${SHANNON_CXX_STANDARD}")
+if(SHANNON_CXX_STANDARD STREQUAL "26")
+    if(MSVC)
+        check_cxx_compiler_flag("/std:c++26" SHANNON_COMPILER_CXX26)
+    else()
+        check_cxx_compiler_flag("-std=c++26" SHANNON_COMPILER_CXX26)
+    endif()
+    if(NOT SHANNON_COMPILER_CXX26)
+        message(WARNING
+            "Compiler does not accept C++26; falling back to C++23. "
+            "Set -DSHANNON_CXX_STANDARD=23 to silence this.")
+        set(_shannon_effective_std "23")
+    endif()
+endif()
+
+if(_shannon_effective_std STREQUAL "26")
+    # g++-14 accepts -std=c++26, but CMake 3.28's GNU compiler module does not
+    # treat GCC 14 as supporting the CXX26 dialect. CMAKE_CXX_STANDARD 26 then
+    # breaks later try_compile (AVX2 flag checks). Keep the CMake dialect at 23
+    # and inject the real flag.
+    set(CMAKE_CXX_STANDARD 23)
+    if(MSVC)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/std:c++26>)
+    else()
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-std=c++26>)
+    endif()
+    message(STATUS "Shannon C++ standard: 26 (via -std=c++26; CMake dialect table stays 23)")
+else()
+    set(CMAKE_CXX_STANDARD ${_shannon_effective_std})
+    message(STATUS "Shannon C++ standard: ${CMAKE_CXX_STANDARD}")
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-message(STATUS "Shannon C++ standard: ${CMAKE_CXX_STANDARD}")
 
 # ── Options ──────────────────────────────────────────────────────────────────────
 option(SHANNON_BUILD_TESTS    "Build GoogleTest unit tests"     ON)
@@ -22,6 +57,9 @@ option(SHANNON_BUILD_PYTHON   "Build pybind11 Python module"    ON)
 option(SHANNON_BUILD_AGENT    "Build shannon-agent CLI"         ON)
 option(SHANNON_USE_OPENMP     "Enable OpenMP acceleration"      ON)
 option(SHANNON_USE_EIGEN      "Enable Eigen vectorization"      OFF)
+# Portable SIMD kernel (experimental::simd Horner). OFF compiles a scalar stub.
+# Default ON — the TU uses __has_include and degrades if the header is missing.
+option(SHANNON_USE_STD_SIMD   "Build experimental/std simd entropy kernel" ON)
 # GPU backends (CUDA/Metal/ROCm) were removed in this release: the workload is
 # per-token streaming entropy of a single distribution, which is latency- and
 # transfer-bound on a discrete GPU (H2D of up to ~1 MB + launch overhead per
@@ -40,6 +78,7 @@ configure_file(
 # Base sources — no ISA-specific code, compiled at baseline ISA
 set(SHANNON_V2_BASE_SOURCES
     src/shannon/entropy_scalar.cpp
+    src/shannon/entropy_std_simd.cpp
     src/shannon/hardware_detect.cpp
     src/shannon/unified_dispatch.cpp
     src/shannon/collapse_detector.cpp
@@ -59,6 +98,9 @@ if(SHANNON_USE_OPENMP)
 endif()
 if(SHANNON_USE_EIGEN)
     list(APPEND SHANNON_DEFS SHANNON_USE_EIGEN)
+endif()
+if(NOT SHANNON_USE_STD_SIMD)
+    list(APPEND SHANNON_DEFS SHANNON_NO_STD_SIMD)
 endif()
 
 # ── Per-ISA SIMD detection and source selection ────────────────────────────────
@@ -85,6 +127,9 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     if(SHANNON_COMPILER_AVX2)
         list(APPEND SHANNON_DEFS SHANNON_USE_AVX2 SHANNON_HAS_AVX2)
         list(APPEND SHANNON_SIMD_SOURCES src/shannon/entropy_avx2.cpp)
+        if(SHANNON_USE_STD_SIMD)
+            list(APPEND SHANNON_DEFS SHANNON_STD_SIMD_REQUIRES_AVX2)
+        endif()
     endif()
 
     # AVX-512 — compiled with -mavx512f -mavx512dq -mavx512bw
@@ -128,6 +173,9 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     set_source_files_properties(src/shannon/entropy_sse42.cpp PROPERTIES COMPILE_FLAGS "-msse4.2")
     if(SHANNON_COMPILER_AVX2)
         set_source_files_properties(src/shannon/entropy_avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+        if(SHANNON_USE_STD_SIMD)
+            set_source_files_properties(src/shannon/entropy_std_simd.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+        endif()
     endif()
     if(SHANNON_COMPILER_AVX512)
         set_source_files_properties(src/shannon/entropy_avx512.cpp PROPERTIES COMPILE_FLAGS "-mavx512f -mavx512dq -mavx512bw -mfma")

@@ -60,6 +60,22 @@ as_span(const double* p, std::size_t n) noexcept {
 }
 #endif
 
+// Portable SIMD (experimental::simd Horner). Always linked; std_simd_kernels_built()
+// is false when the TS header is missing or SHANNON_NO_STD_SIMD is set.
+[[nodiscard]] bool std_simd_kernels_built() noexcept;
+[[nodiscard]] double configurational_entropy_std_simd(std::span<const double> w) noexcept;
+[[nodiscard]] inline double configurational_entropy_std_simd(const double* w, std::size_t n) noexcept {
+    return configurational_entropy_std_simd(detail::as_span(w, n));
+}
+[[nodiscard]] double entropy_from_probs_std_simd(std::span<const double> p) noexcept;
+[[nodiscard]] inline double entropy_from_probs_std_simd(const double* p, std::size_t n) noexcept {
+    return entropy_from_probs_std_simd(detail::as_span(p, n));
+}
+[[nodiscard]] double entropy_from_logprobs_std_simd(std::span<const double> lp) noexcept;
+[[nodiscard]] inline double entropy_from_logprobs_std_simd(const double* lp, std::size_t n) noexcept {
+    return entropy_from_logprobs_std_simd(detail::as_span(lp, n));
+}
+
 #if defined(SHANNON_USE_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
 [[nodiscard]] double configurational_entropy_neon(std::span<const double> w) noexcept;
 [[nodiscard]] inline double configurational_entropy_neon(const double* w, std::size_t n) noexcept {

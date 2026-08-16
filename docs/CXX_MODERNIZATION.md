@@ -131,7 +131,7 @@ rewritten in that PR.
 C++20 hatch still compiles:
 
 1. `EntropyExpected` = `std::expected<double, DispatchError>`; `DispatchResult::as_expected` / `from_expected`; span overloads on `UnifiedDispatch`.
-2. `shannon::assume_unreachable()` (`std::unreachable` / `std::abort` hatch) on exhaustive `HandrailAction` / `InputFormat` / `StreamMode` switches. `backend_name(99)` still returns `"UNKNOWN"` (not UB).
+2. `shannon::assume_unreachable()` (`std::unreachable` / `std::abort` hatch) exists for compiler-proven dead arms only. Public `HandrailAction` / `InputFormat` / `StreamMode` switches fail closed on corrupt storage (skip token / no-op / exit 1). `backend_name(99)` still returns `"UNKNOWN"` (not UB).
 3. `shannon::enum_code` (`std::to_underlying` / `static_cast` hatch) at the pybind `used_backend` boundary and handrail logs.
 4. `CollapseCallback` / `HandrailCallback` / `TokenCallback` are `std::move_only_function` on C++23; `std::function` on the C++20 hatch. v1 `shannon.hpp` stays `std::function`.
 5. `std::print` / `std::println` for agent/handrail log lines when `__cpp_lib_print` (g++-14+); fprintf otherwise (g++-13 Cloud snapshot).

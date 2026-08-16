@@ -39,6 +39,11 @@ template <class E>
 #endif
 }
 
+// Dead-code marker for arms the compiler can prove unreachable (closed
+// switches over complete enumerations). Do **not** put this in a `default:`
+// of a public enum: out-of-range storage is a valid construction and
+// `std::unreachable()` is UB. Fail closed instead (`backend_name` →
+// `"UNKNOWN"`, skip the token / no-op the handrail).
 [[noreturn]] inline void assume_unreachable() noexcept {
 #if defined(__cpp_lib_unreachable)
     std::unreachable();

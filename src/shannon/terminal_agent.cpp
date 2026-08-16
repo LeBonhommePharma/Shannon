@@ -52,7 +52,10 @@ int TerminalAgent::run() {
         exit_code = run_shmem();
         break;
     default:
-        assume_unreachable();
+        // Corrupt StreamMode: do not ingest. assume_unreachable() here
+        // is reachable UB if storage is out of range.
+        exit_code = 1;
+        break;
     }
 
     if (!config_.quiet) {
@@ -121,7 +124,8 @@ int TerminalAgent::run_stdin() {
                 result = detector_.add_logprobs(data.logprobs);
                 break;
             default:
-                assume_unreachable();
+                // Fail closed: skip the token rather than UB / drop logits.
+                return;
             }
             ++tokens_processed_;
 

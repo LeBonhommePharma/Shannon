@@ -70,8 +70,13 @@ public:
     // Connect and start reading. Blocks until disconnected.
     void listen(TokenCallback cb);
 
-    // Read a single message (non-blocking if timeout_ms > 0)
-    bool read_one(TokenCallback cb, int timeout_ms = 0);
+    // Read a single message (non-blocking if timeout_ms > 0).
+    // Match StdinIngester: take the callback by reference so a
+    // move-only TokenCallback is not consumed on a timeout miss.
+    bool read_one(TokenCallback& cb, int timeout_ms = 0);
+    bool read_one(TokenCallback&& cb, int timeout_ms = 0) {
+        return read_one(cb, timeout_ms);
+    }
 
     void stop();
     void close();

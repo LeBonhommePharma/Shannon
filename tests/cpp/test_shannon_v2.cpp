@@ -1236,6 +1236,46 @@ TEST(Handrail, WebhookNoUrlNoCrash) {
     EXPECT_EQ(engine.total_collapses(), 1);
 }
 
+TEST(Handrail, UnknownActionIsFailClosed) {
+    HandrailConfig cfg;
+    cfg.on_first_collapse = static_cast<HandrailAction>(99);
+    cfg.on_sustained_collapse = HandrailAction::LOG_ONLY;
+    cfg.log_path = "/dev/null";
+    cfg.cooldown_seconds = 0.0;
+
+    HandrailEngine engine(std::move(cfg));
+
+    CollapseResult r{
+        .entropy = 1.0, .window_mean = 8.0, .window_std = 1.0,
+        .delta = -7.0, .z_score = -7.0, .collapsed = true,
+        .token_index = 0, .used_backend = Backend::SCALAR,
+    };
+
+    EXPECT_NO_THROW(engine.evaluate(r));
+    EXPECT_EQ(engine.total_collapses(), 1);
+    EXPECT_EQ(engine.escalated_actions(), 0);
+}
+
+TEST(Handrail, WebhookRejectsNonHttpUrl) {
+    HandrailConfig cfg;
+    cfg.on_first_collapse = HandrailAction::WEBHOOK;
+    cfg.on_sustained_collapse = HandrailAction::LOG_ONLY;
+    cfg.webhook_url = "-o/tmp/shannon-curl-injection";
+    cfg.log_path = "/dev/null";
+    cfg.cooldown_seconds = 0.0;
+
+    HandrailEngine engine(std::move(cfg));
+
+    CollapseResult r{
+        .entropy = 1.0, .window_mean = 8.0, .window_std = 1.0,
+        .delta = -7.0, .z_score = -7.0, .collapsed = true,
+        .token_index = 0, .used_backend = Backend::SCALAR,
+    };
+
+    EXPECT_NO_THROW(engine.evaluate(r));
+    EXPECT_EQ(engine.total_collapses(), 1);
+}
+
 // ─── Types tests ────────────────────────────────────────────────────────────
 
 TEST(Types, BackendEnum) {
@@ -1372,6 +1412,15 @@ TEST(TerminalAgent, ResetClears) {
     EXPECT_EQ(agent.tokens_processed(), 0u);
 }
 
+TEST(TerminalAgent, UnknownStreamModeIsFailClosed) {
+    AgentConfig config;
+    config.quiet = true;
+    config.stream_mode = static_cast<StreamMode>(99);
+    TerminalAgent agent(std::move(config));
+    EXPECT_EQ(agent.run(), 1);
+    EXPECT_EQ(agent.tokens_processed(), 0u);
+}
+
 // ─── StdinIngester tests ────────────────────────────────────────────────────
 
 TEST(StdinIngester, ParseValidAndInvalid) {
@@ -1407,6 +1456,12 @@ TEST(StdinIngester, RejectsNonFiniteTokens) {
     EXPECT_TRUE(parser.parse_jsonl_line(
         R"({"logits": [1.0, 2.0, 3.0]})", data));
     EXPECT_EQ(data.logits.size(), 3u);
+}
+
+TEST(StdinIngester, UnknownFormatIsFailClosed) {
+    shannon::ingest::StdinIngester parser("logits", static_cast<InputFormat>(99));
+    shannon::ingest::TokenData data;
+    EXPECT_FALSE(parser.parse_jsonl_line(R"({"logits": [0.1, 0.2]})", data));
 }
 
 TEST(StdinIngester, LocaleIndependentDecimalParsing) {

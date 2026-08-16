@@ -15,6 +15,7 @@
 #endif
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #include <csignal>
@@ -173,7 +174,9 @@ void HandrailEngine::execute_action(HandrailAction action, const CollapseResult&
     case HandrailAction::CALLBACK:
         break;
     default:
-        assume_unreachable();
+        // Corrupt HandrailAction: no-op. assume_unreachable() is UB if
+        // storage is out of range, and a default: arm also kills -Wswitch.
+        return;
     }
 
     if (action != HandrailAction::LOG_ONLY) {
@@ -182,7 +185,14 @@ void HandrailEngine::execute_action(HandrailAction action, const CollapseResult&
     }
 }
 
+[[nodiscard]] static bool webhook_url_is_http(std::string_view url) noexcept {
+    return url.starts_with("https://") || url.starts_with("http://");
+}
+
 void HandrailEngine::fire_webhook(const std::string& url, const CollapseResult& result) {
+    // Scheme allow-list + `--url` so a configured string that looks like a
+    // curl flag (`-o/tmp/x`, `--config …`) cannot be option-injected.
+    if (!webhook_url_is_http(url)) return;
     const char* event_str = "none";
     if (result.collapsed) event_str = "collapse";
     else if (result.expanded) event_str = "expansion";
@@ -219,7 +229,7 @@ void HandrailEngine::fire_webhook(const std::string& url, const CollapseResult& 
             "curl", "-s", "-X", "POST",
             "-H", "Content-Type: application/json",
             "-d", json.c_str(),
-            url.c_str(),
+            "--url", url.c_str(),
             nullptr
         };
         ::execvp("curl", const_cast<char* const*>(argv));

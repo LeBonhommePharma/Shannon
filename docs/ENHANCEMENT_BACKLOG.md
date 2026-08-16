@@ -308,8 +308,42 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 
 ## Investigation notes
 
+- **2026-08-16 (C++20→C++26):** Audited `src/shannon/**`, `CMakeLists.txt` (`CMAKE_CXX_STANDARD 20`), CI `g++-13`. g++-13 has no `-std=c++26`; C++23 library on that compiler has `expected`/`move_only_function`/`unreachable` but not `print`/`simd`. `std::simd` math (`exp`) is still missing in GCC 16 libstdc++ — Shannon’s custom `simd_exp.hpp` stays. Plan: `docs/CXX_MODERNIZATION.md`. Enqueued **ENH-033…036**. Do not flip the dialect in one PR.
 - **2026-07-26 (AgentNotch/Peek/Callout parity):** Sources https://www.agentnotch.app · https://agentpeek.app/ · https://agentcallout.com/. User approved G1–G4,G6–G10 (not G5 chat, not G11 OTEL). Enqueued **ENH-026…032** + UX-057/058. Inventory: `{SCRATCH}/parity_inventory.md`. Counts: present 17 / partial 8 / missing 5 (C1–C30).
 - **2026-07-26 (Grok 4.5 OS swarm):** macOS audit filed **ENH-023** (remote clearAsk fail-open). iOS filed **ENH-024** (stem dismiss no-op) and **ENH-025** (freeform dead). Cross-check: not ENH-018…022 (closed multi-device honesty). UI dual-copy/gate chrome → `docs/MULTI_OS_UX_BACKLOG.md` UX-035…052.
+
+### - [ ] ENH-033: C++20 constexpr Backend name table (no dialect bump)
+
+- **Why:** `DispatchTelemetry::summary` and `UnifiedDispatch::backend_name` hand-roll the same `switch (Backend)`. A new enumerant can silently print `"UNKNOWN"` / fall through. First slice of `docs/CXX_MODERNIZATION.md` Phase A — smallest C++ surface, no ISA files.
+- **Area:** `src/shannon/types.hpp`, `src/shannon/unified_dispatch.cpp`, `tests/cpp/test_shannon_v2.cpp`
+- **First slice:** `constexpr` name table covering `SCALAR`…`NEON`+`AUTO`; exhaustive switch with fail-closed default; unit test every enumerant. Do **not** change `Backend` integer values.
+- **Priority:** P2
+- **Plan:** `docs/CXX_MODERNIZATION.md` Phase A.3
+
+### - [ ] ENH-034: Span-primary entropy kernel ABI + nullptr guards
+
+- **Why:** Public kernels take `const double*, size_t`; `nullptr` with `n>0` is UB (audit). `std::span` overloads already exist as wrappers in the other direction.
+- **Area:** `src/shannon/entropy.hpp`, `src/shannon.hpp`, `unified_dispatch.cpp`, `tests/cpp/test_shannon_v2.cpp`
+- **First slice:** Span as the declared API; pointer+size becomes an inline span wrapper that rejects `nullptr && n>0`; GoogleTest for empty / null / n==1. No SIMD rewrite in this item.
+- **Priority:** P2
+- **Plan:** `docs/CXX_MODERNIZATION.md` Phase A.1
+
+### - [ ] ENH-035: ISA-traits log-sum-exp (one algorithm, thin ISA TUs)
+
+- **Why:** Scalar / OMP / SSE4.2 / AVX2 / AVX-512 / NEON duplicate the same H formula. A traits template is the prerequisite for a later `std::simd` backend; doing `std::simd` first would fork a seventh copy. Custom `simd_exp.hpp` must stay — C++26 `[simd.math]` is not available.
+- **Area:** new `src/shannon/entropy_algorithm.hpp`, `src/shannon/entropy_*.cpp`, `src/shannon/simd_exp.hpp`
+- **First slice:** One configurational-entropy algorithm over a vector traits type; convert AVX2 only; bit-identical vs current AVX2 tests. Follow-up PRs for AVX-512 / NEON / SSE — do not land all ISAs in one loop.
+- **Priority:** P1
+- **Plan:** `docs/CXX_MODERNIZATION.md` Phase A.2 then Phase C
+
+### - [ ] ENH-036: CI compiler floor for C++23 (g++-14/15), then `std::expected` façade
+
+- **Why:** g++-13 (pinned in CI) does not accept `-std=c++26` and lacks `<print>` / `std::simd`. C++23 `std::expected` / `std::unreachable` / `std::to_underlying` **do** exist on g++-13 `-std=c++23`, but a dialect bump still needs a CMake option and `setup.py` `/std:c++23` so wheels keep a C++20 escape hatch.
+- **Area:** `.github/workflows/ci.yml`, `CMakeLists.txt`, `setup.py`, then `src/shannon/types.hpp` / `unified_dispatch.*`
+- **First slice (this item):** compiler bump + `SHANNON_CXX_STANDARD` CMake option defaulting to 23; prove `cpp` + `python` Linux jobs green. **Do not** rewrite kernels in the same PR. `std::expected` façade is the next item after this lands.
+- **Priority:** P2
+- **Plan:** `docs/CXX_MODERNIZATION.md` Phase B
+- **Blocked on:** ENH-033/034 preferred first (less merge conflict with workflow-only PR)
 
 ---
 
@@ -319,6 +353,9 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - Inventing token/cost numbers
 - Full iOS/iPad parity
 - 10-minute scheduler / cron infrastructure
+- One-shot `CMAKE_CXX_STANDARD 20` → `26` bump (see `docs/CXX_MODERNIZATION.md`)
+- Replacing OpenMP reductions with `std::execution` / P2300
+- Calling scalar `std::exp` from a `std::simd` kernel (throughput regression)
 
 ---
 

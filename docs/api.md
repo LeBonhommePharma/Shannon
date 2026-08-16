@@ -91,9 +91,24 @@ struct HandrailConfig {
 ```cpp
 struct DispatchResult {
     DispatchError error = DispatchError::OK;
-    [[nodiscard]] explicit operator bool() const;
+    Backend used_backend = Backend::AUTO;
+    double elapsed_ms = 0.0;
+    std::string detail;
+    [[nodiscard]] explicit operator bool() const;  // true iff error == OK
+#if defined(__cpp_lib_expected)
+    std::expected<double, DispatchError> as_expected(double entropy) const;
+    static DispatchResult from_expected(const std::expected<double, DispatchError>&,
+                                        Backend used = SCALAR, double elapsed_ms = 0,
+                                        std::string detail = {});
+#endif
 };
 ```
+
+On C++23, `UnifiedDispatch` also exposes `configurational_entropy` /
+`entropy_from_probs` / `entropy_from_logprobs` returning
+`shannon::EntropyExpected` (`std::expected<double, DispatchError>`). The
+`compute_*` out-param API remains the pybind / `shannon-agent` façade.
+C++20 (`SHANNON_CXX_STANDARD=20`) omits the expected overloads.
 
 ### `DispatchTelemetry`
 
@@ -169,6 +184,11 @@ public:
         std::span<const double> probs, double& out_entropy);
     DispatchResult compute_entropy_from_logprobs(
         std::span<const double> logprobs, double& out_entropy);
+#if defined(__cpp_lib_expected)
+    EntropyExpected configurational_entropy(std::span<const double>, Backend = AUTO);
+    EntropyExpected entropy_from_probs(std::span<const double>, Backend = AUTO);
+    EntropyExpected entropy_from_logprobs(std::span<const double>, Backend = AUTO);
+#endif
 };
 
 }

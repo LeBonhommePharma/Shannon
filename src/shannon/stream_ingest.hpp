@@ -30,8 +30,12 @@ struct TokenData {
     InputFormat format = InputFormat::LOGITS;
 };
 
-// Callback for each parsed token
+// Callback for each parsed token. Move-only on C++23; std::function hatch on C++20.
+#if defined(__cpp_lib_move_only_function)
+using TokenCallback = std::move_only_function<void(const TokenData&)>;
+#else
 using TokenCallback = std::function<void(const TokenData&)>;
+#endif
 
 // ─── JSONL stdin pipe ingestion ──────────────────────────────────────────────
 
@@ -42,7 +46,8 @@ public:
         InputFormat format = InputFormat::LOGITS);
 
     // Read one JSONL line, parse, invoke callback. Returns false on EOF.
-    bool read_one(TokenCallback cb);
+    bool read_one(TokenCallback& cb);
+    bool read_one(TokenCallback&& cb) { return read_one(cb); }
 
     // Read all lines until EOF
     void read_all(TokenCallback cb);
@@ -65,8 +70,13 @@ public:
     // Connect and start reading. Blocks until disconnected.
     void listen(TokenCallback cb);
 
-    // Read a single message (non-blocking if timeout_ms > 0)
-    bool read_one(TokenCallback cb, int timeout_ms = 0);
+    // Read a single message (non-blocking if timeout_ms > 0).
+    // Match StdinIngester: take the callback by reference so a
+    // move-only TokenCallback is not consumed on a timeout miss.
+    bool read_one(TokenCallback& cb, int timeout_ms = 0);
+    bool read_one(TokenCallback&& cb, int timeout_ms = 0) {
+        return read_one(cb, timeout_ms);
+    }
 
     void stop();
     void close();

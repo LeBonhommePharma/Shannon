@@ -13,10 +13,14 @@
 
 #include "shannon/terminal_agent.hpp"
 #include "shannon/config.hpp"
+#include "shannon/types.hpp"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#if defined(__cpp_lib_print)
+#include <print>
+#endif
 #include <string>
 
 static void print_usage(const char* prog) {
@@ -75,7 +79,11 @@ static shannon::HandrailAction parse_action(const char* s) {
     if (std::strcmp(s, "coredump") == 0)  return shannon::HandrailAction::COREDUMP;
     if (std::strcmp(s, "webhook") == 0)   return shannon::HandrailAction::WEBHOOK;
     if (std::strcmp(s, "callback") == 0)  return shannon::HandrailAction::CALLBACK;
+#if defined(__cpp_lib_print)
+    std::println(stderr, "Unknown action: {} (using LOG_ONLY)", s);
+#else
     std::fprintf(stderr, "Unknown action: %s (using LOG_ONLY)\n", s);
+#endif
     return shannon::HandrailAction::LOG_ONLY;
 }
 
@@ -133,7 +141,11 @@ int main(int argc, char* argv[]) {
             config.verbose = true;
             config.quiet = false;
         } else {
+#if defined(__cpp_lib_print)
+            std::println(stderr, "Unknown option: {}", arg);
+#else
             std::fprintf(stderr, "Unknown option: %s\n", arg.c_str());
+#endif
             print_usage(argv[0]);
             return 2;
         }
@@ -146,7 +158,11 @@ int main(int argc, char* argv[]) {
         shannon::TerminalAgent agent(std::move(config));
         return agent.run();
     } catch (const std::exception& e) {
+#if defined(__cpp_lib_print)
+        std::println(stderr, "[shannon] Fatal: {}", e.what());
+#else
         std::fprintf(stderr, "[shannon] Fatal: %s\n", e.what());
+#endif
         return 2;
     }
 }

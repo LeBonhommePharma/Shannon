@@ -395,6 +395,11 @@ PYBIND11_MODULE(_core, m) {
         .def_readonly("oscillating",  &shannon::CollapseResult::oscillating)
         .def_readonly("event",        &shannon::CollapseResult::event)
         .def_readonly("token_index",  &shannon::CollapseResult::token_index)
+        .def_property_readonly("used_backend",
+            [](const shannon::CollapseResult& r) {
+                return shannon::enum_code(r.used_backend);
+            },
+            "Frozen Backend integer (SCALAR=0 … NEON=5, AUTO=255)")
         .def("__repr__",
             [](const shannon::CollapseResult& r) {
                 return "CollapseResult(entropy=" + std::to_string(r.entropy)

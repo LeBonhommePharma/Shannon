@@ -9,7 +9,12 @@ All notable changes to Shannon are documented in this file.
 - **C++23 default dialect (ENH-036)** — CMake `SHANNON_CXX_STANDARD` defaults to 23
   (`20` remains a packager hatch). Linux CI and the Linux release agent pin **g++-14**.
   `setup.py` emits `-std=c++23` / `/std:c++23` unless `SHANNON_CXX_STANDARD=20`.
-  No kernel rewrite; `std::expected` façade is a follow-up.
+- **C++23 library façade (ENH-036 remainder)** — `EntropyExpected` wraps dispatch
+  entropy; `DispatchResult` stays the pybind/agent API. `enum_code` /
+  `assume_unreachable` hatch to C++20 (the latter is not used on public enums).
+  Callbacks are `move_only_function` on C++23. Agent/handrail log lines use
+  `std::print` when `<print>` exists. Webhook POST uses curl `--url` and
+  rejects non-`http(s)` URLs (curl flag injection).
 
 ### Added
 

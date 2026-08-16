@@ -1236,6 +1236,46 @@ TEST(Handrail, WebhookNoUrlNoCrash) {
     EXPECT_EQ(engine.total_collapses(), 1);
 }
 
+TEST(Handrail, UnknownActionIsFailClosed) {
+    HandrailConfig cfg;
+    cfg.on_first_collapse = static_cast<HandrailAction>(99);
+    cfg.on_sustained_collapse = HandrailAction::LOG_ONLY;
+    cfg.log_path = "/dev/null";
+    cfg.cooldown_seconds = 0.0;
+
+    HandrailEngine engine(std::move(cfg));
+
+    CollapseResult r{
+        .entropy = 1.0, .window_mean = 8.0, .window_std = 1.0,
+        .delta = -7.0, .z_score = -7.0, .collapsed = true,
+        .token_index = 0, .used_backend = Backend::SCALAR,
+    };
+
+    EXPECT_NO_THROW(engine.evaluate(r));
+    EXPECT_EQ(engine.total_collapses(), 1);
+    EXPECT_EQ(engine.escalated_actions(), 0);
+}
+
+TEST(Handrail, WebhookRejectsNonHttpUrl) {
+    HandrailConfig cfg;
+    cfg.on_first_collapse = HandrailAction::WEBHOOK;
+    cfg.on_sustained_collapse = HandrailAction::LOG_ONLY;
+    cfg.webhook_url = "-o/tmp/shannon-curl-injection";
+    cfg.log_path = "/dev/null";
+    cfg.cooldown_seconds = 0.0;
+
+    HandrailEngine engine(std::move(cfg));
+
+    CollapseResult r{
+        .entropy = 1.0, .window_mean = 8.0, .window_std = 1.0,
+        .delta = -7.0, .z_score = -7.0, .collapsed = true,
+        .token_index = 0, .used_backend = Backend::SCALAR,
+    };
+
+    EXPECT_NO_THROW(engine.evaluate(r));
+    EXPECT_EQ(engine.total_collapses(), 1);
+}
+
 // ─── Types tests ────────────────────────────────────────────────────────────
 
 TEST(Types, BackendEnum) {
@@ -1279,6 +1319,58 @@ TEST(Types, DispatchResultBoolConversion) {
     EXPECT_FALSE(static_cast<bool>(fail));
 }
 
+TEST(Types, EnumCodeFrozenBackendIntegers) {
+    EXPECT_EQ(enum_code(Backend::SCALAR), 0);
+    EXPECT_EQ(enum_code(Backend::OPENMP), 1);
+    EXPECT_EQ(enum_code(Backend::SSE42), 2);
+    EXPECT_EQ(enum_code(Backend::AVX2), 3);
+    EXPECT_EQ(enum_code(Backend::AVX512), 4);
+    EXPECT_EQ(enum_code(Backend::NEON), 5);
+    EXPECT_EQ(enum_code(Backend::AUTO), 255);
+}
+
+#if defined(__cpp_lib_expected)
+TEST(Types, DispatchResultExpectedFacade) {
+    DispatchResult ok;
+    ok.error = DispatchError::OK;
+    auto good = ok.as_expected(2.0);
+    ASSERT_TRUE(good.has_value());
+    EXPECT_DOUBLE_EQ(*good, 2.0);
+
+    DispatchResult fail;
+    fail.error = DispatchError::INVALID_ARGS;
+    auto bad = fail.as_expected(99.0);
+    ASSERT_FALSE(bad.has_value());
+    EXPECT_EQ(bad.error(), DispatchError::INVALID_ARGS);
+
+    auto from_ok = DispatchResult::from_expected(EntropyExpected{1.0}, Backend::AVX2, 0.5);
+    EXPECT_TRUE(from_ok);
+    EXPECT_EQ(from_ok.used_backend, Backend::AVX2);
+    EXPECT_DOUBLE_EQ(from_ok.elapsed_ms, 0.5);
+
+    auto from_err = DispatchResult::from_expected(
+        std::unexpected(DispatchError::NO_BACKEND), Backend::SCALAR);
+    EXPECT_FALSE(from_err);
+    EXPECT_EQ(from_err.error, DispatchError::NO_BACKEND);
+}
+
+TEST(UnifiedDispatch, ExpectedEntropyOverloads) {
+    auto& d = dispatch::UnifiedDispatch::instance();
+    d.detect();
+    std::vector<double> uniform = {0.25, 0.25, 0.25, 0.25};
+    auto h = d.entropy_from_probs(uniform);
+    ASSERT_TRUE(h.has_value());
+    EXPECT_NEAR(*h, 2.0, 1e-10);
+
+    double out = 42.0;
+    auto invalid = d.compute_configurational_entropy(nullptr, 8, out);
+    EXPECT_FALSE(invalid);
+    auto mapped = invalid.as_expected(out);
+    ASSERT_FALSE(mapped.has_value());
+    EXPECT_EQ(mapped.error(), DispatchError::INVALID_ARGS);
+}
+#endif
+
 // ─── TerminalAgent tests ────────────────────────────────────────────────────
 
 TEST(TerminalAgent, ProcessLogits) {
@@ -1320,6 +1412,15 @@ TEST(TerminalAgent, ResetClears) {
     EXPECT_EQ(agent.tokens_processed(), 0u);
 }
 
+TEST(TerminalAgent, UnknownStreamModeIsFailClosed) {
+    AgentConfig config;
+    config.quiet = true;
+    config.stream_mode = static_cast<StreamMode>(99);
+    TerminalAgent agent(std::move(config));
+    EXPECT_EQ(agent.run(), 1);
+    EXPECT_EQ(agent.tokens_processed(), 0u);
+}
+
 // ─── StdinIngester tests ────────────────────────────────────────────────────
 
 TEST(StdinIngester, ParseValidAndInvalid) {
@@ -1355,6 +1456,12 @@ TEST(StdinIngester, RejectsNonFiniteTokens) {
     EXPECT_TRUE(parser.parse_jsonl_line(
         R"({"logits": [1.0, 2.0, 3.0]})", data));
     EXPECT_EQ(data.logits.size(), 3u);
+}
+
+TEST(StdinIngester, UnknownFormatIsFailClosed) {
+    shannon::ingest::StdinIngester parser("logits", static_cast<InputFormat>(99));
+    shannon::ingest::TokenData data;
+    EXPECT_FALSE(parser.parse_jsonl_line(R"({"logits": [0.1, 0.2]})", data));
 }
 
 TEST(StdinIngester, LocaleIndependentDecimalParsing) {

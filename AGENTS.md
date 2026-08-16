@@ -36,7 +36,9 @@ and cannot be built in this environment (no Xcode/Swift on Linux).
   part of CI's pytest invocation.
 - C++ tests: configure with `-DCMAKE_CXX_COMPILER=g++-13` (or `g++-14` if
   installed). Default dialect is C++23 (`-DSHANNON_CXX_STANDARD=23`); the
-  packager hatch is `-DSHANNON_CXX_STANDARD=20`. Then run `ctest` with the CI
+  packager hatch is `-DSHANNON_CXX_STANDARD=20`. C++23 library façades
+  (`std::expected`, `move_only_function`, `std::print`) are feature-test
+  guarded and drop out of the C++20 hatch. Then run `ctest` with the CI
   filter `-E 'Avx512|SimdLog2Avx2.MaxRelativeError'` — hosted/VM CPUs may
   advertise AVX-512 in CPUID yet `SIGILL` on those paths under the hypervisor.
 - `ruff` is a **local-only** gate with known pre-existing debt (see the CI note

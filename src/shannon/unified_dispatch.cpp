@@ -424,6 +424,33 @@ DispatchResult UnifiedDispatch::compute_entropy_from_logprobs(
         logprobs.data(), logprobs.size(), out_entropy, backend);
 }
 
+#if defined(__cpp_lib_expected)
+EntropyExpected UnifiedDispatch::configurational_entropy(
+    std::span<const double> log_weights, Backend backend)
+{
+    double h = 0.0;
+    const DispatchResult r =
+        compute_configurational_entropy(log_weights, h, backend);
+    return r.as_expected(h);
+}
+
+EntropyExpected UnifiedDispatch::entropy_from_probs(
+    std::span<const double> probs, Backend backend)
+{
+    double h = 0.0;
+    const DispatchResult r = compute_entropy_from_probs(probs, h, backend);
+    return r.as_expected(h);
+}
+
+EntropyExpected UnifiedDispatch::entropy_from_logprobs(
+    std::span<const double> logprobs, Backend backend)
+{
+    double h = 0.0;
+    const DispatchResult r = compute_entropy_from_logprobs(logprobs, h, backend);
+    return r.as_expected(h);
+}
+#endif
+
 DispatchReport UnifiedDispatch::get_dispatch_report() const {
     ensure_detected();
     Backend sel = best_backend(KernelType::CONFIGURATIONAL_ENTROPY);

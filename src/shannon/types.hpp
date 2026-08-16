@@ -8,11 +8,18 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <version>
+#if defined(__cpp_lib_expected)
+#include <expected>
+#endif
 #include <format>
 #include <functional>
 #include <optional>
 #include <span>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -20,6 +27,30 @@
 #endif
 
 namespace shannon {
+
+// C++23 std::to_underlying with a C++20 hatch (static_cast of the
+// underlying type). Frozen Backend integers must stay 0–5 / 255.
+template <class E>
+[[nodiscard]] constexpr auto enum_code(E e) noexcept {
+#if defined(__cpp_lib_to_underlying)
+    return std::to_underlying(e);
+#else
+    return static_cast<std::underlying_type_t<E>>(e);
+#endif
+}
+
+// Dead-code marker for arms the compiler can prove unreachable (closed
+// switches over complete enumerations). Do **not** put this in a `default:`
+// of a public enum: out-of-range storage is a valid construction and
+// `std::unreachable()` is UB. Fail closed instead (`backend_name` →
+// `"UNKNOWN"`, skip the token / no-op the handrail).
+[[noreturn]] inline void assume_unreachable() noexcept {
+#if defined(__cpp_lib_unreachable)
+    std::unreachable();
+#else
+    std::abort();
+#endif
+}
 
 // ─── Backend enumeration ─────────────────────────────────────────────────────
 
@@ -93,6 +124,10 @@ enum class DispatchError : uint8_t {
     DEVICE_LOST   = 7,
 };
 
+#if defined(__cpp_lib_expected)
+using EntropyExpected = std::expected<double, DispatchError>;
+#endif
+
 struct DispatchResult {
     DispatchError error        = DispatchError::OK;
     Backend       used_backend = Backend::AUTO;
@@ -100,6 +135,30 @@ struct DispatchResult {
     std::string   detail;
 
     [[nodiscard]] explicit operator bool() const { return error == DispatchError::OK; }
+
+#if defined(__cpp_lib_expected)
+    // Map this telemetry/error wrapper onto the C++23 expected façade.
+    // `entropy` is the out-param from compute_*; ignored when error != OK.
+    [[nodiscard]] std::expected<double, DispatchError>
+    as_expected(double entropy) const noexcept {
+        if (error != DispatchError::OK) {
+            return std::unexpected(error);
+        }
+        return entropy;
+    }
+
+    static DispatchResult from_expected(const std::expected<double, DispatchError>& e,
+                                        Backend used = Backend::SCALAR,
+                                        double elapsed_ms = 0.0,
+                                        std::string detail = {}) {
+        DispatchResult r;
+        r.used_backend = used;
+        r.elapsed_ms = elapsed_ms;
+        r.detail = std::move(detail);
+        r.error = e ? DispatchError::OK : e.error();
+        return r;
+    }
+#endif
 };
 
 // ─── Entropy event classification ────────────────────────────────────────────
@@ -127,7 +186,14 @@ struct CollapseResult {
     Backend     used_backend = Backend::SCALAR;  // which backend computed entropy
 };
 
+// Owned callbacks are move-only on C++23 (no type-erasure copy on the hot
+// path). std::function remains the C++20 hatch alias so packagers on
+// SHANNON_CXX_STANDARD=20 still compile.
+#if defined(__cpp_lib_move_only_function)
+using CollapseCallback = std::move_only_function<void(const CollapseResult&)>;
+#else
 using CollapseCallback = std::function<void(const CollapseResult&)>;
+#endif
 
 // ─── Handrail (failsafe) actions ─────────────────────────────────────────────
 
@@ -154,7 +220,11 @@ struct HandrailConfig {
     double         cooldown_seconds      = 5.0;       // min time between escalated actions
 };
 
+#if defined(__cpp_lib_move_only_function)
+using HandrailCallback = std::move_only_function<void(HandrailAction, const CollapseResult&)>;
+#else
 using HandrailCallback = std::function<void(HandrailAction, const CollapseResult&)>;
+#endif
 
 // ─── Stream ingestion ────────────────────────────────────────────────────────
 

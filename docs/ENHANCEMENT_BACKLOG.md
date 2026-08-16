@@ -339,9 +339,10 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 
 ### - [ ] ENH-036: CI compiler floor for C++23 (g++-14/15), then `std::expected` façade
 
-- **Why:** g++-13 (pinned in CI) does not accept `-std=c++26` and lacks `<print>` / `std::simd`. C++23 `std::expected` / `std::unreachable` / `std::to_underlying` **do** exist on g++-13 `-std=c++23`, but a dialect bump still needs a CMake option and `setup.py` `/std:c++23` so wheels keep a C++20 escape hatch.
+- **Why:** g++-13 (the old CI pin) does not accept `-std=c++26` and lacks `<print>` / `std::simd`. C++23 `std::expected` / `std::unreachable` / `std::to_underlying` exist on g++-13 `-std=c++23`, but a dialect bump still needs a CMake option and `setup.py` `/std:c++23` so wheels keep a C++20 escape hatch.
 - **Area:** `.github/workflows/ci.yml`, `CMakeLists.txt`, `setup.py`, then `src/shannon/types.hpp` / `unified_dispatch.*`
 - **First slice (this item):** compiler bump + `SHANNON_CXX_STANDARD` CMake option defaulting to 23; prove `cpp` + `python` Linux jobs green. **Do not** rewrite kernels in the same PR. `std::expected` façade is the next item after this lands.
+- **Done (first slice):** Linux CI (`cpp`, `python`, `benchmarks`) and release Linux agent pin **g++-14**. CMake `SHANNON_CXX_STANDARD` defaults to 23 (values `20`|`23` only; `cmake_minimum_required` 3.20). `setup.py` `_cxx_std_args` reads `SHANNON_CXX_STANDARD` (default 23; bad values warn and use 23). macOS unpinned; Windows still `SHANNON_SKIP_CORE=1`. Kernels untouched. Remaining: `std::expected` façade / `std::unreachable` / `std::to_underlying` / `move_only_function` / `std::print` — own PR, no further compiler bump.
 - **Priority:** P2
 - **Plan:** `docs/CXX_MODERNIZATION.md` Phase B
 - **Blocked on:** ENH-033/034 preferred first (less merge conflict with workflow-only PR)

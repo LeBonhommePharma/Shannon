@@ -72,7 +72,7 @@ Target: Python 3.10+, line length 100, ruff rules E/F/W/I/UP.
 
 ## Project Structure
 
-- Primary languages: Python, C++20, with YAML for configuration
+- Primary languages: Python, C++23 (C++20 hatch: `-DSHANNON_CXX_STANDARD=20`), with YAML for configuration
 - C++ dialect roadmap (do **not** flip to C++26 in one PR): `docs/CXX_MODERNIZATION.md`
 - CMake build system — always run `cmake -B build` then `cmake --build build` to compile
 - Python tests via `pytest tests/python/ -v` (repo-root `pythonpath = ["python"]` in pyproject.toml), C++ tests via `ctest --test-dir build --output-on-failure`
@@ -112,6 +112,7 @@ S = log2(Z) - (1/Z) Σ (w_i - max_w) exp(w_i - max_w) / ln(2)
 
 | Option | Default | Purpose |
 |--------|---------|---------|
+| `SHANNON_CXX_STANDARD` | 23 | C++ dialect (`20` or `23`; packager hatch) |
 | `SHANNON_BUILD_TESTS` | ON | Build GoogleTest suite |
 | `SHANNON_BUILD_PYTHON` | ON | Build pybind11 module |
 | `SHANNON_USE_OPENMP` | ON | Enable OpenMP acceleration |
@@ -122,7 +123,7 @@ GitHub Actions (`.github/workflows/ci.yml`):
 
 | Job | Coverage |
 |-----|----------|
-| `cpp` | Ubuntu + macOS (`ctest`; some AVX suites filtered on hosted runners) |
+| `cpp` | Ubuntu (`g++-14`, C++23) + macOS unpinned Apple Clang (`ctest`; some AVX suites filtered on hosted runners) |
 | `python` | Ubuntu/macOS × 3.10–3.13; Windows pure-Python at 3.12 only (`SHANNON_SKIP_CORE=1`) |
 | `python-fallback` / packaging | Pure install paths + wheel checks |
 | `apple-platforms` | `./scripts/test_apple_platforms.sh --quick` on macos (SKIP if no Simulator runtimes) |

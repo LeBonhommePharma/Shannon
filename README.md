@@ -21,7 +21,7 @@ This stack ships **two named products** (not one mixed binary):
 [![CI](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml/badge.svg)](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![PyPI](https://img.shields.io/badge/PyPI-shannon--entropy-blue.svg)](https://pypi.org/project/shannon-entropy/)
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
+[![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
 [![macOS](https://img.shields.io/badge/macOS-13%2B-black.svg)](https://github.com/LeBonhommePharma/ShannonUI)
 [![iOS](https://img.shields.io/badge/iOS-17%2B-lightgrey.svg)](https://github.com/LeBonhommePharma/ShannonUI)
@@ -179,7 +179,7 @@ LLM logits / probs / logprobs  (JSONL · socket · shared memory · Python strea
               │
               ▼
      ┌──────────────────── entropy kernels ────────────────────┐
-     │  C++20 SIMD (SSE4.2 / AVX2 / AVX-512 / NEON / OMP)      │
+     │  C++23 SIMD (SSE4.2 / AVX2 / AVX-512 / NEON / OMP)      │
      │       → Numba JIT → pure NumPy fallback                 │
      │  log-sum-exp configurational H  (stable, NaN-safe)      │
      └────────────────────────┬────────────────────────────────┘
@@ -331,7 +331,7 @@ Shannon/   (Shannon CLI + science — this repo)
 ├── scripts/shannon              # dual-product operator handrail (CLI + UI lifecycle)
 ├── hub/                         # gate, agent_manager, DatasetRunner bridge
 ├── python/shannon/              # PyPI package + `shannon` harness / shannon-monitor
-├── src/                         # C++20 entropy / agent core
+├── src/                         # C++23 entropy / agent core
 ├── archive/legacy_agent_hub_ui/ # non-production dual status-item UI
 ├── tests/python/                # library + product-split contract tests
 └── docs/                        # theory, architecture, SHANNON_UI.md

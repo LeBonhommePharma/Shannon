@@ -25,11 +25,21 @@ jobs:
 
       - name: Configure (Linux)
         if: runner.os == 'Linux'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF -DCMAKE_CXX_COMPILER=g++-14
+        run: |
+          set -o pipefail
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DSHANNON_BUILD_TESTS=ON \
+            -DSHANNON_BUILD_PYTHON=OFF -DCMAKE_CXX_COMPILER=g++-14 \
+            2>&1 | tee cmake-configure.log
+          grep -F "Shannon C++ standard: 26" cmake-configure.log
 
       - name: Configure (macOS)
         if: runner.os == 'macOS'
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF
+        run: |
+          set -o pipefail
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DSHANNON_BUILD_TESTS=ON \
+            -DSHANNON_BUILD_PYTHON=OFF \
+            2>&1 | tee cmake-configure.log
+          grep -F "Shannon C++ standard: 26" cmake-configure.log
 
       - name: Build
         run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
@@ -41,6 +51,42 @@ jobs:
         # -mavx512*, so they are 8-wide even when entropy_std_simd.cpp is
         # only -mavx2. Filter those accuracy suites in CI; full suites still
         # run on real metal via bare ctest.
+        run: >
+          cd build && ctest --output-on-failure
+          -E 'Avx512|SimdLog2Avx2.MaxRelativeError|SimdExpGeneric|SimdLog2Generic'
+
+  # ── C++26 hatch lane (GCC 16). g++-14 remains the proven Linux floor. ──
+  # ubuntu-toolchain-r/test currently ships GCC 16.0 experimental trunk, not
+  # 16.1 stable. That snapshot enables function_ref / mdspan / pack indexing /
+  # #embed; it still does **not** define __cpp_lib_simd (P1928 stays hatched).
+  cpp-gcc16:
+    name: C++ (Ubuntu, GCC 16)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install GCC 16 (ubuntu-toolchain-r/test)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common cmake
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y g++-16
+
+      - name: Configure
+        run: |
+          set -o pipefail
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DSHANNON_BUILD_TESTS=ON \
+            -DSHANNON_BUILD_PYTHON=OFF -DCMAKE_CXX_COMPILER=g++-16 \
+            2>&1 | tee cmake-configure.log
+          grep -F "Shannon C++ standard: 26" cmake-configure.log
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
         run: >
           cd build && ctest --output-on-failure
           -E 'Avx512|SimdLog2Avx2.MaxRelativeError|SimdExpGeneric|SimdLog2Generic'

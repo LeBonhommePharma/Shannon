@@ -4,8 +4,12 @@ Thank you for your interest in contributing. This guide covers build, test, and 
 
 ## Prerequisites
 
-- C++26 compiler (GCC >= 14, Clang with `-std=c++26`, MSVC 2022 17.3+). CI Linux pins **g++-14**.
-  Compilers that reject C++26 fall back to C++23 at CMake configure time.
+- C++26 compiler (GCC >= 14, Clang with `-std=c++26`, MSVC 2022 17.3+).
+  Linux CI pins **g++-14** as the proven floor. An extra `cpp-gcc16` job
+  installs experimental GCC 16 from `ppa:ubuntu-toolchain-r/test` so Phase D
+  hatches (`function_ref`, `mdspan`, pack indexing, `#embed`) actually compile.
+  That snapshot still lacks `__cpp_lib_simd` (P1928 stays hatched). Compilers
+  that reject C++26 fall back to C++23 at CMake configure time.
   Packagers can force C++23 or C++20 with `-DSHANNON_CXX_STANDARD=23` / `20`.
 - CMake >= 3.20 (`CMAKE_CXX_STANDARD 26` needs CMake >= 3.25; older CMake injects `-std=c++26`)
 - Python >= 3.10 (for bindings and Python tests)

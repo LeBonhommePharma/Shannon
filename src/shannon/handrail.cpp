@@ -10,6 +10,9 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#if defined(__cpp_lib_print)
+#include <print>
+#endif
 #include <sstream>
 #include <string>
 #include <thread>
@@ -100,6 +103,17 @@ void HandrailEngine::log_event(const char* event_type, const CollapseResult& res
 
     if (!fp) return;
 
+#if defined(__cpp_lib_print)
+    std::print(fp,
+        "[SHANNON HANDRAIL] {} at token {}: "
+        "entropy={:.4f} bits, delta={:.4f}, z={:.4f}, backend={}\n",
+        event_type,
+        result.token_index,
+        result.entropy,
+        result.delta,
+        result.z_score,
+        enum_code(result.used_backend));
+#else
     std::fprintf(fp,
         "[SHANNON HANDRAIL] %s at token %zu: "
         "entropy=%.4f bits, delta=%.4f, z=%.4f, backend=%d\n",
@@ -108,7 +122,8 @@ void HandrailEngine::log_event(const char* event_type, const CollapseResult& res
         result.entropy,
         result.delta,
         result.z_score,
-        static_cast<int>(result.used_backend));
+        static_cast<int>(enum_code(result.used_backend)));
+#endif
 
     if (!is_stderr) std::fclose(fp);
 }
@@ -157,6 +172,8 @@ void HandrailEngine::execute_action(HandrailAction action, const CollapseResult&
 
     case HandrailAction::CALLBACK:
         break;
+    default:
+        assume_unreachable();
     }
 
     if (action != HandrailAction::LOG_ONLY) {

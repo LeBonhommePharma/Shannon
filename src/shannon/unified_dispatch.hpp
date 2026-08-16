@@ -76,6 +76,17 @@ public:
         std::span<const double> logprobs, double& out_entropy,
         Backend backend = Backend::AUTO);
 
+#if defined(__cpp_lib_expected)
+    // C++23 façade: entropy value or DispatchError. Telemetry stays on
+    // DispatchResult; these wrap compute_* + as_expected.
+    [[nodiscard]] EntropyExpected configurational_entropy(
+        std::span<const double> log_weights, Backend backend = Backend::AUTO);
+    [[nodiscard]] EntropyExpected entropy_from_probs(
+        std::span<const double> probs, Backend backend = Backend::AUTO);
+    [[nodiscard]] EntropyExpected entropy_from_logprobs(
+        std::span<const double> logprobs, Backend backend = Backend::AUTO);
+#endif
+
     // Dispatch report for debugging
     DispatchReport get_dispatch_report() const;
 

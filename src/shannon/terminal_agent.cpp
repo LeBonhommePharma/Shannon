@@ -6,6 +6,9 @@
 #include <cstdio>
 #include <iostream>
 #include <memory>
+#if defined(__cpp_lib_print)
+#include <print>
+#endif
 
 namespace shannon {
 
@@ -26,9 +29,15 @@ int TerminalAgent::run() {
 
     if (!config_.quiet) {
         auto report = dispatch::UnifiedDispatch::instance().hardware_report();
+#if defined(__cpp_lib_print)
+        std::print(stderr, "{}", report);
+        std::println(stderr, "[shannon] Monitoring with window={}, threshold={:.1f} bits",
+            config_.window_size, config_.threshold_bits);
+#else
         std::fprintf(stderr, "%s", report.c_str());
         std::fprintf(stderr, "[shannon] Monitoring with window=%zu, threshold=%.1f bits\n",
             config_.window_size, config_.threshold_bits);
+#endif
     }
 
     int exit_code = 0;
@@ -42,12 +51,20 @@ int TerminalAgent::run() {
     case StreamMode::SHARED_MEMORY:
         exit_code = run_shmem();
         break;
+    default:
+        assume_unreachable();
     }
 
     if (!config_.quiet) {
+#if defined(__cpp_lib_print)
+        std::println(stderr, "[shannon] Done. {} tokens, {} collapses, {} expansions, {} oscillations",
+            tokens_processed_, handrail_.total_collapses(),
+            handrail_.total_expansions(), handrail_.total_oscillations());
+#else
         std::fprintf(stderr, "[shannon] Done. %zu tokens, %d collapses, %d expansions, %d oscillations\n",
             tokens_processed_, handrail_.total_collapses(),
             handrail_.total_expansions(), handrail_.total_oscillations());
+#endif
     }
 
     return exit_code;
@@ -104,8 +121,7 @@ int TerminalAgent::run_stdin() {
                 result = detector_.add_logprobs(data.logprobs);
                 break;
             default:
-                result = detector_.add_logits(data.logits);
-                break;
+                assume_unreachable();
             }
             ++tokens_processed_;
 
@@ -114,6 +130,15 @@ int TerminalAgent::run_stdin() {
                 if (result.oscillating)    tag = " ** OSCILLATION **";
                 else if (result.expanded)  tag = " ** EXPANSION **";
                 else if (result.collapsed) tag = " ** COLLAPSE **";
+#if defined(__cpp_lib_print)
+                std::println(stderr,
+                    "[shannon] token {}: H={:.4f} bits, delta={:.4f}, z={:.4f}{}",
+                    result.token_index,
+                    result.entropy,
+                    result.delta,
+                    result.z_score,
+                    tag);
+#else
                 std::fprintf(stderr,
                     "[shannon] token %zu: H=%.4f bits, delta=%.4f, z=%.4f%s\n",
                     result.token_index,
@@ -121,6 +146,7 @@ int TerminalAgent::run_stdin() {
                     result.delta,
                     result.z_score,
                     tag);
+#endif
             }
         });
 
@@ -141,9 +167,15 @@ int TerminalAgent::run_socket() {
                 const char* tag = "";
                 if (result.collapsed) tag = " ** COLLAPSE **";
                 else if (result.expanded) tag = " ** EXPANSION **";
+#if defined(__cpp_lib_print)
+                std::println(stderr,
+                    "[shannon] token {}: H={:.4f} bits{}",
+                    result.token_index, result.entropy, tag);
+#else
                 std::fprintf(stderr,
                     "[shannon] token %zu: H=%.4f bits%s\n",
                     result.token_index, result.entropy, tag);
+#endif
             }
     });
 
@@ -155,8 +187,13 @@ int TerminalAgent::run_shmem() {
     shmem_ingester_ = std::make_unique<ingest::ShmemIngester>(config_.shmem_name);
 
     if (!shmem_ingester_->open()) {
+#if defined(__cpp_lib_print)
+        std::println(stderr, "[shannon] Failed to open shared memory: {}",
+            config_.shmem_name);
+#else
         std::fprintf(stderr, "[shannon] Failed to open shared memory: %s\n",
             config_.shmem_name.c_str());
+#endif
         shmem_ingester_.reset();
         return 2;
     }
@@ -169,9 +206,15 @@ int TerminalAgent::run_shmem() {
                 const char* tag = "";
                 if (result.collapsed) tag = " ** COLLAPSE **";
                 else if (result.expanded) tag = " ** EXPANSION **";
+#if defined(__cpp_lib_print)
+                std::println(stderr,
+                    "[shannon] token {}: H={:.4f} bits{}",
+                    result.token_index, result.entropy, tag);
+#else
                 std::fprintf(stderr,
                     "[shannon] token %zu: H=%.4f bits%s\n",
                     result.token_index, result.entropy, tag);
+#endif
             }
     });
 

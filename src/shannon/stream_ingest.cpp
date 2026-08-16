@@ -128,12 +128,14 @@ bool StdinIngester::parse_jsonl_line(std::string_view line, TokenData& out) {
     case InputFormat::LOGPROBS:
         out.logprobs = std::move(values);
         break;
+    default:
+        shannon::assume_unreachable();
     }
 
     return true;
 }
 
-bool StdinIngester::read_one(TokenCallback cb) {
+bool StdinIngester::read_one(TokenCallback& cb) {
     std::string line;
     if (!std::getline(std::cin, line)) return false;
 

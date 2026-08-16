@@ -1,10 +1,11 @@
 # C++20 → C++26 modernization plan
 
-Status: **Phase A complete.** **Phase B first slice (ENH-036 compiler floor) landed**
-— CI Linux is `g++-14`, CMake/`setup.py` default `-std=c++23`, packagers can
-force `SHANNON_CXX_STANDARD=20`. Do **not** add C++23 library types in headers
-while the C++20 hatch exists (or until it is retired). Next: `std::expected`
-façade (rest of Phase B). No C++26 dialect bump.
+Status: **Phase A complete. Phase B complete (ENH-036).** CI Linux is `g++-14`,
+CMake/`setup.py` default `-std=c++23`, packagers can force
+`SHANNON_CXX_STANDARD=20`. C++23 library types in headers are **feature-test
+guarded** (`__cpp_lib_expected`, `__cpp_lib_move_only_function`, …) so the
+hatch still compiles. Next: Phase C `std::simd` traits behind a flag. No C++26
+dialect bump.
 Audience: follow-up implementers. Claim one ENH item at a time from
 `docs/ENHANCEMENT_BACKLOG.md` (`ENH-033` onward).
 
@@ -126,18 +127,14 @@ install **g++-14** (not 13); macOS stays unpinned Apple Clang; Windows still
 `SHANNON_CXX_STANDARD=20` is the packager hatch). Kernels were **not**
 rewritten in that PR.
 
-Remaining (own PR — do not mix with another compiler bump):
+**Second slice done:** C++23 library façade behind feature-test macros so the
+C++20 hatch still compiles:
 
-1. `std::expected<double, DispatchError>` internally for
-   `compute_*`; keep `DispatchResult` as a compatibility façade for
-   pybind and `shannon-agent`.
-2. `std::unreachable()` in exhaustive `Backend` / `HandrailAction`
-   switches.
-3. `std::to_underlying` at the pybind boundary.
-4. `std::move_only_function` for owned callbacks (`set_callback`);
-   keep `std::function` aliases until Python/C bindings are updated.
-5. `std::print` / `std::println` for `shannon-agent` **only after**
-   libstdc++ has `<print>` (true on g++-14+; still unused).
+1. `EntropyExpected` = `std::expected<double, DispatchError>`; `DispatchResult::as_expected` / `from_expected`; span overloads on `UnifiedDispatch`.
+2. `shannon::assume_unreachable()` (`std::unreachable` / `std::abort` hatch) on exhaustive `HandrailAction` / `InputFormat` / `StreamMode` switches. `backend_name(99)` still returns `"UNKNOWN"` (not UB).
+3. `shannon::enum_code` (`std::to_underlying` / `static_cast` hatch) at the pybind `used_backend` boundary and handrail logs.
+4. `CollapseCallback` / `HandrailCallback` / `TokenCallback` are `std::move_only_function` on C++23; `std::function` on the C++20 hatch. v1 `shannon.hpp` stays `std::function`.
+5. `std::print` / `std::println` for agent/handrail log lines when `__cpp_lib_print` (g++-14+); fprintf otherwise (g++-13 Cloud snapshot).
 
 Do **not** enable C++ modules (`import std`) in this phase — pybind11
 + FetchContent GoogleTest + per-ISA TUs are a modules foot-gun.
@@ -190,8 +187,8 @@ surface first**.
 4. Phase A.2 algorithm traits (all `entropy_*.cpp` + `simd_exp.hpp`).
    This is the conflict magnet — do it **alone**.
 5. Phase A.4 `std::format` telemetry.
-6. Phase B compiler bump (workflow + CMake + setup.py only).  ← **this PR**
-7. Phase B `std::expected` façade.
+6. Phase B compiler bump (workflow + CMake + setup.py only).  ← **done (PR #16)**
+7. Phase B `std::expected` façade.  ← **this PR**
 8. Phase C `std::simd` traits behind a flag.
 
 ## Explicit non-goals

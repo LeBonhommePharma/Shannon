@@ -343,7 +343,7 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Area:** `.github/workflows/ci.yml`, `CMakeLists.txt`, `setup.py`, then `src/shannon/types.hpp` / `unified_dispatch.*`
 - **First slice:** compiler bump + `SHANNON_CXX_STANDARD` CMake option defaulting to 23; prove `cpp` + `python` Linux jobs green. **Do not** rewrite kernels in the same PR.
 - **Done (first slice):** Linux CI (`cpp`, `python`, `benchmarks`) and release Linux agent pin **g++-14**. CMake `SHANNON_CXX_STANDARD` defaults to 23. `setup.py` `_cxx_std_args` reads `SHANNON_CXX_STANDARD`. Kernels untouched.
-- **Done (second slice):** `EntropyExpected` + `DispatchResult::{as_expected,from_expected}` + span expected overloads. `assume_unreachable` on HandrailAction/InputFormat/StreamMode (not on `backend_name`, which stays UNKNOWN for corrupt 99). `enum_code` at pybind `used_backend` and handrail logs. `move_only_function` callbacks on C++23 (`std::function` hatch). `std::print` when `__cpp_lib_print`, else fprintf. No kernel rewrite.
+- **Done (second slice):** `EntropyExpected` + `DispatchResult::{as_expected,from_expected}` + span expected overloads. Public `HandrailAction` / `InputFormat` / `StreamMode` switches fail closed (skip / no-op / exit 1) on corrupt storage — `assume_unreachable` is not used on those arms (`backend_name(99)` stays `"UNKNOWN"`). `enum_code` at pybind `used_backend` and handrail logs. `move_only_function` callbacks on C++23 (`std::function` hatch). `std::print` when `__cpp_lib_print`, else fprintf. Webhook curl uses `--url` plus an `http(s)` scheme allow-list. No kernel rewrite.
 - **Priority:** P2
 - **Plan:** `docs/CXX_MODERNIZATION.md` Phase B
 

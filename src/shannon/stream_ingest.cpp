@@ -129,7 +129,10 @@ bool StdinIngester::parse_jsonl_line(std::string_view line, TokenData& out) {
         out.logprobs = std::move(values);
         break;
     default:
-        shannon::assume_unreachable();
+        // Corrupt / future InputFormat: skip the token. A default:
+        // assume_unreachable() here is reachable UB and also silences
+        // -Wswitch when a new enumerant is added.
+        return false;
     }
 
     return true;
@@ -204,7 +207,7 @@ void SocketIngester::listen(TokenCallback cb) {
     close();
 }
 
-bool SocketIngester::read_one(TokenCallback cb, int timeout_ms) {
+bool SocketIngester::read_one(TokenCallback& cb, int timeout_ms) {
     if (fd_ < 0 && !connect()) return false;
 
     while (true) {

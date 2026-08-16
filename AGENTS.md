@@ -55,6 +55,11 @@ and cannot be built in this environment (no Xcode/Swift on Linux).
   upgrades `libstdc++6` system-wide. Optional local: `g++-16` if already
   present. C++23 library façades (`std::expected`, `move_only_function`,
   `std::print`) are feature-test guarded and drop out of the C++20 hatch.
+- Product `shannon::CollapseDetector` is v2 (`collapse_detector.hpp`, Welford
+  n−1, UnifiedDispatch). Legacy population-variance collapse-only is
+  `shannon::v1::CollapseDetector` in `src/shannon.hpp`. Include both headers
+  in one TU; do not wrap v1 around v2 (window_std disagrees). Python /
+  `shannon-monitor` / `shannon-agent` stay on v2.
 - CMake 3.28 does **not** treat g++-14 as a `CMAKE_CXX_STANDARD 26` compiler
   (later `try_compile` for `-mavx2` fails with “dialect CXX26”). The build
   injects `-std=c++26` while leaving the CMake dialect at 23. Do not “fix”

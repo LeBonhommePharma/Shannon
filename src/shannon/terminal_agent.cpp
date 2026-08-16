@@ -14,7 +14,8 @@ namespace shannon {
 
 TerminalAgent::TerminalAgent(AgentConfig config)
     : config_(std::move(config))
-    , detector_(config_.window_size, config_.threshold_bits)
+    , detector_(config_.window_size, config_.threshold_bits,
+                kDefaultExpansionThreshold, config_.oscillation_window)
     , handrail_(config_.handrail)
 {
     detector_.set_callback([this](const CollapseResult& r) {

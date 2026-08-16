@@ -101,8 +101,8 @@ TEST(ShannonFromLogProbs, UniformFourWay) {
 
 // ─── Collapse Detector Tests ────────────────────────────────────────────────
 
-TEST(CollapseDetector, DetectsCollapse) {
-    shannon::CollapseDetector detector(4, -2.0);
+TEST(V1CollapseDetector, DetectsCollapse) {
+    shannon::v1::CollapseDetector detector(4, -2.0);
 
     // Feed high-entropy tokens to fill the window
     std::vector<double> high = {0.0, 0.0, 0.0, 0.0};  // uniform → 2 bits
@@ -121,10 +121,10 @@ TEST(CollapseDetector, DetectsCollapse) {
     EXPECT_LT(result.delta, 0.0);
 }
 
-TEST(CollapseDetector, CallbackFires) {
+TEST(V1CollapseDetector, CallbackFires) {
     int count = 0;
-    shannon::CollapseDetector detector(4, -1.0);
-    detector.set_callback([&](const shannon::CollapseResult&) { ++count; });
+    shannon::v1::CollapseDetector detector(4, -1.0);
+    detector.set_callback([&](const shannon::v1::CollapseResult&) { ++count; });
 
     std::vector<double> high = {0.0, 0.0, 0.0, 0.0};
     for (int i = 0; i < 4; ++i) {
@@ -137,8 +137,8 @@ TEST(CollapseDetector, CallbackFires) {
     EXPECT_GE(count, 1);
 }
 
-TEST(CollapseDetector, ResetClearsState) {
-    shannon::CollapseDetector detector(4, -3.2);
+TEST(V1CollapseDetector, ResetClearsState) {
+    shannon::v1::CollapseDetector detector(4, -3.2);
 
     std::vector<double> w = {0.0, 0.0};
     detector.add_logits(w.data(), w.size());
@@ -148,13 +148,25 @@ TEST(CollapseDetector, ResetClearsState) {
     EXPECT_EQ(detector.trace().size(), 0);
 }
 
-TEST(CollapseDetector, TraceGrows) {
-    shannon::CollapseDetector detector;
+TEST(V1CollapseDetector, TraceGrows) {
+    shannon::v1::CollapseDetector detector;
     std::vector<double> w = {1.0, 2.0, 3.0};
     for (int i = 0; i < 10; ++i) {
         detector.add_logits(w.data(), w.size());
     }
     EXPECT_EQ(detector.trace().size(), 10);
+}
+
+TEST(V1CollapseDetector, PopulationVarianceMatchesReference) {
+    shannon::v1::CollapseDetector det(4, -100.0);
+    det.push_entropy(2.0);
+    det.push_entropy(4.0);
+    det.push_entropy(4.0);
+    det.push_entropy(4.0);
+    auto r = det.push_entropy(5.0);
+    // Window is {4,4,4,5}. Population: mean=4.25, E[X²]=18.25, var=0.1875.
+    EXPECT_NEAR(r.window_mean, 4.25, 1e-10);
+    EXPECT_NEAR(r.window_std, std::sqrt(0.1875), 1e-10);
 }
 
 // ─── Performance Sanity Check ───────────────────────────────────────────────

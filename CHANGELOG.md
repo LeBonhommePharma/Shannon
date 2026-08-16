@@ -6,6 +6,13 @@ All notable changes to Shannon are documented in this file.
 
 ### Changed
 
+- **v1/v2 CollapseDetector naming (ENH-041)** — `shannon::CollapseDetector` is
+  always the v2 Welford / UnifiedDispatch detector. Legacy population-variance
+  collapse-only lives in `shannon::v1` (`src/shannon.hpp`); both headers can be
+  included together. `TerminalAgent` applies `AgentConfig.oscillation_window`.
+  pybind `_core.CollapseDetector` default `oscillation_window` is 5 (was 16).
+  Python `ShannonCollapseDetector` already passed its own window, so the twin
+  path is unchanged. `shannon_core` and `shannon_v2` stay separate libraries.
 - **P1928 portable SIMD retarget (ENH-038)** — `simd_generic.hpp` uses
   `std::simd::vec<T>` when `__cpp_lib_simd`; g++-14 keeps Parallelism TS
   `native_simd`. Same Horner `exp`/`log2`. `StdSimdFlavor` reports which ABI

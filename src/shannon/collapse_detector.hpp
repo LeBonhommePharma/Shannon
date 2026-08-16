@@ -1,5 +1,9 @@
 // collapse_detector.hpp — Sliding-window entropy event detector for Shannon 2.0
 //
+// This is the **product** `shannon::CollapseDetector` (Python twin, pybind
+// `_core`, shannon-agent). Legacy population-variance collapse-only lives in
+// `shannon::v1` (`src/shannon.hpp`) and must not be confused with this class.
+//
 // Detects three classes of entropy anomaly:
 //   COLLAPSE    — entropy drops below threshold (ordering / lock-in)
 //   EXPANSION   — entropy rises above threshold (disordering / release)
@@ -98,6 +102,7 @@ public:
 
     // Accessors
     std::size_t token_count() const noexcept;
+    std::size_t oscillation_window() const noexcept;
     const std::deque<double>& entropy_trace() const noexcept;
 
 private:

@@ -1,9 +1,10 @@
 # C++20 → C++26 modernization plan
 
-Status: **Phase A–D complete in code. ENH-040 is the toolchain slice**
-(g++-14 floor + GCC 16 hatch lane + C++26 README badge). Next library work
-that still cannot compile is P1928 `std::simd::vec`: the GCC 16.0 PPA
-snapshot does **not** define `__cpp_lib_simd`.
+Status: **Phase A–D complete. ENH-040 toolchain done. ENH-041 detector
+names unified** (`shannon::CollapseDetector` is v2; `shannon::v1` keeps
+population variance). Next library work that still cannot compile is P1928
+`std::simd::vec`: the GCC 16.0 PPA snapshot does **not** define
+`__cpp_lib_simd`.
 
 CMake 3.28 still injects `-std=c++26` because its dialect table stays 23 —
 that is not a compiler fallback. README advertises C++26 when Linux **and**
@@ -94,7 +95,7 @@ Already in use, leave alone unless a later phase needs a touch-up:
 | Hand-written `switch (Backend)` name tables | `types.hpp`, `unified_dispatch.cpp` | C++20 `constexpr` table now; C++26 reflection later |
 | Allocating `std::function` callbacks | `CollapseCallback`, `TokenCallback`, `HandrailCallback` | Hot path on every token if a callback is set; C++23 `move_only_function` / C++26 `function_ref` |
 | `fprintf` CLI | `apps/shannon-agent/main.cpp` | `std::format` already exists on g++-13 C++20 |
-| Dual v1 / v2 `CollapseDetector` | `shannon.hpp` inline `v1` vs `src/shannon/collapse_detector.hpp` | Bindings still expose v1; SIMD dispatch is v2. Language bump will not fix this — ABI/product work |
+| Dual v1 / v2 `CollapseDetector` | `shannon.hpp` `namespace v1` vs `collapse_detector.hpp` | **Done (ENH-041):** product name is v2; v1 kept as `shannon::v1` with population variance. Bindings / agent / Python twin stay on v2. |
 | Runtime search for `soft_contact_256.bin` | `energy_matrix.cpp` | C++26 `#embed` can bake the 256 KB blob; C++20 can `std::to_array` of search paths today |
 
 ## Phased plan (safest first)
@@ -215,7 +216,8 @@ surface first**.
 7. Phase B `std::expected` façade.  ← **done (PR #17)**
 8. Phase C portable SIMD traits + C++26 dialect default.  ← **done (PR #18)**
 9. P1928 `<simd>` retarget when `__cpp_lib_simd` exists on CI.  ← **hatched (PR #20)**
-10. GCC 16 hatch lane + C++26 README badge.  ← **ENH-040 (this PR)**
+10. GCC 16 hatch lane + C++26 README badge.  ← **done (ENH-040)**
+11. v1/v2 detector naming unify.  ← **ENH-041 (this PR)**
 
 **This VM:** g++-14 leaves `__cpp_lib_simd` unset (`ExperimentalTs` on
 libstdc++, `Stub` on libc++). g++-16.0 from the toolchain-r PPA still leaves
@@ -230,8 +232,9 @@ the singleton used the closed-form fallback.
 
 - Rewriting the hand-rolled JSONL parser in `stream_ingest.cpp` as
   part of a language bump.
-- Collapsing v1 `shannon_core` and v2 `shannon_v2` in the same PR as
-  a dialect change.
+- Collapsing v1 `shannon_core` and v2 `shannon_v2` **libraries** in the same
+  PR as a dialect change. Detector **names** are unified (ENH-041); the two
+  static libs remain.
 - GPU backends (already removed; workload is transfer-bound).
 - Changing the −3.2 bit threshold, Welford formula, or Python detector
   arithmetic “because C++26”.

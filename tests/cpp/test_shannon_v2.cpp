@@ -23,6 +23,12 @@
 #include <vector>
 #include <unistd.h>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__GNUC__) || defined(__clang__)
+#include <cpuid.h>
+#endif
+#endif
+
 using namespace shannon;
 
 // ─── Scalar entropy kernel tests ────────────────────────────────────────────
@@ -428,6 +434,62 @@ TEST(UnifiedDispatch, BackendNames) {
     EXPECT_STREQ(backend_name(Backend::AUTO), "AUTO");
     EXPECT_STREQ(backend_name(static_cast<Backend>(99)), "UNKNOWN");
 }
+
+#if defined(SHANNON_USE_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+namespace {
+
+// Compile-time SHANNON_USE_AVX2 does not mean the host can execute AVX2
+// (hosted VMs may advertise bits in CPUID and still SIGILL under a hypervisor).
+inline bool cpu_has_avx2() {
+#if defined(__GNUC__) || defined(__clang__)
+    unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+    if (!__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) return false;
+    return (ebx & (1u << 5)) != 0;  // AVX2
+#else
+    return true;
+#endif
+}
+
+}  // namespace
+
+TEST(Avx2Kernels, MatchesScalarConfigurational) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    std::vector<double> logits(64);
+    for (std::size_t i = 0; i < logits.size(); ++i) {
+        logits[i] = std::sin(static_cast<double>(i) * 0.17) * 3.0;
+    }
+    const double h_scalar = kernels::configurational_entropy_scalar(logits);
+    const double h_avx2 = kernels::configurational_entropy_avx2(logits);
+    EXPECT_NEAR(h_scalar, h_avx2, 1e-10);
+}
+
+TEST(Avx2Kernels, VectorWidthNoTail) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    // n == Traits::width (4) — pure vector body, empty scalar tail.
+    std::vector<double> logits(4, 0.0);
+    const double h_scalar = kernels::configurational_entropy_scalar(logits);
+    const double h_avx2 = kernels::configurational_entropy_avx2(logits);
+    EXPECT_NEAR(h_scalar, h_avx2, 1e-10);
+    EXPECT_NEAR(h_avx2, 2.0, 1e-10);  // log2(4)
+}
+
+TEST(Avx2Kernels, OddLengthTail) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    std::vector<double> logits(17, 0.0);
+    logits[3] = 1.5;
+    const double h_scalar = kernels::configurational_entropy_scalar(logits);
+    const double h_avx2 = kernels::configurational_entropy_avx2(logits);
+    EXPECT_NEAR(h_scalar, h_avx2, 1e-10);
+}
+
+TEST(Avx2Kernels, EmptyAndSingleton) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_avx2(std::span<const double>{}), 0.0);
+    const double one = 1.0;
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_avx2(&one, 1), 0.0);
+}
+
+#endif  // SHANNON_USE_AVX2 && x86_64
 
 TEST(UnifiedDispatch, NullptrNonzeroIsInvalidArgs) {
     auto& d = dispatch::UnifiedDispatch::instance();

@@ -4,6 +4,7 @@
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/entropy.hpp"
+#include "shannon/entropy_algorithm.hpp"
 #include "shannon/config.hpp"
 #include "shannon/simd_exp.hpp"
 #include "shannon/simd_log2.hpp"
@@ -27,41 +28,30 @@ static inline double hsum256_pd(__m256d v) noexcept {
 
 #if defined(SHANNON_USE_AVX2)
 
+namespace {
+
+// AVX2 vector traits for configurational_entropy<>. Instantiated only in this
+// TU (compiled with -mavx2 -mfma). Probs/logprobs kernels stay hand-written.
+struct Avx2Traits {
+    using vec = __m256d;
+    static constexpr std::size_t width = 4;
+
+    [[nodiscard]] static vec set1(double x) noexcept { return _mm256_set1_pd(x); }
+    [[nodiscard]] static vec zero() noexcept { return _mm256_setzero_pd(); }
+    [[nodiscard]] static vec load(const double* p) noexcept { return _mm256_loadu_pd(p); }
+    [[nodiscard]] static vec sub(vec a, vec b) noexcept { return _mm256_sub_pd(a, b); }
+    [[nodiscard]] static vec add(vec a, vec b) noexcept { return _mm256_add_pd(a, b); }
+    [[nodiscard]] static vec fmadd(vec a, vec b, vec c) noexcept {
+        return _mm256_fmadd_pd(a, b, c);
+    }
+    [[nodiscard]] static vec exp(vec x) noexcept { return simd::shannon_exp_avx2(x); }
+    [[nodiscard]] static double hsum(vec v) noexcept { return hsum256_pd(v); }
+};
+
+}  // namespace
+
 double configurational_entropy_avx2(std::span<const double> weights) noexcept {
-    const double* w = weights.data();
-    const std::size_t n = weights.size();
-    if (n <= 1) return 0.0;
-
-    double max_w = w[0];
-    for (std::size_t i = 1; i < n; ++i) {
-        if (w[i] > max_w) max_w = w[i];
-    }
-
-    __m256d v_max = _mm256_set1_pd(max_w);
-    __m256d acc_Z = _mm256_setzero_pd();
-    __m256d acc_ws = _mm256_setzero_pd();
-
-    std::size_t i = 0;
-    for (; i + 3 < n; i += 4) {
-        __m256d vw = _mm256_loadu_pd(w + i);
-        __m256d sh = _mm256_sub_pd(vw, v_max);
-        __m256d ev = simd::shannon_exp_avx2(sh);
-        acc_Z  = _mm256_add_pd(acc_Z, ev);
-        acc_ws = _mm256_fmadd_pd(sh, ev, acc_ws);
-    }
-
-    double Z  = hsum256_pd(acc_Z);
-    double ws = hsum256_pd(acc_ws);
-
-    for (; i < n; ++i) {
-        const double shifted = w[i] - max_w;
-        const double ev = std::exp(shifted);
-        Z += ev;
-        ws += shifted * ev;
-    }
-
-    if (Z <= 0.0) return 0.0;
-    return std::fmax(0.0, std::log2(Z) - (ws / (Z * kLn2)));
+    return configurational_entropy<Avx2Traits>(weights);
 }
 
 double entropy_from_probs_avx2(std::span<const double> probs) noexcept {

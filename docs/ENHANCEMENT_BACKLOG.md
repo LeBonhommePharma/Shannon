@@ -333,6 +333,8 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Why:** Scalar / OMP / SSE4.2 / AVX2 / AVX-512 / NEON duplicate the same H formula. A traits template is the prerequisite for a later `std::simd` backend; doing `std::simd` first would fork a seventh copy. Custom `simd_exp.hpp` must stay — C++26 `[simd.math]` is not available.
 - **Area:** new `src/shannon/entropy_algorithm.hpp`, `src/shannon/entropy_*.cpp`, `src/shannon/simd_exp.hpp`
 - **First slice:** One configurational-entropy algorithm over a vector traits type; convert AVX2 only; bit-identical vs current AVX2 tests. Follow-up PRs for AVX-512 / NEON / SSE — do not land all ISAs in one loop.
+- **Done (first slice):** `configurational_entropy<Traits>` in `entropy_algorithm.hpp`. AVX2 configurational kernel is `Avx2Traits` + one-line call in `entropy_avx2.cpp` (still `-mavx2 -mfma` in that TU). Probs/logprobs AVX2 kernels unchanged. Tests: `Avx2Kernels.MatchesScalarConfigurational`, `VectorWidthNoTail`, `OddLengthTail`, `EmptyAndSingleton` (CPUID skip).
+- **Remaining:** AVX-512 / NEON / SSE / scalar-as-width-1; H(p) / H(logp) traits.
 - **Priority:** P1
 - **Plan:** `docs/CXX_MODERNIZATION.md` Phase A.2 then Phase C
 

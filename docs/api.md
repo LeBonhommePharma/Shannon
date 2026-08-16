@@ -7,6 +7,7 @@
 | `shannon/types.hpp` | Core types: enums, structs, `Backend`, `HandrailAction`, `CollapseResult` |
 | `shannon/config.hpp` | Build-time constants: version, thresholds, physical constants |
 | `shannon/entropy.hpp` | Entropy kernel declarations (all `[[nodiscard]] noexcept`) |
+| `shannon/entropy_algorithm.hpp` | ISA-traits log-sum-exp (configurational; AVX2 first) |
 | `shannon/unified_dispatch.hpp` | `UnifiedDispatch` singleton: backend selection, hardware report |
 | `shannon/hardware_detect.hpp` | `HardwareCapabilities` struct, `detect_hardware()` |
 | `shannon/collapse_detector.hpp` | `CollapseDetector`: sliding window, z-score, callbacks |
@@ -125,6 +126,10 @@ double entropy_from_logprobs_scalar(std::span<const double> lp) noexcept;
 // SIMD variants (conditionally compiled): omp / sse42 / avx2 / avx512 / neon
 }
 ```
+
+ISA-traits algorithm (`entropy_algorithm.hpp`): `configurational_entropy<Traits>`
+is instantiated by `entropy_avx2.cpp`. Other ISAs and H(p) / H(logp) stay
+hand-written until follow-up ENH-035 slices.
 
 ---
 

@@ -399,7 +399,7 @@ PYBIND11_MODULE(_core, m) {
             [](const shannon::CollapseResult& r) {
                 return shannon::enum_code(r.used_backend);
             },
-            "Frozen Backend integer (SCALAR=0 … NEON=5, AUTO=255)")
+            "Frozen Backend integer (SCALAR=0 … NEON=5, STD_SIMD=6, AUTO=255)")
         .def("__repr__",
             [](const shannon::CollapseResult& r) {
                 return "CollapseResult(entropy=" + std::to_string(r.entropy)

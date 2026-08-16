@@ -29,7 +29,8 @@
 namespace shannon {
 
 // C++23 std::to_underlying with a C++20 hatch (static_cast of the
-// underlying type). Frozen Backend integers must stay 0–5 / 255.
+// underlying type). Frozen Backend integers: 0–5 stay put; STD_SIMD=6 is
+// additive; AUTO=255.
 template <class E>
 [[nodiscard]] constexpr auto enum_code(E e) noexcept {
 #if defined(__cpp_lib_to_underlying)
@@ -57,14 +58,16 @@ template <class E>
 // GPU backends (METAL/CUDA/ROCM) were removed: this is a CPU-only, per-token
 // single-distribution streaming workload. Enum values 0-5 and AUTO=255 are
 // kept stable so the pybind11 binding and any persisted telemetry stay valid.
+// STD_SIMD=6 is an opt-in override (not selected by best_backend).
 enum class Backend : uint8_t {
-    SCALAR  = 0,
-    OPENMP  = 1,
-    SSE42   = 2,
-    AVX2    = 3,
-    AVX512  = 4,
-    NEON    = 5,
-    AUTO    = 255,
+    SCALAR   = 0,
+    OPENMP   = 1,
+    SSE42    = 2,
+    AVX2     = 3,
+    AVX512   = 4,
+    NEON     = 5,
+    STD_SIMD = 6,
+    AUTO     = 255,
 };
 
 // Stable names for telemetry / pybind. Integer values above must not change.
@@ -72,26 +75,28 @@ enum class Backend : uint8_t {
 // "UNKNOWN" rather than UB (cannot std::abort in a constexpr path).
 [[nodiscard]] constexpr const char* backend_name(Backend b) noexcept {
     switch (b) {
-    case Backend::SCALAR: return "SCALAR";
-    case Backend::OPENMP: return "OPENMP";
-    case Backend::SSE42:  return "SSE42";
-    case Backend::AVX2:   return "AVX2";
-    case Backend::AVX512: return "AVX512";
-    case Backend::NEON:   return "NEON";
-    case Backend::AUTO:   return "AUTO";
+    case Backend::SCALAR:   return "SCALAR";
+    case Backend::OPENMP:   return "OPENMP";
+    case Backend::SSE42:    return "SSE42";
+    case Backend::AVX2:     return "AVX2";
+    case Backend::AVX512:   return "AVX512";
+    case Backend::NEON:     return "NEON";
+    case Backend::STD_SIMD: return "STD_SIMD";
+    case Backend::AUTO:     return "AUTO";
     }
     return "UNKNOWN";
 }
 
 // Named backends excluding AUTO (dispatch availability / hardware reports).
-inline constexpr std::array<Backend, 6> kConcreteBackends = {
+inline constexpr std::array kConcreteBackends = {
     Backend::SCALAR, Backend::OPENMP, Backend::SSE42,
-    Backend::AVX2, Backend::AVX512, Backend::NEON,
+    Backend::AVX2, Backend::AVX512, Backend::NEON, Backend::STD_SIMD,
 };
 
-inline constexpr std::array<Backend, 7> kAllBackends = {
+inline constexpr std::array kAllBackends = {
     Backend::SCALAR, Backend::OPENMP, Backend::SSE42,
-    Backend::AVX2, Backend::AVX512, Backend::NEON, Backend::AUTO,
+    Backend::AVX2, Backend::AVX512, Backend::NEON, Backend::STD_SIMD,
+    Backend::AUTO,
 };
 
 // ─── Kernel types ────────────────────────────────────────────────────────────

@@ -1,11 +1,13 @@
 """Build script for the shannon-entropy Python package.
 
 The accelerated ``shannon._core`` extension is **optional**:
-- Built when pybind11 + a C++23 compiler + sources are available and compile succeeds.
+- Built when pybind11 + a C++26 compiler + sources are available and compile succeeds.
 - Skipped cleanly (pure-Python / Numba fallback) when any of those are missing or
   the compile fails. ``pip install shannon-entropy`` must always succeed.
-- Override the dialect with ``SHANNON_CXX_STANDARD=20`` (C++20 escape hatch)
-  or ``SHANNON_CXX_STANDARD=23`` (default). Invalid values warn and fall back to 23.
+- Override the dialect with ``SHANNON_CXX_STANDARD=20`` (C++20 escape hatch),
+  ``SHANNON_CXX_STANDARD=23``, or ``SHANNON_CXX_STANDARD=26`` (default).
+  Invalid values warn and fall back to 26. Compilers that reject ``-std=c++26``
+  (g++-13, older Apple Clang) fall back to 23 automatically, matching CMake.
 
 Set ``SHANNON_SKIP_CORE=1`` to force pure-Python packaging (used for the
 universal ``py3-none-any`` wheel on PyPI).
@@ -14,8 +16,13 @@ universal ``py3-none-any`` wheel on PyPI).
 from __future__ import annotations
 
 import os
+import shlex
+import shutil
+import subprocess
 import sys
+import tempfile
 import warnings
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -36,6 +43,7 @@ _CORE_SOURCES = [
     "src/shannon/hardware_detect.cpp",
     # entropy kernels (platform guards inside each file)
     "src/shannon/entropy_scalar.cpp",
+    "src/shannon/entropy_std_simd.cpp",
     "src/shannon/entropy_neon.cpp",
     "src/shannon/entropy_omp.cpp",
     "src/shannon/entropy_avx2.cpp",
@@ -60,15 +68,64 @@ def _core_sources_available() -> bool:
     return all((ROOT / rel).is_file() for rel in _CORE_SOURCES)
 
 
-def _cxx_std() -> str:
-    """Return ``20`` or ``23`` from ``SHANNON_CXX_STANDARD`` (default ``23``).
+@lru_cache(maxsize=8)
+def _compiler_supports_std(std: str, cxx_env: str, windows: bool) -> bool:
+    """True if ``CXX`` (or a discovered compiler) accepts ``-std=c++N`` / ``/std:c++N``."""
+    src = "int main(){return 0;}\n"
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            src_path = os.path.join(td, "probe.cpp")
+            out_path = os.path.join(td, "probe.o")
+            with open(src_path, "w", encoding="utf-8") as fh:
+                fh.write(src)
+            if windows:
+                cmd_prefix = shlex.split(cxx_env) if cxx_env else (
+                    [shutil.which("cl")] if shutil.which("cl") else []
+                )
+                if not cmd_prefix or cmd_prefix[0] is None:
+                    return False
+                cmd = [*cmd_prefix, f"/std:c++{std}", "/c", src_path, f"/Fo{out_path}"]
+            else:
+                discovered = (
+                    shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
+                )
+                cmd_prefix = shlex.split(cxx_env) if cxx_env else (
+                    [discovered] if discovered else []
+                )
+                if not cmd_prefix or cmd_prefix[0] is None:
+                    return False
+                cmd = [*cmd_prefix, f"-std=c++{std}", "-c", src_path, "-o", out_path]
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+                check=False,
+            )
+            return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
-    Never fail the optional-core install on a bad value — warn and use 23.
+
+def _cxx_std() -> str:
+    """Return ``20``, ``23``, or ``26`` from ``SHANNON_CXX_STANDARD`` (default ``26``).
+
+    Never fail the optional-core install on a bad value — warn and use 26,
+    then fall back to 23 if the compiler rejects ``-std=c++26``.
     """
-    raw = os.environ.get("SHANNON_CXX_STANDARD", "23").strip()
-    if raw not in ("20", "23"):
+    raw = os.environ.get("SHANNON_CXX_STANDARD", "26").strip()
+    if raw not in ("20", "23", "26"):
         warnings.warn(
-            f"SHANNON_CXX_STANDARD={raw!r} is not 20 or 23; defaulting to 23.",
+            f"SHANNON_CXX_STANDARD={raw!r} is not 20, 23, or 26; defaulting to 26.",
+            stacklevel=2,
+        )
+        raw = "26"
+    if raw == "26" and not _compiler_supports_std(
+        "26", os.environ.get("CXX", "").strip(), os.name == "nt"
+    ):
+        warnings.warn(
+            "Compiler does not accept C++26; falling back to C++23. "
+            "Set SHANNON_CXX_STANDARD=23 to silence this.",
             stacklevel=2,
         )
         return "23"
@@ -122,8 +179,8 @@ class optional_build_ext(_build_ext):
             if any(getattr(e, "name", "") == "shannon._core" for e in requested):
                 warnings.warn(
                     "shannon._core was not built. Installing pure-Python fallback only. "
-                    "Install a C++23 compiler + pybind11 for the accelerated path "
-                    "(or set SHANNON_CXX_STANDARD=20 for the C++20 hatch).",
+                    "Install a C++26 compiler + pybind11 for the accelerated path "
+                    "(or set SHANNON_CXX_STANDARD=23 / 20 for a hatch).",
                     stacklevel=2,
                 )
 

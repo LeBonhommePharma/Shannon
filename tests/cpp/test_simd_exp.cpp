@@ -10,6 +10,7 @@
 
 #include "shannon/simd_exp.hpp"
 #include "shannon/simd_log2.hpp"
+#include "shannon/simd_generic.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -239,6 +240,48 @@ TEST(SimdLog2Avx2, ExactAtPowersOfTwo) {
     EXPECT_NEAR(eval_log2_avx2(0.5), -1.0, 1e-14);
     EXPECT_NEAR(eval_log2_avx2(0.25), -2.0, 1e-14);
     EXPECT_NEAR(eval_log2_avx2(1e-300), std::log2(1e-300), 1e-12 * 997.0);
+}
+#endif
+
+#if defined(SHANNON_SIMD_GENERIC_EXPERIMENTAL)
+namespace {
+double eval_generic_exp(double x) {
+    using V = shannon::kernels::simd::abi::native<double>;
+    return shannon::kernels::simd::shannon_exp_generic(V(x))[0];
+}
+double eval_generic_log2(double x) {
+    using V = shannon::kernels::simd::abi::native<double>;
+    return shannon::kernels::simd::shannon_log2_generic(V(x))[0];
+}
+}  // namespace
+
+TEST(SimdExpGeneric, MaxRelativeErrorUnder1e13) {
+    using V = shannon::kernels::simd::abi::native<double>;
+    if (V::size() >= 4 && !cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    EXPECT_LT(max_rel_error(eval_generic_exp), 1e-13);
+}
+TEST(SimdExpGeneric, ExactAtZero) {
+    using V = shannon::kernels::simd::abi::native<double>;
+    if (V::size() >= 4 && !cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    EXPECT_EQ(eval_generic_exp(0.0), 1.0);
+}
+TEST(SimdExpGeneric, DeepNegativeSaturatesToZero) {
+    using V = shannon::kernels::simd::abi::native<double>;
+    if (V::size() >= 4 && !cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    for (double x : {-709.0, -1418.0, -1420.0, -2000.0, -1e6, -1e300}) {
+        EXPECT_EQ(eval_generic_exp(x), 0.0) << "x=" << x;
+        EXPECT_FALSE(std::signbit(eval_generic_exp(x))) << "must be +0, x=" << x;
+    }
+}
+TEST(SimdLog2Generic, MaxRelativeErrorUnder1e12) {
+    using V = shannon::kernels::simd::abi::native<double>;
+    if (V::size() >= 4 && !cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    EXPECT_LT(max_rel_error_log2(eval_generic_log2), 1e-12);
+}
+TEST(SimdLog2Generic, ExactAtOne) {
+    using V = shannon::kernels::simd::abi::native<double>;
+    if (V::size() >= 4 && !cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    EXPECT_EQ(eval_generic_log2(1.0), 0.0);
 }
 #endif
 

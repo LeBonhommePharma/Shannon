@@ -15,6 +15,7 @@
 #include "shannon/types.hpp"
 #include "shannon/terminal_agent.hpp"
 #include "shannon/stream_ingest.hpp"
+#include "shannon/cxx26.hpp"
 
 #include <cmath>
 #include <limits>
@@ -385,6 +386,13 @@ TEST(Entropy, NaNInfInput) {
     EXPECT_GE(h, 0.0);
 }
 
+TEST(Entropy, AllNanLogitsAreZero) {
+    std::vector<double> all_nan(8, std::numeric_limits<double>::quiet_NaN());
+    const double h = kernels::configurational_entropy_scalar(all_nan);
+    EXPECT_FALSE(std::isnan(h));
+    EXPECT_DOUBLE_EQ(h, 0.0);
+}
+
 TEST(Entropy, NegInfMaskedLogitsUseFiniteSupport) {
     // Masked-vocab -inf must not 0*-inf NaN the weighted sum into H=0
     // (false collapse). Three equal finite logits → log2(3).
@@ -452,6 +460,7 @@ TEST(UnifiedDispatch, BackendNames) {
     EXPECT_STREQ(backend_name(Backend::AVX2), "AVX2");
     EXPECT_STREQ(backend_name(Backend::AVX512), "AVX512");
     EXPECT_STREQ(backend_name(Backend::NEON), "NEON");
+    EXPECT_STREQ(backend_name(Backend::STD_SIMD), "STD_SIMD");
     EXPECT_STREQ(backend_name(Backend::AUTO), "AUTO");
     EXPECT_STREQ(backend_name(static_cast<Backend>(99)), "UNKNOWN");
 }
@@ -588,6 +597,130 @@ TEST(Avx2Kernels, PosInfLogitIsCertain) {
     EXPECT_DOUBLE_EQ(kernels::configurational_entropy_avx2(logits), 0.0);
 }
 #endif  // SHANNON_USE_AVX2 && x86_64
+
+TEST(StdSimdKernels, BuiltOrStub) {
+    // The TU always links. On libstdc++ this is typically true; on libc++
+    // without <experimental/simd> it is a scalar stub.
+    (void)kernels::std_simd_kernels_built();
+}
+
+TEST(StdSimdKernels, MatchesScalarConfigurational) {
+    if (!kernels::std_simd_kernels_built()) {
+        GTEST_SKIP() << "experimental/simd kernel not built";
+    }
+#if defined(SHANNON_STD_SIMD_REQUIRES_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+#endif
+    std::vector<double> logits(64);
+    for (std::size_t i = 0; i < logits.size(); ++i) {
+        logits[i] = std::sin(static_cast<double>(i) * 0.17) * 3.0;
+    }
+    EXPECT_NEAR(kernels::configurational_entropy_scalar(logits),
+                kernels::configurational_entropy_std_simd(logits), 1e-10);
+}
+
+TEST(StdSimdKernels, OddLengthTail) {
+    if (!kernels::std_simd_kernels_built()) {
+        GTEST_SKIP() << "experimental/simd kernel not built";
+    }
+#if defined(SHANNON_STD_SIMD_REQUIRES_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+#endif
+    std::vector<double> logits(17, 0.0);
+    logits[3] = 1.5;
+    EXPECT_NEAR(kernels::configurational_entropy_scalar(logits),
+                kernels::configurational_entropy_std_simd(logits), 1e-10);
+}
+
+TEST(StdSimdKernels, MatchesScalarProbs) {
+    if (!kernels::std_simd_kernels_built()) {
+        GTEST_SKIP() << "experimental/simd kernel not built";
+    }
+#if defined(SHANNON_STD_SIMD_REQUIRES_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+#endif
+    std::vector<double> probs = {0.05, 0.10, 0.15, 0.20, 0.25, 0.25};
+    EXPECT_NEAR(kernels::entropy_from_probs_scalar(probs),
+                kernels::entropy_from_probs_std_simd(probs), 1e-12);
+}
+
+TEST(StdSimdKernels, MatchesScalarLogprobs) {
+    if (!kernels::std_simd_kernels_built()) {
+        GTEST_SKIP() << "experimental/simd kernel not built";
+    }
+#if defined(SHANNON_STD_SIMD_REQUIRES_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+#endif
+    std::vector<double> logprobs;
+    for (double p : {0.1, 0.2, 0.3, 0.4}) {
+        logprobs.push_back(std::log(p));
+    }
+    EXPECT_NEAR(kernels::entropy_from_logprobs_scalar(logprobs),
+                kernels::entropy_from_logprobs_std_simd(logprobs), 1e-12);
+}
+
+TEST(StdSimdKernels, NegInfMaskedLogits) {
+    if (!kernels::std_simd_kernels_built()) {
+        GTEST_SKIP() << "experimental/simd kernel not built";
+    }
+#if defined(SHANNON_STD_SIMD_REQUIRES_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+#endif
+    const double ninf = -std::numeric_limits<double>::infinity();
+    std::vector<double> logits(8, 0.0);
+    logits[7] = ninf;
+    EXPECT_NEAR(kernels::configurational_entropy_std_simd(logits), std::log2(7.0), 1e-10);
+}
+
+TEST(StdSimdKernels, PosInfLogitIsCertain) {
+    if (!kernels::std_simd_kernels_built()) {
+        GTEST_SKIP() << "experimental/simd kernel not built";
+    }
+#if defined(SHANNON_STD_SIMD_REQUIRES_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+#endif
+    const double pinf = std::numeric_limits<double>::infinity();
+    std::vector<double> logits(8, 0.0);
+    logits[3] = pinf;
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_std_simd(logits), 0.0);
+}
+
+TEST(StdSimdKernels, AllNanLogitsAreZero) {
+    if (!kernels::std_simd_kernels_built()) {
+        GTEST_SKIP() << "experimental/simd kernel not built";
+    }
+#if defined(SHANNON_STD_SIMD_REQUIRES_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+#endif
+    std::vector<double> all_nan(8, std::numeric_limits<double>::quiet_NaN());
+    const double h = kernels::configurational_entropy_std_simd(all_nan);
+    EXPECT_FALSE(std::isnan(h));
+    EXPECT_DOUBLE_EQ(h, 0.0);
+}
+
+TEST(UnifiedDispatch, StdSimdOverrideNotAuto) {
+    auto& d = dispatch::UnifiedDispatch::instance();
+    d.detect();
+    d.clear_override();
+    const Backend auto_b = d.best_backend(KernelType::CONFIGURATIONAL_ENTROPY, 256);
+    EXPECT_NE(auto_b, Backend::STD_SIMD);
+
+    if (!kernels::std_simd_kernels_built()) {
+        GTEST_SKIP() << "experimental/simd kernel not built";
+    }
+#if defined(SHANNON_STD_SIMD_REQUIRES_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+#endif
+    EXPECT_TRUE(d.is_available(Backend::STD_SIMD));
+    EXPECT_TRUE(d.has_kernel(Backend::STD_SIMD, KernelType::CONFIGURATIONAL_ENTROPY));
+
+    std::vector<double> logits(32, 0.0);
+    double h = 0.0;
+    auto result = d.compute_configurational_entropy(logits, h, Backend::STD_SIMD);
+    EXPECT_TRUE(result);
+    EXPECT_EQ(result.used_backend, Backend::STD_SIMD);
+    EXPECT_NEAR(h, 5.0, 1e-8);
+}
 
 #if defined(SHANNON_USE_AVX512) && (defined(__x86_64__) || defined(_M_X64))
 TEST(Avx512Kernels, MatchesScalarConfigurational) {
@@ -1285,6 +1418,7 @@ TEST(Types, BackendEnum) {
     EXPECT_EQ(static_cast<int>(Backend::AVX2), 3);
     EXPECT_EQ(static_cast<int>(Backend::AVX512), 4);
     EXPECT_EQ(static_cast<int>(Backend::NEON), 5);
+    EXPECT_EQ(static_cast<int>(Backend::STD_SIMD), 6);
     EXPECT_EQ(static_cast<int>(Backend::AUTO), 255);
 }
 
@@ -1326,6 +1460,7 @@ TEST(Types, EnumCodeFrozenBackendIntegers) {
     EXPECT_EQ(enum_code(Backend::AVX2), 3);
     EXPECT_EQ(enum_code(Backend::AVX512), 4);
     EXPECT_EQ(enum_code(Backend::NEON), 5);
+    EXPECT_EQ(enum_code(Backend::STD_SIMD), 6);
     EXPECT_EQ(enum_code(Backend::AUTO), 255);
 }
 
@@ -1370,6 +1505,25 @@ TEST(UnifiedDispatch, ExpectedEntropyOverloads) {
     EXPECT_EQ(mapped.error(), DispatchError::INVALID_ARGS);
 }
 #endif
+
+TEST(Cxx26, CapabilityReportMatchesDialect) {
+    // Extra library features (P1928 simd, contracts, reflection, mdspan, …)
+    // are optional. Asserting they are absent would fail on a newer GCC even
+    // when cxx26.hpp is honest. Only the dialect vs __cplusplus is required.
+#if __cplusplus >= 202400L
+    EXPECT_TRUE(cxx26::dialect_26);
+#else
+    EXPECT_FALSE(cxx26::dialect_26);
+#endif
+#if defined(SHANNON_CXX26_HAS_INCLUDE_EXPERIMENTAL_SIMD)
+    EXPECT_TRUE(cxx26::has_experimental_simd_header);
+#endif
+#if defined(__cpp_lib_simd)
+    EXPECT_TRUE(cxx26::has_std_simd);
+#else
+    EXPECT_FALSE(cxx26::has_std_simd);
+#endif
+}
 
 // ─── TerminalAgent tests ────────────────────────────────────────────────────
 

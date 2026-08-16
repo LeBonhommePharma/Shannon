@@ -347,6 +347,29 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Priority:** P2
 - **Plan:** `docs/CXX_MODERNIZATION.md` Phase B
 
+### - [x] ENH-037: C++26 dialect default + portable SIMD Horner kernel
+
+- **Why:** Phase C (`std::simd` traits) and the C++26 dialect / remaining
+  paradigms were intentionally out of ENH-036. g++-14 accepts `-std=c++26`
+  but does **not** ship P1928 `<simd>`, `[simd.math]`, contracts, `#embed`,
+  or reflection. The portable kernel is Parallelism TS
+  `std::experimental::simd` with the same Horner `exp` / atanh `log2` as
+  AVX2 — not scalar `std::exp` per lane.
+- **Area:** `CMakeLists.txt`, `setup.py`, `src/shannon/simd_generic.hpp`,
+  `entropy_std_simd.cpp`, `types.hpp` (`STD_SIMD=6`), `cxx26.hpp`,
+  `unified_dispatch.cpp`
+- **First slice:** CMake `SHANNON_CXX_STANDARD` default 26 with compiler
+  fallback to 23; experimental-simd traits TU; `Backend::STD_SIMD` override
+  only (do not change `best_backend`); `SHANNON_ASSUME`; capability tests
+  that match dialect / feature-test macros (do not hard-fail when a newer
+  GCC grows mdspan or P1928).
+- **Done:** Dialect 20/23/26; `SHANNON_USE_STD_SIMD` (OFF → scalar stub);
+  Horner on `native_simd<double>`; golden `StdSimdKernels` + `SimdExpGeneric`;
+  `cxx26.hpp` reports optional P1928/contracts/embed/reflection/pack indexing;
+  `setup.py` falls back to 23 when `-std=c++26` is rejected.
+- **Priority:** P2
+- **Plan:** `docs/CXX_MODERNIZATION.md` Phase C + dialect 26 + Phase D hatches
+
 ---
 
 ## Out of scope for this backlog (do not pick here)
@@ -355,9 +378,11 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - Inventing token/cost numbers
 - Full iOS/iPad parity
 - 10-minute scheduler / cron infrastructure
-- One-shot `CMAKE_CXX_STANDARD 20` → `26` bump (see `docs/CXX_MODERNIZATION.md`)
 - Replacing OpenMP reductions with `std::execution` / P2300
 - Calling scalar `std::exp` from a `std::simd` kernel (throughput regression)
+- Advertising C++26 in README badges until macOS CI compiles `-std=c++26`
+  without CMake fallback
+- P1928 `<simd>` retarget (needs `__cpp_lib_simd` on CI — GCC 16)
 
 ---
 

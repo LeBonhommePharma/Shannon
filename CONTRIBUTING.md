@@ -4,9 +4,10 @@ Thank you for your interest in contributing. This guide covers build, test, and 
 
 ## Prerequisites
 
-- C++23 compiler (GCC >= 13, Clang >= 16, MSVC 2022 17.3+). CI Linux pins **g++-14**.
-  Packagers can force C++20 with `-DSHANNON_CXX_STANDARD=20` or `SHANNON_CXX_STANDARD=20`.
-- CMake >= 3.20 (`CMAKE_CXX_STANDARD 23`)
+- C++26 compiler (GCC >= 14, Clang with `-std=c++26`, MSVC 2022 17.3+). CI Linux pins **g++-14**.
+  Compilers that reject C++26 fall back to C++23 at CMake configure time.
+  Packagers can force C++23 or C++20 with `-DSHANNON_CXX_STANDARD=23` / `20`.
+- CMake >= 3.20 (`CMAKE_CXX_STANDARD 26` needs CMake >= 3.25; older CMake injects `-std=c++26`)
 - Python >= 3.10 (for bindings and Python tests)
 - Optional: OpenMP, Eigen3, CUDA Toolkit, Metal framework
 
@@ -38,7 +39,7 @@ pytest tests/python/ -v
 
 ### C++
 
-- C++23 standard (C++20 via `SHANNON_CXX_STANDARD=20`)
+- C++26 standard (C++23 / C++20 via `SHANNON_CXX_STANDARD`)
 - No GPL/AGPL dependencies (Apache-2.0, BSD, MIT, MPL-2.0 only)
 - `[[nodiscard]]` on all functions returning a value the caller must use
 - `noexcept` on pure numerical compute functions with no heap allocation or I/O

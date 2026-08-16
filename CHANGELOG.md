@@ -6,6 +6,11 @@ All notable changes to Shannon are documented in this file.
 
 ### Changed
 
+- **C++26 default dialect (ENH-037)** — CMake `SHANNON_CXX_STANDARD` defaults to 26
+  (`23` and `20` remain packager hatches). Compilers that reject `-std=c++26`
+  fall back to 23 at configure time. `setup.py` probes the same way (no longer
+  requires a manual `SHANNON_CXX_STANDARD=23` on g++-13). README badge stays
+  C++23 until macOS CI compiles 26 without fallback.
 - **C++23 default dialect (ENH-036)** — CMake `SHANNON_CXX_STANDARD` defaults to 23
   (`20` remains a packager hatch). Linux CI and the Linux release agent pin **g++-14**.
   `setup.py` emits `-std=c++23` / `/std:c++23` unless `SHANNON_CXX_STANDARD=20`.
@@ -18,6 +23,11 @@ All notable changes to Shannon are documented in this file.
 
 ### Added
 
+- **Portable SIMD entropy kernel (ENH-037)** — Horner `exp` / atanh `log2` on
+  `std::experimental::native_simd<double>` (`simd_generic.hpp`,
+  `entropy_std_simd.cpp`). `Backend::STD_SIMD = 6` is an opt-in override;
+  `best_backend()` still prefers AVX-512 / AVX2. P1928 `<simd>` is not in
+  GCC 14; `[simd.math]` is not used.
 - **Ori-style agent harness** — `shannon grok`, `shannon claude`, `shannon codex`
   (and `opencode`, `deepseek`, `kimi`, `hermes`, `pi`, `cursor`, `prime-agent`) find the real
   CLI already on `PATH`, tag the session (`SHANNON_AGENT_ID`, task, gate socket),

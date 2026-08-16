@@ -1,10 +1,20 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.20)
 project(shannon VERSION 2.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+# Default C++23 (ENH-036). Packagers can force the C++20 escape hatch:
+#   cmake -DSHANNON_CXX_STANDARD=20 ...
+# Do not add C++23-only APIs in headers until that hatch is retired.
+set(SHANNON_CXX_STANDARD 23 CACHE STRING "C++ dialect (20 or 23)")
+set_property(CACHE SHANNON_CXX_STANDARD PROPERTY STRINGS 20 23)
+if(NOT SHANNON_CXX_STANDARD STREQUAL "20" AND NOT SHANNON_CXX_STANDARD STREQUAL "23")
+    message(FATAL_ERROR
+        "SHANNON_CXX_STANDARD must be 20 or 23 (got '${SHANNON_CXX_STANDARD}')")
+endif()
+set(CMAKE_CXX_STANDARD ${SHANNON_CXX_STANDARD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+message(STATUS "Shannon C++ standard: ${CMAKE_CXX_STANDARD}")
 
 # ── Options ──────────────────────────────────────────────────────────────────────
 option(SHANNON_BUILD_TESTS    "Build GoogleTest unit tests"     ON)

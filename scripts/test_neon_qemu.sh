@@ -40,8 +40,9 @@ if [ ! -f "$GEN_DIR/shannon/config.hpp" ]; then
 fi
 
 OUT=$(mktemp -d)
-echo "cross-compiling NEON kernel tests ($CXX)..."
-"$CXX" -std=c++20 -O2 -static \
+STD="${SHANNON_CXX_STANDARD:-23}"
+echo "cross-compiling NEON kernel tests ($CXX, -std=c++${STD})..."
+"$CXX" -std="c++${STD}" -O2 -static \
     -DSHANNON_USE_NEON \
     -I src -I "$GEN_DIR" \
     tests/cpp/test_neon_kernels.cpp \

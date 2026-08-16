@@ -1,9 +1,11 @@
 """Build script for the shannon-entropy Python package.
 
 The accelerated ``shannon._core`` extension is **optional**:
-- Built when pybind11 + a C++20 compiler + sources are available and compile succeeds.
+- Built when pybind11 + a C++23 compiler + sources are available and compile succeeds.
 - Skipped cleanly (pure-Python / Numba fallback) when any of those are missing or
   the compile fails. ``pip install shannon-entropy`` must always succeed.
+- Override the dialect with ``SHANNON_CXX_STANDARD=20`` (C++20 escape hatch)
+  or ``SHANNON_CXX_STANDARD=23`` (default). Invalid values warn and fall back to 23.
 
 Set ``SHANNON_SKIP_CORE=1`` to force pure-Python packaging (used for the
 universal ``py3-none-any`` wheel on PyPI).
@@ -58,10 +60,26 @@ def _core_sources_available() -> bool:
     return all((ROOT / rel).is_file() for rel in _CORE_SOURCES)
 
 
+def _cxx_std() -> str:
+    """Return ``20`` or ``23`` from ``SHANNON_CXX_STANDARD`` (default ``23``).
+
+    Never fail the optional-core install on a bad value — warn and use 23.
+    """
+    raw = os.environ.get("SHANNON_CXX_STANDARD", "23").strip()
+    if raw not in ("20", "23"):
+        warnings.warn(
+            f"SHANNON_CXX_STANDARD={raw!r} is not 20 or 23; defaulting to 23.",
+            stacklevel=2,
+        )
+        return "23"
+    return raw
+
+
 def _cxx_std_args() -> List[str]:
+    std = _cxx_std()
     if os.name == "nt":
-        return ["/O2", "/std:c++20", "/EHsc"]
-    return ["-std=c++20", "-O3"]
+        return ["/O2", f"/std:c++{std}", "/EHsc"]
+    return [f"-std=c++{std}", "-O3"]
 
 
 class optional_build_ext(_build_ext):
@@ -104,7 +122,8 @@ class optional_build_ext(_build_ext):
             if any(getattr(e, "name", "") == "shannon._core" for e in requested):
                 warnings.warn(
                     "shannon._core was not built. Installing pure-Python fallback only. "
-                    "Install a C++20 compiler + pybind11 for the accelerated path.",
+                    "Install a C++23 compiler + pybind11 for the accelerated path "
+                    "(or set SHANNON_CXX_STANDARD=20 for the C++20 hatch).",
                     stacklevel=2,
                 )
 

@@ -1,26 +1,29 @@
 # C++20 → C++26 modernization plan
 
-Status: **Phase A (C++20 cleanup) in progress** — ENH-033 name table, ENH-034 span ABI,
-and ENH-035 ISA-traits (all CPU vector backends + H(p)/H(logp); OpenMP remains a
-reduction specialization) landed in code (this tree). ENH-036 C++23 CI bump is
-**not** started. No `CMAKE_CXX_STANDARD` bump.
+Status: **Phase A complete.** **Phase B first slice (ENH-036 compiler floor) landed**
+— CI Linux is `g++-14`, CMake/`setup.py` default `-std=c++23`, packagers can
+force `SHANNON_CXX_STANDARD=20`. Do **not** add C++23 library types in headers
+while the C++20 hatch exists (or until it is retired). Next: `std::expected`
+façade (rest of Phase B). No C++26 dialect bump.
 Audience: follow-up implementers. Claim one ENH item at a time from
 `docs/ENHANCEMENT_BACKLOG.md` (`ENH-033` onward).
 
-Shannon’s C++ core is already a **C++20** library (`CMakeLists.txt`
-`CMAKE_CXX_STANDARD 20`, `setup.py` `-std=c++20` / `/std:c++20`). The v2
-kernels (`src/shannon/entropy_*.cpp`, `simd_exp.hpp`, `unified_dispatch.cpp`)
-are the performance-critical path. Flipping the dialect to C++26 in one
-shot is a **compiler-matrix change**, not a style change — CI today
-cannot build `-std=c++26`.
+Shannon’s C++ core defaults to **C++23** (`CMakeLists.txt`
+`SHANNON_CXX_STANDARD` default 23, `setup.py` `-std=c++23` / `/std:c++23`).
+The v2 kernels (`src/shannon/entropy_*.cpp`, `simd_exp.hpp`,
+`unified_dispatch.cpp`) are the performance-critical path and still compile as
+C++20-compatible source. Flipping the dialect to C++26 in one shot is a
+**compiler-matrix change**, not a style change — CI today cannot build
+`-std=c++26`.
 
 ## What we measured (2026-08-16)
 
 | Toolchain | Flag | Result |
 |---|---|---|
-| CI Linux (`g++-13`, pinned in `.github/workflows/ci.yml`) | `-std=c++20` | Current production dialect |
+| Pre-ENH-036 CI Linux (`g++-13`) | `-std=c++20` | Production dialect before Phase B |
 | same | `-std=c++23` | Compiles. libstdc++ **has** `std::expected`, `std::move_only_function`, `std::unreachable`, `std::to_underlying`, `std::byteswap`, `std::format`. **Missing:** `std::print`, `std::mdspan`, `std::flat_map`, `std::generator`, `std::simd`, pack indexing, contracts, reflection |
 | same | `-std=c++26` / `-std=c++2c` | **Unrecognized** (`g++-13: error: unrecognized command-line option`) |
+| CI Linux after ENH-036 (`g++-14`) | `-std=c++23` (default) | Current production dialect. `<print>` exists on this compiler; Shannon does not use it yet |
 | This image `clang++` 18.1.3 | `-std=c++26` | Flag accepted; standard library headers not wired for a libc++ C++26 build here |
 | CI macOS | Apple Clang from Xcode (unpinned) | C++23 is realistic; C++26 `std::simd` / reflection / contracts are **not** a 2026 CI default |
 | CI Windows | C++ core **not built** (`SHANNON_SKIP_CORE=1`) | Dialect bump must not assume MSVC C++26 |
@@ -86,9 +89,9 @@ Already in use, leave alone unless a later phase needs a touch-up:
 Each phase is a separate PR. Do not combine a compiler bump with a
 kernel rewrite.
 
-### Phase A — C++20 cleanup (no dialect change)  ← start here
+### Phase A — C++20 cleanup (no dialect change)  ← **done**
 
-Compiler: **g++-13 / current Apple Clang**. Risk: low if tests stay green.
+Compiler at the time: **g++-13 / current Apple Clang**. Risk: low if tests stay green.
 
 1. **Span-primary kernel ABI.** Make `std::span<const double>` the
    declared API in `entropy.hpp`; keep `const double*, size_t` as
@@ -116,23 +119,25 @@ on this image.
 
 ### Phase B — compiler bump, then C++23
 
-Blocked on CI: Ubuntu job must install **g++-14 or g++-15** (not 13)
-and macOS must keep compiling. Do this as its own PR *before* using
-C++23 library types in headers.
+**First slice done (ENH-036):** Ubuntu `cpp` / `python` / `benchmarks` jobs
+install **g++-14** (not 13); macOS stays unpinned Apple Clang; Windows still
+`SHANNON_SKIP_CORE=1`. CMake `SHANNON_CXX_STANDARD` defaults to 23;
+`setup.py` `_cxx_std_args` emits `-std=c++23` / `/std:c++23` (env
+`SHANNON_CXX_STANDARD=20` is the packager hatch). Kernels were **not**
+rewritten in that PR.
 
-1. `.github/workflows/ci.yml` + `setup.py` `_cxx_std_args`:
-   `-std=c++23` / `/std:c++23`. Keep a CMake option
-   `SHANNON_CXX_STANDARD` (default 23) so a packager can force 20.
-2. `std::expected<double, DispatchError>` internally for
+Remaining (own PR — do not mix with another compiler bump):
+
+1. `std::expected<double, DispatchError>` internally for
    `compute_*`; keep `DispatchResult` as a compatibility façade for
    pybind and `shannon-agent`.
-3. `std::unreachable()` in exhaustive `Backend` / `HandrailAction`
+2. `std::unreachable()` in exhaustive `Backend` / `HandrailAction`
    switches.
-4. `std::to_underlying` at the pybind boundary.
-5. `std::move_only_function` for owned callbacks (`set_callback`);
+3. `std::to_underlying` at the pybind boundary.
+4. `std::move_only_function` for owned callbacks (`set_callback`);
    keep `std::function` aliases until Python/C bindings are updated.
-6. `std::print` / `std::println` for `shannon-agent` **only after**
-   libstdc++ has `<print>` (g++-14+).
+5. `std::print` / `std::println` for `shannon-agent` **only after**
+   libstdc++ has `<print>` (true on g++-14+; still unused).
 
 Do **not** enable C++ modules (`import std`) in this phase — pybind11
 + FetchContent GoogleTest + per-ISA TUs are a modules foot-gun.
@@ -185,7 +190,7 @@ surface first**.
 4. Phase A.2 algorithm traits (all `entropy_*.cpp` + `simd_exp.hpp`).
    This is the conflict magnet — do it **alone**.
 5. Phase A.4 `std::format` telemetry.
-6. Phase B compiler bump (workflow + CMake + setup.py only).
+6. Phase B compiler bump (workflow + CMake + setup.py only).  ← **this PR**
 7. Phase B `std::expected` façade.
 8. Phase C `std::simd` traits behind a flag.
 
@@ -204,9 +209,9 @@ surface first**.
 ## Verification bar (every code PR)
 
 ```bash
-# Linux / this environment
+# Linux / this environment (CI pins g++-14; g++-13 still compiles -std=c++23)
 cmake -B build -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF \
-      -DCMAKE_CXX_COMPILER=g++-13   # or g++-15 after Phase B
+      -DCMAKE_CXX_COMPILER=g++-14
 cmake --build build -j
 ctest --test-dir build --output-on-failure \
       -E 'Avx512|SimdLog2Avx2.MaxRelativeError'

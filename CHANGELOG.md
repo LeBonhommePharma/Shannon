@@ -4,6 +4,13 @@ All notable changes to Shannon are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **C++23 default dialect (ENH-036)** — CMake `SHANNON_CXX_STANDARD` defaults to 23
+  (`20` remains a packager hatch). Linux CI and the Linux release agent pin **g++-14**.
+  `setup.py` emits `-std=c++23` / `/std:c++23` unless `SHANNON_CXX_STANDARD=20`.
+  No kernel rewrite; `std::expected` façade is a follow-up.
+
 ### Added
 
 - **Ori-style agent harness** — `shannon grok`, `shannon claude`, `shannon codex`

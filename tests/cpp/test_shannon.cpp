@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <vector>
@@ -53,6 +54,14 @@ TEST(ShannonEntropy, NumericalStabilityNegativeValues) {
     std::vector<double> w = {-1000.0, -1000.0, -1000.0, -1000.0};
     double h = shannon::shannon_configurational_entropy(w.data(), w.size());
     EXPECT_NEAR(h, 2.0, 1e-10);
+}
+
+TEST(ShannonEntropy, NegInfMaskedLogitsUseFiniteSupport) {
+    const double ninf = -std::numeric_limits<double>::infinity();
+    std::vector<double> w = {0.0, 0.0, 0.0, ninf};
+    double h = shannon::shannon_configurational_entropy(w.data(), w.size());
+    EXPECT_FALSE(std::isnan(h));
+    EXPECT_NEAR(h, std::log2(3.0), 1e-10);
 }
 
 // ─── Entropy from Probs ─────────────────────────────────────────────────────

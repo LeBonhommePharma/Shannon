@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 
 namespace shannon {
@@ -31,12 +32,17 @@ double shannon_configurational_entropy(std::span<const double> log_weights) {
     if (n == 0) return 0.0;
     if (n == 1) return 0.0;
 
-    // Step 1: find max for log-sum-exp stability
-    double max_w = w[0];
-    #pragma omp simd reduction(max:max_w)
-    for (std::size_t i = 1; i < n; ++i) {
-        if (w[i] > max_w) max_w = w[i];
+    // Finite-support max: -inf / NaN logits must not poison Z (0 * -inf = NaN)
+    // into H=0 via std::max(0, NaN) — a masked-vocab false collapse.
+    double max_w = -std::numeric_limits<double>::infinity();
+    bool any_finite = false;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (std::isfinite(w[i])) {
+            any_finite = true;
+            if (w[i] > max_w) max_w = w[i];
+        }
     }
+    if (!any_finite) return 0.0;
 
     // Step 2: compute partition function Z and weighted sum
     double Z = 0.0;
@@ -45,9 +51,11 @@ double shannon_configurational_entropy(std::span<const double> log_weights) {
     #pragma omp parallel for simd reduction(+:Z,weighted_sum) schedule(static)
     for (std::size_t i = 0; i < n; ++i) {
         const double shifted = w[i] - max_w;
-        const double exp_val = std::exp(shifted);
-        Z += exp_val;
-        weighted_sum += shifted * exp_val;  // (w_i - max_w) * exp(w_i - max_w)
+        if (std::isfinite(shifted)) {
+            const double exp_val = std::exp(shifted);
+            Z += exp_val;
+            weighted_sum += shifted * exp_val;  // (w_i - max_w) * exp(w_i - max_w)
+        }
     }
 
     if (Z <= 0.0) return 0.0;

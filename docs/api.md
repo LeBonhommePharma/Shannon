@@ -127,9 +127,11 @@ double entropy_from_logprobs_scalar(std::span<const double> lp) noexcept;
 }
 ```
 
-ISA-traits algorithm (`entropy_algorithm.hpp`): `configurational_entropy<Traits>`
-is instantiated by `entropy_avx2.cpp`. Other ISAs and H(p) / H(logp) stay
-hand-written until follow-up ENH-035 slices.
+ISA-traits algorithm (`entropy_algorithm.hpp`): `configurational_entropy<Traits>`,
+`entropy_from_probs<Traits>`, and `entropy_from_logprobs<Traits>` are instantiated
+by the per-ISA TUs (scalar width=1, SSE4.2 configurational, AVX2, AVX-512, NEON).
+OpenMP stays a reduction specialization. Masked `-inf` logits are skipped so they
+do not poison H to 0.
 
 ---
 

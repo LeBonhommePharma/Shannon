@@ -1,9 +1,9 @@
 # C++20 → C++26 modernization plan
 
 Status: **Phase A (C++20 cleanup) in progress** — ENH-033 name table, ENH-034 span ABI,
-and ENH-035 first slice (AVX2 configurational traits) landed in code (this tree).
-Remaining ISAs / H(p) / H(logp) traits and ENH-036 C++23 CI bump are **not**
-started. No `CMAKE_CXX_STANDARD` bump.
+and ENH-035 ISA-traits (all CPU vector backends + H(p)/H(logp); OpenMP remains a
+reduction specialization) landed in code (this tree). ENH-036 C++23 CI bump is
+**not** started. No `CMAKE_CXX_STANDARD` bump.
 Audience: follow-up implementers. Claim one ENH item at a time from
 `docs/ENHANCEMENT_BACKLOG.md` (`ENH-033` onward).
 

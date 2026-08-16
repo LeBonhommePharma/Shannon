@@ -328,13 +328,12 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Done:** Span is the declared kernel ABI in `entropy.hpp` / v1 `shannon.hpp`; pointer+size is an inline wrapper via `detail::as_span` (never constructs a non-empty span from nullptr). Dispatch returns `INVALID_ARGS` for `nullptr && n > 0`. Tests: `ScalarEntropy.NullptrNonzeroIsZero`, `SpanOverload`, `UnifiedDispatch.NullptrNonzeroIsInvalidArgs`. ISA-traits rewrite remains ENH-035.
 - **Priority:** P2
 
-### - [ ] ENH-035: ISA-traits log-sum-exp (one algorithm, thin ISA TUs)
+### - [x] ENH-035: ISA-traits log-sum-exp (one algorithm, thin ISA TUs)
 
 - **Why:** Scalar / OMP / SSE4.2 / AVX2 / AVX-512 / NEON duplicate the same H formula. A traits template is the prerequisite for a later `std::simd` backend; doing `std::simd` first would fork a seventh copy. Custom `simd_exp.hpp` must stay — C++26 `[simd.math]` is not available.
 - **Area:** new `src/shannon/entropy_algorithm.hpp`, `src/shannon/entropy_*.cpp`, `src/shannon/simd_exp.hpp`
 - **First slice:** One configurational-entropy algorithm over a vector traits type; convert AVX2 only; bit-identical vs current AVX2 tests. Follow-up PRs for AVX-512 / NEON / SSE — do not land all ISAs in one loop.
-- **Done (first slice):** `configurational_entropy<Traits>` in `entropy_algorithm.hpp`. AVX2 configurational kernel is `Avx2Traits` + one-line call in `entropy_avx2.cpp` (still `-mavx2 -mfma` in that TU). Probs/logprobs AVX2 kernels unchanged. Tests: `Avx2Kernels.MatchesScalarConfigurational`, `VectorWidthNoTail`, `OddLengthTail`, `EmptyAndSingleton` (CPUID skip).
-- **Remaining:** AVX-512 / NEON / SSE / scalar-as-width-1; H(p) / H(logp) traits.
+- **Done:** `configurational_entropy` / `entropy_from_probs` / `entropy_from_logprobs` templates in `entropy_algorithm.hpp`. Thin TUs: scalar (width=1), SSE4.2 (configurational; libm exp; mul+add), AVX2, AVX-512, NEON. OpenMP stays a reduction specialization (same finite-support max). Finite-only max + `select_finite` so masked `-inf` logits do not 0·(-inf) NaN into H=0. Tests: `Avx2Kernels.*`, `Sse42Kernels.*`, `Avx512Kernels.*` (CI `-E Avx512`), `NeonKernels.*`, `Entropy.NegInfMaskedLogitsUseFiniteSupport`.
 - **Priority:** P1
 - **Plan:** `docs/CXX_MODERNIZATION.md` Phase A.2 then Phase C
 

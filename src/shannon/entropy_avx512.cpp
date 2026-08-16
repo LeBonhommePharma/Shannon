@@ -5,13 +5,14 @@
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/entropy.hpp"
+#include "shannon/entropy_algorithm.hpp"
 #include "shannon/config.hpp"
 #include "shannon/simd_exp.hpp"
 #include "shannon/simd_log2.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -34,91 +35,49 @@ static inline double hsum512_pd(__m512d v) noexcept {
 
 #if defined(SHANNON_USE_AVX512)
 
+namespace {
+
+struct Avx512Traits {
+    using vec = __m512d;
+    static constexpr std::size_t width = 8;
+
+    [[nodiscard]] static vec set1(double x) noexcept { return _mm512_set1_pd(x); }
+    [[nodiscard]] static vec zero() noexcept { return _mm512_setzero_pd(); }
+    [[nodiscard]] static vec load(const double* p) noexcept { return _mm512_loadu_pd(p); }
+    [[nodiscard]] static vec sub(vec a, vec b) noexcept { return _mm512_sub_pd(a, b); }
+    [[nodiscard]] static vec add(vec a, vec b) noexcept { return _mm512_add_pd(a, b); }
+    [[nodiscard]] static vec mul(vec a, vec b) noexcept { return _mm512_mul_pd(a, b); }
+    [[nodiscard]] static vec fmadd(vec a, vec b, vec c) noexcept {
+        return _mm512_fmadd_pd(a, b, c);
+    }
+    [[nodiscard]] static vec exp(vec x) noexcept { return simd::shannon_exp_avx512(x); }
+    [[nodiscard]] static vec log2(vec x) noexcept { return simd::shannon_log2_avx512(x); }
+    [[nodiscard]] static vec select_gt(vec values, double threshold, vec if_true) noexcept {
+        const __mmask8 m =
+            _mm512_cmp_pd_mask(values, _mm512_set1_pd(threshold), _CMP_GT_OQ);
+        return _mm512_maskz_mov_pd(m, if_true);
+    }
+    [[nodiscard]] static vec select_finite(vec x, vec v) noexcept {
+        const vec ax = _mm512_andnot_pd(_mm512_set1_pd(-0.0), x);
+        const __mmask8 m = _mm512_cmp_pd_mask(
+            ax, _mm512_set1_pd(std::numeric_limits<double>::infinity()), _CMP_LT_OQ);
+        return _mm512_maskz_mov_pd(m, v);
+    }
+    [[nodiscard]] static double hsum(vec v) noexcept { return hsum512_pd(v); }
+};
+
+}  // namespace
+
 double configurational_entropy_avx512(std::span<const double> weights) noexcept {
-    const double* w = weights.data();
-    const std::size_t n = weights.size();
-    if (n <= 1) return 0.0;
-
-    double max_w = w[0];
-    for (std::size_t i = 1; i < n; ++i) {
-        if (w[i] > max_w) max_w = w[i];
-    }
-
-    __m512d v_max  = _mm512_set1_pd(max_w);
-    __m512d acc_Z  = _mm512_setzero_pd();
-    __m512d acc_ws = _mm512_setzero_pd();
-
-    std::size_t i = 0;
-    for (; i + 7 < n; i += 8) {
-        __m512d vw = _mm512_loadu_pd(w + i);
-        __m512d sh = _mm512_sub_pd(vw, v_max);
-        __m512d ev = simd::shannon_exp_avx512(sh);
-        acc_Z  = _mm512_add_pd(acc_Z, ev);
-        acc_ws = _mm512_fmadd_pd(sh, ev, acc_ws);
-    }
-
-    double Z  = hsum512_pd(acc_Z);
-    double ws = hsum512_pd(acc_ws);
-
-    for (; i < n; ++i) {
-        const double shifted = w[i] - max_w;
-        const double ev = std::exp(shifted);
-        Z += ev;
-        ws += shifted * ev;
-    }
-
-    if (Z <= 0.0) return 0.0;
-    return std::fmax(0.0, std::log2(Z) - (ws / (Z * kLn2)));
+    return configurational_entropy<Avx512Traits>(weights);
 }
 
 double entropy_from_probs_avx512(std::span<const double> probs) noexcept {
-    const double* p = probs.data();
-    const std::size_t n = probs.size();
-    if (n <= 1) return 0.0;
-
-    __m512d acc = _mm512_setzero_pd();
-    std::size_t i = 0;
-
-    for (; i + 7 < n; i += 8) {
-        __m512d vp = _mm512_loadu_pd(p + i);
-        // contrib = -p * log2(p); zero where p <= kEpsilon (matches scalar).
-        __m512d contrib = _mm512_mul_pd(_mm512_sub_pd(_mm512_setzero_pd(), vp),
-                                        simd::shannon_log2_avx512(vp));
-        __mmask8 m = _mm512_cmp_pd_mask(vp, _mm512_set1_pd(kEpsilon), _CMP_GT_OQ);
-        acc = _mm512_add_pd(acc, _mm512_maskz_mov_pd(m, contrib));
-    }
-
-    double h = hsum512_pd(acc);
-    for (; i < n; ++i) {
-        if (p[i] > kEpsilon) h -= p[i] * std::log2(p[i]);
-    }
-    return std::fmax(0.0, h);
+    return entropy_from_probs<Avx512Traits>(probs);
 }
 
 double entropy_from_logprobs_avx512(std::span<const double> logprobs) noexcept {
-    const double* lp = logprobs.data();
-    const std::size_t n = logprobs.size();
-    if (n <= 1) return 0.0;
-
-    __m512d acc = _mm512_setzero_pd();
-    std::size_t i = 0;
-
-    for (; i + 7 < n; i += 8) {
-        __m512d vlp = _mm512_loadu_pd(lp + i);
-        __m512d p   = simd::shannon_exp_avx512(vlp);
-        // contrib = -p * lp * log2e  (>= 0 since lp <= 0); zero where p <= eps
-        __m512d contrib = _mm512_mul_pd(_mm512_mul_pd(p, vlp),
-                                        _mm512_set1_pd(-kLog2E));
-        __mmask8 m = _mm512_cmp_pd_mask(p, _mm512_set1_pd(kEpsilon), _CMP_GT_OQ);
-        acc = _mm512_add_pd(acc, _mm512_maskz_mov_pd(m, contrib));
-    }
-
-    double h = hsum512_pd(acc);
-    for (; i < n; ++i) {
-        const double p = std::exp(lp[i]);
-        if (p > kEpsilon) h -= p * lp[i] * kLog2E;
-    }
-    return std::fmax(0.0, h);
+    return entropy_from_logprobs<Avx512Traits>(logprobs);
 }
 
 #endif  // SHANNON_USE_AVX512

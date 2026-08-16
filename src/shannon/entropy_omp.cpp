@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 namespace shannon::kernels {
 
@@ -19,10 +20,17 @@ double configurational_entropy_omp(std::span<const double> weights) noexcept {
     const std::size_t n = weights.size();
     if (n <= 1) return 0.0;
 
-    double max_w = w[0];
-    for (std::size_t i = 1; i < n; ++i) {
-        if (w[i] > max_w) max_w = w[i];
+    // Same finite-support max as entropy_algorithm.hpp (not a vector traits
+    // backend — OpenMP stays a reduction specialization).
+    double max_w = -std::numeric_limits<double>::infinity();
+    bool any_finite = false;
+    for (std::size_t i = 0; i < n; ++i) {
+        if (std::isfinite(w[i])) {
+            any_finite = true;
+            if (w[i] > max_w) max_w = w[i];
+        }
     }
+    if (!any_finite) return 0.0;
 
     double Z = 0.0;
     double ws = 0.0;
@@ -30,9 +38,11 @@ double configurational_entropy_omp(std::span<const double> weights) noexcept {
     #pragma omp parallel for simd reduction(+:Z,ws) schedule(static)
     for (std::size_t i = 0; i < n; ++i) {
         const double shifted = w[i] - max_w;
-        const double ev = std::exp(shifted);
-        Z += ev;
-        ws += shifted * ev;
+        if (std::isfinite(shifted)) {
+            const double ev = std::exp(shifted);
+            Z += ev;
+            ws += shifted * ev;
+        }
     }
 
     if (Z <= 0.0) return 0.0;

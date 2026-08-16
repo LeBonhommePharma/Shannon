@@ -11,6 +11,9 @@
 #include <gtest/gtest.h>
 #include "energy_matrix.h"
 #include <cmath>
+#include <fstream>
+#include <string>
+#include <vector>
 
 // =============================================================================
 // ShannonEnergyMatrix core tests
@@ -166,6 +169,53 @@ TEST(EnergyMatrix, SourceReported) {
     EXPECT_TRUE(std::string(src) == "closed_form" || std::string(src) == "soft_contact");
 }
 
+TEST(EnergyMatrix, SearchPathsAreConstexpr) {
+    static_assert(shannon::kSoftContactSearchPaths.size() == 3);
+    EXPECT_STREQ(shannon::kSoftContactSearchPaths[0], "data/soft_contact_256.bin");
+}
+
+TEST(EnergyMatrix, FlatSpanIsRowMajor) {
+    const auto& m = shannon::ShannonEnergyMatrix::instance();
+    auto flat = m.flat_span();
+    ASSERT_EQ(flat.size(), shannon::ShannonEnergyMatrix::TOTAL_PARAMS);
+    EXPECT_DOUBLE_EQ(flat[0], m.energy(0, 0));
+    EXPECT_DOUBLE_EQ(flat[1], m.energy(0, 1));
+    EXPECT_DOUBLE_EQ(flat[256], m.energy(1, 0));
+#if defined(__cpp_lib_mdspan)
+    auto view = m.as_mdspan();
+    EXPECT_EQ(view.extent(0), 256u);
+    EXPECT_EQ(view.extent(1), 256u);
+    EXPECT_DOUBLE_EQ(view[0, 0], m.energy(0, 0));
+    EXPECT_DOUBLE_EQ(view[1, 2], m.energy(1, 2));
+#endif
+}
+
+TEST(SoftContactMatrix, LoadFromMemoryParsesSc01) {
+    shannon::SoftContactMatrix sc;
+    const char* path = nullptr;
+    for (const char* candidate : shannon::kSoftContactSearchPaths) {
+        std::ifstream in(candidate, std::ios::binary);
+        if (in) {
+            path = candidate;
+            break;
+        }
+    }
+    if (path == nullptr) {
+        GTEST_SKIP() << "data/soft_contact_256.bin not found from ctest cwd";
+    }
+    std::ifstream in(path, std::ios::binary);
+    in.seekg(0, std::ios::end);
+    const auto n = static_cast<std::size_t>(in.tellg());
+    in.seekg(0);
+    std::vector<char> buf(n);
+    in.read(buf.data(), static_cast<std::streamsize>(n));
+    ASSERT_TRUE(in);
+    ASSERT_TRUE(sc.load_from_memory(buf.data(), buf.size()));
+    EXPECT_TRUE(sc.is_loaded());
+    EXPECT_FALSE(sc.load_from_memory(nullptr, 0));
+    EXPECT_FALSE(sc.load_from_memory("XXXX", 4));
+}
+
 // =============================================================================
 // Weighted entropy with super-cluster bias
 // =============================================================================
@@ -310,6 +360,9 @@ TEST(SybylBridge, ContextAwareParent) {
 
 TEST(Projection, ProjectTo40x40) {
     const auto& sc = shannon::ShannonEnergyMatrix::instance().soft_contact();
+    if (!sc.is_loaded()) {
+        GTEST_SKIP() << "soft_contact_256.bin not loaded (closed-form fallback)";
+    }
 
     float proj[32 * 32] = {};
     shannon::project_to_40x40(sc, proj);

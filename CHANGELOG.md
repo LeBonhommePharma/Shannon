@@ -6,6 +6,10 @@ All notable changes to Shannon are documented in this file.
 
 ### Changed
 
+- **P1928 portable SIMD retarget (ENH-038)** — `simd_generic.hpp` uses
+  `std::simd::vec<T>` when `__cpp_lib_simd`; g++-14 keeps Parallelism TS
+  `native_simd`. Same Horner `exp`/`log2`. `StdSimdFlavor` reports which ABI
+  the TU compiled. `best_backend()` still ignores `STD_SIMD=6`.
 - **C++26 default dialect (ENH-037)** — CMake `SHANNON_CXX_STANDARD` defaults to 26
   (`23` and `20` remain packager hatches). Compilers that reject `-std=c++26`
   fall back to 23 at configure time. `setup.py` probes the same way (no longer
@@ -23,6 +27,13 @@ All notable changes to Shannon are documented in this file.
 
 ### Added
 
+- **Phase D C++26 hatches (ENH-039)** — `TokenCallbackRef` (`std::function_ref`),
+  `SHANNON_CONTRACT_ASSERT`, `#embed` of `data/soft_contact_256.bin` after path
+  search, `SoftContactMatrix::load_from_memory`, `nth_type_t` pack-indexing
+  hatch, `ShannonEnergyMatrix::as_mdspan` on `__cpp_lib_mdspan`, P2996
+  `enum_reflect.hpp` vs the fail-closed `backend_name` table. `inplace_vector`
+  / `std::execution` remain skipped. `tests/test_energy_matrix.cpp` now runs
+  under CMake `shannon_tests`.
 - **Portable SIMD entropy kernel (ENH-037)** — Horner `exp` / atanh `log2` on
   `std::experimental::native_simd<double>` (`simd_generic.hpp`,
   `entropy_std_simd.cpp`). `Backend::STD_SIMD = 6` is an opt-in override;

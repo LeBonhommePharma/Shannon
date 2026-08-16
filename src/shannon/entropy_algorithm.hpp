@@ -71,6 +71,7 @@ template <typename Traits>
     const std::size_t n = weights.size();
     if (n <= 1) return 0.0;
     SHANNON_ASSUME(n > 1);
+    SHANNON_CONTRACT_ASSERT(n > 1);
 
     const auto support = detail::scan_logit_support(weights);
     // +inf = delta (certain token). All-masked / all-NaN = empty support → H=0.
@@ -119,6 +120,7 @@ template <typename Traits>
     const double* p = probs.data();
     const std::size_t n = probs.size();
     if (n <= 1) return 0.0;
+    SHANNON_CONTRACT_ASSERT(n > 1);
 
     using vec = typename Traits::vec;
     vec acc = Traits::zero();
@@ -145,6 +147,7 @@ template <typename Traits>
     const double* lp = logprobs.data();
     const std::size_t n = logprobs.size();
     if (n <= 1) return 0.0;
+    SHANNON_CONTRACT_ASSERT(n > 1);
 
     using vec = typename Traits::vec;
     vec acc = Traits::zero();

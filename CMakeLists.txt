@@ -57,8 +57,9 @@ option(SHANNON_BUILD_PYTHON   "Build pybind11 Python module"    ON)
 option(SHANNON_BUILD_AGENT    "Build shannon-agent CLI"         ON)
 option(SHANNON_USE_OPENMP     "Enable OpenMP acceleration"      ON)
 option(SHANNON_USE_EIGEN      "Enable Eigen vectorization"      OFF)
-# Portable SIMD kernel (experimental::simd Horner). OFF compiles a scalar stub.
-# Default ON — the TU uses __has_include and degrades if the header is missing.
+# Portable SIMD kernel (P1928 std::simd::vec when `__cpp_lib_simd`, else
+# Parallelism TS experimental::simd Horner). OFF compiles a scalar stub.
+# Default ON — the TU uses feature tests and degrades if neither header exists.
 option(SHANNON_USE_STD_SIMD   "Build experimental/std simd entropy kernel" ON)
 # GPU backends (CUDA/Metal/ROCm) were removed in this release: the workload is
 # per-token streaming entropy of a single distribution, which is latency- and
@@ -265,7 +266,10 @@ if(SHANNON_BUILD_TESTS)
 
     enable_testing()
 
-    add_executable(shannon_tests tests/cpp/test_shannon.cpp)
+    add_executable(shannon_tests
+        tests/cpp/test_shannon.cpp
+        tests/test_energy_matrix.cpp
+    )
     target_link_libraries(shannon_tests PRIVATE shannon_core GTest::gtest_main)
 
     add_executable(shannon_v2_tests
@@ -305,7 +309,8 @@ if(SHANNON_BUILD_TESTS)
     endif()
 
     include(GoogleTest)
-    gtest_discover_tests(shannon_tests)
+    # Energy-matrix tests open data/soft_contact_256.bin relative to the repo root.
+    gtest_discover_tests(shannon_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     gtest_discover_tests(shannon_v2_tests)
     gtest_discover_tests(shannon_simd_exp_tests)
 endif()

@@ -1,11 +1,11 @@
 # C++20 → C++26 modernization plan
 
-Status: **Phase A complete. Phase B complete (ENH-036). Phase C + dialect 26
-(ENH-037) in this tree.** CMake/`setup.py` default `-std=c++26` with a
-configure-time fallback to 23 if the compiler rejects 26 (g++-13, older Apple
-Clang). Portable SIMD kernel uses Parallelism TS `std::experimental::simd`
-(Horner `exp`/`log2`, not scalar-per-lane). P1928 `<simd>` / `[simd.math]` /
-contracts / reflection / `#embed` remain **unavailable on g++-14**.
+Status: **Phase A–C complete. Item 9 (P1928 retarget) and Phase D hatches
+are in this tree.** Portable SIMD prefers `std::simd::vec<T>` when
+`__cpp_lib_simd`; otherwise Parallelism TS `native_simd` (g++-14). Horner
+`exp`/`log2` is unchanged. Phase D features are wired behind feature-test
+macros and no-op on g++-14 except placeholder `_` (available) and the
+constexpr soft-contact search path / `load_from_memory` hatch.
 Audience: follow-up implementers. Claim one ENH item at a time from
 `docs/ENHANCEMENT_BACKLOG.md` (`ENH-033` onward).
 
@@ -164,22 +164,26 @@ This is a **traits swap**, not a seventh copy of the algorithm (Phase A).
 4. Golden tests: `StdSimdKernels.*` vs scalar; `SimdExpGeneric` /
    `SimdLog2Generic` vs libm (1e-13 / 1e-12). Never claim bit-identical
    `exp` across ISAs.
-5. P1928 `<simd>` (`__cpp_lib_simd`) is still **undefined** on g++-14.
-   When GCC 16 CI exists, retarget `abi::native` without changing Horner.
+5. P1928 `<simd>` (`__cpp_lib_simd`): **done as a hatch.**
+   `simd_generic.hpp` prefers `std::simd::vec<T>` (IS / GCC 16 `namespace
+   std::simd`) when the macro is set, else Parallelism TS `native_simd`.
+   Horner is unchanged. GCC 16 `[simd.math]` still lacks Shannon `exp`/`log2`
+   (and currently fma/floor/nearbyint); those stay in this header. Do **not**
+   call scalar `std::exp` per lane. `best_backend()` still ignores `STD_SIMD`.
 
-### Phase D — other C++26, opportunistic  ← **partial (what g++-14 has)**
+### Phase D — other C++26, opportunistic  ← **hatched (what g++-14 lacks is still a no-op)**
 
 | Feature | Shannon use | Status on g++-14 `-std=c++26` |
 |---|---|---|
 | Dialect `-std=c++26` | CMake/setup.py default | **Done** (fallback to 23) |
 | `[[assume]]` | `SHANNON_ASSUME` after kernel early-outs | **Done** (`!(Z > 0)` before assume so NaN is not UB) |
-| Placeholder `_` | Available; not forced through existing code | Macro reported in `cxx26.hpp` |
-| `std::function_ref` | `TokenCallback` / ingest | **Blocked** |
-| Contracts (`pre` / `post`) | `entropy >= 0`, non-null kernels | **Blocked** |
-| `#embed` | `data/soft_contact_256.bin` | **Blocked** (path search stays) |
-| Static reflection | `enum_name(Backend)` | **Blocked** (constexpr table is enough) |
-| Pack indexing | Kernel dispatcher templates | **Blocked** |
-| `std::mdspan` | energy matrix | **Blocked** |
+| Placeholder `_` | Available; used in Cxx26 tests, not forced through old loops | Macro reported in `cxx26.hpp` |
+| `std::function_ref` | `TokenCallbackRef` on `read_one` | **Hatched** (`__cpp_lib_function_ref`) |
+| Contracts (`contract_assert`) | After `n > 1` kernel guards | **Hatched** (`SHANNON_CONTRACT_ASSERT`; fail-closed returns stay) |
+| `#embed` | `data/soft_contact_256.bin` after path search | **Hatched** (`__has_embed`); `load_from_memory` always |
+| Static reflection | `enum_reflect.hpp` vs `backend_name` table | **Hatched** (`<meta>`); table stays fail-closed UNKNOWN |
+| Pack indexing | `cxx26::nth_type_t` / `nth_value` | **Hatched** (`tuple_element` on C++20) |
+| `std::mdspan` | `ShannonEnergyMatrix::as_mdspan` | **Hatched** (`__cpp_lib_mdspan` only, not a lone `__has_include`) |
 | `std::inplace_vector` | Not a fit (vocab 32k–128k) | Skip |
 | `std::execution` | Not a fit for this reduction | Skip |
 
@@ -197,8 +201,18 @@ surface first**.
 5. Phase A.4 `std::format` telemetry.
 6. Phase B compiler bump (workflow + CMake + setup.py only).  ← **done (PR #16)**
 7. Phase B `std::expected` façade.  ← **done (PR #17)**
-8. Phase C portable SIMD traits + C++26 dialect default.  ← **this PR**
-9. P1928 `<simd>` retarget when `__cpp_lib_simd` exists on CI.
+8. Phase C portable SIMD traits + C++26 dialect default.  ← **done (PR #18)**
+9. P1928 `<simd>` retarget when `__cpp_lib_simd` exists on CI.  ← **hatched (this PR)**
+
+**This VM (g++-14 / clang++ 18):** `__cpp_lib_simd` is undefined, so
+`std_simd_flavor()` is `ExperimentalTs` on libstdc++ and `Stub` on libc++.
+GCC 16 is required to compile the P1928 `std::simd::vec` branch. Phase D
+macros (`function_ref`, contracts, `#embed`, reflection, pack indexing,
+mdspan) are also unset here except placeholder `_`. `shannon_tests` now
+includes `tests/test_energy_matrix.cpp`; `gtest_discover_tests` runs those
+cases with `WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}` so
+`data/soft_contact_256.bin` is found. `Projection.ProjectTo40x40` skips when
+the singleton used the closed-form fallback.
 
 ## Explicit non-goals
 

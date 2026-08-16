@@ -40,8 +40,13 @@ and cannot be built in this environment (no Xcode/Swift on Linux).
   (`Backend::STD_SIMD=6`) is an **override**, not `best_backend()` — it needs
   libstdc++ `<experimental/simd>` (present here) and, when the TU is built
   with `-mavx2`, an AVX2 host. Then run `ctest` with the CI filter
-  `-E 'Avx512|SimdLog2Avx2.MaxRelativeError'` — hosted/VM CPUs may advertise
-  AVX-512 in CPUID yet `SIGILL` on those paths under the hypervisor.
+  `-E 'Avx512|SimdLog2Avx2.MaxRelativeError|SimdExpGeneric|SimdLog2Generic'`
+  — hosted/VM CPUs may advertise AVX-512 in CPUID yet `SIGILL` on those
+  paths under the hypervisor. `SimdExpGeneric` / `SimdLog2Generic` compile
+  in a TU with `-mavx512*`, so `native_simd` is 8-wide even when the
+  entropy kernel TU is only `-mavx2`. Portable SIMD (`experimental::simd`
+  Horner) is **libstdc++-only**; libc++ / Apple compile the scalar stub
+  (`std_simd_kernels_built()==false`).
   C++23 library façades (`std::expected`, `move_only_function`, `std::print`)
   are feature-test guarded and drop out of the C++20 hatch.
 - CMake 3.28 does **not** treat g++-14 as a `CMAKE_CXX_STANDARD 26` compiler

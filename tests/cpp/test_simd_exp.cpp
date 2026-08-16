@@ -253,34 +253,50 @@ double eval_generic_log2(double x) {
     using V = shannon::kernels::simd::abi::native<double>;
     return shannon::kernels::simd::shannon_log2_generic(V(x))[0];
 }
+
+// This TU is compiled with the widest -m flags (AVX2 and often AVX-512), so
+// native_simd<double> follows that width. size()==8 needs AVX-512 at runtime;
+// hosted runners advertise AVX-512 in CPUID then SIGILL. Skip here and keep
+// the suites in the CI -E filter (same policy as SimdLog2Avx2.MaxRelativeError).
+bool generic_native_runnable() {
+    using V = shannon::kernels::simd::abi::native<double>;
+    if (V::size() >= 8 && !cpu_has_avx512f()) return false;
+    if (V::size() >= 4 && !cpu_has_avx2()) return false;
+    return true;
+}
 }  // namespace
 
 TEST(SimdExpGeneric, MaxRelativeErrorUnder1e13) {
-    using V = shannon::kernels::simd::abi::native<double>;
-    if (V::size() >= 4 && !cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    if (!generic_native_runnable()) {
+        GTEST_SKIP() << "host cannot execute native_simd width";
+    }
     EXPECT_LT(max_rel_error(eval_generic_exp), 1e-13);
 }
 TEST(SimdExpGeneric, ExactAtZero) {
-    using V = shannon::kernels::simd::abi::native<double>;
-    if (V::size() >= 4 && !cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    if (!generic_native_runnable()) {
+        GTEST_SKIP() << "host cannot execute native_simd width";
+    }
     EXPECT_EQ(eval_generic_exp(0.0), 1.0);
 }
 TEST(SimdExpGeneric, DeepNegativeSaturatesToZero) {
-    using V = shannon::kernels::simd::abi::native<double>;
-    if (V::size() >= 4 && !cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    if (!generic_native_runnable()) {
+        GTEST_SKIP() << "host cannot execute native_simd width";
+    }
     for (double x : {-709.0, -1418.0, -1420.0, -2000.0, -1e6, -1e300}) {
         EXPECT_EQ(eval_generic_exp(x), 0.0) << "x=" << x;
         EXPECT_FALSE(std::signbit(eval_generic_exp(x))) << "must be +0, x=" << x;
     }
 }
 TEST(SimdLog2Generic, MaxRelativeErrorUnder1e12) {
-    using V = shannon::kernels::simd::abi::native<double>;
-    if (V::size() >= 4 && !cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    if (!generic_native_runnable()) {
+        GTEST_SKIP() << "host cannot execute native_simd width";
+    }
     EXPECT_LT(max_rel_error_log2(eval_generic_log2), 1e-12);
 }
 TEST(SimdLog2Generic, ExactAtOne) {
-    using V = shannon::kernels::simd::abi::native<double>;
-    if (V::size() >= 4 && !cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    if (!generic_native_runnable()) {
+        GTEST_SKIP() << "host cannot execute native_simd width";
+    }
     EXPECT_EQ(eval_generic_log2(1.0), 0.0);
 }
 #endif

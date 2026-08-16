@@ -27,7 +27,11 @@ All notable changes to Shannon are documented in this file.
   `std::experimental::native_simd<double>` (`simd_generic.hpp`,
   `entropy_std_simd.cpp`). `Backend::STD_SIMD = 6` is an opt-in override;
   `best_backend()` still prefers AVX-512 / AVX2. P1928 `<simd>` is not in
-  GCC 14; `[simd.math]` is not used.
+  GCC 14; `[simd.math]` is not used. The Horner path is **libstdc++
+  Parallelism TS only** (`__cpp_lib_experimental_parallel_simd`); libc++ /
+  Apple compile the scalar stub. Hosted CI also filters `SimdExpGeneric` /
+  `SimdLog2Generic` (AVX-512-width `native_simd` SIGILL, same class as
+  `SimdLog2Avx2.MaxRelativeError`).
 - **Ori-style agent harness** — `shannon grok`, `shannon claude`, `shannon codex`
   (and `opencode`, `deepseek`, `kimi`, `hermes`, `pi`, `cursor`, `prime-agent`) find the real
   CLI already on `PATH`, tag the session (`SHANNON_AGENT_ID`, task, gate socket),

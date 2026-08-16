@@ -64,6 +64,12 @@ TEST(ShannonEntropy, NegInfMaskedLogitsUseFiniteSupport) {
     EXPECT_NEAR(h, std::log2(3.0), 1e-10);
 }
 
+TEST(ShannonEntropy, PosInfLogitIsCertain) {
+    const double pinf = std::numeric_limits<double>::infinity();
+    std::vector<double> w = {1.0, pinf, 2.0};
+    EXPECT_DOUBLE_EQ(shannon::shannon_configurational_entropy(w.data(), w.size()), 0.0);
+}
+
 // ─── Entropy from Probs ─────────────────────────────────────────────────────
 
 TEST(ShannonFromProbs, UniformFourWay) {

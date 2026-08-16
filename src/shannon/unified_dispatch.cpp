@@ -285,6 +285,7 @@ DispatchResult UnifiedDispatch::compute_entropy_from_probs(
     case Backend::AVX512:
 #if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
         out_entropy = kernels::entropy_from_probs_avx512(probs, n);
+        result.used_backend = Backend::AVX512;
         ran = true;
         break;
 #endif
@@ -353,6 +354,7 @@ DispatchResult UnifiedDispatch::compute_entropy_from_logprobs(
     case Backend::AVX512:
 #if defined(SHANNON_USE_AVX512) && defined(__x86_64__)
         out_entropy = kernels::entropy_from_logprobs_avx512(logprobs, n);
+        result.used_backend = Backend::AVX512;
         ran = true;
         break;
 #endif

@@ -32,17 +32,20 @@ double shannon_configurational_entropy(std::span<const double> log_weights) {
     if (n == 0) return 0.0;
     if (n == 1) return 0.0;
 
-    // Finite-support max: -inf / NaN logits must not poison Z (0 * -inf = NaN)
-    // into H=0 via std::max(0, NaN) — a masked-vocab false collapse.
+    // -inf / NaN are masked (finite support). +inf is a certain token → H=0.
     double max_w = -std::numeric_limits<double>::infinity();
     bool any_finite = false;
+    bool any_pos_inf = false;
+    const double pinf = std::numeric_limits<double>::infinity();
     for (std::size_t i = 0; i < n; ++i) {
-        if (std::isfinite(w[i])) {
+        if (w[i] == pinf) {
+            any_pos_inf = true;
+        } else if (std::isfinite(w[i])) {
             any_finite = true;
             if (w[i] > max_w) max_w = w[i];
         }
     }
-    if (!any_finite) return 0.0;
+    if (any_pos_inf || !any_finite) return 0.0;
 
     // Step 2: compute partition function Z and weighted sum
     double Z = 0.0;

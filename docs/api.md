@@ -7,7 +7,7 @@
 | `shannon/types.hpp` | Core types: enums, structs, `Backend`, `HandrailAction`, `CollapseResult` |
 | `shannon/config.hpp` | Build-time constants: version, thresholds, physical constants |
 | `shannon/entropy.hpp` | Entropy kernel declarations (all `[[nodiscard]] noexcept`) |
-| `shannon/entropy_algorithm.hpp` | ISA-traits log-sum-exp (configurational; AVX2 first) |
+| `shannon/entropy_algorithm.hpp` | ISA-traits log-sum-exp / H(p) / H(logp) |
 | `shannon/unified_dispatch.hpp` | `UnifiedDispatch` singleton: backend selection, hardware report |
 | `shannon/hardware_detect.hpp` | `HardwareCapabilities` struct, `detect_hardware()` |
 | `shannon/collapse_detector.hpp` | `CollapseDetector`: sliding window, z-score, callbacks |
@@ -32,10 +32,11 @@ All v2 types and functions are in `namespace shannon`. Entropy kernels are in
 ```cpp
 enum class Backend : uint8_t {
     SCALAR = 0, OPENMP = 1, SSE42 = 2, AVX2 = 3,
-    AVX512 = 4, NEON = 5, METAL = 6, CUDA = 7, ROCM = 8,
-    AUTO = 255
+    AVX512 = 4, NEON = 5, AUTO = 255
 };
 ```
+
+Integer values 0–5 and `AUTO=255` are frozen (pybind/telemetry). GPU enumerants were removed.
 
 ### `HandrailAction`
 
@@ -115,8 +116,9 @@ All functions are `[[nodiscard]] noexcept`.
 ```cpp
 namespace shannon::kernels {
 
-// Canonical ABI is std::span. Pointer+size wrappers reject nullptr with n > 0
-// (defined H = 0, not UB).
+// Canonical ABI is std::span. Pointer+size wrappers never construct
+// span{nullptr, n>0} (UB); kernels define that case as H = 0.
+// UnifiedDispatch treats nullptr && n>0 as INVALID_ARGS (does not call the kernel).
 double configurational_entropy_scalar(std::span<const double> w) noexcept;
 double configurational_entropy_scalar(const double* w, std::size_t n) noexcept;
 
@@ -130,8 +132,9 @@ double entropy_from_logprobs_scalar(std::span<const double> lp) noexcept;
 ISA-traits algorithm (`entropy_algorithm.hpp`): `configurational_entropy<Traits>`,
 `entropy_from_probs<Traits>`, and `entropy_from_logprobs<Traits>` are instantiated
 by the per-ISA TUs (scalar width=1, SSE4.2 configurational, AVX2, AVX-512, NEON).
-OpenMP stays a reduction specialization. Masked `-inf` logits are skipped so they
-do not poison H to 0.
+OpenMP stays a reduction specialization. Kernel contract for logits: `-inf` / NaN
+are masked (finite support); any `+inf` is a certain token and yields H=0.
+JSONL ingest and the Python detector still reject non-finite values (fail-closed).
 
 ---
 

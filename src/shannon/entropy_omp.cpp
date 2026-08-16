@@ -4,6 +4,7 @@
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/entropy.hpp"
+#include "shannon/entropy_algorithm.hpp"
 #include "shannon/config.hpp"
 
 #include <algorithm>
@@ -20,17 +21,10 @@ double configurational_entropy_omp(std::span<const double> weights) noexcept {
     const std::size_t n = weights.size();
     if (n <= 1) return 0.0;
 
-    // Same finite-support max as entropy_algorithm.hpp (not a vector traits
-    // backend — OpenMP stays a reduction specialization).
-    double max_w = -std::numeric_limits<double>::infinity();
-    bool any_finite = false;
-    for (std::size_t i = 0; i < n; ++i) {
-        if (std::isfinite(w[i])) {
-            any_finite = true;
-            if (w[i] > max_w) max_w = w[i];
-        }
-    }
-    if (!any_finite) return 0.0;
+    // Same scan as entropy_algorithm.hpp (OpenMP is a reduction specialization).
+    const auto support = detail::scan_logit_support(weights);
+    if (support.any_pos_inf || !support.any_finite) return 0.0;
+    const double max_w = support.max_finite;
 
     double Z = 0.0;
     double ws = 0.0;

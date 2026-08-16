@@ -36,24 +36,44 @@ namespace shannon::kernels {
 //   static double hsum(vec v);
 //
 // log2 / mul / select_gt are required only for H(p) / H(logp) instantiations.
-// select_finite keeps -inf / NaN logits from producing 0*-inf NaNs in ws
-// (masked-vocab false collapse: H became 0 via fmax(0, NaN)).
+// -inf / NaN logits are masked (finite support). +inf is a certain token → H=0
+// (collapse). Mixing those: skip -inf/NaN, but any +inf still yields H=0.
+
+namespace detail {
+
+struct LogitSupport {
+    double max_finite{-std::numeric_limits<double>::infinity()};
+    bool any_pos_inf{false};
+    bool any_finite{false};
+};
+
+[[nodiscard]] inline LogitSupport scan_logit_support(std::span<const double> weights) noexcept {
+    LogitSupport s;
+    const double pinf = std::numeric_limits<double>::infinity();
+    for (const double x : weights) {
+        if (x == pinf) {
+            s.any_pos_inf = true;
+        } else if (std::isfinite(x)) {
+            s.any_finite = true;
+            if (x > s.max_finite) s.max_finite = x;
+        }
+    }
+    return s;
+}
+
+}  // namespace detail
 
 template <typename Traits>
 [[nodiscard]] inline double configurational_entropy(std::span<const double> weights) noexcept {
+    static_assert(Traits::width >= 1, "ISA traits width must be at least 1");
     const double* w = weights.data();
     const std::size_t n = weights.size();
     if (n <= 1) return 0.0;
 
-    double max_w = -std::numeric_limits<double>::infinity();
-    bool any_finite = false;
-    for (std::size_t i = 0; i < n; ++i) {
-        if (std::isfinite(w[i])) {
-            any_finite = true;
-            if (w[i] > max_w) max_w = w[i];
-        }
-    }
-    if (!any_finite) return 0.0;
+    const auto support = detail::scan_logit_support(weights);
+    // +inf = delta (certain token). All-masked / all-NaN = empty support → H=0.
+    if (support.any_pos_inf || !support.any_finite) return 0.0;
+    const double max_w = support.max_finite;
 
     using vec = typename Traits::vec;
     const vec v_max = Traits::set1(max_w);
@@ -88,6 +108,7 @@ template <typename Traits>
 
 template <typename Traits>
 [[nodiscard]] inline double entropy_from_probs(std::span<const double> probs) noexcept {
+    static_assert(Traits::width >= 1, "ISA traits width must be at least 1");
     const double* p = probs.data();
     const std::size_t n = probs.size();
     if (n <= 1) return 0.0;
@@ -113,6 +134,7 @@ template <typename Traits>
 
 template <typename Traits>
 [[nodiscard]] inline double entropy_from_logprobs(std::span<const double> logprobs) noexcept {
+    static_assert(Traits::width >= 1, "ISA traits width must be at least 1");
     const double* lp = logprobs.data();
     const std::size_t n = logprobs.size();
     if (n <= 1) return 0.0;

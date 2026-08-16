@@ -139,6 +139,17 @@ bool StdinIngester::parse_jsonl_line(std::string_view line, TokenData& out) {
 }
 
 bool StdinIngester::read_one(TokenCallback& cb) {
+    return read_one_impl(cb);
+}
+
+#if defined(__cpp_lib_function_ref)
+bool StdinIngester::read_one(TokenCallbackRef cb) {
+    return read_one_impl(cb);
+}
+#endif
+
+template <class Cb>
+bool StdinIngester::read_one_impl(Cb&& cb) {
     std::string line;
     if (!std::getline(std::cin, line)) return false;
 
@@ -208,6 +219,17 @@ void SocketIngester::listen(TokenCallback cb) {
 }
 
 bool SocketIngester::read_one(TokenCallback& cb, int timeout_ms) {
+    return read_one_impl(cb, timeout_ms);
+}
+
+#if defined(__cpp_lib_function_ref)
+bool SocketIngester::read_one(TokenCallbackRef cb, int timeout_ms) {
+    return read_one_impl(cb, timeout_ms);
+}
+#endif
+
+template <class Cb>
+bool SocketIngester::read_one_impl(Cb&& cb, int timeout_ms) {
     if (fd_ < 0 && !connect()) return false;
 
     while (true) {

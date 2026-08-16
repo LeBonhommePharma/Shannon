@@ -370,6 +370,37 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Priority:** P2
 - **Plan:** `docs/CXX_MODERNIZATION.md` Phase C + dialect 26 + Phase D hatches
 
+### - [x] ENH-038: P1928 `std::simd::vec` retarget (Horner unchanged)
+
+- **Why:** Item 9 of `docs/CXX_MODERNIZATION.md`. GCC 16 libstdc++ is landing
+  `__cpp_lib_simd` / `<simd>` as `std::simd::vec<T>` (native width). The
+  Parallelism TS path must remain for g++-14. `[simd.math]` still has no
+  Shannon `exp`/`log2`.
+- **Area:** `src/shannon/simd_generic.hpp`, `entropy_std_simd.cpp`,
+  `entropy.hpp` (`StdSimdFlavor`), `tests/cpp/test_simd_exp.cpp`
+- **First slice:** Prefer P1928 when `__cpp_lib_simd`; else experimental
+  `native_simd`. Same Horner. `STD_SIMD=6` stays override-only.
+- **Done:** `abi::native` / `load` / `store` / `where` / `fma` adapters;
+  `std_simd_flavor()` is `P1928` | `ExperimentalTs` | `Stub`. g++-14 stays
+  experimental. Never scalar `std::exp` per lane.
+- **Priority:** P2
+- **Plan:** `docs/CXX_MODERNIZATION.md` item 9
+
+### - [x] ENH-039: Phase D C++26 hatches (function_ref, contracts, embed, reflection, pack indexing, mdspan)
+
+- **Why:** Remaining Phase D items were blocked on g++-14. Wire them behind
+  feature tests so GCC 16+ CI picks them up without a dialect rewrite.
+  `inplace_vector` / `std::execution` stay skipped.
+- **Area:** `cxx26.hpp`, `stream_ingest.*`, `entropy_algorithm.hpp`,
+  `energy_matrix.*`, `enum_reflect.hpp`, `types.hpp` (`enum_name`)
+- **Done:** `TokenCallbackRef`; `SHANNON_CONTRACT_ASSERT` after `n>1`;
+  constexpr `kSoftContactSearchPaths` + `load_from_memory` + `#embed` fallback;
+  `nth_type_t` / `nth_value`; `as_mdspan` only on `__cpp_lib_mdspan`;
+  `enum_name` delegates to the fail-closed table; placeholder `_` in tests.
+  `tests/test_energy_matrix.cpp` is now in the `shannon_tests` CMake target.
+- **Priority:** P2
+- **Plan:** `docs/CXX_MODERNIZATION.md` Phase D
+
 ---
 
 ## Out of scope for this backlog (do not pick here)
@@ -382,7 +413,8 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - Calling scalar `std::exp` from a `std::simd` kernel (throughput regression)
 - Advertising C++26 in README badges until macOS CI compiles `-std=c++26`
   without CMake fallback
-- P1928 `<simd>` retarget (needs `__cpp_lib_simd` on CI — GCC 16)
+- Replacing the `backend_name` table with reflection on corrupt storage
+  (must stay `"UNKNOWN"`, not UB)
 
 ---
 

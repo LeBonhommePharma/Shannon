@@ -13,6 +13,7 @@
 #include "shannon/simd_generic.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -243,7 +244,7 @@ TEST(SimdLog2Avx2, ExactAtPowersOfTwo) {
 }
 #endif
 
-#if defined(SHANNON_SIMD_GENERIC_EXPERIMENTAL)
+#if defined(SHANNON_SIMD_GENERIC)
 namespace {
 double eval_generic_exp(double x) {
     using V = shannon::kernels::simd::abi::native<double>;
@@ -255,13 +256,14 @@ double eval_generic_log2(double x) {
 }
 
 // This TU is compiled with the widest -m flags (AVX2 and often AVX-512), so
-// native_simd<double> follows that width. size()==8 needs AVX-512 at runtime;
-// hosted runners advertise AVX-512 in CPUID then SIGILL. Skip here and keep
-// the suites in the CI -E filter (same policy as SimdLog2Avx2.MaxRelativeError).
+// native width follows that. size>=8 needs AVX-512 at runtime; hosted runners
+// advertise AVX-512 in CPUID then SIGILL. Skip here and keep the suites in
+// the CI -E filter (same policy as SimdLog2Avx2.MaxRelativeError).
 bool generic_native_runnable() {
     using V = shannon::kernels::simd::abi::native<double>;
-    if (V::size() >= 8 && !cpu_has_avx512f()) return false;
-    if (V::size() >= 4 && !cpu_has_avx2()) return false;
+    const std::size_t w = shannon::kernels::simd::abi::lane_count<V>();
+    if (w >= 8 && !cpu_has_avx512f()) return false;
+    if (w >= 4 && !cpu_has_avx2()) return false;
     return true;
 }
 }  // namespace

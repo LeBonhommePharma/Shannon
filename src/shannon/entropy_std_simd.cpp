@@ -1,9 +1,12 @@
-// entropy_std_simd.cpp — portable SIMD entropy kernels (experimental::simd / P1928)
+// entropy_std_simd.cpp — portable SIMD entropy kernels (P1928 / experimental)
 //
-// Instantiates entropy_algorithm.hpp over native_simd<double>. Compiled with
-// the same -mavx2 -mfma flags as entropy_avx2.cpp on x86 so native width is 4.
-// Not selected by UnifiedDispatch::best_backend (AVX2/AVX-512 stay preferred);
-// override Backend::STD_SIMD to run these kernels.
+// Instantiates entropy_algorithm.hpp over abi::native<double>:
+//   P1928 `std::simd::vec<double>` when `__cpp_lib_simd`, else Parallelism TS
+//   `native_simd<double>`. Compiled with the same -mavx2 -mfma flags as
+//   entropy_avx2.cpp on x86 so native width is 4. Not selected by
+//   UnifiedDispatch::best_backend (AVX2/AVX-512 stay preferred); override
+//   Backend::STD_SIMD to run these kernels. Horner exp/log2 — never scalar
+//   std::exp per lane.
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/entropy.hpp"
@@ -18,18 +21,18 @@
 
 namespace shannon::kernels {
 
-#if !defined(SHANNON_NO_STD_SIMD) && defined(SHANNON_SIMD_GENERIC_EXPERIMENTAL)
+#if !defined(SHANNON_NO_STD_SIMD) && defined(SHANNON_SIMD_GENERIC)
 
 namespace {
 
 struct StdSimdTraits {
     using vec = simd::abi::native<double>;
-    static constexpr std::size_t width = vec::size();
+    static constexpr std::size_t width = simd::abi::lane_count<vec>();
 
     [[nodiscard]] static vec set1(double x) noexcept { return vec(x); }
     [[nodiscard]] static vec zero() noexcept { return vec(0.0); }
     [[nodiscard]] static vec load(const double* p) noexcept {
-        return vec(p, simd::abi::element_aligned);
+        return simd::abi::load<vec>(p);
     }
     [[nodiscard]] static vec sub(vec a, vec b) noexcept { return a - b; }
     [[nodiscard]] static vec add(vec a, vec b) noexcept { return a + b; }
@@ -56,6 +59,14 @@ struct StdSimdTraits {
 
 bool std_simd_kernels_built() noexcept { return true; }
 
+StdSimdFlavor std_simd_flavor() noexcept {
+#if defined(SHANNON_SIMD_GENERIC_P1928)
+    return StdSimdFlavor::P1928;
+#else
+    return StdSimdFlavor::ExperimentalTs;
+#endif
+}
+
 double configurational_entropy_std_simd(std::span<const double> weights) noexcept {
     return configurational_entropy<StdSimdTraits>(weights);
 }
@@ -71,6 +82,8 @@ double entropy_from_logprobs_std_simd(std::span<const double> logprobs) noexcept
 #else
 
 bool std_simd_kernels_built() noexcept { return false; }
+
+StdSimdFlavor std_simd_flavor() noexcept { return StdSimdFlavor::Stub; }
 
 double configurational_entropy_std_simd(std::span<const double> weights) noexcept {
     return configurational_entropy_scalar(weights);

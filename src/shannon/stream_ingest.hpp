@@ -37,6 +37,12 @@ using TokenCallback = std::move_only_function<void(const TokenData&)>;
 using TokenCallback = std::function<void(const TokenData&)>;
 #endif
 
+// Non-owning view of a token callback. function_ref avoids allocating a
+// TokenCallback just to observe one line; TokenCallback& remains the C++23 hatch.
+#if defined(__cpp_lib_function_ref)
+using TokenCallbackRef = std::function_ref<void(const TokenData&)>;
+#endif
+
 // ─── JSONL stdin pipe ingestion ──────────────────────────────────────────────
 
 class StdinIngester {
@@ -48,6 +54,9 @@ public:
     // Read one JSONL line, parse, invoke callback. Returns false on EOF.
     bool read_one(TokenCallback& cb);
     bool read_one(TokenCallback&& cb) { return read_one(cb); }
+#if defined(__cpp_lib_function_ref)
+    bool read_one(TokenCallbackRef cb);
+#endif
 
     // Read all lines until EOF
     void read_all(TokenCallback cb);
@@ -56,6 +65,9 @@ public:
     bool parse_jsonl_line(std::string_view line, TokenData& out);
 
 private:
+    template <class Cb>
+    bool read_one_impl(Cb&& cb);
+
     std::string field_;
     InputFormat format_;
     std::size_t token_index_ = 0;
@@ -77,6 +89,9 @@ public:
     bool read_one(TokenCallback&& cb, int timeout_ms = 0) {
         return read_one(cb, timeout_ms);
     }
+#if defined(__cpp_lib_function_ref)
+    bool read_one(TokenCallbackRef cb, int timeout_ms = 0);
+#endif
 
     void stop();
     void close();
@@ -89,6 +104,9 @@ private:
     std::string leftover_;
 
     bool connect();
+
+    template <class Cb>
+    bool read_one_impl(Cb&& cb, int timeout_ms);
 };
 
 // ─── Shared memory ingestion (zero-copy) ─────────────────────────────────────

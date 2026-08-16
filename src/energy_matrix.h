@@ -23,8 +23,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
+#include <span>
 #include <string>
 #include <vector>
+#include <version>
+
+#if defined(__cpp_lib_mdspan)
+#include <mdspan>
+#endif
 
 namespace shannon {
 
@@ -43,6 +49,9 @@ public:
 
     // Load from binary blob (SC01 format: 4-byte magic + 2x uint16 dims + float32 data)
     bool load(const char* path);
+
+    // Same SC01 payload from an already-mapped / `#embed`'d buffer.
+    bool load_from_memory(const void* buf, size_t nbytes);
 
     // O(1) lookup — symmetric: data[i*256+j] == data[j*256+i]
     float lookup(uint8_t type_i, uint8_t type_j) const noexcept {
@@ -80,6 +89,14 @@ struct MatrixConfig {
     std::string blob_path;         // Path to soft_contact_256.bin
     bool allow_closed_form = true; // Fall back to closed-form if blob missing
 };
+
+// Filesystem search used by ShannonEnergyMatrix (C++20 constexpr table).
+// A local trained blob wins over a C++26 `#embed` fallback.
+inline constexpr auto kSoftContactSearchPaths = std::to_array<const char*>({
+    "data/soft_contact_256.bin",
+    "../data/soft_contact_256.bin",
+    "../../data/soft_contact_256.bin",
+});
 
 // =============================================================================
 // 8-bit type encoding helpers
@@ -164,6 +181,18 @@ public:
     const double* row(uint8_t i) const noexcept {
         return matrix_[i].data();
     }
+
+    // Contiguous 256×256 view (row-major). mdspan when `__cpp_lib_mdspan`.
+    [[nodiscard]] std::span<const double> flat_span() const noexcept {
+        return std::span<const double>(matrix_[0].data(), TOTAL_PARAMS);
+    }
+
+#if defined(__cpp_lib_mdspan)
+    [[nodiscard]] auto as_mdspan() const noexcept {
+        return std::mdspan<const double, std::extents<std::size_t, DIM, DIM>>(
+            matrix_[0].data());
+    }
+#endif
 
     // Weighted entropy: H_w = -sum_i (w_i * p_i * log2(p_i))
     // where w_i incorporates energy-matrix context from token neighborhood

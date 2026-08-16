@@ -16,11 +16,14 @@
 #include "shannon/terminal_agent.hpp"
 #include "shannon/stream_ingest.hpp"
 #include "shannon/cxx26.hpp"
+#include "shannon/enum_reflect.hpp"
 
 #include <cmath>
 #include <limits>
 #include <span>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <vector>
 #include <unistd.h>
 
@@ -599,9 +602,16 @@ TEST(Avx2Kernels, PosInfLogitIsCertain) {
 #endif  // SHANNON_USE_AVX2 && x86_64
 
 TEST(StdSimdKernels, BuiltOrStub) {
-    // The TU always links. On libstdc++ this is typically true; on libc++
-    // without <experimental/simd> it is a scalar stub.
-    (void)kernels::std_simd_kernels_built();
+    const auto flavor = kernels::std_simd_flavor();
+    if (kernels::std_simd_kernels_built()) {
+        EXPECT_TRUE(flavor == kernels::StdSimdFlavor::ExperimentalTs ||
+                    flavor == kernels::StdSimdFlavor::P1928);
+    } else {
+        EXPECT_EQ(flavor, kernels::StdSimdFlavor::Stub);
+    }
+#if defined(__cpp_lib_simd)
+    EXPECT_EQ(flavor, kernels::StdSimdFlavor::P1928);
+#endif
 }
 
 TEST(StdSimdKernels, MatchesScalarConfigurational) {
@@ -1520,8 +1530,95 @@ TEST(Cxx26, CapabilityReportMatchesDialect) {
 #endif
 #if defined(__cpp_lib_simd)
     EXPECT_TRUE(cxx26::has_std_simd);
+    EXPECT_EQ(kernels::std_simd_flavor(), kernels::StdSimdFlavor::P1928);
 #else
     EXPECT_FALSE(cxx26::has_std_simd);
+#endif
+#if defined(__cpp_lib_mdspan)
+    EXPECT_TRUE(cxx26::has_mdspan);
+#else
+    EXPECT_FALSE(cxx26::has_mdspan);
+#endif
+#if defined(__cpp_lib_function_ref)
+    EXPECT_TRUE(cxx26::has_function_ref);
+#else
+    EXPECT_FALSE(cxx26::has_function_ref);
+#endif
+#if defined(__cpp_contracts)
+    EXPECT_TRUE(cxx26::has_contracts);
+#else
+    EXPECT_FALSE(cxx26::has_contracts);
+#endif
+#if defined(__cpp_embed)
+    EXPECT_TRUE(cxx26::has_embed);
+#else
+    EXPECT_FALSE(cxx26::has_embed);
+#endif
+#if defined(__has_embed)
+    EXPECT_TRUE(cxx26::has_embed_operator);
+#else
+    EXPECT_FALSE(cxx26::has_embed_operator);
+#endif
+#if defined(__cpp_pack_indexing)
+    EXPECT_TRUE(cxx26::has_pack_indexing);
+#else
+    EXPECT_FALSE(cxx26::has_pack_indexing);
+#endif
+}
+
+TEST(Cxx26, PackIndexingNthType) {
+    using T0 = cxx26::nth_type_t<0, int, double, char>;
+    using T2 = cxx26::nth_type_t<2, int, double, char>;
+    static_assert(std::is_same_v<T0, int>);
+    static_assert(std::is_same_v<T2, char>);
+    EXPECT_EQ((cxx26::nth_value<0, Backend::SCALAR, Backend::AVX2, Backend::STD_SIMD>),
+              Backend::SCALAR);
+    EXPECT_EQ((cxx26::nth_value<2, Backend::SCALAR, Backend::AVX2, Backend::STD_SIMD>),
+              Backend::STD_SIMD);
+}
+
+TEST(Cxx26, EnumNameMatchesTable) {
+    for (Backend b : kAllBackends) {
+        EXPECT_STREQ(enum_name(b), backend_name(b));
+    }
+    EXPECT_STREQ(enum_name(static_cast<Backend>(99)), "UNKNOWN");
+#if defined(__cpp_impl_reflection) && defined(SHANNON_CXX26_HAS_INCLUDE_META)
+    for (Backend b : kAllBackends) {
+        EXPECT_EQ(cxx26::reflected_enumerator_name(b), std::string_view(backend_name(b)));
+    }
+#endif
+}
+
+TEST(Cxx26, PlaceholderVariables) {
+#if defined(__cpp_placeholder_variables)
+    {
+        auto _ = 0;
+        auto _ = 1;
+    }
+    EXPECT_TRUE(cxx26::has_placeholder_variables);
+#else
+    EXPECT_FALSE(cxx26::has_placeholder_variables);
+#endif
+}
+
+TEST(Cxx26, FunctionRefTokenCallback) {
+#if defined(__cpp_lib_function_ref)
+    ingest::TokenData seen;
+    bool fired = false;
+    auto fn = [&](const ingest::TokenData& t) {
+        seen = t;
+        fired = true;
+    };
+    ingest::TokenCallbackRef ref = fn;
+    ingest::TokenData in;
+    in.token_index = 7;
+    in.logits = {0.0, 1.0};
+    ref(in);
+    EXPECT_TRUE(fired);
+    EXPECT_EQ(seen.token_index, 7u);
+    EXPECT_EQ(seen.logits.size(), 2u);
+#else
+    GTEST_SKIP() << "std::function_ref not on this toolchain";
 #endif
 }
 

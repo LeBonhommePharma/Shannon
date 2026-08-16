@@ -60,9 +60,16 @@ as_span(const double* p, std::size_t n) noexcept {
 }
 #endif
 
-// Portable SIMD (experimental::simd Horner). Always linked; std_simd_kernels_built()
-// is false when the TS header is missing or SHANNON_NO_STD_SIMD is set.
+// Portable SIMD Horner kernel. Always linked. std_simd_kernels_built() is false
+// when neither P1928 `<simd>` nor libstdc++ Parallelism TS is available, or
+// SHANNON_NO_STD_SIMD is set. Flavor says which ABI the TU actually compiled.
+enum class StdSimdFlavor : unsigned char {
+    Stub = 0,
+    ExperimentalTs = 1,
+    P1928 = 2,
+};
 [[nodiscard]] bool std_simd_kernels_built() noexcept;
+[[nodiscard]] StdSimdFlavor std_simd_flavor() noexcept;
 [[nodiscard]] double configurational_entropy_std_simd(std::span<const double> w) noexcept;
 [[nodiscard]] inline double configurational_entropy_std_simd(const double* w, std::size_t n) noexcept {
     return configurational_entropy_std_simd(detail::as_span(w, n));

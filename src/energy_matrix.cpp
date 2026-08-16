@@ -23,6 +23,20 @@
 #include <numbers>
 #include <numeric>
 
+#if defined(__has_embed)
+#  if __has_embed("../data/soft_contact_256.bin")
+#    define SHANNON_SOFT_CONTACT_EMBEDDED 1
+static constexpr unsigned char kSoftContactEmbedded[] = {
+#embed "../data/soft_contact_256.bin"
+};
+#  elif __has_embed("data/soft_contact_256.bin")
+#    define SHANNON_SOFT_CONTACT_EMBEDDED 1
+static constexpr unsigned char kSoftContactEmbedded[] = {
+#embed "data/soft_contact_256.bin"
+};
+#  endif
+#endif
+
 // Prefer SHANNON_USE_* (set by CMake); accept SHANNON_HAS_* as aliases.
 #if defined(SHANNON_USE_AVX512) && !defined(SHANNON_HAS_AVX512)
 #  define SHANNON_HAS_AVX512 1
@@ -89,6 +103,23 @@ bool SoftContactMatrix::load(const char* path) {
     return true;
 }
 
+bool SoftContactMatrix::load_from_memory(const void* buf, size_t nbytes) {
+    constexpr size_t kHeader = 4 + 2 * sizeof(uint16_t);
+    if (buf == nullptr || nbytes < kHeader + BYTE_SIZE) return false;
+    const auto* p = static_cast<const unsigned char*>(buf);
+    if (p[0] != 'S' || p[1] != 'C' || p[2] != '0' || p[3] != '1') {
+        return false;
+    }
+    uint16_t rows = 0;
+    uint16_t cols = 0;
+    std::memcpy(&rows, p + 4, sizeof(rows));
+    std::memcpy(&cols, p + 6, sizeof(cols));
+    if (rows != DIM || cols != DIM) return false;
+    std::memcpy(data_, p + kHeader, BYTE_SIZE);
+    loaded_ = true;
+    return true;
+}
+
 // =============================================================================
 // ShannonEnergyMatrix — Singleton
 // =============================================================================
@@ -100,23 +131,27 @@ const ShannonEnergyMatrix& ShannonEnergyMatrix::instance() {
 
 ShannonEnergyMatrix::ShannonEnergyMatrix() {
     // Try loading from soft-contact binary blob first
-    // Search common paths relative to typical install locations
-    static const char* search_paths[] = {
-        "data/soft_contact_256.bin",
-        "../data/soft_contact_256.bin",
-        "../../data/soft_contact_256.bin",
-        nullptr
-    };
-
+    // Search common paths relative to typical install locations; a local
+    // trained file wins over a C++26 `#embed` of data/soft_contact_256.bin.
     bool loaded = false;
-    for (const char** p = search_paths; *p != nullptr; ++p) {
-        if (soft_contact_.load(*p)) {
+    for (const char* path : kSoftContactSearchPaths) {
+        if (soft_contact_.load(path)) {
             load_from_soft_contact();
             source_ = "soft_contact";
             loaded = true;
             break;
         }
     }
+
+#if defined(SHANNON_SOFT_CONTACT_EMBEDDED)
+    if (!loaded &&
+        soft_contact_.load_from_memory(kSoftContactEmbedded,
+                                       sizeof(kSoftContactEmbedded))) {
+        load_from_soft_contact();
+        source_ = "soft_contact";
+        loaded = true;
+    }
+#endif
 
     if (!loaded) {
         initialize_closed_form();

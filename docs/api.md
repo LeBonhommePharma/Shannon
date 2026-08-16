@@ -8,8 +8,9 @@
 | `shannon/config.hpp` | Build-time constants: version, thresholds, physical constants |
 | `shannon/entropy.hpp` | Entropy kernel declarations (all `[[nodiscard]] noexcept`) |
 | `shannon/entropy_algorithm.hpp` | ISA-traits log-sum-exp / H(p) / H(logp) |
-| `shannon/simd_generic.hpp` | Horner exp / log2 on `experimental::native_simd` |
-| `shannon/cxx26.hpp` | Dialect / library capability report + `SHANNON_ASSUME` |
+| `shannon/simd_generic.hpp` | Horner exp / log2 on P1928 `std::simd::vec` or `experimental::native_simd` |
+| `shannon/cxx26.hpp` | Dialect / library capability report + `SHANNON_ASSUME` / `SHANNON_CONTRACT_ASSERT` / `nth_type_t` |
+| `shannon/enum_reflect.hpp` | P2996 hatch: enumerator names vs the `backend_name` table |
 | `shannon/unified_dispatch.hpp` | `UnifiedDispatch` singleton: backend selection, hardware report |
 | `shannon/hardware_detect.hpp` | `HardwareCapabilities` struct, `detect_hardware()` |
 | `shannon/collapse_detector.hpp` | `CollapseDetector`: sliding window, z-score, callbacks |
@@ -39,7 +40,8 @@ enum class Backend : uint8_t {
 ```
 
 Integer values 0–5 and `AUTO=255` are frozen (pybind/telemetry). `STD_SIMD=6`
-is additive: Horner `exp`/`log2` on `std::experimental::native_simd<double>`,
+is additive: Horner `exp`/`log2` on P1928 `std::simd::vec<double>` when
+`__cpp_lib_simd`, else `std::experimental::native_simd<double>`,
 selected only via override — not `best_backend()`. GPU enumerants were removed.
 
 ### `HandrailAction`

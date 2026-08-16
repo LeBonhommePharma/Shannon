@@ -37,16 +37,21 @@ and cannot be built in this environment (no Xcode/Swift on Linux).
 - C++ tests: configure with `-DCMAKE_CXX_COMPILER=g++-14` when installed
   (otherwise `g++-13`, which falls back to C++23). Default dialect is C++26
   (`-DSHANNON_CXX_STANDARD=26`); hatches are `23` and `20`. Portable SIMD
-  (`Backend::STD_SIMD=6`) is an **override**, not `best_backend()` — it needs
-  libstdc++ `<experimental/simd>` (present here) and, when the TU is built
-  with `-mavx2`, an AVX2 host. Then run `ctest` with the CI filter
+  (`Backend::STD_SIMD=6`) is an **override**, not `best_backend()`. On g++-14
+  it needs libstdc++ `<experimental/simd>` and, when the TU is built
+  with `-mavx2`, an AVX2 host. When `__cpp_lib_simd` exists the same TU
+  uses P1928 `std::simd::vec` instead. Then run `ctest` with the CI filter
   `-E 'Avx512|SimdLog2Avx2.MaxRelativeError|SimdExpGeneric|SimdLog2Generic'`
   — hosted/VM CPUs may advertise AVX-512 in CPUID yet `SIGILL` on those
   paths under the hypervisor. `SimdExpGeneric` / `SimdLog2Generic` compile
   in a TU with `-mavx512*`, so `native_simd` is 8-wide even when the
-  entropy kernel TU is only `-mavx2`. Portable SIMD (`experimental::simd`
-  Horner) is **libstdc++-only**; libc++ / Apple compile the scalar stub
-  (`std_simd_kernels_built()==false`).
+  entropy kernel TU is only `-mavx2`. Portable SIMD prefers P1928
+  `std::simd::vec` when `__cpp_lib_simd` (GCC 16 `<simd>`); on this image
+  (g++-14) that macro is unset and the kernel is libstdc++
+  `experimental::simd` Horner. libc++ / Apple compile the scalar stub
+  (`std_simd_kernels_built()==false`). Phase D C++26 leftovers
+  (`function_ref`, contracts, `#embed`, reflection, pack indexing, mdspan)
+  are feature-test hatches and no-op here except placeholder `_`.
   C++23 library façades (`std::expected`, `move_only_function`, `std::print`)
   are feature-test guarded and drop out of the C++20 hatch.
 - CMake 3.28 does **not** treat g++-14 as a `CMAKE_CXX_STANDARD 26` compiler

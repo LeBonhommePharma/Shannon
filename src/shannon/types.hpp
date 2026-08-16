@@ -87,6 +87,13 @@ enum class Backend : uint8_t {
     return "UNKNOWN";
 }
 
+// Public name for telemetry. The constexpr table is the source of truth
+// (corrupt storage → "UNKNOWN"). When P2996 `<meta>` is on CI, enum_reflect.hpp
+// cross-checks enumerators against this table; it does not replace it.
+[[nodiscard]] constexpr const char* enum_name(Backend b) noexcept {
+    return backend_name(b);
+}
+
 // Named backends excluding AUTO (dispatch availability / hardware reports).
 inline constexpr std::array kConcreteBackends = {
     Backend::SCALAR, Backend::OPENMP, Backend::SSE42,

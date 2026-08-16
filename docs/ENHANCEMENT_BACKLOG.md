@@ -308,6 +308,11 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 
 ## Investigation notes
 
+- **2026-08-16 (toolchain):** `g++-16` from `ppa:ubuntu-toolchain-r/test` is
+  16.0.1 experimental trunk (r16-8100), not 16.1. **Has:** `function_ref`,
+  `mdspan`, pack indexing, `__has_embed`, placeholder `_`. **Missing:**
+  `__cpp_lib_simd` / `<simd>` (P1928 hatch stays dark), contracts, reflection.
+  Enqueued **ENH-040**. Do not put this PPA in the Cursor Cloud update script.
 - **2026-08-16 (C++20→C++26):** Audited `src/shannon/**`, `CMakeLists.txt` (`CMAKE_CXX_STANDARD 20`), CI `g++-13`. g++-13 has no `-std=c++26`; C++23 library on that compiler has `expected`/`move_only_function`/`unreachable` but not `print`/`simd`. `std::simd` math (`exp`) is still missing in GCC 16 libstdc++ — Shannon’s custom `simd_exp.hpp` stays. Plan: `docs/CXX_MODERNIZATION.md`. Enqueued **ENH-033…036**. Do not flip the dialect in one PR.
 - **2026-07-26 (AgentNotch/Peek/Callout parity):** Sources https://www.agentnotch.app · https://agentpeek.app/ · https://agentcallout.com/. User approved G1–G4,G6–G10 (not G5 chat, not G11 OTEL). Enqueued **ENH-026…032** + UX-057/058. Inventory: `{SCRATCH}/parity_inventory.md`. Counts: present 17 / partial 8 / missing 5 (C1–C30).
 - **2026-07-26 (Grok 4.5 OS swarm):** macOS audit filed **ENH-023** (remote clearAsk fail-open). iOS filed **ENH-024** (stem dismiss no-op) and **ENH-025** (freeform dead). Cross-check: not ENH-018…022 (closed multi-device honesty). UI dual-copy/gate chrome → `docs/MULTI_OS_UX_BACKLOG.md` UX-035…052.
@@ -401,6 +406,24 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Priority:** P2
 - **Plan:** `docs/CXX_MODERNIZATION.md` Phase D
 
+### - [x] ENH-040: GCC 16 hatch lane + C++26 README badge
+
+- **Why:** Phases A–D are hatched, but g++-14 leaves `function_ref` / `mdspan` /
+  pack indexing / `#embed` as no-ops, and the README still advertised C++23
+  until Linux **and** macOS compiled `-std=c++26` without the *compiler*
+  fallback. P1928 `<simd>` is **not** in the current GCC 16.0 PPA snapshot.
+- **Area:** `.github/workflows/ci.yml`, `stream_ingest.hpp`, README badge,
+  `docs/CXX_MODERNIZATION.md`
+- **Done:** `cpp` Ubuntu stays **g++-14**. New `cpp-gcc16` job installs
+  experimental GCC 16 from `ppa:ubuntu-toolchain-r/test`. Both `cpp` OSes and
+  `cpp-gcc16` grep configure logs for `Shannon C++ standard: 26`.
+  `read_one(TokenCallback&&)` is omitted when `__cpp_lib_function_ref` so
+  lambdas bind to `TokenCallbackRef`. Release Linux agent remains g++-14.
+  `inplace_vector` / `std::execution` still skipped. Do not prefer
+  `STD_SIMD` in `best_backend()`.
+- **Priority:** P2
+- **Plan:** `docs/CXX_MODERNIZATION.md` toolchain
+
 ---
 
 ## Out of scope for this backlog (do not pick here)
@@ -411,10 +434,11 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - 10-minute scheduler / cron infrastructure
 - Replacing OpenMP reductions with `std::execution` / P2300
 - Calling scalar `std::exp` from a `std::simd` kernel (throughput regression)
-- Advertising C++26 in README badges until macOS CI compiles `-std=c++26`
-  without CMake fallback
 - Replacing the `backend_name` table with reflection on corrupt storage
   (must stay `"UNKNOWN"`, not UB)
+- Pinning the Linux release agent or python jobs to experimental GCC 16
+- Claiming P1928 `std::simd::vec` runs on the current GCC 16.0 PPA snapshot
+  (`__cpp_lib_simd` is still unset)
 
 ---
 

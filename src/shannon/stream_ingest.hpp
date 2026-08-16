@@ -53,9 +53,12 @@ public:
 
     // Read one JSONL line, parse, invoke callback. Returns false on EOF.
     bool read_one(TokenCallback& cb);
-    bool read_one(TokenCallback&& cb) { return read_one(cb); }
 #if defined(__cpp_lib_function_ref)
+    // A lambda converts to both TokenCallback&& (via move_only_function) and
+    // function_ref; keep only the non-owning overload so g++-16 is unambiguous.
     bool read_one(TokenCallbackRef cb);
+#else
+    bool read_one(TokenCallback&& cb) { return read_one(cb); }
 #endif
 
     // Read all lines until EOF
@@ -86,11 +89,12 @@ public:
     // Match StdinIngester: take the callback by reference so a
     // move-only TokenCallback is not consumed on a timeout miss.
     bool read_one(TokenCallback& cb, int timeout_ms = 0);
+#if defined(__cpp_lib_function_ref)
+    bool read_one(TokenCallbackRef cb, int timeout_ms = 0);
+#else
     bool read_one(TokenCallback&& cb, int timeout_ms = 0) {
         return read_one(cb, timeout_ms);
     }
-#if defined(__cpp_lib_function_ref)
-    bool read_one(TokenCallbackRef cb, int timeout_ms = 0);
 #endif
 
     void stop();

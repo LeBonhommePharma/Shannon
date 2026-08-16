@@ -19,8 +19,10 @@
 #include "shannon/enum_reflect.hpp"
 
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -1617,6 +1619,23 @@ TEST(Cxx26, FunctionRefTokenCallback) {
     EXPECT_TRUE(fired);
     EXPECT_EQ(seen.token_index, 7u);
     EXPECT_EQ(seen.logits.size(), 2u);
+#else
+    GTEST_SKIP() << "std::function_ref not on this toolchain";
+#endif
+}
+
+TEST(Cxx26, FunctionRefReadOneAcceptsLambda) {
+#if defined(__cpp_lib_function_ref)
+    ingest::StdinIngester ingester("logits", InputFormat::LOGITS);
+    std::istringstream jsonl(R"({"logits":[0.0,1.0,0.0,0.0]})" "\n");
+    auto* prev = std::cin.rdbuf(jsonl.rdbuf());
+    std::size_t n = 0;
+    const bool ok = ingester.read_one([&](const ingest::TokenData& t) {
+        n = t.logits.size();
+    });
+    std::cin.rdbuf(prev);
+    EXPECT_TRUE(ok);
+    EXPECT_EQ(n, 4u);
 #else
     GTEST_SKIP() << "std::function_ref not on this toolchain";
 #endif

@@ -10,11 +10,15 @@ All notable changes to Shannon are documented in this file.
   `std::simd::vec<T>` when `__cpp_lib_simd`; g++-14 keeps Parallelism TS
   `native_simd`. Same Horner `exp`/`log2`. `StdSimdFlavor` reports which ABI
   the TU compiled. `best_backend()` still ignores `STD_SIMD=6`.
-- **C++26 default dialect (ENH-037)** — CMake `SHANNON_CXX_STANDARD` defaults to 26
-  (`23` and `20` remain packager hatches). Compilers that reject `-std=c++26`
-  fall back to 23 at configure time. `setup.py` probes the same way (no longer
-  requires a manual `SHANNON_CXX_STANDARD=23` on g++-13). README badge stays
-  C++23 until macOS CI compiles 26 without fallback.
+- **GCC 16 hatch lane (ENH-040)** — Linux CI keeps **g++-14** as the proven
+  floor (python / release agent / `cpp` Ubuntu). A new `cpp-gcc16` job installs
+  experimental GCC 16.0 from `ppa:ubuntu-toolchain-r/test`. That snapshot
+  compiles `-std=c++26` and turns on `function_ref` / `mdspan` / pack indexing /
+  `#embed`; it still does **not** define `__cpp_lib_simd` (P1928 remains
+  hatched). `read_one(TokenCallback&&)` is omitted when `function_ref` exists
+  so lambdas are unambiguous. README advertises C++26: Linux **and** macOS `cpp`
+  jobs grep the configure log for `Shannon C++ standard: 26` (compiler accepts
+  the flag; CMake 3.28 still injects it because its dialect table stays 23).
 - **C++23 default dialect (ENH-036)** — CMake `SHANNON_CXX_STANDARD` defaults to 23
   (`20` remains a packager hatch). Linux CI and the Linux release agent pin **g++-14**.
   `setup.py` emits `-std=c++23` / `/std:c++23` unless `SHANNON_CXX_STANDARD=20`.

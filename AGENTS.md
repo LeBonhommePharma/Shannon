@@ -46,18 +46,21 @@ and cannot be built in this environment (no Xcode/Swift on Linux).
   paths under the hypervisor. `SimdExpGeneric` / `SimdLog2Generic` compile
   in a TU with `-mavx512*`, so `native_simd` is 8-wide even when the
   entropy kernel TU is only `-mavx2`. Portable SIMD prefers P1928
-  `std::simd::vec` when `__cpp_lib_simd` (GCC 16 `<simd>`); on this image
-  (g++-14) that macro is unset and the kernel is libstdc++
-  `experimental::simd` Horner. libc++ / Apple compile the scalar stub
-  (`std_simd_kernels_built()==false`). Phase D C++26 leftovers
-  (`function_ref`, contracts, `#embed`, reflection, pack indexing, mdspan)
-  are feature-test hatches and no-op here except placeholder `_`.
-  C++23 library façades (`std::expected`, `move_only_function`, `std::print`)
-  are feature-test guarded and drop out of the C++20 hatch.
+  `std::simd::vec` when `__cpp_lib_simd`. **This image and GitHub's GCC 16.0
+  PPA snapshot still leave that macro unset** (Parallelism TS Horner on
+  libstdc++; scalar stub on libc++ / Apple). Phase D hatches
+  (`function_ref`, `mdspan`, pack indexing, `#embed`) **do** light on
+  g++-16; they no-op on g++-14 except placeholder `_`. Do **not** install
+  `ppa:ubuntu-toolchain-r/test` from the Cursor Cloud update script — it
+  upgrades `libstdc++6` system-wide. Optional local: `g++-16` if already
+  present. C++23 library façades (`std::expected`, `move_only_function`,
+  `std::print`) are feature-test guarded and drop out of the C++20 hatch.
 - CMake 3.28 does **not** treat g++-14 as a `CMAKE_CXX_STANDARD 26` compiler
   (later `try_compile` for `-mavx2` fails with “dialect CXX26”). The build
   injects `-std=c++26` while leaving the CMake dialect at 23. Do not “fix”
-  that by setting `CMAKE_CXX_STANDARD` to 26 on this toolchain.
+  that by setting `CMAKE_CXX_STANDARD` to 26 on this toolchain. Linux and
+  macOS CI grep the configure log for `Shannon C++ standard: 26` (compiler
+  accepted the flag; that is the README C++26-badge gate).
 - `ruff` is a **local-only** gate with known pre-existing debt (see the CI note
   in `CLAUDE.md`); it is not enforced in CI and currently reports errors.
 

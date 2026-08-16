@@ -124,7 +124,8 @@ GitHub Actions (`.github/workflows/ci.yml`):
 
 | Job | Coverage |
 |-----|----------|
-| `cpp` | Ubuntu (`g++-14`, C++26 default) + macOS unpinned Apple Clang (`ctest`; some AVX suites filtered on hosted runners) |
+| `cpp` | Ubuntu (`g++-14`, C++26 default; configure log must contain `Shannon C++ standard: 26`) + macOS unpinned Apple Clang (same C++26 configure assertion) |
+| `cpp-gcc16` | Ubuntu + experimental GCC 16 from `ppa:ubuntu-toolchain-r/test` (Phase D hatch lane; not the release pin) |
 | `python` | Ubuntu/macOS × 3.10–3.13; Windows pure-Python at 3.12 only (`SHANNON_SKIP_CORE=1`) |
 | `python-fallback` / packaging | Pure install paths + wheel checks |
 | `apple-platforms` | `./scripts/test_apple_platforms.sh --quick` on macos (SKIP if no Simulator runtimes) |

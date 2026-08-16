@@ -1,11 +1,20 @@
 # C++20 → C++26 modernization plan
 
-Status: **Phase A–C complete. Item 9 (P1928 retarget) and Phase D hatches
-are in this tree.** Portable SIMD prefers `std::simd::vec<T>` when
-`__cpp_lib_simd`; otherwise Parallelism TS `native_simd` (g++-14). Horner
+Status: **Phase A–D complete in code. ENH-040 is the toolchain slice**
+(g++-14 floor + GCC 16 hatch lane + C++26 README badge). Next library work
+that still cannot compile is P1928 `std::simd::vec`: the GCC 16.0 PPA
+snapshot does **not** define `__cpp_lib_simd`.
+
+CMake 3.28 still injects `-std=c++26` because its dialect table stays 23 —
+that is not a compiler fallback. README advertises C++26 when Linux **and**
+macOS `cpp` jobs grep `Shannon C++ standard: 26`.
+
+Portable SIMD prefers `std::simd::vec<T>` when `__cpp_lib_simd`; otherwise
+Parallelism TS `native_simd` (g++-14, and the current GCC 16.0 PPA). Horner
 `exp`/`log2` is unchanged. Phase D features are wired behind feature-test
-macros and no-op on g++-14 except placeholder `_` (available) and the
-constexpr soft-contact search path / `load_from_memory` hatch.
+macros: no-op on g++-14 except placeholder `_` and the constexpr soft-contact
+search path / `load_from_memory`; live on GCC 16.0 for `function_ref` /
+`mdspan` / pack indexing / `#embed`.
 Audience: follow-up implementers. Claim one ENH item at a time from
 `docs/ENHANCEMENT_BACKLOG.md` (`ENH-033` onward).
 
@@ -14,7 +23,9 @@ Shannon’s C++ core defaults to **C++26** (`CMakeLists.txt`
 Compilers that do not accept that flag fall back to C++23. The v2 kernels
 still compile as C++20-compatible source (`-DSHANNON_CXX_STANDARD=20`).
 Do **not** advertise C++26 in README badges until Linux **and** macOS CI
-both compile `-std=c++26` without falling back.
+both compile `-std=c++26` without the compiler falling back to 23.
+**ENH-040:** both `cpp` OSes grep the configure log for
+`Shannon C++ standard: 26`.
 
 ## What we measured (2026-08-16)
 
@@ -25,8 +36,9 @@ both compile `-std=c++26` without falling back.
 | same | `-std=c++26` / `-std=c++2c` | **Unrecognized** (`g++-13: error: unrecognized command-line option`) |
 | CI Linux after ENH-036 (`g++-14`) | `-std=c++23` (default then) | Production dialect before ENH-037 |
 | This image `g++-14` 14.2.0 | `-std=c++26` | Flag accepted. `__cplusplus=202400L`. **Has:** `<print>`, `expected`, placeholder `_`, `[[assume]]`. **Missing:** `<simd>` (`__cpp_lib_simd`), `<mdspan>`, `#embed`, contracts, reflection, pack indexing, `function_ref`. **Has** `<experimental/simd>` (Parallelism TS; `native_simd<double>` width 4 with `-mavx2`) |
+| This image `g++-16` 16.0.1 (`ppa:ubuntu-toolchain-r/test`, trunk r16-8100) | `-std=c++26` | Flag accepted. **Has:** `function_ref`, `mdspan` (`view[i, j]`), pack indexing `Ts...[I]`, `__has_embed`, placeholder `_`, `<print>`. **Missing:** `__cpp_lib_simd` / `<simd>` (P1928 hatch still dark), `__cpp_contracts`, `__cpp_impl_reflection`. **Has** `<experimental/simd>` |
 | This image `clang++` 18.1.3 | `-std=c++26` | Flag accepted; standard library headers not wired for a libc++ C++26 build here |
-| CI macOS | Apple Clang from Xcode (unpinned) | CMake falls back to C++23 if `-std=c++26` is rejected |
+| CI macOS | Apple Clang from Xcode (unpinned) | `cpp` job greps `Shannon C++ standard: 26`. CMake still injects `-std=c++26` (dialect table stays 23). Fallback to 23 only if the compiler rejects the flag. |
 | CI Windows | C++ core **not built** (`SHANNON_SKIP_CORE=1`) | Dialect bump must not assume MSVC C++26 |
 
 `std::simd` (P1928) is the only C++26 feature that would structurally
@@ -171,21 +183,21 @@ This is a **traits swap**, not a seventh copy of the algorithm (Phase A).
    (and currently fma/floor/nearbyint); those stay in this header. Do **not**
    call scalar `std::exp` per lane. `best_backend()` still ignores `STD_SIMD`.
 
-### Phase D — other C++26, opportunistic  ← **hatched (what g++-14 lacks is still a no-op)**
+### Phase D — other C++26, opportunistic  ← **hatched; GCC 16.0 lights some of them**
 
-| Feature | Shannon use | Status on g++-14 `-std=c++26` |
-|---|---|---|
-| Dialect `-std=c++26` | CMake/setup.py default | **Done** (fallback to 23) |
-| `[[assume]]` | `SHANNON_ASSUME` after kernel early-outs | **Done** (`!(Z > 0)` before assume so NaN is not UB) |
-| Placeholder `_` | Available; used in Cxx26 tests, not forced through old loops | Macro reported in `cxx26.hpp` |
-| `std::function_ref` | `TokenCallbackRef` on `read_one` | **Hatched** (`__cpp_lib_function_ref`) |
-| Contracts (`contract_assert`) | After `n > 1` kernel guards | **Hatched** (`SHANNON_CONTRACT_ASSERT`; fail-closed returns stay) |
-| `#embed` | `data/soft_contact_256.bin` after path search | **Hatched** (`__has_embed`); `load_from_memory` always |
-| Static reflection | `enum_reflect.hpp` vs `backend_name` table | **Hatched** (`<meta>`); table stays fail-closed UNKNOWN |
-| Pack indexing | `cxx26::nth_type_t` / `nth_value` | **Hatched** (`tuple_element` on C++20) |
-| `std::mdspan` | `ShannonEnergyMatrix::as_mdspan` | **Hatched** (`__cpp_lib_mdspan` only, not a lone `__has_include`) |
-| `std::inplace_vector` | Not a fit (vocab 32k–128k) | Skip |
-| `std::execution` | Not a fit for this reduction | Skip |
+| Feature | Shannon use | g++-14 `-std=c++26` | g++-16.0 PPA |
+|---|---|---|---|
+| Dialect `-std=c++26` | CMake/setup.py default | **Done** (fallback to 23 if rejected) | Same |
+| `[[assume]]` | `SHANNON_ASSUME` after kernel early-outs | **Done** (`!(Z > 0)` before assume so NaN is not UB) | Same |
+| Placeholder `_` | Cxx26 tests | Live | Live |
+| `std::function_ref` | `TokenCallbackRef` on `read_one` | Hatch (no-op) | **Live** (omit `TokenCallback&&`) |
+| Contracts (`contract_assert`) | After `n > 1` kernel guards | Hatch | Still unset |
+| `#embed` | `data/soft_contact_256.bin` after path search | Hatch; `load_from_memory` always | `__has_embed` live |
+| Static reflection | `enum_reflect.hpp` vs `backend_name` table | Hatch; table stays UNKNOWN | Still unset |
+| Pack indexing | `cxx26::nth_type_t` / `nth_value` | `tuple_element` hatch | **Live** (`Ts...[I]`) |
+| `std::mdspan` | `ShannonEnergyMatrix::as_mdspan` | Hatch | **Live** |
+| `std::inplace_vector` | Not a fit (vocab 32k–128k) | Skip | Skip |
+| `std::execution` | Not a fit for this reduction | Skip | Skip |
 
 ## Suggested PR order (conflict-minimizing)
 
@@ -202,15 +214,15 @@ surface first**.
 6. Phase B compiler bump (workflow + CMake + setup.py only).  ← **done (PR #16)**
 7. Phase B `std::expected` façade.  ← **done (PR #17)**
 8. Phase C portable SIMD traits + C++26 dialect default.  ← **done (PR #18)**
-9. P1928 `<simd>` retarget when `__cpp_lib_simd` exists on CI.  ← **hatched (this PR)**
+9. P1928 `<simd>` retarget when `__cpp_lib_simd` exists on CI.  ← **hatched (PR #20)**
+10. GCC 16 hatch lane + C++26 README badge.  ← **ENH-040 (this PR)**
 
-**This VM (g++-14 / clang++ 18):** `__cpp_lib_simd` is undefined, so
-`std_simd_flavor()` is `ExperimentalTs` on libstdc++ and `Stub` on libc++.
-GCC 16 is required to compile the P1928 `std::simd::vec` branch. Phase D
-macros (`function_ref`, contracts, `#embed`, reflection, pack indexing,
-mdspan) are also unset here except placeholder `_`. `shannon_tests` now
-includes `tests/test_energy_matrix.cpp`; `gtest_discover_tests` runs those
-cases with `WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}` so
+**This VM:** g++-14 leaves `__cpp_lib_simd` unset (`ExperimentalTs` on
+libstdc++, `Stub` on libc++). g++-16.0 from the toolchain-r PPA still leaves
+`__cpp_lib_simd` unset, so P1928 `std::simd::vec` does **not** compile yet.
+It **does** define `function_ref`, `mdspan`, pack indexing, and `__has_embed`.
+`shannon_tests` includes `tests/test_energy_matrix.cpp`;
+`gtest_discover_tests` uses `WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}` so
 `data/soft_contact_256.bin` is found. `Projection.ProjectTo40x40` skips when
 the singleton used the closed-form fallback.
 
@@ -223,18 +235,25 @@ the singleton used the closed-form fallback.
 - GPU backends (already removed; workload is transfer-bound).
 - Changing the −3.2 bit threshold, Welford formula, or Python detector
   arithmetic “because C++26”.
-- Advertising C++26 in README badges until Linux **and** macOS CI compile
-  `-std=c++26` without the CMake fallback.
+- Pinning python / release Linux jobs to experimental GCC 16.
+- Claiming P1928 runs because a GCC 16 binary exists (need `__cpp_lib_simd`).
 
 ## Verification bar (every code PR)
 
 ```bash
-# Linux / this environment (CI pins g++-14; g++-13 still compiles -std=c++23)
+# Proven Linux floor (CI `cpp` Ubuntu / python / release agent)
 cmake -B build -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF \
       -DCMAKE_CXX_COMPILER=g++-14
 # Default SHANNON_CXX_STANDARD=26 (g++-14 accepts it; g++-13 falls back to 23)
 cmake --build build -j
 ctest --test-dir build --output-on-failure \
+      -E 'Avx512|SimdLog2Avx2.MaxRelativeError|SimdExpGeneric|SimdLog2Generic'
+
+# Hatch lane (CI `cpp-gcc16`; PPA GCC 16.0 — still no __cpp_lib_simd)
+cmake -B build-gxx16 -DSHANNON_BUILD_TESTS=ON -DSHANNON_BUILD_PYTHON=OFF \
+      -DCMAKE_CXX_COMPILER=g++-16
+cmake --build build-gxx16 -j
+ctest --test-dir build-gxx16 --output-on-failure \
       -E 'Avx512|SimdLog2Avx2.MaxRelativeError|SimdExpGeneric|SimdLog2Generic'
 
 source .venv/bin/activate

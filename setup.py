@@ -68,8 +68,8 @@ def _core_sources_available() -> bool:
     return all((ROOT / rel).is_file() for rel in _CORE_SOURCES)
 
 
-@lru_cache(maxsize=4)
-def _compiler_supports_std(std: str) -> bool:
+@lru_cache(maxsize=8)
+def _compiler_supports_std(std: str, cxx_env: str, windows: bool) -> bool:
     """True if ``CXX`` (or a discovered compiler) accepts ``-std=c++N`` / ``/std:c++N``."""
     src = "int main(){return 0;}\n"
     try:
@@ -78,8 +78,7 @@ def _compiler_supports_std(std: str) -> bool:
             out_path = os.path.join(td, "probe.o")
             with open(src_path, "w", encoding="utf-8") as fh:
                 fh.write(src)
-            cxx_env = os.environ.get("CXX", "").strip()
-            if os.name == "nt":
+            if windows:
                 cmd_prefix = shlex.split(cxx_env) if cxx_env else (
                     [shutil.which("cl")] if shutil.which("cl") else []
                 )

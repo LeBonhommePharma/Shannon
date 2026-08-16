@@ -18,11 +18,12 @@ and cannot be built in this environment (no Xcode/Swift on Linux).
   `source .venv/bin/activate`, or call tools directly via `.venv/bin/python`,
   `.venv/bin/pytest`, `.venv/bin/ruff`. The `shannon` / `shannon-monitor`
   console scripts are on PATH only while the venv is active.
-- The startup update script rebuilds the editable install. The optional native
-  C++ extension `shannon._core` **is expected to build** here (`g++-13` +
-  `python3-dev` are installed), so `shannon._HAS_CORE` is `True`. If it ever
-  reports `False`, the pure-NumPy fallback still works; force it with
-  `SHANNON_SKIP_CORE=1`.
+- The startup update script recreates `.venv`, rebuilds the editable install,
+  and best-effort installs `python3-dev` (a codebase build dependency; `g++-13`
+  already ships in the base image). With both present the optional native C++
+  extension `shannon._core` **builds**, so `shannon._HAS_CORE` is `True`. If it
+  ever reports `False` (e.g. `python3-dev` could not be installed), the
+  pure-NumPy fallback still works; force it with `SHANNON_SKIP_CORE=1`.
 
 ### Running / testing
 - Python tests: `pytest tests/python/ tests/test_detector.py tests/test_train.py`.

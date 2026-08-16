@@ -185,8 +185,10 @@ TEST(EnergyMatrix, FlatSpanIsRowMajor) {
     auto view = m.as_mdspan();
     EXPECT_EQ(view.extent(0), 256u);
     EXPECT_EQ(view.extent(1), 256u);
-    EXPECT_DOUBLE_EQ(view[0, 0], m.energy(0, 0));
-    EXPECT_DOUBLE_EQ(view[1, 2], m.energy(1, 2));
+    // Extra parens: GTest macros split on commas, and view[i, j] is not nested
+    // in () the way m.energy(i, j) is.
+    EXPECT_DOUBLE_EQ((view[0, 0]), m.energy(0, 0));
+    EXPECT_DOUBLE_EQ((view[1, 2]), m.energy(1, 2));
 #endif
 }
 

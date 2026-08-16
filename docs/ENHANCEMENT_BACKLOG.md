@@ -361,10 +361,12 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **First slice:** CMake `SHANNON_CXX_STANDARD` default 26 with compiler
   fallback to 23; experimental-simd traits TU; `Backend::STD_SIMD` override
   only (do not change `best_backend`); `SHANNON_ASSUME`; capability tests
-  that stay false for blocked features.
+  that match dialect / feature-test macros (do not hard-fail when a newer
+  GCC grows mdspan or P1928).
 - **Done:** Dialect 20/23/26; `SHANNON_USE_STD_SIMD` (OFF → scalar stub);
   Horner on `native_simd<double>`; golden `StdSimdKernels` + `SimdExpGeneric`;
-  `cxx26.hpp` reports blocked P1928/contracts/embed/reflection/pack indexing.
+  `cxx26.hpp` reports optional P1928/contracts/embed/reflection/pack indexing;
+  `setup.py` falls back to 23 when `-std=c++26` is rejected.
 - **Priority:** P2
 - **Plan:** `docs/CXX_MODERNIZATION.md` Phase C + dialect 26 + Phase D hatches
 

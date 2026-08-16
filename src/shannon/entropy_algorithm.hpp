@@ -105,7 +105,10 @@ template <typename Traits>
         ws += shifted * ev;
     }
 
-    if (Z <= 0.0) return 0.0;
+    // NaN is not <= 0, so `Z <= 0` then `[[assume]](Z > 0)` is reachable UB.
+    // Treat non-positive *and* NaN as empty support (H=0), matching the
+    // historical `std::fmax(0, log2(NaN))` fail-closed path.
+    if (!(Z > 0.0)) return 0.0;
     SHANNON_ASSUME(Z > 0.0);
     return std::fmax(0.0, std::log2(Z) - (ws / (Z * kLn2)));
 }

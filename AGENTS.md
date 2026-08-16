@@ -21,7 +21,7 @@ and cannot be built in this environment (no Xcode/Swift on Linux).
 - The startup update script recreates `.venv`, rebuilds the editable install,
   and best-effort installs `python3-dev` (a codebase build dependency; `g++-13`
   already ships in the base image). **g++-13 does not accept `-std=c++26`**
-  (CMake falls back to 23). Prefer `g++-14` when present (GitHub CI pin) so
+  (CMake **and** `setup.py` fall back to 23). Prefer `g++-14` when present (GitHub CI pin) so
   the default dialect is actually 26. With `python3-dev` the optional native
   C++ extension `shannon._core` **builds**, so `shannon._HAS_CORE` is `True`.
   If it ever reports `False`, the pure-NumPy fallback still works; force it

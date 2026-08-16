@@ -170,7 +170,7 @@ This is a **traits swap**, not a seventh copy of the algorithm (Phase A).
 | Feature | Shannon use | Status on g++-14 `-std=c++26` |
 |---|---|---|
 | Dialect `-std=c++26` | CMake/setup.py default | **Done** (fallback to 23) |
-| `[[assume]]` | `SHANNON_ASSUME` after kernel early-outs | **Done** (`cxx26.hpp`) |
+| `[[assume]]` | `SHANNON_ASSUME` after kernel early-outs | **Done** (`!(Z > 0)` before assume so NaN is not UB) |
 | Placeholder `_` | Available; not forced through existing code | Macro reported in `cxx26.hpp` |
 | `std::function_ref` | `TokenCallback` / ingest | **Blocked** |
 | Contracts (`pre` / `post`) | `entropy >= 0`, non-null kernels | **Blocked** |

@@ -386,6 +386,13 @@ TEST(Entropy, NaNInfInput) {
     EXPECT_GE(h, 0.0);
 }
 
+TEST(Entropy, AllNanLogitsAreZero) {
+    std::vector<double> all_nan(8, std::numeric_limits<double>::quiet_NaN());
+    const double h = kernels::configurational_entropy_scalar(all_nan);
+    EXPECT_FALSE(std::isnan(h));
+    EXPECT_DOUBLE_EQ(h, 0.0);
+}
+
 TEST(Entropy, NegInfMaskedLogitsUseFiniteSupport) {
     // Masked-vocab -inf must not 0*-inf NaN the weighted sum into H=0
     // (false collapse). Three equal finite logits → log2(3).
@@ -676,6 +683,19 @@ TEST(StdSimdKernels, PosInfLogitIsCertain) {
     std::vector<double> logits(8, 0.0);
     logits[3] = pinf;
     EXPECT_DOUBLE_EQ(kernels::configurational_entropy_std_simd(logits), 0.0);
+}
+
+TEST(StdSimdKernels, AllNanLogitsAreZero) {
+    if (!kernels::std_simd_kernels_built()) {
+        GTEST_SKIP() << "experimental/simd kernel not built";
+    }
+#if defined(SHANNON_STD_SIMD_REQUIRES_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+#endif
+    std::vector<double> all_nan(8, std::numeric_limits<double>::quiet_NaN());
+    const double h = kernels::configurational_entropy_std_simd(all_nan);
+    EXPECT_FALSE(std::isnan(h));
+    EXPECT_DOUBLE_EQ(h, 0.0);
 }
 
 TEST(UnifiedDispatch, StdSimdOverrideNotAuto) {
@@ -1486,23 +1506,22 @@ TEST(UnifiedDispatch, ExpectedEntropyOverloads) {
 }
 #endif
 
-TEST(Cxx26, CapabilityReportIsHonest) {
-    // P1928 / contracts / reflection / pack indexing / #embed / function_ref
-    // are not on g++-14. Do not flip these to true without a toolchain bump.
-    EXPECT_FALSE(cxx26::has_std_simd);
-    EXPECT_FALSE(cxx26::has_contracts);
-    EXPECT_FALSE(cxx26::has_reflection);
-    EXPECT_FALSE(cxx26::has_pack_indexing);
-    EXPECT_FALSE(cxx26::has_embed);
-    EXPECT_FALSE(cxx26::has_function_ref);
-    EXPECT_FALSE(cxx26::has_mdspan);
-#if defined(SHANNON_CXX26_HAS_INCLUDE_EXPERIMENTAL_SIMD)
-    EXPECT_TRUE(cxx26::has_experimental_simd_header);
-#endif
+TEST(Cxx26, CapabilityReportMatchesDialect) {
+    // Extra library features (P1928 simd, contracts, reflection, mdspan, …)
+    // are optional. Asserting they are absent would fail on a newer GCC even
+    // when cxx26.hpp is honest. Only the dialect vs __cplusplus is required.
 #if __cplusplus >= 202400L
     EXPECT_TRUE(cxx26::dialect_26);
 #else
     EXPECT_FALSE(cxx26::dialect_26);
+#endif
+#if defined(SHANNON_CXX26_HAS_INCLUDE_EXPERIMENTAL_SIMD)
+    EXPECT_TRUE(cxx26::has_experimental_simd_header);
+#endif
+#if defined(__cpp_lib_simd)
+    EXPECT_TRUE(cxx26::has_std_simd);
+#else
+    EXPECT_FALSE(cxx26::has_std_simd);
 #endif
 }
 

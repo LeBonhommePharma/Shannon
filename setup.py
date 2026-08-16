@@ -120,7 +120,9 @@ def _cxx_std() -> str:
             stacklevel=2,
         )
         raw = "26"
-    if raw == "26" and not _compiler_supports_std("26"):
+    if raw == "26" and not _compiler_supports_std(
+        "26", os.environ.get("CXX", "").strip(), os.name == "nt"
+    ):
         warnings.warn(
             "Compiler does not accept C++26; falling back to C++23. "
             "Set SHANNON_CXX_STANDARD=23 to silence this.",

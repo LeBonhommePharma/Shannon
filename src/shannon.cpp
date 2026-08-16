@@ -110,7 +110,9 @@ double shannon_entropy_from_logprobs(std::span<const double> logprobs) {
     return std::max(0.0, h);
 }
 
-// ─── Collapse Detector ───────────────────────────────────────────────────────
+// ─── Collapse Detector (legacy v1: population variance, collapse-only) ───────
+
+namespace v1 {
 
 CollapseDetector::CollapseDetector(std::size_t window_size, double threshold_bits)
     : window_size_(window_size > 0 ? window_size : kDefaultWindowSize)
@@ -207,6 +209,8 @@ CollapseResult CollapseDetector::push_entropy(double h) {
 
     return result;
 }
+
+}  // namespace v1
 
 // ─── Hardware info (v1 API used by Python bindings / CLI) ────────────────────
 

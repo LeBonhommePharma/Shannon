@@ -279,6 +279,11 @@ class TestInputPolicy:
             with pytest.raises(ValueError):
                 getattr(det, method)(np.array([], dtype=np.float64))
 
+    def test_cpp_core_default_oscillation_window_matches_python(self):
+        core = pytest.importorskip("shannon._core")
+        det = core.CollapseDetector()
+        assert det.oscillation_window == 5
+
 
 # ── Callback contracts ───────────────────────────────────────────────────────
 

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <shannon/config.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -18,14 +20,6 @@
 #include <vector>
 
 namespace shannon {
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-inline constexpr double kLn2        = 0.693147180559945309417;
-inline constexpr double kLog2E      = 1.44269504088896340736;
-inline constexpr double kEpsilon    = 1e-300;
-inline constexpr double kDefaultCollapseThreshold = -3.2; // bits
-inline constexpr std::size_t kDefaultWindowSize   = 8;
 
 // ─── Core Kernel ─────────────────────────────────────────────────────────────
 // Direct port of shannon_configurational_entropy from FlexAID∆S.
@@ -61,15 +55,18 @@ inline double shannon_entropy_from_logprobs(const double* logprobs, std::size_t 
 
 // ─── Sliding-Window Collapse Detector (legacy v1) ────────────────────────────
 //
-// The canonical detector is shannon::CollapseDetector in
-// src/shannon/collapse_detector.hpp (v2: expansion/oscillation events,
-// unified dispatch). This interim version is kept for the legacy test suite.
-// The inline namespace keeps `shannon::CollapseDetector` working for code
-// that includes only this header, while giving these symbols distinct
-// mangled names so both libraries can be linked into one binary
-// (the pybind11 _core module links shannon_core AND shannon_v2).
+// Product detector: `shannon::CollapseDetector` in collapse_detector.hpp
+// (Welford n−1, expansion/oscillation, UnifiedDispatch). Bindings, the
+// Python twin, and shannon-agent use that class.
+//
+// This v1 detector is a separate implementation: OpenMP kernels, population
+// variance (E[X²]−μ² with divisor n), collapse-only, unbounded trace. Do not
+// wrap it around v2 — the window_std / z_score / edge-threshold .collapsed
+// bits disagree. `namespace v1` is **not** inline so both headers can be
+// included in one TU: `shannon::CollapseDetector` is always v2.
+// Itanium mangling already included `v1` when this was an inline namespace.
 
-inline namespace v1 {
+namespace v1 {
 
 /// Result from a single step of collapse detection.
 struct CollapseResult {
@@ -111,6 +108,9 @@ public:
     CollapseResult add_logprobs(const double* logprobs, std::size_t n);
     CollapseResult add_logprobs(std::span<const double> logprobs);
 
+    /// Feed a pre-computed entropy (same window math as add_*).
+    CollapseResult push_entropy(double h);
+
     /// Register a callback invoked on every collapse event.
     void set_callback(CollapseCallback cb);
 
@@ -122,8 +122,6 @@ public:
     double      threshold_bits() const { return threshold_;   }
 
 private:
-    CollapseResult push_entropy(double h);
-
     std::size_t           window_size_;
     double                threshold_;
     std::vector<double>   trace_;
@@ -136,6 +134,6 @@ private:
     CollapseCallback      callback_;
 };
 
-}  // inline namespace v1
+}  // namespace v1
 
 }  // namespace shannon

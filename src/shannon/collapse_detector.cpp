@@ -368,6 +368,10 @@ std::size_t CollapseDetector::token_count() const noexcept {
     return token_count_;
 }
 
+std::size_t CollapseDetector::oscillation_window() const noexcept {
+    return oscillation_window_;
+}
+
 const std::deque<double>& CollapseDetector::entropy_trace() const noexcept {
     return trace_;
 }

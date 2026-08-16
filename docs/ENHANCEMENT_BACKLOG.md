@@ -424,6 +424,24 @@ Original seed: 2026-07-26 thorough test pass (Pill session-content / live-surfac
 - **Priority:** P2
 - **Plan:** `docs/CXX_MODERNIZATION.md` toolchain
 
+### - [x] ENH-041: Unify v1/v2 CollapseDetector names without dropping v1 math
+
+- **Why:** `inline namespace v1` made `shannon::CollapseDetector` mean v1 when
+  only `shannon.hpp` was included, while the product (bindings, agent, Python
+  twin) already used v2. Wrapping v1 around v2 would change population
+  variance to Welford n−1.
+- **Area:** `src/shannon.hpp`, `src/shannon.cpp`, `collapse_detector.hpp`,
+  `terminal_agent.cpp`, `src/bindings.cpp`, tests
+- **Done:** `namespace v1` is not inline. Product name is v2. v1 kernels,
+  population `E[X²]−μ²`, collapse-only callbacks, unbounded `trace()` kept.
+  `push_entropy` public on v1 for the same-H comparison. Both headers compile
+  in one TU (`tests/cpp/test_detector_unify.cpp`). Agent applies
+  `oscillation_window`. pybind default osc window is `kDefaultOscillationWindow`
+  (5). Libraries `shannon_core` / `shannon_v2` not merged. Welford / −3.2 /
+  Python twin unchanged.
+- **Priority:** P2
+- **Plan:** `docs/CXX_MODERNIZATION.md` detector unify
+
 ---
 
 ## Out of scope for this backlog (do not pick here)

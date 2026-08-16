@@ -13,7 +13,8 @@
 | `shannon/enum_reflect.hpp` | P2996 hatch: enumerator names vs the `backend_name` table |
 | `shannon/unified_dispatch.hpp` | `UnifiedDispatch` singleton: backend selection, hardware report |
 | `shannon/hardware_detect.hpp` | `HardwareCapabilities` struct, `detect_hardware()` |
-| `shannon/collapse_detector.hpp` | `CollapseDetector`: sliding window, z-score, callbacks |
+| `shannon/collapse_detector.hpp` | Product `CollapseDetector` (Welford n−1, UnifiedDispatch) |
+| `shannon.hpp` | v1 kernels + `shannon::v1::CollapseDetector` (population variance) |
 | `shannon/handrail.hpp` | `HandrailEngine`: escalation, cooldown, actions |
 | `shannon/terminal_agent.hpp` | `TerminalAgent`: full pipeline with stream ingestion |
 | `shannon/stream_ingest.hpp` | `StdinIngester`, `SocketIngester`, `ShmemIngester` |
@@ -25,6 +26,8 @@
 
 All v2 types and functions are in `namespace shannon`. Entropy kernels are in
 `namespace shannon::kernels`. Stream ingesters are in `namespace shannon::ingest`.
+The legacy collapse-only detector is `shannon::v1::CollapseDetector`
+(`src/shannon.hpp`); do not alias it to `shannon::CollapseDetector`.
 
 ---
 

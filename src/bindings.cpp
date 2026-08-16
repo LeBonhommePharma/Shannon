@@ -414,7 +414,7 @@ PYBIND11_MODULE(_core, m) {
              py::arg("window_size") = 8,
              py::arg("collapse_threshold") = -3.2,
              py::arg("expansion_threshold") = 3.2,
-             py::arg("oscillation_window") = 16)
+             py::arg("oscillation_window") = shannon::kDefaultOscillationWindow)
         .def("add_logits",
             [](shannon::CollapseDetector& self, py::array logits) {
                 auto vec = to_double_vec(logits);
@@ -482,6 +482,8 @@ PYBIND11_MODULE(_core, m) {
         .def("set_max_trace_size", &shannon::CollapseDetector::set_max_trace_size)
         .def("reset", &shannon::CollapseDetector::reset)
         .def_property_readonly("token_count", &shannon::CollapseDetector::token_count)
+        .def_property_readonly("oscillation_window",
+            &shannon::CollapseDetector::oscillation_window)
         .def_property_readonly("trace",
             [](const shannon::CollapseDetector& self) {
                 const auto& t = self.entropy_trace();

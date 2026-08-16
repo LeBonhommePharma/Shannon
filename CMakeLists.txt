@@ -274,8 +274,9 @@ if(SHANNON_BUILD_TESTS)
 
     add_executable(shannon_v2_tests
         tests/cpp/test_shannon_v2.cpp
+        tests/cpp/test_detector_unify.cpp
     )
-    target_link_libraries(shannon_v2_tests PRIVATE shannon_v2 GTest::gtest_main)
+    target_link_libraries(shannon_v2_tests PRIVATE shannon_v2 shannon_core GTest::gtest_main)
     target_compile_definitions(shannon_v2_tests PRIVATE ${SHANNON_DEFS})
     target_include_directories(shannon_v2_tests PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated/)
 

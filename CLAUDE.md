@@ -73,6 +73,7 @@ Target: Python 3.10+, line length 100, ruff rules E/F/W/I/UP.
 ## Project Structure
 
 - Primary languages: Python, C++20, with YAML for configuration
+- C++ dialect roadmap (do **not** flip to C++26 in one PR): `docs/CXX_MODERNIZATION.md`
 - CMake build system — always run `cmake -B build` then `cmake --build build` to compile
 - Python tests via `pytest tests/python/ -v` (repo-root `pythonpath = ["python"]` in pyproject.toml), C++ tests via `ctest --test-dir build --output-on-failure`
 - Apple multi-platform: `./scripts/test_apple_platforms.sh` (macOS always; iOS/iPad/watch Simulator builds when Xcode + xcodegen allow — see `docs/APPLE_PLATFORM_TESTING.md`)

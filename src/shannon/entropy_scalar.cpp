@@ -2,88 +2,63 @@
 //
 // Pure C++20 entropy collapse detection — Le Bonhomme Pharma / NRGlab
 // Ported from FlexAIDdS shannon_configurational_entropy with identical math.
+// Instantiated as width=1 traits over the shared algorithm.
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/entropy.hpp"
+#include "shannon/entropy_algorithm.hpp"
 #include "shannon/config.hpp"
 
-#include <algorithm>
 #include <cassert>
 #include <cmath>
 
 namespace shannon::kernels {
 
-// ─── Configurational entropy (log-sum-exp) ────────────────────────────────────
-//
-// Given unnormalized log-weights w_i, the entropy in bits is:
-//   H = log2(Z) - (1/Z) * Σ_i [ (w_i - max_w) * exp(w_i - max_w) ] / ln(2)
-// where Z = Σ_i exp(w_i - max_w)
+namespace {
 
-double configurational_entropy_scalar(const double* w, std::size_t n) noexcept {
-    if (n == 0) return 0.0;
-    if (n == 1) return 0.0;
+struct ScalarTraits {
+    using vec = double;
+    static constexpr std::size_t width = 1;
 
-    // Step 1: find max for log-sum-exp stability
-    double max_w = w[0];
-    for (std::size_t i = 1; i < n; ++i) {
-        if (w[i] > max_w) max_w = w[i];
+    [[nodiscard]] static vec set1(double x) noexcept { return x; }
+    [[nodiscard]] static vec zero() noexcept { return 0.0; }
+    [[nodiscard]] static vec load(const double* p) noexcept { return *p; }
+    [[nodiscard]] static vec sub(vec a, vec b) noexcept { return a - b; }
+    [[nodiscard]] static vec add(vec a, vec b) noexcept { return a + b; }
+    [[nodiscard]] static vec mul(vec a, vec b) noexcept { return a * b; }
+    [[nodiscard]] static vec fmadd(vec a, vec b, vec c) noexcept { return a * b + c; }
+    [[nodiscard]] static vec exp(vec x) noexcept { return std::exp(x); }
+    [[nodiscard]] static vec log2(vec x) noexcept { return std::log2(x); }
+    [[nodiscard]] static vec select_gt(vec values, double threshold, vec if_true) noexcept {
+        return values > threshold ? if_true : 0.0;
     }
-
-    // Step 2: compute partition function Z and weighted sum
-    double Z = 0.0;
-    double weighted_sum = 0.0;
-
-    for (std::size_t i = 0; i < n; ++i) {
-        const double shifted = w[i] - max_w;
-        const double exp_val = std::exp(shifted);
-        Z += exp_val;
-        weighted_sum += shifted * exp_val;
+    [[nodiscard]] static vec select_finite(vec x, vec v) noexcept {
+        return std::isfinite(x) ? v : 0.0;
     }
+    [[nodiscard]] static double hsum(vec v) noexcept { return v; }
+};
 
-    if (Z <= 0.0) return 0.0;
+}  // namespace
 
-    // Step 3: entropy in bits
-    const double log2_Z = std::log2(Z);
-    const double entropy = log2_Z - (weighted_sum / (Z * kLn2));
-
-    return std::fmax(0.0, entropy);
+double configurational_entropy_scalar(std::span<const double> weights) noexcept {
+    return configurational_entropy<ScalarTraits>(weights);
 }
 
-// ─── Shannon entropy from probabilities ───────────────────────────────────────
-
-double entropy_from_probs_scalar(const double* p, std::size_t n) noexcept {
-    if (n == 0) return 0.0;
-    if (n == 1) return 0.0;
-
-    double h = 0.0;
-    for (std::size_t i = 0; i < n; ++i) {
-        if (p[i] > kEpsilon) {
-            h -= p[i] * std::log2(p[i]);
-        }
-    }
-    return std::fmax(0.0, h);
+double entropy_from_probs_scalar(std::span<const double> probs) noexcept {
+    return entropy_from_probs<ScalarTraits>(probs);
 }
 
-// ─── Shannon entropy from log-probabilities ───────────────────────────────────
-
-double entropy_from_logprobs_scalar(const double* lp, std::size_t n) noexcept {
-    if (n == 0) return 0.0;
-    if (n == 1) return 0.0;
-
+double entropy_from_logprobs_scalar(std::span<const double> logprobs) noexcept {
 #ifndef NDEBUG
-    double Z = 0.0;
-    for (std::size_t i = 0; i < n; ++i) Z += std::exp(lp[i]);
-    assert(std::abs(Z - 1.0) < 1e-4 && "entropy_from_logprobs: input not normalized");
-#endif
-
-    double h = 0.0;
-    for (std::size_t i = 0; i < n; ++i) {
-        const double p = std::exp(lp[i]);
-        if (p > kEpsilon) {
-            h -= p * lp[i] * kLog2E;  // nats → bits
-        }
+    const double* lp = logprobs.data();
+    const std::size_t n = logprobs.size();
+    if (n > 1 && lp != nullptr) {
+        double Z = 0.0;
+        for (std::size_t i = 0; i < n; ++i) Z += std::exp(lp[i]);
+        assert(std::abs(Z - 1.0) < 1e-4 && "entropy_from_logprobs: input not normalized");
     }
-    return std::fmax(0.0, h);
+#endif
+    return entropy_from_logprobs<ScalarTraits>(logprobs);
 }
 
 }  // namespace shannon::kernels

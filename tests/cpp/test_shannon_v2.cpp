@@ -18,9 +18,16 @@
 
 #include <cmath>
 #include <limits>
+#include <span>
 #include <string>
 #include <vector>
 #include <unistd.h>
+
+#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__GNUC__) || defined(__clang__)
+#include <cpuid.h>
+#endif
+#endif
 
 using namespace shannon;
 
@@ -41,6 +48,19 @@ TEST(ScalarEntropy, SingleElement) {
 TEST(ScalarEntropy, EmptyInput) {
     double h = kernels::configurational_entropy_scalar(nullptr, 0);
     EXPECT_DOUBLE_EQ(h, 0.0);
+}
+
+TEST(ScalarEntropy, NullptrNonzeroIsZero) {
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_scalar(nullptr, 8), 0.0);
+    EXPECT_DOUBLE_EQ(kernels::entropy_from_probs_scalar(nullptr, 8), 0.0);
+    EXPECT_DOUBLE_EQ(kernels::entropy_from_logprobs_scalar(nullptr, 4), 0.0);
+}
+
+TEST(ScalarEntropy, SpanOverload) {
+    std::vector<double> logits(16, 0.0);
+    std::span<const double> view{logits};
+    double h = kernels::configurational_entropy_scalar(view);
+    EXPECT_NEAR(h, std::log2(16.0), 1e-10);
 }
 
 TEST(ScalarEntropy, TwoElements) {
@@ -357,12 +377,33 @@ TEST(Entropy, NaNInfInput) {
     std::vector<double> with_inf = {1.0, std::numeric_limits<double>::infinity(), 2.0};
     h = kernels::configurational_entropy_scalar(with_inf.data(), 3);
     EXPECT_FALSE(std::isnan(h));
-    EXPECT_GE(h, 0.0);
+    EXPECT_DOUBLE_EQ(h, 0.0);  // +inf is a certain token, not a mask
 
     std::vector<double> all_neg_inf(4, -std::numeric_limits<double>::infinity());
     h = kernels::configurational_entropy_scalar(all_neg_inf.data(), 4);
     EXPECT_FALSE(std::isnan(h));
     EXPECT_GE(h, 0.0);
+}
+
+TEST(Entropy, NegInfMaskedLogitsUseFiniteSupport) {
+    // Masked-vocab -inf must not 0*-inf NaN the weighted sum into H=0
+    // (false collapse). Three equal finite logits → log2(3).
+    const double ninf = -std::numeric_limits<double>::infinity();
+    std::vector<double> logits = {0.0, 0.0, 0.0, ninf};
+    const double h = kernels::configurational_entropy_scalar(logits);
+    EXPECT_FALSE(std::isnan(h));
+    EXPECT_NEAR(h, std::log2(3.0), 1e-10);
+}
+
+TEST(Entropy, PosInfLogitIsCertain) {
+    const double pinf = std::numeric_limits<double>::infinity();
+    const double ninf = -std::numeric_limits<double>::infinity();
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_scalar(
+                         std::vector<double>{1.0, pinf, 2.0}),
+                     0.0);
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_scalar(
+                         std::vector<double>{pinf, ninf, 0.0}),
+                     0.0);
 }
 
 // ─── Config tests ───────────────────────────────────────────────────────────
@@ -399,11 +440,240 @@ TEST(UnifiedDispatch, ComputeEntropy) {
 }
 
 TEST(UnifiedDispatch, BackendNames) {
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::SCALAR), "SCALAR");
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AVX2), "AVX2");
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AVX512), "AVX512");
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::NEON), "NEON");
-    EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(Backend::AUTO), "AUTO");
+    for (Backend b : kAllBackends) {
+        const char* name = backend_name(b);
+        ASSERT_NE(name, nullptr);
+        EXPECT_STRNE(name, "UNKNOWN") << "enumerant " << static_cast<int>(b);
+        EXPECT_STREQ(dispatch::UnifiedDispatch::backend_name(b), name);
+    }
+    EXPECT_STREQ(backend_name(Backend::SCALAR), "SCALAR");
+    EXPECT_STREQ(backend_name(Backend::OPENMP), "OPENMP");
+    EXPECT_STREQ(backend_name(Backend::SSE42), "SSE42");
+    EXPECT_STREQ(backend_name(Backend::AVX2), "AVX2");
+    EXPECT_STREQ(backend_name(Backend::AVX512), "AVX512");
+    EXPECT_STREQ(backend_name(Backend::NEON), "NEON");
+    EXPECT_STREQ(backend_name(Backend::AUTO), "AUTO");
+    EXPECT_STREQ(backend_name(static_cast<Backend>(99)), "UNKNOWN");
+}
+
+#if defined(__x86_64__) || defined(_M_X64)
+namespace {
+
+#if defined(__GNUC__) || defined(__clang__)
+inline bool cpu_has_sse42() {
+    unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+    if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx)) return false;
+    return (ecx & (1u << 20)) != 0;  // SSE4.2
+}
+inline bool cpu_has_avx2() {
+    unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+    if (!__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) return false;
+    return (ebx & (1u << 5)) != 0;  // AVX2
+}
+inline bool cpu_has_avx512f() {
+    unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+    if (!__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx)) return false;
+    return (ebx & (1u << 16)) != 0;  // AVX512F
+}
+#else
+inline bool cpu_has_sse42() { return true; }
+inline bool cpu_has_avx2() { return true; }
+inline bool cpu_has_avx512f() { return true; }
+#endif
+
+std::vector<double> sine_logits(std::size_t n) {
+    std::vector<double> logits(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        logits[i] = std::sin(static_cast<double>(i) * 0.17) * 3.0;
+    }
+    return logits;
+}
+
+}  // namespace
+#endif  // x86_64
+
+#if defined(SHANNON_USE_SSE42) && (defined(__x86_64__) || defined(_M_X64))
+TEST(Sse42Kernels, MatchesScalarConfigurational) {
+    if (!cpu_has_sse42()) GTEST_SKIP() << "host CPU lacks SSE4.2";
+    auto logits = sine_logits(64);
+    EXPECT_NEAR(kernels::configurational_entropy_scalar(logits),
+                kernels::configurational_entropy_sse42(logits), 1e-10);
+}
+
+TEST(Sse42Kernels, OddLengthTail) {
+    if (!cpu_has_sse42()) GTEST_SKIP() << "host CPU lacks SSE4.2";
+    std::vector<double> logits(17, 0.0);
+    logits[3] = 1.5;
+    EXPECT_NEAR(kernels::configurational_entropy_scalar(logits),
+                kernels::configurational_entropy_sse42(logits), 1e-10);
+}
+
+TEST(Sse42Kernels, NegInfMaskedLogits) {
+    if (!cpu_has_sse42()) GTEST_SKIP() << "host CPU lacks SSE4.2";
+    const double ninf = -std::numeric_limits<double>::infinity();
+    std::vector<double> logits = {0.0, 0.0, 0.0, ninf};
+    EXPECT_NEAR(kernels::configurational_entropy_sse42(logits), std::log2(3.0), 1e-10);
+}
+
+TEST(Sse42Kernels, PosInfLogitIsCertain) {
+    if (!cpu_has_sse42()) GTEST_SKIP() << "host CPU lacks SSE4.2";
+    const double pinf = std::numeric_limits<double>::infinity();
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_sse42(
+                         std::vector<double>{0.0, pinf, 0.0, 0.0}),
+                     0.0);
+}
+#endif
+
+#if defined(SHANNON_USE_AVX2) && (defined(__x86_64__) || defined(_M_X64))
+TEST(Avx2Kernels, MatchesScalarConfigurational) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    auto logits = sine_logits(64);
+    EXPECT_NEAR(kernels::configurational_entropy_scalar(logits),
+                kernels::configurational_entropy_avx2(logits), 1e-10);
+}
+
+TEST(Avx2Kernels, VectorWidthNoTail) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    std::vector<double> logits(4, 0.0);
+    const double h_avx2 = kernels::configurational_entropy_avx2(logits);
+    EXPECT_NEAR(kernels::configurational_entropy_scalar(logits), h_avx2, 1e-10);
+    EXPECT_NEAR(h_avx2, 2.0, 1e-10);  // log2(4)
+}
+
+TEST(Avx2Kernels, OddLengthTail) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    std::vector<double> logits(17, 0.0);
+    logits[3] = 1.5;
+    EXPECT_NEAR(kernels::configurational_entropy_scalar(logits),
+                kernels::configurational_entropy_avx2(logits), 1e-10);
+}
+
+TEST(Avx2Kernels, EmptyAndSingleton) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_avx2(std::span<const double>{}), 0.0);
+    const double one = 1.0;
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_avx2(&one, 1), 0.0);
+}
+
+TEST(Avx2Kernels, MatchesScalarProbs) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    std::vector<double> probs = {0.05, 0.10, 0.15, 0.20, 0.25, 0.25};
+    EXPECT_NEAR(kernels::entropy_from_probs_scalar(probs),
+                kernels::entropy_from_probs_avx2(probs), 1e-12);
+}
+
+TEST(Avx2Kernels, MatchesScalarLogprobs) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    std::vector<double> logprobs;
+    for (double p : {0.1, 0.2, 0.3, 0.4}) {
+        logprobs.push_back(std::log(p));
+    }
+    EXPECT_NEAR(kernels::entropy_from_logprobs_scalar(logprobs),
+                kernels::entropy_from_logprobs_avx2(logprobs), 1e-12);
+}
+
+TEST(Avx2Kernels, NegInfMaskedLogits) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    const double ninf = -std::numeric_limits<double>::infinity();
+    std::vector<double> logits(8, 0.0);
+    logits[7] = ninf;
+    EXPECT_NEAR(kernels::configurational_entropy_avx2(logits), std::log2(7.0), 1e-10);
+}
+
+TEST(Avx2Kernels, PosInfLogitIsCertain) {
+    if (!cpu_has_avx2()) GTEST_SKIP() << "host CPU lacks AVX2";
+    const double pinf = std::numeric_limits<double>::infinity();
+    std::vector<double> logits(8, 0.0);
+    logits[3] = pinf;
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_avx2(logits), 0.0);
+}
+#endif  // SHANNON_USE_AVX2 && x86_64
+
+#if defined(SHANNON_USE_AVX512) && (defined(__x86_64__) || defined(_M_X64))
+TEST(Avx512Kernels, MatchesScalarConfigurational) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX-512";
+    auto logits = sine_logits(64);
+    EXPECT_NEAR(kernels::configurational_entropy_scalar(logits),
+                kernels::configurational_entropy_avx512(logits), 1e-10);
+}
+
+TEST(Avx512Kernels, OddLengthTail) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX-512";
+    std::vector<double> logits(17, 0.0);
+    logits[3] = 1.5;
+    EXPECT_NEAR(kernels::configurational_entropy_scalar(logits),
+                kernels::configurational_entropy_avx512(logits), 1e-10);
+}
+
+TEST(Avx512Kernels, MatchesScalarProbs) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX-512";
+    std::vector<double> probs = {0.05, 0.10, 0.15, 0.20, 0.25, 0.25};
+    EXPECT_NEAR(kernels::entropy_from_probs_scalar(probs),
+                kernels::entropy_from_probs_avx512(probs), 1e-12);
+}
+
+TEST(Avx512Kernels, MatchesScalarLogprobs) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX-512";
+    std::vector<double> logprobs;
+    for (double p : {0.1, 0.2, 0.3, 0.4}) {
+        logprobs.push_back(std::log(p));
+    }
+    EXPECT_NEAR(kernels::entropy_from_logprobs_scalar(logprobs),
+                kernels::entropy_from_logprobs_avx512(logprobs), 1e-12);
+}
+
+TEST(Avx512Kernels, NegInfMaskedLogits) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX-512";
+    const double ninf = -std::numeric_limits<double>::infinity();
+    std::vector<double> logits(16, 0.0);
+    logits[15] = ninf;
+    EXPECT_NEAR(kernels::configurational_entropy_avx512(logits), std::log2(15.0), 1e-10);
+}
+
+TEST(Avx512Kernels, PosInfLogitIsCertain) {
+    if (!cpu_has_avx512f()) GTEST_SKIP() << "host CPU lacks AVX-512";
+    const double pinf = std::numeric_limits<double>::infinity();
+    std::vector<double> logits(16, 0.0);
+    logits[8] = pinf;
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_avx512(logits), 0.0);
+}
+#endif
+
+#if defined(SHANNON_USE_OPENMP)
+TEST(OmpKernels, NegInfMaskedLogits) {
+    const double ninf = -std::numeric_limits<double>::infinity();
+    std::vector<double> logits = {0.0, 0.0, 0.0, ninf};
+    EXPECT_NEAR(kernels::configurational_entropy_omp(logits), std::log2(3.0), 1e-10);
+    EXPECT_NEAR(kernels::configurational_entropy_omp(logits),
+                kernels::configurational_entropy_scalar(logits), 1e-12);
+}
+
+TEST(OmpKernels, PosInfLogitIsCertain) {
+    const double pinf = std::numeric_limits<double>::infinity();
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_omp(
+                         std::vector<double>{1.0, pinf, 2.0}),
+                     0.0);
+}
+#endif
+
+TEST(UnifiedDispatch, NullptrNonzeroIsInvalidArgs) {
+    auto& d = dispatch::UnifiedDispatch::instance();
+    d.detect();
+    double h = 42.0;
+    auto result = d.compute_configurational_entropy(nullptr, 16, h);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error, DispatchError::INVALID_ARGS);
+    EXPECT_DOUBLE_EQ(h, 0.0);
+
+    h = 42.0;
+    result = d.compute_entropy_from_probs(nullptr, 8, h);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error, DispatchError::INVALID_ARGS);
+
+    h = 42.0;
+    result = d.compute_entropy_from_logprobs(nullptr, 8, h);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error, DispatchError::INVALID_ARGS);
 }
 
 #if defined(SHANNON_USE_NEON) && (defined(__ARM_NEON) || defined(__aarch64__))
@@ -441,6 +711,19 @@ TEST(NeonKernels, OddLengthTail) {
     double h_scalar = kernels::configurational_entropy_scalar(logits.data(), logits.size());
     double h_neon   = kernels::configurational_entropy_neon(logits.data(), logits.size());
     EXPECT_NEAR(h_scalar, h_neon, 1e-10);
+}
+
+TEST(NeonKernels, NegInfMaskedLogits) {
+    const double ninf = -std::numeric_limits<double>::infinity();
+    std::vector<double> logits = {0.0, 0.0, 0.0, ninf};
+    EXPECT_NEAR(kernels::configurational_entropy_neon(logits), std::log2(3.0), 1e-10);
+}
+
+TEST(NeonKernels, PosInfLogitIsCertain) {
+    const double pinf = std::numeric_limits<double>::infinity();
+    EXPECT_DOUBLE_EQ(kernels::configurational_entropy_neon(
+                         std::vector<double>{1.0, pinf, 2.0}),
+                     0.0);
 }
 
 TEST(UnifiedDispatch, SelectsNeonOnArm) {
@@ -957,6 +1240,10 @@ TEST(Handrail, WebhookNoUrlNoCrash) {
 
 TEST(Types, BackendEnum) {
     EXPECT_EQ(static_cast<int>(Backend::SCALAR), 0);
+    EXPECT_EQ(static_cast<int>(Backend::OPENMP), 1);
+    EXPECT_EQ(static_cast<int>(Backend::SSE42), 2);
+    EXPECT_EQ(static_cast<int>(Backend::AVX2), 3);
+    EXPECT_EQ(static_cast<int>(Backend::AVX512), 4);
     EXPECT_EQ(static_cast<int>(Backend::NEON), 5);
     EXPECT_EQ(static_cast<int>(Backend::AUTO), 255);
 }

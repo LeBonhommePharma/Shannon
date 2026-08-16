@@ -33,33 +33,30 @@ inline constexpr std::size_t kDefaultWindowSize   = 8;
 
 /// Compute Shannon configurational entropy from unnormalized log-weights.
 /// @param log_weights  array of log-weights (e.g. logits from an LLM)
-/// @param n            number of elements
 /// @return             entropy in bits (always >= 0)
-double shannon_configurational_entropy(const double* log_weights, std::size_t n);
+double shannon_configurational_entropy(std::span<const double> log_weights);
 
-/// Overload accepting a std::span for modern C++ usage.
-inline double shannon_configurational_entropy(std::span<const double> log_weights) {
-    return shannon_configurational_entropy(log_weights.data(), log_weights.size());
+/// Pointer+size overload. `nullptr` with `n > 0` is defined as H = 0
+/// (not UB).
+inline double shannon_configurational_entropy(const double* log_weights, std::size_t n) {
+    if (log_weights == nullptr || n == 0) return 0.0;
+    return shannon_configurational_entropy(std::span<const double>{log_weights, n});
 }
 
 /// Compute Shannon entropy from a normalized probability distribution.
-/// @param probs  array of probabilities (must sum to ~1)
-/// @param n      number of elements
-/// @return       entropy in bits
-double shannon_entropy_from_probs(const double* probs, std::size_t n);
+double shannon_entropy_from_probs(std::span<const double> probs);
 
-inline double shannon_entropy_from_probs(std::span<const double> probs) {
-    return shannon_entropy_from_probs(probs.data(), probs.size());
+inline double shannon_entropy_from_probs(const double* probs, std::size_t n) {
+    if (probs == nullptr || n == 0) return 0.0;
+    return shannon_entropy_from_probs(std::span<const double>{probs, n});
 }
 
-/// Compute Shannon entropy from log-probabilities.
-/// @param logprobs  array of log-probabilities (base e)
-/// @param n         number of elements
-/// @return          entropy in bits
-double shannon_entropy_from_logprobs(const double* logprobs, std::size_t n);
+/// Compute Shannon entropy from log-probabilities (base e).
+double shannon_entropy_from_logprobs(std::span<const double> logprobs);
 
-inline double shannon_entropy_from_logprobs(std::span<const double> logprobs) {
-    return shannon_entropy_from_logprobs(logprobs.data(), logprobs.size());
+inline double shannon_entropy_from_logprobs(const double* logprobs, std::size_t n) {
+    if (logprobs == nullptr || n == 0) return 0.0;
+    return shannon_entropy_from_logprobs(std::span<const double>{logprobs, n});
 }
 
 // ─── Sliding-Window Collapse Detector (legacy v1) ────────────────────────────

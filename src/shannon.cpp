@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 
 namespace shannon {
@@ -25,16 +26,26 @@ namespace shannon {
 //
 // where Z = sum_i exp(w_i - max_w)  (log-sum-exp trick for stability).
 
-double shannon_configurational_entropy(const double* log_weights, std::size_t n) {
+double shannon_configurational_entropy(std::span<const double> log_weights) {
+    const double* w = log_weights.data();
+    const std::size_t n = log_weights.size();
     if (n == 0) return 0.0;
     if (n == 1) return 0.0;
 
-    // Step 1: find max for log-sum-exp stability
-    double max_w = log_weights[0];
-    #pragma omp simd reduction(max:max_w)
-    for (std::size_t i = 1; i < n; ++i) {
-        if (log_weights[i] > max_w) max_w = log_weights[i];
+    // -inf / NaN are masked (finite support). +inf is a certain token → H=0.
+    double max_w = -std::numeric_limits<double>::infinity();
+    bool any_finite = false;
+    bool any_pos_inf = false;
+    const double pinf = std::numeric_limits<double>::infinity();
+    for (std::size_t i = 0; i < n; ++i) {
+        if (w[i] == pinf) {
+            any_pos_inf = true;
+        } else if (std::isfinite(w[i])) {
+            any_finite = true;
+            if (w[i] > max_w) max_w = w[i];
+        }
     }
+    if (any_pos_inf || !any_finite) return 0.0;
 
     // Step 2: compute partition function Z and weighted sum
     double Z = 0.0;
@@ -42,10 +53,12 @@ double shannon_configurational_entropy(const double* log_weights, std::size_t n)
 
     #pragma omp parallel for simd reduction(+:Z,weighted_sum) schedule(static)
     for (std::size_t i = 0; i < n; ++i) {
-        const double shifted = log_weights[i] - max_w;
-        const double exp_val = std::exp(shifted);
-        Z += exp_val;
-        weighted_sum += shifted * exp_val;  // (w_i - max_w) * exp(w_i - max_w)
+        const double shifted = w[i] - max_w;
+        if (std::isfinite(shifted)) {
+            const double exp_val = std::exp(shifted);
+            Z += exp_val;
+            weighted_sum += shifted * exp_val;  // (w_i - max_w) * exp(w_i - max_w)
+        }
     }
 
     if (Z <= 0.0) return 0.0;
@@ -60,15 +73,17 @@ double shannon_configurational_entropy(const double* log_weights, std::size_t n)
 
 // ─── Entropy from Probability Distribution ───────────────────────────────────
 
-double shannon_entropy_from_probs(const double* probs, std::size_t n) {
+double shannon_entropy_from_probs(std::span<const double> probs) {
+    const double* p = probs.data();
+    const std::size_t n = probs.size();
     if (n == 0) return 0.0;
 
     double h = 0.0;
 
     #pragma omp parallel for simd reduction(+:h) schedule(static)
     for (std::size_t i = 0; i < n; ++i) {
-        if (probs[i] > kEpsilon) {
-            h -= probs[i] * std::log2(probs[i]);
+        if (p[i] > kEpsilon) {
+            h -= p[i] * std::log2(p[i]);
         }
     }
 
@@ -77,16 +92,18 @@ double shannon_entropy_from_probs(const double* probs, std::size_t n) {
 
 // ─── Entropy from Log-Probabilities ──────────────────────────────────────────
 
-double shannon_entropy_from_logprobs(const double* logprobs, std::size_t n) {
+double shannon_entropy_from_logprobs(std::span<const double> logprobs) {
+    const double* lp = logprobs.data();
+    const std::size_t n = logprobs.size();
     if (n == 0) return 0.0;
 
     double h = 0.0;
 
     #pragma omp parallel for simd reduction(+:h) schedule(static)
     for (std::size_t i = 0; i < n; ++i) {
-        const double p = std::exp(logprobs[i]);
+        const double p = std::exp(lp[i]);
         if (p > kEpsilon) {
-            h -= p * logprobs[i] * kLog2E;  // convert from nats to bits
+            h -= p * lp[i] * kLog2E;  // convert from nats to bits
         }
     }
 

@@ -4,13 +4,14 @@
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/entropy.hpp"
+#include "shannon/entropy_algorithm.hpp"
 #include "shannon/config.hpp"
 #include "shannon/simd_exp.hpp"
 #include "shannon/simd_log2.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -27,85 +28,48 @@ static inline double hsum256_pd(__m256d v) noexcept {
 
 #if defined(SHANNON_USE_AVX2)
 
-double configurational_entropy_avx2(const double* w, std::size_t n) noexcept {
-    if (n <= 1) return 0.0;
+namespace {
 
-    double max_w = w[0];
-    for (std::size_t i = 1; i < n; ++i) {
-        if (w[i] > max_w) max_w = w[i];
+struct Avx2Traits {
+    using vec = __m256d;
+    static constexpr std::size_t width = 4;
+
+    [[nodiscard]] static vec set1(double x) noexcept { return _mm256_set1_pd(x); }
+    [[nodiscard]] static vec zero() noexcept { return _mm256_setzero_pd(); }
+    [[nodiscard]] static vec load(const double* p) noexcept { return _mm256_loadu_pd(p); }
+    [[nodiscard]] static vec sub(vec a, vec b) noexcept { return _mm256_sub_pd(a, b); }
+    [[nodiscard]] static vec add(vec a, vec b) noexcept { return _mm256_add_pd(a, b); }
+    [[nodiscard]] static vec mul(vec a, vec b) noexcept { return _mm256_mul_pd(a, b); }
+    [[nodiscard]] static vec fmadd(vec a, vec b, vec c) noexcept {
+        return _mm256_fmadd_pd(a, b, c);
     }
-
-    __m256d v_max = _mm256_set1_pd(max_w);
-    __m256d acc_Z = _mm256_setzero_pd();
-    __m256d acc_ws = _mm256_setzero_pd();
-
-    std::size_t i = 0;
-    for (; i + 3 < n; i += 4) {
-        __m256d vw = _mm256_loadu_pd(w + i);
-        __m256d sh = _mm256_sub_pd(vw, v_max);
-        __m256d ev = simd::shannon_exp_avx2(sh);
-        acc_Z  = _mm256_add_pd(acc_Z, ev);
-        acc_ws = _mm256_fmadd_pd(sh, ev, acc_ws);
+    [[nodiscard]] static vec exp(vec x) noexcept { return simd::shannon_exp_avx2(x); }
+    [[nodiscard]] static vec log2(vec x) noexcept { return simd::shannon_log2_avx2(x); }
+    [[nodiscard]] static vec select_gt(vec values, double threshold, vec if_true) noexcept {
+        const vec m = _mm256_cmp_pd(values, _mm256_set1_pd(threshold), _CMP_GT_OQ);
+        return _mm256_and_pd(m, if_true);
     }
-
-    double Z  = hsum256_pd(acc_Z);
-    double ws = hsum256_pd(acc_ws);
-
-    for (; i < n; ++i) {
-        const double shifted = w[i] - max_w;
-        const double ev = std::exp(shifted);
-        Z += ev;
-        ws += shifted * ev;
+    [[nodiscard]] static vec select_finite(vec x, vec v) noexcept {
+        const vec ax = _mm256_andnot_pd(_mm256_set1_pd(-0.0), x);
+        const vec m = _mm256_cmp_pd(
+            ax, _mm256_set1_pd(std::numeric_limits<double>::infinity()), _CMP_LT_OQ);
+        return _mm256_and_pd(m, v);
     }
+    [[nodiscard]] static double hsum(vec v) noexcept { return hsum256_pd(v); }
+};
 
-    if (Z <= 0.0) return 0.0;
-    return std::fmax(0.0, std::log2(Z) - (ws / (Z * kLn2)));
+}  // namespace
+
+double configurational_entropy_avx2(std::span<const double> weights) noexcept {
+    return configurational_entropy<Avx2Traits>(weights);
 }
 
-double entropy_from_probs_avx2(const double* p, std::size_t n) noexcept {
-    if (n <= 1) return 0.0;
-
-    __m256d acc = _mm256_setzero_pd();
-    std::size_t i = 0;
-
-    for (; i + 3 < n; i += 4) {
-        __m256d vp = _mm256_loadu_pd(p + i);
-        // contrib = -p * log2(p); zero where p <= kEpsilon (matches scalar).
-        __m256d contrib = _mm256_mul_pd(_mm256_sub_pd(_mm256_setzero_pd(), vp),
-                                        simd::shannon_log2_avx2(vp));
-        __m256d m = _mm256_cmp_pd(vp, _mm256_set1_pd(kEpsilon), _CMP_GT_OQ);
-        acc = _mm256_add_pd(acc, _mm256_and_pd(m, contrib));
-    }
-
-    double h = hsum256_pd(acc);
-    for (; i < n; ++i) {
-        if (p[i] > kEpsilon) h -= p[i] * std::log2(p[i]);
-    }
-    return std::fmax(0.0, h);
+double entropy_from_probs_avx2(std::span<const double> probs) noexcept {
+    return entropy_from_probs<Avx2Traits>(probs);
 }
 
-double entropy_from_logprobs_avx2(const double* lp, std::size_t n) noexcept {
-    if (n <= 1) return 0.0;
-
-    __m256d acc = _mm256_setzero_pd();
-    std::size_t i = 0;
-
-    for (; i + 3 < n; i += 4) {
-        __m256d vlp = _mm256_loadu_pd(lp + i);
-        __m256d p   = simd::shannon_exp_avx2(vlp);
-        // contrib = -p * lp * log2e  (>= 0 since lp <= 0); zero where p <= eps
-        __m256d contrib = _mm256_mul_pd(_mm256_mul_pd(p, vlp),
-                                        _mm256_set1_pd(-kLog2E));
-        __m256d m = _mm256_cmp_pd(p, _mm256_set1_pd(kEpsilon), _CMP_GT_OQ);
-        acc = _mm256_add_pd(acc, _mm256_and_pd(m, contrib));
-    }
-
-    double h = hsum256_pd(acc);
-    for (; i < n; ++i) {
-        const double p = std::exp(lp[i]);
-        if (p > kEpsilon) h -= p * lp[i] * kLog2E;
-    }
-    return std::fmax(0.0, h);
+double entropy_from_logprobs_avx2(std::span<const double> logprobs) noexcept {
+    return entropy_from_logprobs<Avx2Traits>(logprobs);
 }
 
 #endif  // SHANNON_USE_AVX2

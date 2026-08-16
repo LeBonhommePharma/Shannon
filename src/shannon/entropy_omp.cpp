@@ -4,23 +4,27 @@
 //
 // Apache-2.0 © 2026 Le Bonhomme Pharma
 #include "shannon/entropy.hpp"
+#include "shannon/entropy_algorithm.hpp"
 #include "shannon/config.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 namespace shannon::kernels {
 
 #if defined(SHANNON_USE_OPENMP)
 
-double configurational_entropy_omp(const double* w, std::size_t n) noexcept {
+double configurational_entropy_omp(std::span<const double> weights) noexcept {
+    const double* w = weights.data();
+    const std::size_t n = weights.size();
     if (n <= 1) return 0.0;
 
-    double max_w = w[0];
-    for (std::size_t i = 1; i < n; ++i) {
-        if (w[i] > max_w) max_w = w[i];
-    }
+    // Same scan as entropy_algorithm.hpp (OpenMP is a reduction specialization).
+    const auto support = detail::scan_logit_support(weights);
+    if (support.any_pos_inf || !support.any_finite) return 0.0;
+    const double max_w = support.max_finite;
 
     double Z = 0.0;
     double ws = 0.0;
@@ -28,16 +32,20 @@ double configurational_entropy_omp(const double* w, std::size_t n) noexcept {
     #pragma omp parallel for simd reduction(+:Z,ws) schedule(static)
     for (std::size_t i = 0; i < n; ++i) {
         const double shifted = w[i] - max_w;
-        const double ev = std::exp(shifted);
-        Z += ev;
-        ws += shifted * ev;
+        if (std::isfinite(shifted)) {
+            const double ev = std::exp(shifted);
+            Z += ev;
+            ws += shifted * ev;
+        }
     }
 
     if (Z <= 0.0) return 0.0;
     return std::fmax(0.0, std::log2(Z) - (ws / (Z * kLn2)));
 }
 
-double entropy_from_probs_omp(const double* p, std::size_t n) noexcept {
+double entropy_from_probs_omp(std::span<const double> probs) noexcept {
+    const double* p = probs.data();
+    const std::size_t n = probs.size();
     if (n == 0) return 0.0;
     if (n == 1) return 0.0;
     double h = 0.0;
@@ -48,7 +56,9 @@ double entropy_from_probs_omp(const double* p, std::size_t n) noexcept {
     return std::fmax(0.0, h);
 }
 
-double entropy_from_logprobs_omp(const double* lp, std::size_t n) noexcept {
+double entropy_from_logprobs_omp(std::span<const double> logprobs) noexcept {
+    const double* lp = logprobs.data();
+    const std::size_t n = logprobs.size();
     if (n == 0) return 0.0;
     if (n == 1) return 0.0;
     double h = 0.0;

@@ -144,49 +144,58 @@ void CollapseDetector::reset() {
     token_count_ = 0;
 }
 
-CollapseResult CollapseDetector::add_logits(const double* logits, std::size_t n) {
-    auto& dispatch = dispatch::UnifiedDispatch::instance();
-
-    double h = 0.0;
-    auto result = dispatch.compute_configurational_entropy(logits, n, h);
-
-    CollapseResult cr = push_entropy(h);
-    cr.used_backend = result.used_backend;
-    return cr;
-}
-
 CollapseResult CollapseDetector::add_logits(std::span<const double> logits) {
-    return add_logits(logits.data(), logits.size());
-}
-
-CollapseResult CollapseDetector::add_probs(const double* probs, std::size_t n) {
     auto& dispatch = dispatch::UnifiedDispatch::instance();
 
     double h = 0.0;
-    auto result = dispatch.compute_entropy_from_probs(probs, n, h);
+    auto result = dispatch.compute_configurational_entropy(logits, h);
 
     CollapseResult cr = push_entropy(h);
     cr.used_backend = result.used_backend;
     return cr;
+}
+
+CollapseResult CollapseDetector::add_logits(const double* logits, std::size_t n) {
+    if (logits == nullptr || n == 0) {
+        return add_logits(std::span<const double>{});
+    }
+    return add_logits(std::span<const double>{logits, n});
 }
 
 CollapseResult CollapseDetector::add_probs(std::span<const double> probs) {
-    return add_probs(probs.data(), probs.size());
-}
-
-CollapseResult CollapseDetector::add_logprobs(const double* logprobs, std::size_t n) {
     auto& dispatch = dispatch::UnifiedDispatch::instance();
 
     double h = 0.0;
-    auto result = dispatch.compute_entropy_from_logprobs(logprobs, n, h);
+    auto result = dispatch.compute_entropy_from_probs(probs, h);
 
     CollapseResult cr = push_entropy(h);
     cr.used_backend = result.used_backend;
     return cr;
 }
 
+CollapseResult CollapseDetector::add_probs(const double* probs, std::size_t n) {
+    if (probs == nullptr || n == 0) {
+        return add_probs(std::span<const double>{});
+    }
+    return add_probs(std::span<const double>{probs, n});
+}
+
 CollapseResult CollapseDetector::add_logprobs(std::span<const double> logprobs) {
-    return add_logprobs(logprobs.data(), logprobs.size());
+    auto& dispatch = dispatch::UnifiedDispatch::instance();
+
+    double h = 0.0;
+    auto result = dispatch.compute_entropy_from_logprobs(logprobs, h);
+
+    CollapseResult cr = push_entropy(h);
+    cr.used_backend = result.used_backend;
+    return cr;
+}
+
+CollapseResult CollapseDetector::add_logprobs(const double* logprobs, std::size_t n) {
+    if (logprobs == nullptr || n == 0) {
+        return add_logprobs(std::span<const double>{});
+    }
+    return add_logprobs(std::span<const double>{logprobs, n});
 }
 
 EntropyEvent CollapseDetector::classify_event(double delta, bool window_ready) const {

@@ -17,6 +17,7 @@ This stack ships **two named products** (not one mixed binary):
 |---------|------------|---------------|
 | **Shannon UI** | Sole shipped macOS menu-bar / notch operator HUD (+ iOS / iPad / watchOS) | [LeBonhommePharma/ShannonUI](https://github.com/LeBonhommePharma/ShannonUI) · cask `shannon-pill` · `./scripts/shannon` lifecycle |
 | **Shannon CLI** | Headless entropy, gate, agent, and science tooling (this repo) | `shannon grok` / `shannon claude` / `shannon-monitor`, `./scripts/shannon status\|gate\|agent…`, `hub/`, Formula `shannon` |
+| **Exergy** | Remaining-quota tracker (Claude / Codex / Cursor / Grok) for Mac, iPhone, iPad, Watch — OAuth, private iCloud | ShannonUI `Exergy/` · [thebonhomme.com/Exergy](https://thebonhomme.com/Exergy/) |
 
 [![CI](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml/badge.svg)](https://github.com/LeBonhommePharma/Shannon/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)

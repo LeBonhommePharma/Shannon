@@ -15,6 +15,7 @@ agent tooling, installers, and docs. The two products share operator handrails
 |---------|------|------|
 | **Shannon UI** | [ShannonUI](https://github.com/LeBonhommePharma/ShannonUI) (**private**) | Sole shipped menu-bar / notch HUD (+ companions) |
 | **Shannon CLI** | this repo | Headless entropy monitor, gate, agent manager, C++ `shannon-agent` |
+| **Exergy** | ShannonUI `Exergy/` | App Store remaining-quota tracker (Mac / iPhone / iPad / Watch). See [`docs/EXERGY.md`](EXERGY.md). |
 
 ## Private clone (required)
 
